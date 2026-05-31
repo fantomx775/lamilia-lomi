@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="680" viewBox="0 0 900 680" role="img" aria-label="Moon Garden sample page with stars">
+  <rect width="900" height="680" fill="#fffaf3"/>
+  <g fill="none" stroke="#594d45" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M140 520h620M190 520V330l105-80 105 80v190M500 520V370l90-70 90 70v150"/>
+    <path d="M250 520V420h90v100M545 520v-85h75v85"/>
+    <path d="M165 190l25 50 55 8-40 39 10 55-50-26-50 26 10-55-40-39 55-8z"/>
+    <path d="M675 120c-55 60-45 140 25 180-95-5-165-75-160-155 3-53 45-96 135-25z"/>
+  </g>
+</svg>

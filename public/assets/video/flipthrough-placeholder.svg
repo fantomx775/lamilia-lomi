@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-label="Flipthrough video placeholder">
+  <rect width="1200" height="675" fill="#efe5dc"/>
+  <rect x="95" y="72" width="1010" height="531" rx="30" fill="#d9b8b5"/>
+  <circle cx="600" cy="338" r="90" fill="#fff8ef"/>
+  <path d="M574 286l96 52-96 52z" fill="#c56f5d"/>
+  <text x="600" y="520" text-anchor="middle" font-family="Arial, sans-serif" font-size="38" fill="#3e342f">Public flipthrough preview</text>
+</svg>

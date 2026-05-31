@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LamiliaLomi
+
+Next.js App Router implementation for the LamiliaLomi content platform described in:
+
+- `LamiliaLomi_SOURCE_OF_TRUTH.md`
+- `LamiliaLomi_IMPLEMENTATION_PLAN.md`
+
+The app currently runs in local demo mode with deterministic seed data and Supabase-ready migrations. No real secrets are required to try the core flow.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://127.0.0.1:3000/en](http://127.0.0.1:3000/en).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Demo accounts:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- User: `demo@lamilialomi.test`
+- Unverified user: `unverified@lamilialomi.test`
+- Admin: `admin@lamilialomi.test`
 
-## Learn More
+Premium code:
 
-To learn more about Next.js, take a look at the following resources:
+- `LOMI-BOOK-2026`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Useful commands:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm test
+npm run typecheck
+npm run lint
+npm run build
+npm run e2e
+```
 
-## Deploy on Vercel
+## Supabase
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The schema foundation is in:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `supabase/migrations/20260531093244_lamilialomi_foundation.sql`
+
+Apply it to the intended Supabase project, then set the values from `.env.example`.

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" role="img" aria-label="Bedtime Forest Picture Book cover">
+  <rect width="900" height="1200" fill="#f8f1e7"/>
+  <rect x="72" y="72" width="756" height="1056" rx="48" fill="#b7c2a4"/>
+  <path d="M145 870c70-170 133-255 190-255 74 0 109 105 172 105 56 0 88-80 145-180 60 105 94 215 103 330z" fill="#6d7f64"/>
+  <path d="M230 690l75-180 75 180zM410 690l75-210 75 210zM575 690l75-165 75 165z" fill="#34483c"/>
+  <circle cx="645" cy="240" r="72" fill="#fff6cf"/>
+  <rect x="345" y="760" width="210" height="160" rx="24" fill="#f4d8bf"/>
+  <path d="M325 778l125-104 125 104z" fill="#c56f5d"/>
+  <text x="450" y="1010" text-anchor="middle" font-family="Georgia, serif" font-size="58" fill="#2f3d35">Bedtime Forest</text>
+  <text x="450" y="1070" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" fill="#2f3d35">Picture Book</text>
+</svg>

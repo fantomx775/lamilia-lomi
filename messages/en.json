@@ -1,0 +1,22 @@
+{
+  "Nav": {
+    "products": "Catalog",
+    "library": "My Library",
+    "contact": "Contact",
+    "login": "Log in",
+    "admin": "Admin"
+  },
+  "Home": {
+    "eyebrow": "Premium creative books and bonuses",
+    "title": "LamiliaLomi",
+    "subtitle": "A calm home for coloring books, picture stories, and premium printable bonuses unlocked from your physical book.",
+    "kids": "Kids",
+    "adults": "Adults",
+    "browse": "Browse catalog"
+  },
+  "Product": {
+    "amazon": "View on Amazon",
+    "premium": "Unlock premium materials",
+    "download": "Download premium file"
+  }
+}

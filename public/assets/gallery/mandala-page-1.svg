@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="680" viewBox="0 0 900 680" role="img" aria-label="Mandala sample page">
+  <rect width="900" height="680" fill="#fffaf3"/>
+  <g transform="translate(450 340)" fill="none" stroke="#594d45" stroke-width="7">
+    <circle r="230"/>
+    <circle r="166"/>
+    <circle r="90"/>
+    <circle r="30"/>
+    <path d="M0-230C55-150 55 150 0 230C-55 150-55-150 0-230z"/>
+    <path d="M230 0C150 55-150 55-230 0C-150-55 150-55 230 0z"/>
+    <path d="M163-163C145-60 60 145-163 163C-145 60-60-145 163-163z"/>
+    <path d="M163 163C60 145-145 60-163-163C-60-145 145-60 163 163z"/>
+  </g>
+</svg>

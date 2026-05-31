@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="680" viewBox="0 0 900 680" role="img" aria-label="Moon Garden sample page with flowers">
+  <rect width="900" height="680" fill="#fffaf3"/>
+  <g fill="none" stroke="#594d45" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M450 575V340"/>
+    <path d="M450 340c-80-75-75-160 0-210 75 50 80 135 0 210z"/>
+    <path d="M450 340c-115-10-170-72-150-160 88-20 150 35 150 160z"/>
+    <path d="M450 340c115-10 170-72 150-160-88-20-150 35-150 160z"/>
+    <path d="M450 460c-80-45-150-30-210 45 85 30 155 15 210-45z"/>
+    <path d="M450 500c90-56 170-50 240 18-95 38-175 32-240-18z"/>
+  </g>
+</svg>

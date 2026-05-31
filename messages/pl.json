@@ -1,0 +1,22 @@
+{
+  "Nav": {
+    "products": "Katalog",
+    "library": "Moja biblioteka",
+    "contact": "Kontakt",
+    "login": "Logowanie",
+    "admin": "Admin"
+  },
+  "Home": {
+    "eyebrow": "Kreatywne książki premium i bonusy",
+    "title": "LamiliaLomi",
+    "subtitle": "Spokojne miejsce dla kolorowanek, opowieści obrazkowych i dodatkowych materiałów do pobrania po odblokowaniu kodem z książki.",
+    "kids": "Dzieci",
+    "adults": "Dorośli",
+    "browse": "Przeglądaj katalog"
+  },
+  "Product": {
+    "amazon": "Zobacz na Amazon",
+    "premium": "Odblokuj materiały premium",
+    "download": "Pobierz plik premium"
+  }
+}

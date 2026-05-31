@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" role="img" aria-label="Moon Garden Coloring Book cover">
+  <rect width="900" height="1200" fill="#f7efe8"/>
+  <rect x="70" y="70" width="760" height="1060" rx="46" fill="#d9b8b5"/>
+  <circle cx="640" cy="230" r="94" fill="#fff8df"/>
+  <path d="M520 230c45 62 126 80 190 42-35 73-126 116-209 85-65-24-104-82-105-146 24 17 76 19 124 19z" fill="#d9b8b5"/>
+  <path d="M160 735c95-165 178-245 251-241 84 5 134 118 203 118 47 0 75-50 126-130v420H160z" fill="#8fa895"/>
+  <path d="M214 827c44-110 98-166 161-166 67 0 101 75 160 75 35 0 64-28 95-82v248H214z" fill="#c56f5d"/>
+  <g fill="none" stroke="#5e5149" stroke-width="8" stroke-linecap="round">
+    <path d="M215 340c55-38 107-38 156 0"/>
+    <path d="M201 400c74 56 144 56 211 0"/>
+    <path d="M250 585c14-55 38-86 72-92 39 9 65 40 79 92"/>
+    <path d="M536 506c35-33 70-33 104 0"/>
+  </g>
+  <text x="450" y="1020" text-anchor="middle" font-family="Georgia, serif" font-size="68" fill="#3e342f">Moon Garden</text>
+  <text x="450" y="1084" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" fill="#3e342f">LamiliaLomi Coloring Book</text>
+</svg>

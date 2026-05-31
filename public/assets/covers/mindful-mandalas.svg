@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" role="img" aria-label="Mindful Mandalas for Adults cover">
+  <rect width="900" height="1200" fill="#f6f0e8"/>
+  <rect x="86" y="86" width="728" height="1028" rx="44" fill="#9dad91"/>
+  <circle cx="450" cy="465" r="230" fill="#ead1c8"/>
+  <g fill="none" stroke="#54453c" stroke-width="8">
+    <circle cx="450" cy="465" r="178"/>
+    <circle cx="450" cy="465" r="112"/>
+    <circle cx="450" cy="465" r="50"/>
+    <path d="M450 235c70 88 70 372 0 460M220 465c88-70 372-70 460 0M287 302c112 12 313 213 326 326M613 302C500 314 300 515 287 628"/>
+  </g>
+  <text x="450" y="910" text-anchor="middle" font-family="Georgia, serif" font-size="58" fill="#fff8ef">Mindful Mandalas</text>
+  <text x="450" y="970" text-anchor="middle" font-family="Arial, sans-serif" font-size="30" fill="#fff8ef">for Adults</text>
+</svg>
