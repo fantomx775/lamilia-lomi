@@ -22,7 +22,7 @@ Produkt ma umożliwiać:
 - stronę produktu z galerią, wideo, linkami Amazon i CTA premium,
 - rejestrację/logowanie/weryfikację e-mail/reset hasła,
 - odblokowanie premium contentu kodem lub QR,
-- bezpieczne pobieranie premium plików przez signed URLs,
+- bezpieczne pobieranie premium plików przez signed URLs oraz opcję wysłania linku do biblioteki/pobrania na własny zweryfikowany e-mail,
 - bibliotekę użytkownika,
 - panel admina po polsku,
 - zarządzanie produktami, tłumaczeniami, kategoriami, tagami, mediami, kodami, użytkownikami i eksportem maili,
@@ -187,7 +187,7 @@ Realizuj slice'y w tej kolejności:
 3. Slice 2 - Public home page and brand segmentation.
 4. Slice 3 - Public catalog with filtering, sorting, and search.
 5. Slice 4 - Product detail page with SEO and Amazon link tracking.
-6. Slice 5 - Auth: register, login, logout, reset password.
+6. Slice 5 - Auth: unlock-context registration, login, logout, reset password.
 7. Slice 6 - Email verification gate.
 8. Slice 7 - Manual premium code unlock.
 9. Slice 8 - QR code unlock flow through auth.

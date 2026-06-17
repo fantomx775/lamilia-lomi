@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Locale } from "@/i18n/routing";
+import { isUnlockRegistrationContext } from "@/lib/auth";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -18,6 +19,11 @@ export default async function LoginPage({ params, searchParams }: Props) {
   const query = await searchParams;
   const redirectTo = stringParam(query.redirectTo) ?? `/${locale}/library`;
   const code = stringParam(query.code) ?? "";
+  const canCreateAccount = isUnlockRegistrationContext({
+    locale,
+    redirectTo,
+    code,
+  });
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">
@@ -51,9 +57,14 @@ export default async function LoginPage({ params, searchParams }: Props) {
             <Link className="text-[var(--color-terracotta)]" href={`/${locale}/reset-password`}>
               Reset password
             </Link>
-            <Link className="text-[var(--color-terracotta)]" href={`/${locale}/register?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`}>
-              Create account
-            </Link>
+            {canCreateAccount ? (
+              <Link
+                className="text-[var(--color-terracotta)]"
+                href={`/${locale}/register?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`}
+              >
+                Create account
+              </Link>
+            ) : null}
           </div>
         </CardContent>
       </Card>

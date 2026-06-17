@@ -1,14 +1,28 @@
-import { BookOpen, LayoutDashboard, Library, LogIn } from "lucide-react";
+import { BookOpen, Library, LogIn } from "lucide-react";
+import Link from "next/link";
 
 import type { Locale } from "@/i18n/routing";
+import { hasAdminAccess } from "@/lib/auth";
 import { getDemoSession } from "@/lib/session.server";
 
 import { LanguageSwitcher } from "./language-switcher";
 import { buttonClassName } from "./ui/button";
-import Link from "next/link";
 
-export async function SiteHeader({ locale }: { locale: Locale }) {
+export async function SiteHeader({
+  locale,
+  showLanguageSwitcher = true,
+}: {
+  locale: Locale;
+  showLanguageSwitcher?: boolean;
+}) {
   const session = await getDemoSession();
+  const isAdmin = hasAdminAccess(session);
+  const labels = {
+    products: locale === "pl" ? "Katalog" : "Catalog",
+    library: locale === "pl" ? "Moja biblioteka" : "My Library",
+    account: locale === "pl" ? "Moje konto" : "Account",
+    login: locale === "pl" ? "Logowanie" : "Log in",
+  };
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]/92 backdrop-blur">
@@ -29,25 +43,21 @@ export async function SiteHeader({ locale }: { locale: Locale }) {
         <nav className="hidden items-center gap-1 md:flex">
           <Link className={buttonClassName({ variant: "ghost", size: "sm" })} href={`/${locale}/products`}>
             <BookOpen className="size-4" aria-hidden />
-            Catalog
+            {labels.products}
           </Link>
           <Link className={buttonClassName({ variant: "ghost", size: "sm" })} href={`/${locale}/library`}>
             <Library className="size-4" aria-hidden />
-            Library
-          </Link>
-          <Link className={buttonClassName({ variant: "ghost", size: "sm" })} href="/admin">
-            <LayoutDashboard className="size-4" aria-hidden />
-            Admin
+            {labels.library}
           </Link>
         </nav>
         <div className="flex items-center gap-2">
-          <LanguageSwitcher />
+          {showLanguageSwitcher ? <LanguageSwitcher /> : null}
           <Link
             className={buttonClassName({ variant: session ? "outline" : "default", size: "sm" })}
-            href={session ? `/${locale}/account` : `/${locale}/login`}
+            href={session ? (isAdmin ? "/admin" : `/${locale}/account`) : `/${locale}/login`}
           >
             <LogIn className="size-4" aria-hidden />
-            <span className="hidden sm:inline">{session ? "Account" : "Log in"}</span>
+            <span className="hidden sm:inline">{session ? labels.account : labels.login}</span>
           </Link>
         </div>
       </div>

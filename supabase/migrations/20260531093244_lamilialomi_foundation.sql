@@ -10,7 +10,7 @@ create table public.profiles (
   role text not null default 'user' check (role in ('user', 'admin')),
   marketing_consent boolean not null default false,
   terms_accepted_at timestamptz,
-  preferred_locale text not null default 'en' check (preferred_locale in ('en', 'pl')),
+  preferred_locale text not null default 'en' check (preferred_locale in ('en', 'pl', 'de', 'es')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -32,7 +32,7 @@ create table public.products (
 create table public.product_translations (
   id uuid primary key default gen_random_uuid(),
   product_id uuid not null references public.products(id) on delete cascade,
-  locale text not null check (locale in ('en', 'pl')),
+  locale text not null check (locale in ('en', 'pl', 'de', 'es')),
   title text not null,
   short_description text not null,
   long_description text not null,
@@ -51,7 +51,7 @@ create table public.categories (
 create table public.category_translations (
   id uuid primary key default gen_random_uuid(),
   category_id uuid not null references public.categories(id) on delete cascade,
-  locale text not null check (locale in ('en', 'pl')),
+  locale text not null check (locale in ('en', 'pl', 'de', 'es')),
   name text not null,
   description text,
   unique (category_id, locale)
@@ -66,7 +66,7 @@ create table public.tags (
 create table public.tag_translations (
   id uuid primary key default gen_random_uuid(),
   tag_id uuid not null references public.tags(id) on delete cascade,
-  locale text not null check (locale in ('en', 'pl')),
+  locale text not null check (locale in ('en', 'pl', 'de', 'es')),
   name text not null,
   unique (tag_id, locale)
 );
@@ -92,7 +92,7 @@ create table public.product_assets (
   filename text not null,
   content_type text not null,
   size_bytes bigint,
-  locale text check (locale in ('en', 'pl')),
+  locale text check (locale in ('en', 'pl', 'de', 'es')),
   title text,
   sort_order integer not null default 100,
   is_public boolean not null default false,
@@ -151,7 +151,7 @@ create table public.review_reminders (
 create table public.static_pages (
   id uuid primary key default gen_random_uuid(),
   slug text not null,
-  locale text not null check (locale in ('en', 'pl')),
+  locale text not null check (locale in ('en', 'pl', 'de', 'es')),
   title text not null,
   body text not null,
   updated_at timestamptz not null default now(),
@@ -518,7 +518,11 @@ on conflict (id) do nothing;
 insert into public.static_pages (slug, locale, title, body)
 values
   ('privacy', 'en', 'Privacy Policy', 'Replace with final owner-approved policy before production.'),
+  ('privacy', 'de', 'Datenschutzerklaerung', 'Replace with final owner-approved German policy before production.'),
+  ('privacy', 'es', 'Politica de privacidad', 'Replace with final owner-approved Spanish policy before production.'),
   ('privacy', 'pl', 'Polityka prywatności', 'Zastąp finalną polityką przed produkcją.'),
   ('terms', 'en', 'Terms', 'Replace with final owner-approved terms before production.'),
+  ('terms', 'de', 'Nutzungsbedingungen', 'Replace with final owner-approved German terms before production.'),
+  ('terms', 'es', 'Terminos', 'Replace with final owner-approved Spanish terms before production.'),
   ('terms', 'pl', 'Regulamin', 'Zastąp finalnym regulaminem przed produkcją.')
 on conflict (slug, locale) do nothing;

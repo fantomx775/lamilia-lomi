@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ProductCard } from "@/components/product-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
-import { getLocalizedProductView } from "@/lib/products";
+import { getLocalizedProductView, getProductById } from "@/lib/products";
 import { getDemoSession } from "@/lib/session.server";
 
 type Props = {
@@ -34,14 +34,9 @@ export default async function LibraryPage({ params }: Props) {
 
   const unlockedProducts = session.unlockedProductIds
     .map((productId) => {
-      const slug =
-        productId === "11111111-1111-4111-8111-111111111111"
-          ? "moon-garden-coloring-book"
-          : productId === "22222222-2222-4222-8222-222222222222"
-            ? "mindful-mandalas-for-adults"
-            : "bedtime-forest-picture-book";
+      const product = getProductById(productId);
 
-      return getLocalizedProductView(slug, locale);
+      return product ? getLocalizedProductView(product.slug, locale) : null;
     })
     .filter((product): product is NonNullable<typeof product> => Boolean(product));
 

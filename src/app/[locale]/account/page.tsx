@@ -1,4 +1,7 @@
+import { BookOpen, Library, UserRound } from "lucide-react";
+
 import { logoutAction, verifyDemoEmailAction } from "@/app/actions";
+import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
@@ -11,16 +14,27 @@ type Props = {
 export default async function AccountPage({ params }: Props) {
   const { locale } = await params;
   const session = await getDemoSession();
+  const nav: DashboardNavItem[] = [
+    { href: `/${locale}/account`, label: locale === "pl" ? "Moje konto" : "Account", icon: UserRound },
+    { href: `/${locale}/library`, label: locale === "pl" ? "Moja biblioteka" : "My Library", icon: Library },
+    { href: `/${locale}/products`, label: locale === "pl" ? "Katalog" : "Catalog", icon: BookOpen },
+  ];
 
   if (!session) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-12">
         <Card>
           <CardHeader>
-            <h1 className="font-serif text-3xl font-semibold">Account</h1>
+            <h1 className="font-serif text-3xl font-semibold">
+              {locale === "pl" ? "Moje konto" : "Account"}
+            </h1>
           </CardHeader>
           <CardContent>
-            <p className="text-[var(--color-muted)]">Log in to view account details.</p>
+            <p className="text-[var(--color-muted)]">
+              {locale === "pl"
+                ? "Zaloguj się, aby zobaczyć konto."
+                : "Log in to view account details."}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -28,10 +42,19 @@ export default async function AccountPage({ params }: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-12">
+    <DashboardShell
+      nav={nav}
+      title="LamiliaLomi"
+      subtitle={locale === "pl" ? "Panel użytkownika" : "User dashboard"}
+    >
       <Card>
         <CardHeader>
-          <h1 className="font-serif text-3xl font-semibold">Account</h1>
+          <p className="text-sm font-medium text-[var(--color-terracotta)]">
+            {locale === "pl" ? "Panel użytkownika" : "User dashboard"}
+          </p>
+          <h1 className="mt-2 font-serif text-4xl font-semibold">
+            {locale === "pl" ? "Moje konto" : "Account"}
+          </h1>
           <p className="text-sm text-[var(--color-muted)]">{session.email}</p>
         </CardHeader>
         <CardContent className="grid gap-4">
@@ -64,6 +87,6 @@ export default async function AccountPage({ params }: Props) {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </DashboardShell>
   );
 }

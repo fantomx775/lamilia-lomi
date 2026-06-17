@@ -51,7 +51,10 @@ export function buildAuthRedirect(input: {
   const locale = normalizeLocale(input.locale);
   const fallback = `/${locale}/library`;
   const safeRedirect =
-    input.redirectTo?.startsWith(`/${locale}/`) || input.redirectTo === `/${locale}`
+    input.redirectTo === "/admin" ||
+    input.redirectTo?.startsWith("/admin/") ||
+    input.redirectTo?.startsWith(`/${locale}/`) ||
+    input.redirectTo === `/${locale}`
       ? input.redirectTo
       : fallback;
   const url = new URL(safeRedirect, "http://local.test");
@@ -61,6 +64,19 @@ export function buildAuthRedirect(input: {
   }
 
   return `${url.pathname}${url.search}`;
+}
+
+export function isUnlockRegistrationContext(input: {
+  locale?: string;
+  redirectTo?: string | null;
+  code?: string | null;
+}) {
+  const locale = normalizeLocale(input.locale);
+
+  return (
+    Boolean(input.code?.trim()) ||
+    Boolean(input.redirectTo?.startsWith(`/${locale}/products/`))
+  );
 }
 
 export function createDemoSession(input: {

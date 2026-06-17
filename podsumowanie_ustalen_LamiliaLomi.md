@@ -1,6 +1,8 @@
 
 # Podsumowanie ustaleń projektowych dla platformy LamiliaLomi
 
+Status: dokument historyczny. Kanoniczne decyzje implementacyjne są w `LamiliaLomi_SOURCE_OF_TRUTH.md`; ten plik zostaje jako skrót pierwotnej rozmowy PM i może zawierać uproszczenia, które później doprecyzowano.
+
 Poniżej znajduje się finalna dokumentacja wszystkich kluczowych założeń i decyzji wypracowanych podczas procesu projektowego.
 
 ## 1. Architektura i Cele

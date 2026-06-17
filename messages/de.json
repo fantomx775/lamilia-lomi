@@ -1,0 +1,22 @@
+{
+  "Nav": {
+    "products": "Katalog",
+    "library": "Meine Bibliothek",
+    "contact": "Kontakt",
+    "login": "Einloggen",
+    "admin": "Admin"
+  },
+  "Home": {
+    "eyebrow": "Premium-Kreativbücher und Boni",
+    "title": "LamiliaLomi",
+    "subtitle": "Ein ruhiger Ort für Malbücher, Bildergeschichten und Premium-Downloads, die mit dem Code aus dem gedruckten Buch freigeschaltet werden.",
+    "kids": "Kinder",
+    "adults": "Erwachsene",
+    "browse": "Katalog ansehen"
+  },
+  "Product": {
+    "amazon": "Auf Amazon ansehen",
+    "premium": "Premium-Materialien freischalten",
+    "download": "Premium-Datei herunterladen"
+  }
+}

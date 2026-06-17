@@ -25,6 +25,12 @@ Premium code:
 
 - `LOMI-BOOK-2026`
 
+Admin CRUD:
+
+- Log in as `admin@lamilialomi.test`, then open `/admin`.
+- Product, category, tag, static-page, media metadata, Amazon-link, and premium-code edits persist locally to `data/lamilialomi-content.local.json`.
+- That local content file is ignored by git and is meant for demo/development until Supabase production persistence is enabled.
+
 Useful commands:
 
 ```bash

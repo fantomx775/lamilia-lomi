@@ -4,6 +4,7 @@ import {
   buildAuthRedirect,
   createDemoSession,
   hasAdminAccess,
+  isUnlockRegistrationContext,
   parseDemoSession,
   serializeDemoSession,
   validateRegistrationInput,
@@ -43,9 +44,31 @@ describe("auth behavior", () => {
     expect(
       buildAuthRedirect({
         locale: "en",
+        redirectTo: "/admin",
+      }),
+    ).toBe("/admin");
+
+    expect(
+      buildAuthRedirect({
+        locale: "en",
         redirectTo: "https://evil.example/phish",
       }),
     ).toBe("/en/library");
+  });
+
+  it("allows registration only in a product unlock context", () => {
+    expect(
+      isUnlockRegistrationContext({
+        locale: "en",
+        redirectTo: "/en/products/moon-garden-coloring-book",
+      }),
+    ).toBe(true);
+    expect(isUnlockRegistrationContext({ locale: "en", code: "LOMI-BOOK-2026" })).toBe(
+      true,
+    );
+    expect(isUnlockRegistrationContext({ locale: "en", redirectTo: "/en/library" })).toBe(
+      false,
+    );
   });
 
   it("detects admin access from role, not editable metadata", () => {

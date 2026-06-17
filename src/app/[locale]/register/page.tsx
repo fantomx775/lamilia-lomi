@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { registerDemoAction } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Locale } from "@/i18n/routing";
+import { isUnlockRegistrationContext } from "@/lib/auth";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -18,6 +20,10 @@ export default async function RegisterPage({ params, searchParams }: Props) {
   const redirectTo = stringParam(query.redirectTo) ?? `/${locale}/library`;
   const code = stringParam(query.code) ?? "";
   const error = stringParam(query.error);
+
+  if (!isUnlockRegistrationContext({ locale, redirectTo, code })) {
+    redirect(`/${locale}/products`);
+  }
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">

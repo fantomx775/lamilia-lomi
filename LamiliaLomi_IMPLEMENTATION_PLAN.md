@@ -130,7 +130,8 @@ Minimum seed set:
 - one Adults product,
 - one complete product with:
   - EN translation,
-  - PL translation or fallback,
+  - PL translation or EN fallback,
+  - DE/ES routes proving EN fallback if translations are not seeded yet,
   - cover,
   - gallery,
   - video placeholder,
@@ -218,7 +219,7 @@ The app can load one seeded published product from the database.
   - archived products are not in catalog.
 - Test translation fallback:
   - requested locale is used if present,
-  - missing PL falls back to EN.
+  - missing PL/DE/ES falls back to EN.
 
 ### Integration tests
 
@@ -351,7 +352,7 @@ Guest can view product details, gallery, video, tags/categories, and click Amazo
 
 - Build `/[locale]/products/[slug]`.
 - Render product translation with EN fallback.
-- Render gallery and video placeholder.
+- Render the full public gallery and video placeholder for guests.
 - Render Amazon links.
 - Add premium CTA.
 - Add metadata generation.
@@ -386,20 +387,20 @@ Guest can view product details, gallery, video, tags/categories, and click Amazo
 
 ---
 
-## Slice 5 - Auth: register, login, logout, reset password
+## Slice 5 - Auth: unlock-context registration, login, logout, reset password
 
 ### Goal
 
-Enable account creation and session handling.
+Enable session handling and account creation only when the user is unlocking a product.
 
 ### Product capability
 
-User can register, log in, log out, and request password reset.
+User can create an account from a product unlock context, log in, log out, and request password reset. Casual visitors should not see a generic sign-up path.
 
 ### Implementation
 
 - Add Supabase Auth integration.
-- Add register page.
+- Add register page guarded to QR/product unlock context.
 - Add login page.
 - Add logout action.
 - Add reset password flow.
@@ -410,6 +411,8 @@ User can register, log in, log out, and request password reset.
 ### TDD/unit tests
 
 - Test registration input validation.
+- Test generic registration redirects away or is unavailable.
+- Test product/QR registration context is allowed.
 - Test consent validation:
   - terms required,
   - marketing optional,
@@ -418,14 +421,14 @@ User can register, log in, log out, and request password reset.
 
 ### Integration tests
 
-- Register creates auth user/profile.
+- Unlock-context registration creates auth user/profile.
 - Profile stores marketing consent.
 - Login returns valid session.
 - Protected page rejects guest.
 
 ### E2E/manual verification
 
-- Register test user.
+- Register test user from a product unlock context.
 - Verify visible post-registration state.
 - Log out.
 - Log in.
@@ -540,7 +543,7 @@ Make the physical book QR journey work end-to-end.
 
 ### Product capability
 
-User enters through `/en/products/[slug]?code=...`, logs in/registers, and unlocks the product without losing the code.
+User enters through `/en/products/[slug]?code=...`, logs in or registers in that unlock context, and unlocks the product without losing the code.
 
 ### Implementation
 
@@ -597,6 +600,7 @@ Unlocked verified user can download premium PDF. Guest or locked user cannot.
 - Generate signed URL.
 - Log `download_events`.
 - Show premium download list on product page.
+- Add an authenticated "send this file/link to my email" action for mobile users; the email should point back to the protected product/library download flow, not expose a permanent public file URL.
 
 ### TDD/unit tests
 
@@ -608,6 +612,8 @@ Unlocked verified user can download premium PDF. Guest or locked user cannot.
   - asset from different product.
 - Test allowed state:
   - verified user with matching unlock.
+- Test email-to-self request is allowed only for a verified user with the matching unlock.
+- Test email-to-self payload contains product/file context without a permanent public file URL.
 
 ### Integration tests
 
@@ -615,13 +621,16 @@ Unlocked verified user can download premium PDF. Guest or locked user cannot.
 - Route handler denies locked user.
 - Route handler returns redirect/signed URL for unlocked user.
 - Download event is inserted.
+- Email-to-self route/action sends through Resend or stub mode after the same access checks.
 
 ### E2E/manual verification
 
 - Guest sees premium locked.
 - Locked user cannot download.
 - Unlocked user clicks download.
+- On mobile, unlocked user can send the premium file/library link to their own email.
 - Confirm file access starts or signed URL is returned.
+- Confirm email stub/log evidence for the send-to-email action.
 - Confirm `download_events` row exists.
 
 ### Done evidence
@@ -727,14 +736,14 @@ Allow admin to create and publish products.
 
 ### Product capability
 
-Admin can create a product with EN/PL content, publish it, and see it on the public catalog/product page.
+Admin can create a product with EN/PL/DE/ES content, publish it, and see it on the public catalog/product page.
 
 ### Implementation
 
 - Admin product list.
 - Product create form.
 - Product edit form.
-- EN/PL translation fields.
+- EN/PL/DE/ES translation fields.
 - Status draft/published/archived.
 - Audience and product type.
 - SEO fields.
@@ -1201,7 +1210,7 @@ Notes:
 3. Slice 2 - Public home page and brand segmentation.
 4. Slice 3 - Public catalog with filtering, sorting, and search.
 5. Slice 4 - Product detail page with SEO and Amazon link tracking.
-6. Slice 5 - Auth: register, login, logout, reset password.
+6. Slice 5 - Auth: unlock-context registration, login, logout, reset password.
 7. Slice 6 - Email verification gate.
 8. Slice 7 - Manual premium code unlock.
 9. Slice 8 - QR code unlock flow through auth.
@@ -1234,3 +1243,15 @@ This order intentionally reaches the public customer journey before expanding ad
 - When a slice creates data, verify the database.
 - When a slice touches UI, verify with browser screenshots.
 - When a slice touches storage, verify both object existence and access denial/allow behavior.
+ 
+---
+
+# 9. Admin CRUD Slice Update - 2026-05-31
+
+The audit and implementation described in `docs/admin-crud-gap-audit.md` closed the major local admin CRUD gaps earlier than the original milestone order:
+
+- Slice 12 product CRUD is implemented for local demo/content-store mode.
+- Slice 13 taxonomy and Amazon link management is implemented for local demo/content-store mode.
+- The metadata side of Slice 14 is implemented: admin can define cover/gallery/video/public download/premium download asset rows and the app enforces the public vs premium visibility classification.
+- Binary upload to Supabase Storage remains the next storage-specific slice.
+- Production Supabase activation remains a separate hardening slice because the connected remote project currently has no public tables and the app still uses demo-cookie auth for local flows.

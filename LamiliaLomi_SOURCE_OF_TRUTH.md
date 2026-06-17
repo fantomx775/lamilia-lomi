@@ -2,6 +2,7 @@
 
 Status: accepted for implementation
 Date: 2026-05-31
+Last updated: 2026-05-31 after `lamilialomi_tech_spec_ver1_1 (2).md`, `poziomy użytkowników.docx`, and audit against `Pelny_Zapis_Projektu_LamiliaLomi.md`
 
 This document is the canonical implementation source of truth for the first full-product iteration of LamiliaLomi. It supersedes the previous working notes and question checklist. Earlier documents remain useful as historical context, but product and technical decisions should be implemented according to this file.
 
@@ -41,7 +42,7 @@ The first iteration should attempt to deliver the full small product, not a redu
 - Private premium files served through signed URLs.
 - Polish admin panel under `/admin`.
 - Admin management for products, translations, categories, tags, media, premium files, premium codes, users, and email export.
-- Frontend in English and Polish.
+- Frontend in English, Polish, German, and Spanish.
 - SEO basics: metadata, Open Graph, sitemap, robots.txt, structured data where useful.
 - Privacy, Terms, and cookie consent.
 - Resend for system emails.
@@ -51,6 +52,7 @@ The first iteration should attempt to deliver the full small product, not a redu
 - Review reminder email after configurable delay.
 - GA4 plus custom business events.
 - User "My Library" page.
+- Mobile-friendly option to email a premium download/library link to the verified account email.
 - Manual ordering for products and galleries.
 - Simple admin editing for static pages.
 
@@ -59,7 +61,7 @@ The first iteration should attempt to deliver the full small product, not a redu
 - Product import from CSV/XLSX.
 - Advanced admin analytics.
 - Multiple codes per product beyond the initial shared-code model.
-- German language version.
+- Additional frontend languages beyond English, Polish, German, and Spanish.
 - Automatic Amazon geotargeting.
 
 ## Explicitly out of scope
@@ -115,9 +117,11 @@ A guest cannot:
 - Access user library.
 - Access admin.
 
-## Registered User
+## Customer Account
 
-A registered user can:
+A customer account is created for the premium unlock journey, not as a standalone browsing tier.
+
+A customer can:
 
 - Log in with email and password.
 - Verify email address.
@@ -126,6 +130,8 @@ A registered user can:
 - Unlock premium content using a product code.
 - Download unlocked premium files.
 - See their unlocked products in "My Library".
+
+There should be no broad "create an account" acquisition CTA for casual visitors. Account creation is shown from a product unlock context, such as a QR/code journey or the locked downloads section on a product page. Returning customers can still log in directly.
 
 ## Premium Access
 
@@ -162,7 +168,7 @@ Admin can:
    `/en/products/my-book?code=LOMI-BOOK-2026`
 
 3. User lands on the product page.
-4. If not logged in, user is prompted to register or log in.
+4. If not logged in, user is prompted to log in or create an account in this unlock context.
 5. The code from the URL is preserved through auth.
 6. After login and email verification, the product unlock is completed or shown as a prefilled confirmation action.
 7. Unlock is stored permanently for that user/product.
@@ -173,6 +179,8 @@ Admin can:
 Users can also manually enter a code on the product page.
 
 Codes should be case-insensitive and friendly to type.
+
+If a guest starts a manual unlock from a product page, account creation is allowed because it is still tied to a product/code unlock context.
 
 ## Returning User
 
@@ -203,7 +211,7 @@ Minimum product fields:
 - Categories.
 - Tags.
 - Cover image.
-- Gallery images.
+- Gallery images, visible publicly to all visitors.
 - Public flipthrough video.
 - Public/basic downloads if needed.
 - Premium downloads.
@@ -222,7 +230,7 @@ Translatable fields:
 - SEO title.
 - SEO description.
 
-English is the primary language. Polish is the second language. Missing Polish content can fall back to English.
+English is the primary language. Polish, German, and Spanish are supported frontend locales. Missing non-English product content can fall back to English.
 
 ## Product statuses
 
@@ -266,6 +274,8 @@ Premium files live in private storage and are accessed via short-lived signed UR
 
 Download count is not limited, but downloads should be tracked.
 
+For mobile convenience, an unlocked verified user should also be able to send a premium file/library link to their own verified account email. The email should not expose a permanent public file URL; access should still go through the authenticated product/library flow or generate a fresh signed URL after an access check.
+
 ---
 
 # 9. Admin Panel
@@ -283,7 +293,7 @@ Admin panel language:
 - Product list.
 - Create/edit product.
 - Draft/publish/archive product.
-- Manage EN/PL product translations.
+- Manage EN/PL/DE/ES product translations.
 - Manage categories.
 - Manage tags.
 - Upload cover image.
@@ -313,18 +323,23 @@ Frontend locales:
 
 - `en` as default.
 - `pl` as secondary.
+- `de` as third.
+- `es` as fourth.
 
 Routing:
 
 - `/en/...`
 - `/pl/...`
+- `/de/...`
+- `/es/...`
 
 Language behavior:
 
 - Detect browser language on first visit.
 - Store preferred language in a cookie.
 - Provide a manual language selector in the header.
-- Fall back to English when Polish translation is missing.
+- Fall back to English when a non-English translation is missing.
+- Product content is translated manually by the admin per language.
 
 Admin:
 
@@ -368,6 +383,7 @@ Emails to support:
 - Password reset.
 - Product unlock confirmation.
 - Review reminder.
+- Premium download/library link sent to the user's own verified email.
 - Contact form notification to the author.
 
 Tone:
@@ -383,6 +399,7 @@ Review reminder:
 - One reminder per user per product.
 - Delay configurable by admin per product.
 - Recommended default delay: 14 days after unlock.
+- PM full-chat audit note: the discovery conversation recommended 7 days. Later v1.1 source documents and the current implementation use a configurable 14-day default. Confirm with the owner before production if the default should change to 7 days.
 - Reminder links to the product's Amazon page.
 
 ---
@@ -405,7 +422,7 @@ Consent model:
 
 Important legal note:
 
-- Do not force marketing consent as a condition of account creation unless this has been explicitly reviewed legally. The recommended implementation separates required account consent from optional marketing consent.
+- The newer source documents still describe marketing consent as mandatory. This remains a legal/product decision that needs explicit owner/legal confirmation before implementation. Until then, do not force marketing consent as a condition of account creation. The recommended implementation separates required account consent from optional marketing consent.
 
 Cookie consent:
 
@@ -533,6 +550,8 @@ Public:
 - `/`
 - `/en`
 - `/pl`
+- `/de`
+- `/es`
 - `/[locale]/products`
 - `/[locale]/products/[slug]`
 - `/[locale]/categories/[slug]`
@@ -587,7 +606,7 @@ The exact migration can evolve, but the implementation should start from this mo
 - `role` text: `user` or `admin`.
 - `marketing_consent` boolean.
 - `terms_accepted_at` timestamptz.
-- `preferred_locale` text.
+- `preferred_locale` text, one of `en`, `pl`, `de`, `es`.
 - `created_at` timestamptz.
 - `updated_at` timestamptz.
 
@@ -609,7 +628,7 @@ The exact migration can evolve, but the implementation should start from this mo
 
 - `id` UUID.
 - `product_id` UUID.
-- `locale` text.
+- `locale` text, one of `en`, `pl`, `de`, `es`.
 - `title` text.
 - `short_description` text.
 - `long_description` text.
@@ -628,7 +647,7 @@ The exact migration can evolve, but the implementation should start from this mo
 
 - `id` UUID.
 - `category_id` UUID.
-- `locale` text.
+- `locale` text, one of `en`, `pl`, `de`, `es`.
 - `name` text.
 - `description` text nullable.
 - Unique: `category_id`, `locale`.
@@ -643,7 +662,7 @@ The exact migration can evolve, but the implementation should start from this mo
 
 - `id` UUID.
 - `tag_id` UUID.
-- `locale` text.
+- `locale` text, one of `en`, `pl`, `de`, `es`.
 - `name` text.
 - Unique: `tag_id`, `locale`.
 
@@ -669,7 +688,7 @@ The exact migration can evolve, but the implementation should start from this mo
 - `filename` text.
 - `content_type` text.
 - `size_bytes` bigint nullable.
-- `locale` text nullable.
+- `locale` text nullable, one of `en`, `pl`, `de`, `es` when set.
 - `title` text nullable.
 - `sort_order` integer.
 - `is_public` boolean.
@@ -726,7 +745,7 @@ There should be one shared code per product in the first version, but this table
 
 - `id` UUID.
 - `slug` text.
-- `locale` text.
+- `locale` text, one of `en`, `pl`, `de`, `es`.
 - `title` text.
 - `body` text.
 - `updated_at` timestamptz.
@@ -1083,3 +1102,32 @@ These are not unresolved product decisions; they are concrete assets/content nee
 - Production domain.
 
 Implementation can begin with placeholder/sample data, then swap in final assets before launch.
+
+---
+
+# 31. Current CRUD Implementation Status - 2026-05-31
+
+The admin CRUD gap audit is documented in `docs/admin-crud-gap-audit.md`.
+
+Implemented in the current local/demo slice:
+
+- Product create/edit/archive/delete via Server Actions.
+- Product translations for EN/PL/DE/ES, including SEO title and description.
+- Product category/tag assignment.
+- Multiple Amazon links with market and primary flag.
+- Multiple premium codes with active flag.
+- Product asset metadata management for guest-visible media and premium downloads.
+- Clear media visibility rule:
+  - `cover`, `gallery`, `video`, and `public_download` are public/guest-visible.
+  - `premium_download` is private and only for unlocked users.
+- Category create/update/delete with EN/PL/DE/ES translations.
+- Tag create/update/delete with EN/PL/DE/ES translations.
+- Static Privacy/Terms page editing per locale.
+- Public product/static-page reads now go through a shared content store instead of directly importing seed arrays.
+- Local Supabase config declares `public-media`, `public-videos`, and private `premium-files` buckets.
+
+Important implementation boundary:
+
+- CRUD persistence currently works in local demo/content-store mode through `data/lamilialomi-content.local.json`, which is intentionally git-ignored.
+- The connected remote Supabase project currently has no public tables. Apply the existing foundation migration to the intended Supabase project before treating Supabase as the production content source.
+- The next production-hardening slice should replace or extend the local content-store repository with Supabase-backed reads/writes under real Supabase Auth sessions, then wire binary uploads to Supabase Storage.

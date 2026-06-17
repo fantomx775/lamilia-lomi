@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import type { Locale } from "@/i18n/routing";
 
 import { defaultLocale, normalizeLocale } from "./locale";
-import { categories, products, tags } from "./seed-data";
+import { getContentSnapshot } from "./content-store";
 import type {
   Audience,
   CatalogFilters,
@@ -48,15 +48,17 @@ export function pickPrimaryAmazonLink(product: Product) {
 }
 
 export function getProductBySlug(slug: string) {
-  return products.find((product) => product.slug === slug);
+  return getContentSnapshot().products.find((product) => product.slug === slug);
 }
 
 export function getProductById(id: string) {
-  return products.find((product) => product.id === id);
+  return getContentSnapshot().products.find((product) => product.id === id);
 }
 
 export function getAssetById(assetId: string) {
-  return products.flatMap((product) => product.assets).find((asset) => asset.id === assetId);
+  return getContentSnapshot()
+    .products.flatMap((product) => product.assets)
+    .find((asset) => asset.id === assetId);
 }
 
 export function getLocalizedProductView(
@@ -64,6 +66,7 @@ export function getLocalizedProductView(
   requestedLocale: string | undefined,
   options: { includeDrafts?: boolean } = {},
 ): LocalizedProductView | null {
+  const { categories, tags } = getContentSnapshot();
   const product = getProductBySlug(slug);
   const locale = normalizeLocale(requestedLocale);
 
@@ -121,7 +124,8 @@ export function getLocalizedProductView(
 }
 
 export function getPublishedProductViews(locale: Locale) {
-  return products
+  return getContentSnapshot()
+    .products
     .filter(isPublicProduct)
     .map((product) => getLocalizedProductView(product.slug, locale))
     .filter((product): product is LocalizedProductView => Boolean(product));
@@ -214,7 +218,13 @@ export function getCatalogProducts(locale: Locale, filters: CatalogFilters) {
 }
 
 export function getAllProductTypes() {
-  return Array.from(new Set(products.filter(isPublicProduct).map((product) => product.productType)));
+  return Array.from(
+    new Set(
+      getContentSnapshot()
+        .products.filter(isPublicProduct)
+        .map((product) => product.productType),
+    ),
+  );
 }
 
 export function buildProductMetadata(
@@ -280,7 +290,8 @@ export function buildProductJsonLd(
 }
 
 export function getCategoryOptions(locale: Locale) {
-  return categories
+  return getContentSnapshot()
+    .categories
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((category) => ({
@@ -290,7 +301,7 @@ export function getCategoryOptions(locale: Locale) {
 }
 
 export function getTagOptions(locale: Locale) {
-  return tags.map((tag) => ({
+  return getContentSnapshot().tags.map((tag) => ({
     slug: tag.slug,
     name: getTranslation(tag.translations, locale).name,
   }));

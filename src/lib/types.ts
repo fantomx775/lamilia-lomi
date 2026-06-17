@@ -70,6 +70,22 @@ export type PremiumCode = {
   active: boolean;
 };
 
+export type StaticPageRecord = {
+  id: string;
+  slug: "privacy" | "terms";
+  locale: Locale;
+  title: string;
+  body: string;
+  updatedAt: string;
+};
+
+export type ContentSnapshot = {
+  products: Product[];
+  categories: Category[];
+  tags: Tag[];
+  staticPages: StaticPageRecord[];
+};
+
 export type Product = {
   id: string;
   slug: string;

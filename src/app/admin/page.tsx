@@ -1,7 +1,8 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { products } from "@/lib/seed-data";
+import { getContentSnapshot } from "@/lib/content-store";
 
 export default function AdminDashboardPage() {
+  const { products } = getContentSnapshot();
   const published = products.filter((product) => product.status === "published").length;
 
   return (

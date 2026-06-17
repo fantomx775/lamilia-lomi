@@ -24,10 +24,11 @@ describe("app configuration", () => {
 
   it("exposes supported locale configuration", () => {
     expect(getLocaleConfig()).toEqual({
-      locales: ["en", "pl"],
+      locales: ["en", "pl", "de", "es"],
       defaultLocale: "en",
     });
     expect(normalizeLocale("pl")).toBe("pl");
-    expect(normalizeLocale("de")).toBe("en");
+    expect(normalizeLocale("de")).toBe("de");
+    expect(normalizeLocale("fr")).toBe("en");
   });
 });

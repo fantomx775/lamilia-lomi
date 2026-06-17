@@ -2,6 +2,19 @@
 
 Date: 2026-05-31
 
+## PM Full Chat Audit - 2026-05-31
+
+Status: reviewed
+
+Checked source:
+- `C:/Users/user/Downloads/Pelny_Zapis_Projektu_LamiliaLomi.md`
+
+Result:
+- Canonical source-of-truth documents already covered the core PM decisions: static shared code per product, email/password account in unlock context, email verification gate, full public product gallery, locked premium downloads, Kids/Adults segmentation, Polish admin, CSV email export, footer/author social links, and calm premium mobile-first visual direction.
+- Added the missing PM-chat requirement for mobile users: an unlocked verified customer should be able to send a premium download/library link to their own verified email.
+- Left marketing consent as separate and optional in the canonical docs despite the PM chat saying "one mandatory checkbox", because the source of truth explicitly treats this as a legal/product confirmation item before forcing marketing consent.
+- Flagged the review-reminder default mismatch: PM chat recommended 7 days, while current source docs and implementation use a configurable 14-day default.
+
 ## Slice 0 - Project Bootstrap And Quality Gates
 
 Status: done
@@ -136,4 +149,35 @@ Automated tests:
 - E2E: pass, Chromium desktop and Pixel mobile projects.
 
 Known follow-up:
+- Implement the PM-chat mobile convenience flow: "send premium download/library link to my email" after the same verified-user/unlock access checks as direct downloads.
+- Confirm whether review reminder default should remain 14 days or change to the PM-chat recommendation of 7 days before production.
 - `npm audit` reports 2 moderate vulnerabilities from `next@16.2.6` depending on `postcss <8.5.10`. `npm audit fix --force` currently proposes a breaking downgrade to Next 9, so this should be revisited when Next releases a patched stable version.
+
+## Admin CRUD Gap Closure - 2026-05-31
+
+Status: done for local demo/content-store mode
+
+Built:
+- Added `docs/admin-crud-gap-audit.md` with the identified CRUD gaps and closure status.
+- Added a shared content store that reads seed data by default and persists local admin edits to `data/lamilialomi-content.local.json`.
+- Product admin now creates, edits, archives, and deletes products through Server Actions.
+- Product editor now manages EN/PL/DE/ES translations, SEO fields, category/tag assignment, Amazon links, premium codes, cover/video selection, and asset metadata.
+- Media visibility is explicit: guest-visible assets use `cover`, `gallery`, `video`, or `public_download`; protected files use `premium_download`.
+- Category and tag admin now support create/update/delete with multilingual labels.
+- Static page admin now saves Privacy/Terms per locale.
+- Library lookup now uses product IDs dynamically instead of hardcoded ID-to-slug mapping.
+- Supabase local config now declares `public-media`, `public-videos`, and private `premium-files` buckets.
+
+Automated tests:
+- Unit: pass, `npm test`
+- Typecheck: pass, `npm run typecheck`
+- Lint: pass, `npm run lint`
+- Build: pass, `npm run build`
+- E2E: pass, `npm run e2e`
+
+Manual evidence:
+- Browser check: `/admin/products/new` renders taxonomy and public/premium media sections after admin login.
+- Browser console: no errors or warnings on the checked admin editor page.
+
+Production note:
+- The connected remote Supabase project currently lists no public tables, so production Supabase activation still requires applying the foundation migration and replacing/extending local content-store writes with Supabase-backed writes under real Supabase Auth.

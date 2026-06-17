@@ -1,17 +1,17 @@
 import { demoUsers } from "./seed-data";
 import type { Product } from "./types";
+import { validateProductForPublish as validateProductForPublishFromContent } from "./admin-content";
 import { slugify } from "./utils";
 
-export function validateProductForPublish(product: Pick<Product, "translations" | "amazonLinks">) {
-  const english = product.translations.find((translation) => translation.locale === "en");
-
-  return {
-    ok: Boolean(english?.title && product.amazonLinks.length > 0),
-    missing: [
-      english?.title ? null : "English title",
-      product.amazonLinks.length > 0 ? null : "Amazon link",
-    ].filter((item): item is string => Boolean(item)),
-  };
+export function validateProductForPublish(
+  product: Pick<Product, "translations" | "amazonLinks"> &
+    Partial<Pick<Product, "assets" | "coverAssetId">>,
+) {
+  return validateProductForPublishFromContent({
+    ...product,
+    assets: product.assets ?? [],
+    coverAssetId: product.coverAssetId ?? "",
+  });
 }
 
 export function buildProductSlug(title: string) {

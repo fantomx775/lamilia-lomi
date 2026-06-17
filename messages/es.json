@@ -1,0 +1,22 @@
+{
+  "Nav": {
+    "products": "Catálogo",
+    "library": "Mi biblioteca",
+    "contact": "Contacto",
+    "login": "Iniciar sesión",
+    "admin": "Admin"
+  },
+  "Home": {
+    "eyebrow": "Libros creativos premium y bonos",
+    "title": "LamiliaLomi",
+    "subtitle": "Un espacio tranquilo para libros para colorear, cuentos ilustrados y descargas premium desbloqueadas con el código del libro físico.",
+    "kids": "Niños",
+    "adults": "Adultos",
+    "browse": "Ver catálogo"
+  },
+  "Product": {
+    "amazon": "Ver en Amazon",
+    "premium": "Desbloquear materiales premium",
+    "download": "Descargar archivo premium"
+  }
+}

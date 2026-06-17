@@ -2,7 +2,12 @@
 
 import { redirect } from "next/navigation";
 
-import { buildAuthRedirect, createDemoSession, validateRegistrationInput } from "@/lib/auth";
+import {
+  buildAuthRedirect,
+  createDemoSession,
+  isUnlockRegistrationContext,
+  validateRegistrationInput,
+} from "@/lib/auth";
 import { validatePremiumCode } from "@/lib/premium";
 import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
 import { scheduleReviewReminder } from "@/lib/reminders";
@@ -27,6 +32,11 @@ export async function registerDemoAction(formData: FormData) {
   const locale = String(formData.get("locale") ?? "en") as Locale;
   const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/library`);
   const code = String(formData.get("code") ?? "");
+
+  if (!isUnlockRegistrationContext({ locale, redirectTo, code })) {
+    redirect(`/${locale}/products`);
+  }
+
   const result = validateRegistrationInput({
     email: String(formData.get("email") ?? ""),
     password: String(formData.get("password") ?? ""),
@@ -36,7 +46,13 @@ export async function registerDemoAction(formData: FormData) {
   });
 
   if (!result.ok) {
-    redirect(`/${locale}/register?error=consent&redirectTo=${encodeURIComponent(redirectTo)}`);
+    const params = new URLSearchParams({ error: "consent", redirectTo });
+
+    if (code) {
+      params.set("code", code);
+    }
+
+    redirect(`/${locale}/register?${params.toString()}`);
   }
 
   await setDemoSession(

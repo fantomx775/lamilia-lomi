@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { buildContactEmail, validateContactInput } from "@/lib/contact";
 import { getResendClient } from "@/lib/email";
+import { normalizeLocale } from "@/lib/locale";
 
 export async function POST(request: Request) {
   const formData = await request.formData();
@@ -9,7 +10,7 @@ export async function POST(request: Request) {
     name: String(formData.get("name") ?? ""),
     email: String(formData.get("email") ?? ""),
     message: String(formData.get("message") ?? ""),
-    locale: String(formData.get("locale") ?? "en") as "en" | "pl",
+    locale: normalizeLocale(String(formData.get("locale") ?? "en")),
   });
 
   if (!parsed.success) {
