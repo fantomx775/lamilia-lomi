@@ -249,6 +249,36 @@ export function saveStaticPageFromFormData(formData: FormData): AdminMutationRes
   return { ok: true, id: page.id };
 }
 
+export function saveStaticPagesFromFormData(formData: FormData): AdminMutationResult {
+  const snapshot = getContentSnapshot();
+  const slug = staticPageSlugField(formData, "slug");
+  const nextPages = locales.map((locale) => {
+    const existing = snapshot.staticPages.find(
+      (page) => page.slug === slug && page.locale === locale,
+    );
+
+    return {
+      id: existing?.id ?? `static-${slug}-${locale}`,
+      slug,
+      locale,
+      title: textField(formData, `title_${locale}`) || existing?.title || slug,
+      body: textField(formData, `body_${locale}`) || existing?.body || "",
+      updatedAt: new Date().toISOString(),
+    } satisfies StaticPageRecord;
+  });
+
+  saveContentSnapshot({
+    ...snapshot,
+    staticPages: upsertManyByComposite(
+      snapshot.staticPages,
+      nextPages,
+      (item) => `${item.slug}:${item.locale}`,
+    ),
+  });
+
+  return { ok: true, id: slug };
+}
+
 export function validateProductForPublish(
   product: Pick<Product, "translations" | "amazonLinks" | "assets" | "coverAssetId">,
 ) {
@@ -727,6 +757,17 @@ function upsertByComposite<T>(
   }
 
   return collection.map((current) => (keySelector(current) === key ? item : current));
+}
+
+function upsertManyByComposite<T>(
+  collection: T[],
+  items: T[],
+  keySelector: (item: T) => string,
+) {
+  return items.reduce(
+    (result, item) => upsertByComposite(result, item, keySelector),
+    collection,
+  );
 }
 
 function defaultBucketForKind(kind: ProductAsset["kind"]) {

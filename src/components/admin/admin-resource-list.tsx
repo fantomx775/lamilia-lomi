@@ -22,6 +22,7 @@ type AdminResourceListProps<T> = {
   filters?: React.ReactNode;
   emptyState: React.ReactNode;
   noResultsState?: React.ReactNode;
+  renderMobileCard?: (row: T) => React.ReactNode;
   isLoading?: boolean;
   loadingState?: React.ReactNode;
   resultsLabel?: (visibleCount: number) => string;
@@ -41,6 +42,7 @@ export function AdminResourceList<T>({
   filters,
   emptyState,
   noResultsState = <p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak wyników.</p>,
+  renderMobileCard,
   isLoading = false,
   loadingState,
   resultsLabel = formatPolishResultsCount,
@@ -77,6 +79,7 @@ export function AdminResourceList<T>({
         data={filteredRows}
         getRowId={getRowId}
         emptyState={visibleEmptyState}
+        renderMobileCard={renderMobileCard}
         isLoading={isLoading}
         loadingState={loadingState}
       />

@@ -102,4 +102,75 @@ describe("admin behavior", () => {
       validateAssetClassification({ kind: "video", isPublic: true }),
     ).toMatchObject({ ok: true });
   });
+
+  it("preserves existing product locales, taxonomy, assets, markets, and premium codes on edit", () => {
+    const snapshot = getSeedContentSnapshot();
+    const existing = snapshot.products[0];
+    const form = new FormData();
+
+    form.set("id", existing.id);
+    form.set("status", existing.status);
+    form.set("audience", existing.audience);
+    form.set("productType", existing.productType);
+    form.set("slug", existing.slug);
+    form.set("coverAssetId", existing.coverAssetId);
+    form.set("videoAssetId", existing.videoAssetId ?? "");
+    form.set("reviewDelayDays", String(existing.reviewDelayDays));
+    form.set("sortOrder", String(existing.sortOrder));
+
+    for (const translation of existing.translations) {
+      form.set(`title_${translation.locale}`, translation.title);
+      form.set(`shortDescription_${translation.locale}`, translation.shortDescription);
+      form.set(`longDescription_${translation.locale}`, translation.longDescription);
+      form.set(`seoTitle_${translation.locale}`, translation.seoTitle ?? "");
+      form.set(`seoDescription_${translation.locale}`, translation.seoDescription ?? "");
+    }
+
+    for (const categoryId of existing.categoryIds) form.append("categoryIds", categoryId);
+    for (const tagId of existing.tagIds) form.append("tagIds", tagId);
+
+    for (const asset of existing.assets) {
+      form.append("assetId", asset.id);
+      form.append("assetKind", asset.kind);
+      form.append("assetBucket", asset.bucket);
+      form.append("assetPath", asset.path);
+      form.append("assetFilename", asset.filename);
+      form.append("assetContentType", asset.contentType);
+      form.append("assetLocale", asset.locale ?? "");
+      form.append("assetTitle", asset.title ?? "");
+      form.append("assetSortOrder", String(asset.sortOrder));
+    }
+
+    for (const link of existing.amazonLinks) {
+      form.append("amazonId", link.id);
+      form.append("amazonMarket", link.market);
+      form.append("amazonUrl", link.url);
+      if (link.isPrimary) form.append("amazonPrimary", link.id);
+    }
+
+    for (const code of existing.premiumCodes) {
+      form.append("premiumCodeId", code.id);
+      form.append("premiumCode", code.code);
+      if (code.active) form.append("premiumCodeActive", code.id);
+    }
+
+    const result = buildProductFromFormData(form, { existing, snapshot });
+
+    expect(result.errors).toEqual([]);
+    expect(result.product.translations).toEqual(existing.translations);
+    expect(result.product.categoryIds).toEqual(existing.categoryIds);
+    expect(result.product.tagIds).toEqual(existing.tagIds);
+    expect(result.product.assets).toHaveLength(existing.assets.length);
+    for (const asset of existing.assets) {
+      expect(result.product.assets).toContainEqual(expect.objectContaining({
+        id: asset.id,
+        kind: asset.kind,
+        path: asset.path,
+        filename: asset.filename,
+        title: asset.title,
+      }));
+    }
+    expect(result.product.amazonLinks).toEqual(existing.amazonLinks);
+    expect(result.product.premiumCodes).toEqual(existing.premiumCodes);
+  });
 });

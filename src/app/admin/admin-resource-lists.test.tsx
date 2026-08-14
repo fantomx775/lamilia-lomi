@@ -1,7 +1,12 @@
 /** @vitest-environment jsdom */
 
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 import { CategoriesResourceList } from "./categories/categories-list";
 import { PagesResourceList } from "./pages/pages-list";
@@ -67,5 +72,63 @@ describe("admin resource list adapters", () => {
       expect(container.querySelector('[data-slot="data-table"]')).toBeInTheDocument();
       unmount();
     }
+  });
+
+  it("exposes semantic links and buttons for each resource workflow", () => {
+    const product = render(
+      <ProductsResourceList rows={[{ id: "product-1", title: "Test product", slug: "test-product", status: "published", audience: "kids", productType: "coloring-book", languageCodes: ["en"] }]} />,
+    );
+    expect(product.container.querySelector('tbody a[href="/admin/products/product-1"]')).toBeInTheDocument();
+    expect(product.container.querySelector('a[href="/admin/products/new"]')).toBeInTheDocument();
+    expect(product.container.querySelector('tbody tr[role="button"]')).not.toBeInTheDocument();
+
+    const category = render(
+      <CategoriesResourceList
+        rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1, languageCodes: ["en"] }]}
+        items={[{ id: "category-1", slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }]}
+      />,
+    );
+    expect(category.getAllByRole("button", { name: "Edytuj kategorię Books" }).length).toBeGreaterThan(0);
+    expect(category.getByRole("button", { name: /Dodaj kategorię/i })).toBeInTheDocument();
+
+    const tag = render(
+      <TagsResourceList
+        rows={[{ id: "tag-1", name: "Calm", slug: "calm", productCount: 1, languageCodes: ["en"] }]}
+        items={[{ id: "tag-1", slug: "calm", translations: [{ locale: "en", name: "Calm" }] }]}
+      />,
+    );
+    expect(tag.getAllByRole("button", { name: "Edytuj tag Calm" }).length).toBeGreaterThan(0);
+    expect(tag.getByRole("button", { name: /Dodaj tag/i })).toBeInTheDocument();
+
+    const page = render(
+      <PagesResourceList rows={[{ id: "privacy", title: "Privacy", slug: "privacy", languageCodes: ["en"], updatedAt: "today" }]} />,
+    );
+    expect(page.container.querySelector('tbody a[href="/admin/pages/privacy"]')).toBeInTheDocument();
+    expect(page.container.querySelector('a[href="/admin/pages/new"]')).toBeInTheDocument();
+
+    const user = render(
+      <UsersResourceList rows={[{ id: "user@example.com", email: "user@example.com", role: "user", emailVerified: true, marketingConsent: false, unlockCount: 1, unlockedProducts: ["Test product"] }]} />,
+    );
+    expect(user.getAllByRole("button", { name: /Pokaż szczegóły użytkownika user@example.com/ }).length).toBeGreaterThan(0);
+    expect(user.getByRole("link", { name: "Eksport marketing CSV" })).toHaveAttribute("href", "/admin/users/export?marketingOnly=1");
+  });
+
+  it("opens category and user details as accessible drawers", async () => {
+    const user = userEvent.setup();
+    const category = render(
+      <CategoriesResourceList
+        rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1, languageCodes: ["en"] }]}
+        items={[{ id: "category-1", slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }]}
+      />,
+    );
+    await user.click(category.getAllByRole("button", { name: "Edytuj kategorię Books" })[0]);
+    expect(category.getByRole("dialog", { name: "Edytuj kategorię" })).toBeInTheDocument();
+    expect(category.getByRole("tab", { name: /EN/ })).toBeInTheDocument();
+
+    cleanup();
+    const users = render(<UsersResourceList rows={[{ id: "user@example.com", email: "user@example.com", role: "user", emailVerified: true, marketingConsent: false, unlockCount: 1, unlockedProducts: ["Moon Garden"] }]} />);
+    await user.click(users.getAllByRole("button", { name: /Pokaż szczegóły użytkownika user@example.com/ })[0]);
+    expect(users.getByRole("dialog", { name: "Szczegóły użytkownika" })).toHaveTextContent("Moon Garden");
+    expect(users.getByText(/tylko do odczytu/i)).toBeInTheDocument();
   });
 });
