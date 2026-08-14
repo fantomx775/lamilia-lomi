@@ -104,7 +104,8 @@ describe("admin resource list adapters", () => {
       <PagesResourceList rows={[{ id: "privacy", title: "Privacy", slug: "privacy", languageCodes: ["en"], updatedAt: "today" }]} />,
     );
     expect(page.container.querySelector('tbody a[href="/admin/pages/privacy"]')).toBeInTheDocument();
-    expect(page.container.querySelector('a[href="/admin/pages/new"]')).toBeInTheDocument();
+    expect(page.container.querySelector('a[href="/admin/pages/new"]')).not.toBeInTheDocument();
+    expect(page.queryByRole("link", { name: /Dodaj stronę/i })).not.toBeInTheDocument();
 
     const user = render(
       <UsersResourceList rows={[{ id: "user@example.com", email: "user@example.com", role: "user", emailVerified: true, marketingConsent: false, unlockCount: 1, unlockedProducts: ["Test product"] }]} />,

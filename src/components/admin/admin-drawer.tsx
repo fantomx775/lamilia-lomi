@@ -5,6 +5,16 @@ import { useEffect, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled]):not([type=hidden])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[contenteditable=true]",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
 export function AdminDrawer({
   open,
   title,
@@ -12,6 +22,7 @@ export function AdminDrawer({
   onClose,
   children,
   className,
+  restoreFocusElement,
 }: {
   open: boolean;
   title: string;
@@ -19,24 +30,68 @@ export function AdminDrawer({
   onClose: () => void;
   children: React.ReactNode;
   className?: string;
+  restoreFocusElement?: HTMLElement | null;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
+    previousActiveElementRef.current = restoreFocusElement ?? (document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null);
     closeButtonRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        onClose();
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const focusable = getFocusableElements(dialogRef.current);
+
+      if (focusable.length === 0) {
+        event.preventDefault();
+        closeButtonRef.current?.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const activeElement = document.activeElement;
+
+      if (!dialogRef.current?.contains(activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, open]);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      restoreFocus(previousActiveElementRef.current);
+      previousActiveElementRef.current = null;
+    };
+  }, [open, restoreFocusElement]);
 
   if (!open) {
     return null;
@@ -51,6 +106,7 @@ export function AdminDrawer({
         onClick={onClose}
       />
       <aside
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-drawer-title"
@@ -82,4 +138,22 @@ export function AdminDrawer({
       </aside>
     </div>
   );
+}
+
+function getFocusableElements(dialog: HTMLElement | null) {
+  if (!dialog) {
+    return [];
+  }
+
+  return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (element) => !element.hidden && !element.hasAttribute("aria-hidden"),
+  );
+}
+
+function restoreFocus(element: HTMLElement | null) {
+  if (!element || !element.isConnected || element.hasAttribute("disabled") || element.getAttribute("aria-hidden") === "true") {
+    return;
+  }
+
+  element.focus();
 }

@@ -20,7 +20,7 @@ export type AdminUserListRow = {
   unlockedProducts?: string[];
 };
 
-function buildColumns(onOpen: (id: string) => void): DataTableColumn<AdminUserListRow>[] {
+function buildColumns(onOpen: (id: string, trigger: HTMLElement) => void): DataTableColumn<AdminUserListRow>[] {
   return [
     {
       id: "user",
@@ -28,7 +28,7 @@ function buildColumns(onOpen: (id: string) => void): DataTableColumn<AdminUserLi
       cell: (row) => (
         <button
           type="button"
-          onClick={() => onOpen(row.id)}
+          onClick={(event) => onOpen(row.id, event.currentTarget)}
           aria-label={`Pokaż szczegóły użytkownika ${row.email}`}
           className="group inline-flex min-w-0 items-center gap-2 rounded-md text-left font-medium text-[var(--color-ink)] hover:text-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
         >
@@ -55,8 +55,13 @@ function buildColumns(onOpen: (id: string) => void): DataTableColumn<AdminUserLi
 export function UsersResourceList({ rows }: { rows: AdminUserListRow[] }) {
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [restoreFocusElement, setRestoreFocusElement] = useState<HTMLElement | null>(null);
   const selected = rows.find((row) => row.id === selectedId);
-  const openUser = (id: string) => { setSelectedId(id); setOpen(true); };
+  const openUser = (id: string, trigger: HTMLElement) => {
+    setRestoreFocusElement(trigger);
+    setSelectedId(id);
+    setOpen(true);
+  };
 
   return (
     <>
@@ -74,7 +79,7 @@ export function UsersResourceList({ rows }: { rows: AdminUserListRow[] }) {
         renderMobileCard={(row) => (
           <button
             type="button"
-            onClick={() => openUser(row.id)}
+            onClick={(event) => openUser(row.id, event.currentTarget)}
             className="group block w-full min-w-0 rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
             aria-label={`Pokaż szczegóły użytkownika ${row.email}`}
           >
@@ -89,6 +94,7 @@ export function UsersResourceList({ rows }: { rows: AdminUserListRow[] }) {
         onClose={() => setOpen(false)}
         title="Szczegóły użytkownika"
         description={selected?.email}
+        restoreFocusElement={restoreFocusElement}
       >
         {selected ? <UserDetails row={selected} /> : null}
       </AdminDrawer>

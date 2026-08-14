@@ -249,23 +249,12 @@ export function saveStaticPageFromFormData(formData: FormData): AdminMutationRes
   return { ok: true, id: page.id };
 }
 
-export function saveStaticPagesFromFormData(formData: FormData): AdminMutationResult {
+export function saveStaticPagesFromFormData(
+  formData: FormData,
+  expectedSlug: StaticPageRecord["slug"],
+): AdminMutationResult {
   const snapshot = getContentSnapshot();
-  const slug = staticPageSlugField(formData, "slug");
-  const nextPages = locales.map((locale) => {
-    const existing = snapshot.staticPages.find(
-      (page) => page.slug === slug && page.locale === locale,
-    );
-
-    return {
-      id: existing?.id ?? `static-${slug}-${locale}`,
-      slug,
-      locale,
-      title: textField(formData, `title_${locale}`) || existing?.title || slug,
-      body: textField(formData, `body_${locale}`) || existing?.body || "",
-      updatedAt: new Date().toISOString(),
-    } satisfies StaticPageRecord;
-  });
+  const { slug, pages: nextPages } = buildStaticPagesFromFormData(formData, snapshot, expectedSlug);
 
   saveContentSnapshot({
     ...snapshot,
@@ -277,6 +266,29 @@ export function saveStaticPagesFromFormData(formData: FormData): AdminMutationRe
   });
 
   return { ok: true, id: slug };
+}
+
+export function buildStaticPagesFromFormData(
+  formData: FormData,
+  snapshot: ContentSnapshot = getContentSnapshot(),
+  expectedSlug: StaticPageRecord["slug"],
+): { slug: StaticPageRecord["slug"]; pages: StaticPageRecord[] } {
+  const pages = locales.map((locale) => {
+    const existing = snapshot.staticPages.find(
+      (page) => page.slug === expectedSlug && page.locale === locale,
+    );
+
+    return {
+      id: existing?.id ?? `static-${expectedSlug}-${locale}`,
+      slug: expectedSlug,
+      locale,
+      title: textField(formData, `title_${locale}`) || existing?.title || expectedSlug,
+      body: textField(formData, `body_${locale}`) || existing?.body || "",
+      updatedAt: new Date().toISOString(),
+    } satisfies StaticPageRecord;
+  });
+
+  return { slug: expectedSlug, pages };
 }
 
 export function validateProductForPublish(
@@ -370,9 +382,12 @@ function parseProductTranslations(
         textField(formData, `longDescription_${locale}`) ||
         previous?.longDescription ||
         "";
-      const seoTitle = textField(formData, `seoTitle_${locale}`) || previous?.seoTitle;
-      const seoDescription =
-        textField(formData, `seoDescription_${locale}`) || previous?.seoDescription;
+      const seoTitleField = optionalTextField(formData, `seoTitle_${locale}`);
+      const seoDescriptionField = optionalTextField(formData, `seoDescription_${locale}`);
+      const seoTitle = seoTitleField.present ? seoTitleField.value : previous?.seoTitle;
+      const seoDescription = seoDescriptionField.present
+        ? seoDescriptionField.value
+        : previous?.seoDescription;
 
       if (
         !title &&
@@ -757,6 +772,16 @@ function upsertByComposite<T>(
   }
 
   return collection.map((current) => (keySelector(current) === key ? item : current));
+}
+
+function optionalTextField(formData: FormData, key: string) {
+  if (!formData.has(key)) {
+    return { present: false as const };
+  }
+
+  const value = textField(formData, key);
+
+  return { present: true as const, value: value || undefined };
 }
 
 function upsertManyByComposite<T>(

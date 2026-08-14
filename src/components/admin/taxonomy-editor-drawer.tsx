@@ -26,6 +26,7 @@ export function TaxonomyEditorDrawer({
   onSaved,
   saveAction,
   deleteAction,
+  restoreFocusElement,
 }: {
   kind: TaxonomyKind;
   item?: TaxonomyItem;
@@ -34,6 +35,7 @@ export function TaxonomyEditorDrawer({
   onSaved: () => void;
   saveAction?: SaveAction;
   deleteAction?: DeleteAction;
+  restoreFocusElement?: HTMLElement | null;
 }) {
   const [locale, setLocale] = useState<Locale>("en");
   const [isPending, startTransition] = useTransition();
@@ -102,6 +104,7 @@ export function TaxonomyEditorDrawer({
     <AdminDrawer
       open={open}
       onClose={onClose}
+      restoreFocusElement={restoreFocusElement}
       title={item ? `Edytuj ${isCategory ? "kategorię" : "tag"}` : isCategory ? "Nowa kategoria" : "Nowy tag"}
       description="Uzupełnij nazwy i opisy w wybranych językach."
     >

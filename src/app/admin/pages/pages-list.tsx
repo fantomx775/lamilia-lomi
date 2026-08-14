@@ -2,9 +2,7 @@
 
 import { AdminResourceList } from "@/components/admin/admin-resource-list";
 import type { DataTableColumn } from "@/components/admin/data-table";
-import { Plus } from "lucide-react";
 import Link from "next/link";
-import { buttonClassName } from "@/components/ui/button";
 
 export type AdminPageListRow = {
   id: string;
@@ -56,12 +54,6 @@ export function PagesResourceList({ rows }: { rows: AdminPageListRow[] }) {
       columns={columns}
       getRowId={(row) => row.id}
       getSearchText={(row) => [row.title, row.slug, ...row.languageCodes, row.updatedAt].join(" ")}
-      toolbarActions={
-        <Link className={buttonClassName({ size: "sm" })} href="/admin/pages/new">
-          <Plus className="size-4" aria-hidden />
-          Dodaj stronę
-        </Link>
-      }
       renderMobileCard={(row) => (
         <Link
           href={`/admin/pages/${row.slug}`}

@@ -18,7 +18,7 @@ export type AdminTagListRow = {
   languageCodes: string[];
 };
 
-function buildColumns(onEdit: (id: string) => void): DataTableColumn<AdminTagListRow>[] {
+function buildColumns(onEdit: (id: string, trigger: HTMLElement) => void): DataTableColumn<AdminTagListRow>[] {
   return [
     {
       id: "name",
@@ -26,7 +26,7 @@ function buildColumns(onEdit: (id: string) => void): DataTableColumn<AdminTagLis
       cell: (row) => (
         <button
           type="button"
-          onClick={() => onEdit(row.id)}
+          onClick={(event) => onEdit(row.id, event.currentTarget)}
           aria-label={`Edytuj tag ${row.name}`}
           className="group block min-w-0 rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
         >
@@ -55,14 +55,17 @@ export function TagsResourceList({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [restoreFocusElement, setRestoreFocusElement] = useState<HTMLElement | null>(null);
   const editingItem = items.find((item) => item.id === editingId);
 
-  const openCreate = () => {
+  const openCreate = (trigger: HTMLElement) => {
+    setRestoreFocusElement(trigger);
     setEditingId(null);
     setOpen(true);
   };
 
-  const openEdit = (id: string) => {
+  const openEdit = (id: string, trigger: HTMLElement) => {
+    setRestoreFocusElement(trigger);
     setEditingId(id);
     setOpen(true);
   };
@@ -81,11 +84,11 @@ export function TagsResourceList({
         columns={columns}
         getRowId={(row) => row.id}
         getSearchText={(row) => [row.name, row.slug, ...row.languageCodes].join(" ")}
-        toolbarActions={<Button type="button" size="sm" onClick={openCreate}><Plus className="size-4" aria-hidden />Dodaj tag</Button>}
+        toolbarActions={<Button type="button" size="sm" onClick={(event) => openCreate(event.currentTarget)}><Plus className="size-4" aria-hidden />Dodaj tag</Button>}
         renderMobileCard={(row) => (
           <button
             type="button"
-            onClick={() => openEdit(row.id)}
+            onClick={(event) => openEdit(row.id, event.currentTarget)}
             className="group block w-full min-w-0 rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
             aria-label={`Edytuj tag ${row.name}`}
           >
@@ -105,6 +108,7 @@ export function TagsResourceList({
         onSaved={() => { setOpen(false); router.refresh(); }}
         saveAction={saveAction}
         deleteAction={deleteAction}
+        restoreFocusElement={restoreFocusElement}
       />
     </>
   );

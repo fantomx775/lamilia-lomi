@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildStaticPagesFromFormData,
   buildProductFromFormData,
   validateAssetClassification,
 } from "./admin-content";
@@ -172,5 +173,72 @@ describe("admin behavior", () => {
     }
     expect(result.product.amazonLinks).toEqual(existing.amazonLinks);
     expect(result.product.premiumCodes).toEqual(existing.premiumCodes);
+  });
+
+  it("clears submitted SEO overrides while preserving omitted overrides", () => {
+    const snapshot = getSeedContentSnapshot();
+    const existing = {
+      ...snapshot.products[0],
+      translations: snapshot.products[0].translations.map((translation) => translation.locale === "en"
+        ? { ...translation, seoTitle: "Custom SEO", seoDescription: "Custom description" }
+        : translation),
+    };
+    const existingEnglish = existing.translations.find((translation) => translation.locale === "en");
+
+    const clearForm = new FormData();
+    clearForm.set("id", existing.id);
+    clearForm.set("seoTitle_en", "");
+    clearForm.set("seoDescription_en", "");
+
+    const cleared = buildProductFromFormData(clearForm, { existing, snapshot }).product.translations.find(
+      (translation) => translation.locale === "en",
+    );
+
+    expect(cleared).toMatchObject({
+      title: existingEnglish?.title,
+      shortDescription: existingEnglish?.shortDescription,
+      seoTitle: undefined,
+      seoDescription: undefined,
+    });
+    expect(cleared?.seoTitle ?? cleared?.title).toBe(cleared?.title);
+    expect(cleared?.seoDescription ?? cleared?.shortDescription).toBe(cleared?.shortDescription);
+
+    const omitted = buildProductFromFormData(new FormData(), { existing, snapshot }).product.translations.find(
+      (translation) => translation.locale === "en",
+    );
+
+    expect(omitted).toMatchObject({
+      seoTitle: existingEnglish?.seoTitle,
+      seoDescription: existingEnglish?.seoDescription,
+    });
+  });
+
+  it("builds all locale page updates for one immutable page key", () => {
+    const snapshot = getSeedContentSnapshot();
+    const form = new FormData();
+    form.set("slug", "privacy");
+    form.set("title_en", "Updated Privacy Policy");
+    form.set("body_en", "Updated privacy body");
+
+    const result = buildStaticPagesFromFormData(form, snapshot, "privacy");
+
+    expect(result.slug).toBe("privacy");
+    expect(result.pages).toHaveLength(4);
+    expect(result.pages.every((page) => page.slug === "privacy")).toBe(true);
+    expect(result.pages.find((page) => page.locale === "en")).toMatchObject({
+      title: "Updated Privacy Policy",
+      body: "Updated privacy body",
+    });
+    expect(snapshot.staticPages.filter((page) => page.slug === "terms")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ slug: "terms", locale: "en", title: "Terms" }),
+        expect.objectContaining({ slug: "terms", locale: "pl", title: "Regulamin" }),
+      ]),
+    );
+
+    form.set("slug", "terms");
+    const protectedResult = buildStaticPagesFromFormData(form, snapshot, "privacy");
+    expect(protectedResult.slug).toBe("privacy");
+    expect(protectedResult.pages.every((page) => page.slug === "privacy")).toBe(true);
   });
 });

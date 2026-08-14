@@ -15,20 +15,19 @@ import type { StaticPageRecord } from "@/lib/types";
 type PageValue = { title: string; body: string };
 
 export function PageEditor({
+  slug,
   title,
   records,
   feedback,
-  isNew = false,
   saveAction,
 }: {
+  slug: StaticPageRecord["slug"];
   title: string;
   records: StaticPageRecord[];
   feedback?: string;
-  isNew?: boolean;
   saveAction?: (formData: FormData) => void | Promise<void>;
 }) {
   const [locale, setLocale] = useState<Locale>("en");
-  const [slug, setSlug] = useState<StaticPageRecord["slug"]>(records[0]?.slug ?? "privacy");
   const [values, setValues] = useState<Record<Locale, PageValue>>(() => buildValues(records));
   const missingLocales = routing.locales.filter((code) => !values[code].title.trim() && !values[code].body.trim());
 
@@ -38,7 +37,7 @@ export function PageEditor({
 
   return (
     <form id="page-editor-form" action={saveAction} className="grid gap-6">
-      <input type="hidden" name="returnTo" value={isNew ? "/admin/pages/new" : `/admin/pages/${slug}`} />
+      <input type="hidden" name="slug" value={slug} />
       {routing.locales.map((code) => (
         <span key={code}>
           <input type="hidden" name={`title_${code}`} value={values[code].title} />
@@ -49,19 +48,16 @@ export function PageEditor({
         backHref="/admin/pages"
         backLabel="Strony"
         title={title}
-        subtitle={isNew ? "Utwórz zestaw treści dla obsługiwanej strony informacyjnej." : `Klucz strony: ${slug}`}
+        subtitle={`Klucz strony: ${slug}`}
         actions={<PageSubmitButton />}
       />
 
       {feedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
 
-      <AdminEditorSection title="Ustawienia strony" description="Slug pozostaje wspólny dla wszystkich wersji językowych.">
+      <AdminEditorSection title="Ustawienia strony" description="Klucz strony jest stały i wspólny dla wszystkich wersji językowych.">
         <div className="grid gap-2">
-          <Label htmlFor="page-slug">Slug</Label>
-          <select id="page-slug" name="slug" value={slug} onChange={(event) => setSlug(event.target.value as StaticPageRecord["slug"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm outline-none focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]">
-            <option value="privacy">privacy</option>
-            <option value="terms">terms</option>
-          </select>
+          <span className="text-sm font-medium">Klucz strony</span>
+          <code className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm">{slug}</code>
         </div>
       </AdminEditorSection>
 

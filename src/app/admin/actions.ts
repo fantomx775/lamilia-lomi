@@ -16,6 +16,7 @@ import {
   saveStaticPagesFromFormData,
 } from "@/lib/admin-content";
 import { getDemoSession } from "@/lib/session.server";
+import type { StaticPageRecord } from "@/lib/types";
 
 export async function saveProductAction(formData: FormData) {
   await assertAdmin();
@@ -139,13 +140,13 @@ export async function saveStaticPageAction(formData: FormData) {
   redirect("/admin/pages?saved=1");
 }
 
-export async function saveStaticPagesAction(formData: FormData) {
+export async function saveStaticPagesAction(slug: StaticPageRecord["slug"], formData: FormData) {
   await assertAdmin();
-  const result = saveStaticPagesFromFormData(formData);
+  const result = saveStaticPagesFromFormData(formData, slug);
   revalidateContentPaths();
 
   if (!result.ok) {
-    redirect(withAdminError(returnTo(formData, "/admin/pages/new"), result.errors));
+    redirect(withAdminError(`/admin/pages/${slug}`, result.errors));
   }
 
   redirect(`/admin/pages/${result.id}?saved=1`);

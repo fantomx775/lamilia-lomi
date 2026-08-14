@@ -20,5 +20,7 @@ export default async function EditPage({ params, searchParams }: Props) {
   const feedback = error ?? (query.saved ? "Zapisano wszystkie wersje językowe." : undefined);
   const records = getContentSnapshot().staticPages.filter((page) => page.slug === slug);
 
-  return <PageEditor title={records.find((record) => record.locale === "en")?.title ?? slug} records={records} feedback={feedback} saveAction={saveStaticPagesAction} />;
+  const saveAction = saveStaticPagesAction.bind(null, slug);
+
+  return <PageEditor slug={slug} title={records.find((record) => record.locale === "en")?.title ?? slug} records={records} feedback={feedback} saveAction={saveAction} />;
 }

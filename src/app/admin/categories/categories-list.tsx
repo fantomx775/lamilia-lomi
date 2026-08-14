@@ -19,7 +19,7 @@ export type AdminCategoryListRow = {
   languageCodes: string[];
 };
 
-function buildColumns(onEdit: (id: string) => void): DataTableColumn<AdminCategoryListRow>[] {
+function buildColumns(onEdit: (id: string, trigger: HTMLElement) => void): DataTableColumn<AdminCategoryListRow>[] {
   return [
     {
       id: "name",
@@ -27,7 +27,7 @@ function buildColumns(onEdit: (id: string) => void): DataTableColumn<AdminCatego
       cell: (row) => (
         <button
           type="button"
-          onClick={() => onEdit(row.id)}
+          onClick={(event) => onEdit(row.id, event.currentTarget)}
           aria-label={`Edytuj kategorię ${row.name}`}
           className="group block min-w-0 rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
         >
@@ -57,14 +57,17 @@ export function CategoriesResourceList({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [restoreFocusElement, setRestoreFocusElement] = useState<HTMLElement | null>(null);
   const editingItem = items.find((item) => item.id === editingId);
 
-  const openCreate = () => {
+  const openCreate = (trigger: HTMLElement) => {
+    setRestoreFocusElement(trigger);
     setEditingId(null);
     setOpen(true);
   };
 
-  const openEdit = (id: string) => {
+  const openEdit = (id: string, trigger: HTMLElement) => {
+    setRestoreFocusElement(trigger);
     setEditingId(id);
     setOpen(true);
   };
@@ -88,11 +91,11 @@ export function CategoriesResourceList({
         columns={columns}
         getRowId={(row) => row.id}
         getSearchText={(row) => [row.name, row.slug, ...row.languageCodes].join(" ")}
-        toolbarActions={<Button type="button" size="sm" onClick={openCreate}><Plus className="size-4" aria-hidden />Dodaj kategorię</Button>}
+        toolbarActions={<Button type="button" size="sm" onClick={(event) => openCreate(event.currentTarget)}><Plus className="size-4" aria-hidden />Dodaj kategorię</Button>}
         renderMobileCard={(row) => (
           <button
             type="button"
-            onClick={() => openEdit(row.id)}
+            onClick={(event) => openEdit(row.id, event.currentTarget)}
             className="group block w-full min-w-0 rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
             aria-label={`Edytuj kategorię ${row.name}`}
           >
@@ -112,6 +115,7 @@ export function CategoriesResourceList({
         onSaved={handleSaved}
         saveAction={saveAction}
         deleteAction={deleteAction}
+        restoreFocusElement={restoreFocusElement}
       />
     </>
   );
