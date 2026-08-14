@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildStaticPagesFromFormData,
   buildProductFromFormData,
   validateAssetClassification,
 } from "./admin-content";
@@ -101,5 +102,143 @@ describe("admin behavior", () => {
     expect(
       validateAssetClassification({ kind: "video", isPublic: true }),
     ).toMatchObject({ ok: true });
+  });
+
+  it("preserves existing product locales, taxonomy, assets, markets, and premium codes on edit", () => {
+    const snapshot = getSeedContentSnapshot();
+    const existing = snapshot.products[0];
+    const form = new FormData();
+
+    form.set("id", existing.id);
+    form.set("status", existing.status);
+    form.set("audience", existing.audience);
+    form.set("productType", existing.productType);
+    form.set("slug", existing.slug);
+    form.set("coverAssetId", existing.coverAssetId);
+    form.set("videoAssetId", existing.videoAssetId ?? "");
+    form.set("reviewDelayDays", String(existing.reviewDelayDays));
+    form.set("sortOrder", String(existing.sortOrder));
+
+    for (const translation of existing.translations) {
+      form.set(`title_${translation.locale}`, translation.title);
+      form.set(`shortDescription_${translation.locale}`, translation.shortDescription);
+      form.set(`longDescription_${translation.locale}`, translation.longDescription);
+      form.set(`seoTitle_${translation.locale}`, translation.seoTitle ?? "");
+      form.set(`seoDescription_${translation.locale}`, translation.seoDescription ?? "");
+    }
+
+    for (const categoryId of existing.categoryIds) form.append("categoryIds", categoryId);
+    for (const tagId of existing.tagIds) form.append("tagIds", tagId);
+
+    for (const asset of existing.assets) {
+      form.append("assetId", asset.id);
+      form.append("assetKind", asset.kind);
+      form.append("assetBucket", asset.bucket);
+      form.append("assetPath", asset.path);
+      form.append("assetFilename", asset.filename);
+      form.append("assetContentType", asset.contentType);
+      form.append("assetLocale", asset.locale ?? "");
+      form.append("assetTitle", asset.title ?? "");
+      form.append("assetSortOrder", String(asset.sortOrder));
+    }
+
+    for (const link of existing.amazonLinks) {
+      form.append("amazonId", link.id);
+      form.append("amazonMarket", link.market);
+      form.append("amazonUrl", link.url);
+      if (link.isPrimary) form.append("amazonPrimary", link.id);
+    }
+
+    for (const code of existing.premiumCodes) {
+      form.append("premiumCodeId", code.id);
+      form.append("premiumCode", code.code);
+      if (code.active) form.append("premiumCodeActive", code.id);
+    }
+
+    const result = buildProductFromFormData(form, { existing, snapshot });
+
+    expect(result.errors).toEqual([]);
+    expect(result.product.translations).toEqual(existing.translations);
+    expect(result.product.categoryIds).toEqual(existing.categoryIds);
+    expect(result.product.tagIds).toEqual(existing.tagIds);
+    expect(result.product.assets).toHaveLength(existing.assets.length);
+    for (const asset of existing.assets) {
+      expect(result.product.assets).toContainEqual(expect.objectContaining({
+        id: asset.id,
+        kind: asset.kind,
+        path: asset.path,
+        filename: asset.filename,
+        title: asset.title,
+      }));
+    }
+    expect(result.product.amazonLinks).toEqual(existing.amazonLinks);
+    expect(result.product.premiumCodes).toEqual(existing.premiumCodes);
+  });
+
+  it("clears submitted SEO overrides while preserving omitted overrides", () => {
+    const snapshot = getSeedContentSnapshot();
+    const existing = {
+      ...snapshot.products[0],
+      translations: snapshot.products[0].translations.map((translation) => translation.locale === "en"
+        ? { ...translation, seoTitle: "Custom SEO", seoDescription: "Custom description" }
+        : translation),
+    };
+    const existingEnglish = existing.translations.find((translation) => translation.locale === "en");
+
+    const clearForm = new FormData();
+    clearForm.set("id", existing.id);
+    clearForm.set("seoTitle_en", "");
+    clearForm.set("seoDescription_en", "");
+
+    const cleared = buildProductFromFormData(clearForm, { existing, snapshot }).product.translations.find(
+      (translation) => translation.locale === "en",
+    );
+
+    expect(cleared).toMatchObject({
+      title: existingEnglish?.title,
+      shortDescription: existingEnglish?.shortDescription,
+      seoTitle: undefined,
+      seoDescription: undefined,
+    });
+    expect(cleared?.seoTitle ?? cleared?.title).toBe(cleared?.title);
+    expect(cleared?.seoDescription ?? cleared?.shortDescription).toBe(cleared?.shortDescription);
+
+    const omitted = buildProductFromFormData(new FormData(), { existing, snapshot }).product.translations.find(
+      (translation) => translation.locale === "en",
+    );
+
+    expect(omitted).toMatchObject({
+      seoTitle: existingEnglish?.seoTitle,
+      seoDescription: existingEnglish?.seoDescription,
+    });
+  });
+
+  it("builds all locale page updates for one immutable page key", () => {
+    const snapshot = getSeedContentSnapshot();
+    const form = new FormData();
+    form.set("slug", "privacy");
+    form.set("title_en", "Updated Privacy Policy");
+    form.set("body_en", "Updated privacy body");
+
+    const result = buildStaticPagesFromFormData(form, snapshot, "privacy");
+
+    expect(result.slug).toBe("privacy");
+    expect(result.pages).toHaveLength(4);
+    expect(result.pages.every((page) => page.slug === "privacy")).toBe(true);
+    expect(result.pages.find((page) => page.locale === "en")).toMatchObject({
+      title: "Updated Privacy Policy",
+      body: "Updated privacy body",
+    });
+    expect(snapshot.staticPages.filter((page) => page.slug === "terms")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ slug: "terms", locale: "en", title: "Terms" }),
+        expect.objectContaining({ slug: "terms", locale: "pl", title: "Regulamin" }),
+      ]),
+    );
+
+    form.set("slug", "terms");
+    const protectedResult = buildStaticPagesFromFormData(form, snapshot, "privacy");
+    expect(protectedResult.slug).toBe("privacy");
+    expect(protectedResult.pages.every((page) => page.slug === "privacy")).toBe(true);
   });
 });

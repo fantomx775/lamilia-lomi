@@ -249,6 +249,48 @@ export function saveStaticPageFromFormData(formData: FormData): AdminMutationRes
   return { ok: true, id: page.id };
 }
 
+export function saveStaticPagesFromFormData(
+  formData: FormData,
+  expectedSlug: StaticPageRecord["slug"],
+): AdminMutationResult {
+  const snapshot = getContentSnapshot();
+  const { slug, pages: nextPages } = buildStaticPagesFromFormData(formData, snapshot, expectedSlug);
+
+  saveContentSnapshot({
+    ...snapshot,
+    staticPages: upsertManyByComposite(
+      snapshot.staticPages,
+      nextPages,
+      (item) => `${item.slug}:${item.locale}`,
+    ),
+  });
+
+  return { ok: true, id: slug };
+}
+
+export function buildStaticPagesFromFormData(
+  formData: FormData,
+  snapshot: ContentSnapshot = getContentSnapshot(),
+  expectedSlug: StaticPageRecord["slug"],
+): { slug: StaticPageRecord["slug"]; pages: StaticPageRecord[] } {
+  const pages = locales.map((locale) => {
+    const existing = snapshot.staticPages.find(
+      (page) => page.slug === expectedSlug && page.locale === locale,
+    );
+
+    return {
+      id: existing?.id ?? `static-${expectedSlug}-${locale}`,
+      slug: expectedSlug,
+      locale,
+      title: textField(formData, `title_${locale}`) || existing?.title || expectedSlug,
+      body: textField(formData, `body_${locale}`) || existing?.body || "",
+      updatedAt: new Date().toISOString(),
+    } satisfies StaticPageRecord;
+  });
+
+  return { slug: expectedSlug, pages };
+}
+
 export function validateProductForPublish(
   product: Pick<Product, "translations" | "amazonLinks" | "assets" | "coverAssetId">,
 ) {
@@ -340,9 +382,12 @@ function parseProductTranslations(
         textField(formData, `longDescription_${locale}`) ||
         previous?.longDescription ||
         "";
-      const seoTitle = textField(formData, `seoTitle_${locale}`) || previous?.seoTitle;
-      const seoDescription =
-        textField(formData, `seoDescription_${locale}`) || previous?.seoDescription;
+      const seoTitleField = optionalTextField(formData, `seoTitle_${locale}`);
+      const seoDescriptionField = optionalTextField(formData, `seoDescription_${locale}`);
+      const seoTitle = seoTitleField.present ? seoTitleField.value : previous?.seoTitle;
+      const seoDescription = seoDescriptionField.present
+        ? seoDescriptionField.value
+        : previous?.seoDescription;
 
       if (
         !title &&
@@ -727,6 +772,27 @@ function upsertByComposite<T>(
   }
 
   return collection.map((current) => (keySelector(current) === key ? item : current));
+}
+
+function optionalTextField(formData: FormData, key: string) {
+  if (!formData.has(key)) {
+    return { present: false as const };
+  }
+
+  const value = textField(formData, key);
+
+  return { present: true as const, value: value || undefined };
+}
+
+function upsertManyByComposite<T>(
+  collection: T[],
+  items: T[],
+  keySelector: (item: T) => string,
+) {
+  return items.reduce(
+    (result, item) => upsertByComposite(result, item, keySelector),
+    collection,
+  );
 }
 
 function defaultBucketForKind(kind: ProductAsset["kind"]) {

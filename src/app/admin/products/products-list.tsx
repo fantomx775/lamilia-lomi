@@ -1,5 +1,6 @@
 "use client";
 
+import { Plus } from "lucide-react";
 import Link from "next/link";
 
 import { AdminResourceList } from "@/components/admin/admin-resource-list";
@@ -35,10 +36,13 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
     id: "product",
     header: "Produkt",
     cell: (row) => (
-      <div className="min-w-0">
-        <p className="font-medium text-[var(--color-ink)]">{row.title}</p>
+      <Link
+        href={`/admin/products/${row.id}`}
+        className="group block min-w-0 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+      >
+        <p className="font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
         <p className="mt-1 truncate text-xs text-[var(--color-muted)]">{row.slug}</p>
-      </div>
+      </Link>
     ),
   },
   {
@@ -79,9 +83,28 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
       }
       toolbarActions={
         <Link className={buttonClassName({ size: "sm" })} href="/admin/products/new">
+          <Plus className="size-4" aria-hidden />
           Nowy produkt
         </Link>
       }
+      renderMobileCard={(row) => (
+        <Link
+          href={`/admin/products/${row.id}`}
+          className="group block min-w-0 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+          aria-label={`Edytuj produkt ${row.title}`}
+        >
+          <div className="flex min-w-0 items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
+              <p className="mt-1 truncate text-xs text-[var(--color-muted)]">{row.slug}</p>
+            </div>
+            <Badge className={statusClasses[row.status]}>{statusLabels[row.status]}</Badge>
+          </div>
+          <p className="mt-4 text-sm text-[var(--color-muted)]">
+            {row.audience === "kids" ? "Dzieci" : "Dorośli"} · {formatProductType(row.productType)} · {formatLanguages(row.languageCodes)}
+          </p>
+        </Link>
+      )}
       emptyState={<p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak produktów.</p>}
     />
   );

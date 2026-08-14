@@ -1,3 +1,7 @@
+import {
+  deleteTagInlineAction,
+  saveTagInlineAction,
+} from "@/app/admin/actions";
 import { getAdminDisplayName, getAdminLanguageCodes } from "@/lib/admin-list";
 import { getContentSnapshot } from "@/lib/content-store";
 
@@ -13,5 +17,12 @@ export default function AdminTagsPage() {
     languageCodes: getAdminLanguageCodes(tag.translations),
   }));
 
-  return <TagsResourceList rows={rows} />;
+  return (
+    <TagsResourceList
+      rows={rows}
+      items={tags}
+      saveAction={saveTagInlineAction}
+      deleteAction={deleteTagInlineAction}
+    />
+  );
 }

@@ -1,5 +1,10 @@
 import { notFound } from "next/navigation";
 
+import {
+  archiveProductAction,
+  deleteProductAction,
+  saveProductAction,
+} from "@/app/admin/actions";
 import { getContentSnapshot } from "@/lib/content-store";
 import { getProductById, getTranslation } from "@/lib/products";
 import { ProductEditor } from "../product-editor";
@@ -28,6 +33,9 @@ export default async function EditProductPage({ params, searchParams }: Props) {
       categories={snapshot.categories}
       tags={snapshot.tags}
       feedback={error ?? saved}
+      saveAction={saveProductAction}
+      archiveAction={archiveProductAction}
+      deleteAction={deleteProductAction}
     />
   );
 }

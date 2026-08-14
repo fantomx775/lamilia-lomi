@@ -13,8 +13,10 @@ import {
   saveProductFromFormData,
   saveStaticPageFromFormData,
   saveTagFromFormData,
+  saveStaticPagesFromFormData,
 } from "@/lib/admin-content";
 import { getDemoSession } from "@/lib/session.server";
+import type { StaticPageRecord } from "@/lib/types";
 
 export async function saveProductAction(formData: FormData) {
   await assertAdmin();
@@ -80,6 +82,20 @@ export async function deleteCategoryAction(formData: FormData) {
   redirect("/admin/categories?deleted=1");
 }
 
+export async function saveCategoryInlineAction(formData: FormData) {
+  await assertAdmin();
+  const result = saveCategoryFromFormData(formData);
+  revalidateContentPaths();
+  return result;
+}
+
+export async function deleteCategoryInlineAction(formData: FormData) {
+  await assertAdmin();
+  const result = deleteCategory(String(formData.get("id") ?? ""));
+  revalidateContentPaths();
+  return result;
+}
+
 export async function saveTagAction(formData: FormData) {
   await assertAdmin();
 
@@ -102,12 +118,38 @@ export async function deleteTagAction(formData: FormData) {
   redirect("/admin/tags?deleted=1");
 }
 
+export async function saveTagInlineAction(formData: FormData) {
+  await assertAdmin();
+  const result = saveTagFromFormData(formData);
+  revalidateContentPaths();
+  return result;
+}
+
+export async function deleteTagInlineAction(formData: FormData) {
+  await assertAdmin();
+  const result = deleteTag(String(formData.get("id") ?? ""));
+  revalidateContentPaths();
+  return result;
+}
+
 export async function saveStaticPageAction(formData: FormData) {
   await assertAdmin();
 
   saveStaticPageFromFormData(formData);
   revalidateContentPaths();
   redirect("/admin/pages?saved=1");
+}
+
+export async function saveStaticPagesAction(slug: StaticPageRecord["slug"], formData: FormData) {
+  await assertAdmin();
+  const result = saveStaticPagesFromFormData(formData, slug);
+  revalidateContentPaths();
+
+  if (!result.ok) {
+    redirect(withAdminError(`/admin/pages/${slug}`, result.errors));
+  }
+
+  redirect(`/admin/pages/${result.id}?saved=1`);
 }
 
 async function assertAdmin() {

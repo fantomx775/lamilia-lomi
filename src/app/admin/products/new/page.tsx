@@ -1,4 +1,9 @@
 import { ProductEditor } from "../product-editor";
+import {
+  archiveProductAction,
+  deleteProductAction,
+  saveProductAction,
+} from "@/app/admin/actions";
 import { getContentSnapshot } from "@/lib/content-store";
 
 type Props = {
@@ -16,6 +21,9 @@ export default async function NewProductPage({ searchParams }: Props) {
       categories={snapshot.categories}
       tags={snapshot.tags}
       feedback={error}
+      saveAction={saveProductAction}
+      archiveAction={archiveProductAction}
+      deleteAction={deleteProductAction}
     />
   );
 }

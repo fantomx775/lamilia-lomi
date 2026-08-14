@@ -1,3 +1,7 @@
+import {
+  deleteCategoryInlineAction,
+  saveCategoryInlineAction,
+} from "@/app/admin/actions";
 import { getAdminDisplayName, getAdminLanguageCodes } from "@/lib/admin-list";
 import { getContentSnapshot } from "@/lib/content-store";
 
@@ -14,5 +18,12 @@ export default function AdminCategoriesPage() {
     languageCodes: getAdminLanguageCodes(category.translations),
   }));
 
-  return <CategoriesResourceList rows={rows} />;
+  return (
+    <CategoriesResourceList
+      rows={rows}
+      items={categories}
+      saveAction={saveCategoryInlineAction}
+      deleteAction={deleteCategoryInlineAction}
+    />
+  );
 }
