@@ -4,7 +4,7 @@ import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AdminResourceList } from "./admin-resource-list";
+import { AdminResourceList, formatPolishResultsCount } from "./admin-resource-list";
 import { DataTable, type DataTableColumn } from "./data-table";
 
 afterEach(() => {
@@ -42,6 +42,23 @@ describe("DataTable", () => {
     expect(table.querySelector("td")?.textContent).toBe("Alpha");
   });
 
+  it("keeps table rows read-only without button semantics", () => {
+    const { getByRole } = render(
+      <DataTable
+        caption="Read-only records"
+        columns={columns}
+        data={[{ id: "1", name: "Alpha" }]}
+        getRowId={(row) => row.id}
+        emptyState={<p>Nothing here</p>}
+      />,
+    );
+
+    const row = getByRole("table", { name: "Read-only records" }).querySelector("tbody tr");
+
+    expect(row).not.toHaveAttribute("role", "button");
+    expect(row).not.toHaveAttribute("tabindex");
+  });
+
   it("renders the empty state when there are no rows", () => {
     const { getAllByText } = render(
       <DataTable
@@ -54,6 +71,24 @@ describe("DataTable", () => {
     );
 
     expect(getAllByText("Nothing here")).toHaveLength(2);
+  });
+});
+
+describe("formatPolishResultsCount", () => {
+  it.each([
+    [0, "0 wyników"],
+    [1, "1 wynik"],
+    [2, "2 wyniki"],
+    [4, "4 wyniki"],
+    [5, "5 wyników"],
+    [12, "12 wyników"],
+    [14, "14 wyników"],
+    [21, "21 wyników"],
+    [22, "22 wyniki"],
+    [24, "24 wyniki"],
+    [25, "25 wyników"],
+  ])("formats %i as %s", (count, expected) => {
+    expect(formatPolishResultsCount(count)).toBe(expected);
   });
 });
 

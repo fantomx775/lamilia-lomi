@@ -43,7 +43,7 @@ export function AdminResourceList<T>({
   noResultsState = <p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak wyników.</p>,
   isLoading = false,
   loadingState,
-  resultsLabel = defaultResultsLabel,
+  resultsLabel = formatPolishResultsCount,
 }: AdminResourceListProps<T>) {
   const [searchValue, setSearchValue] = useState("");
   const normalizedSearch = normalizeResourceSearchText(searchValue);
@@ -93,12 +93,15 @@ export function normalizeResourceSearchText(value: string) {
     .trim();
 }
 
-function defaultResultsLabel(count: number) {
+export function formatPolishResultsCount(count: number) {
   if (count === 1) {
     return "1 wynik";
   }
 
-  if (count >= 2 && count <= 4) {
+  const lastTwoDigits = count % 100;
+  const lastDigit = count % 10;
+
+  if (lastDigit >= 2 && lastDigit <= 4 && (lastTwoDigits < 12 || lastTwoDigits > 14)) {
     return `${count} wyniki`;
   }
 

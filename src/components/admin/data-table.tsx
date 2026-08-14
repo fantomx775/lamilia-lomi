@@ -1,6 +1,6 @@
 "use client";
 
-import type { KeyboardEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -21,7 +21,6 @@ type DataTableProps<T> = {
   emptyState: ReactNode;
   loadingState?: ReactNode;
   isLoading?: boolean;
-  onRowClick?: (row: T) => void;
   renderMobileCard?: (row: T) => ReactNode;
   className?: string;
 };
@@ -34,7 +33,6 @@ export function DataTable<T>({
   emptyState,
   loadingState = <p className="p-8 text-center text-sm text-[var(--color-muted)]">Ładowanie…</p>,
   isLoading = false,
-  onRowClick,
   renderMobileCard,
   className,
 }: DataTableProps<T>) {
@@ -50,28 +48,6 @@ export function DataTable<T>({
       ))}
     </dl>
   );
-
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, row: T) => {
-    if (!onRowClick || (event.key !== "Enter" && event.key !== " ")) {
-      return;
-    }
-
-    event.preventDefault();
-    onRowClick(row);
-  };
-
-  const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>, row: T) => {
-    if (!onRowClick || (event.key !== "Enter" && event.key !== " ")) {
-      return;
-    }
-
-    event.preventDefault();
-    onRowClick(row);
-  };
-
-  const rowClassName = onRowClick
-    ? "cursor-pointer transition-colors hover:bg-[var(--color-bg-alt)] focus-visible:bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-terracotta)]"
-    : "";
 
   return (
     <div data-slot="data-table" className={cn("min-w-0", className)}>
@@ -101,14 +77,7 @@ export function DataTable<T>({
                 {data.map((row) => (
                   <tr
                     key={getRowId(row)}
-                    className={cn(
-                      "border-b border-[var(--color-border)] last:border-b-0",
-                      rowClassName,
-                    )}
-                    onClick={onRowClick ? () => onRowClick(row) : undefined}
-                    onKeyDown={onRowClick ? (event) => handleRowKeyDown(event, row) : undefined}
-                    role={onRowClick ? "button" : undefined}
-                    tabIndex={onRowClick ? 0 : undefined}
+                    className="border-b border-[var(--color-border)] last:border-b-0"
                   >
                     {columns.map((column) => (
                       <td
@@ -139,14 +108,7 @@ export function DataTable<T>({
           data.map((row) => (
             <div
               key={getRowId(row)}
-              className={cn(
-                "min-w-0 rounded-lg border border-[var(--color-border)] bg-white/70 p-4",
-                rowClassName,
-              )}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
-              onKeyDown={onRowClick ? (event) => handleCardKeyDown(event, row) : undefined}
-              role={onRowClick ? "button" : undefined}
-              tabIndex={onRowClick ? 0 : undefined}
+              className="min-w-0 rounded-lg border border-[var(--color-border)] bg-white/70 p-4"
             >
               {renderMobileCard ? renderMobileCard(row) : renderDefaultMobileCard(row)}
             </div>
