@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -22,6 +23,8 @@ type DataTableProps<T> = {
   loadingState?: ReactNode;
   isLoading?: boolean;
   renderMobileCard?: (row: T) => ReactNode;
+  getRowHref?: (row: T) => string;
+  getRowAriaLabel?: (row: T) => string;
   className?: string;
 };
 
@@ -34,8 +37,11 @@ export function DataTable<T>({
   loadingState = <p className="p-8 text-center text-sm text-[var(--color-muted)]">Ładowanie…</p>,
   isLoading = false,
   renderMobileCard,
+  getRowHref,
+  getRowAriaLabel,
   className,
 }: DataTableProps<T>) {
+  const router = useRouter();
   const renderDefaultMobileCard = (row: T) => (
     <dl className="grid gap-3">
       {columns.map((column) => (
@@ -77,7 +83,37 @@ export function DataTable<T>({
                 {data.map((row) => (
                   <tr
                     key={getRowId(row)}
-                    className="border-b border-[var(--color-border)] last:border-b-0"
+                    className={cn(
+                      "border-b border-[var(--color-border)] last:border-b-0",
+                      getRowHref &&
+                        "admin-motion cursor-pointer hover:bg-[var(--color-bg-alt)] focus-visible:bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-terracotta)]",
+                    )}
+                    role={getRowHref ? "link" : undefined}
+                    tabIndex={getRowHref ? 0 : undefined}
+                    aria-label={getRowAriaLabel?.(row)}
+                    onClick={
+                      getRowHref
+                        ? (event) => {
+                            if (isInteractiveTarget(event.target, event.currentTarget)) {
+                              return;
+                            }
+
+                            router.push(getRowHref(row));
+                          }
+                        : undefined
+                    }
+                    onKeyDown={
+                      getRowHref
+                        ? (event) => {
+                            if (event.target !== event.currentTarget || !isRowNavigationKey(event.key)) {
+                              return;
+                            }
+
+                            event.preventDefault();
+                            router.push(getRowHref(row));
+                          }
+                        : undefined
+                    }
                   >
                     {columns.map((column) => (
                       <td
@@ -117,4 +153,20 @@ export function DataTable<T>({
       </div>
     </div>
   );
+}
+
+function isInteractiveTarget(target: EventTarget | null, currentTarget: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const interactiveTarget = target.closest(
+    "a, button, input, select, textarea, summary, [role='button'], [role='link'], [contenteditable='true']",
+  );
+
+  return Boolean(interactiveTarget && interactiveTarget !== currentTarget);
+}
+
+function isRowNavigationKey(key: string) {
+  return key === "Enter" || key === " ";
 }

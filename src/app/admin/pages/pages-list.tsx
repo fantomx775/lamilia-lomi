@@ -53,11 +53,13 @@ export function PagesResourceList({ rows }: { rows: AdminPageListRow[] }) {
       rows={rows}
       columns={columns}
       getRowId={(row) => row.id}
+      getRowHref={(row) => `/admin/pages/${row.slug}`}
+      getRowAriaLabel={(row) => `Edytuj stronę ${row.title}`}
       getSearchText={(row) => [row.title, row.slug, ...row.languageCodes, row.updatedAt].join(" ")}
       renderMobileCard={(row) => (
         <Link
           href={`/admin/pages/${row.slug}`}
-          className="group block min-w-0 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+          className="admin-motion group block min-w-0 cursor-pointer rounded-md p-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] hover:bg-[var(--color-bg-alt)]"
           aria-label={`Edytuj stronę ${row.title}`}
         >
           <p className="truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>

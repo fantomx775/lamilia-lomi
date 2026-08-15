@@ -1,5 +1,3 @@
-import { BookOpen, Library, UserRound } from "lucide-react";
-
 import { logoutAction, verifyDemoEmailAction } from "@/app/actions";
 import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
 import { Button } from "@/components/ui/button";
@@ -15,9 +13,9 @@ export default async function AccountPage({ params }: Props) {
   const { locale } = await params;
   const session = await getDemoSession();
   const nav: DashboardNavItem[] = [
-    { href: `/${locale}/account`, label: locale === "pl" ? "Moje konto" : "Account", icon: UserRound },
-    { href: `/${locale}/library`, label: locale === "pl" ? "Moja biblioteka" : "My Library", icon: Library },
-    { href: `/${locale}/products`, label: locale === "pl" ? "Katalog" : "Catalog", icon: BookOpen },
+    { href: `/${locale}/account`, label: locale === "pl" ? "Moje konto" : "Account", icon: "account" },
+    { href: `/${locale}/library`, label: locale === "pl" ? "Moja biblioteka" : "My Library", icon: "library" },
+    { href: `/${locale}/products`, label: locale === "pl" ? "Katalog" : "Catalog", icon: "catalog" },
   ];
 
   if (!session) {

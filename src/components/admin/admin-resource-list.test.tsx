@@ -2,13 +2,20 @@
 
 import { cleanup, render } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const routerPush = vi.hoisted(() => vi.fn());
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush }),
+}));
 
 import { AdminResourceList, formatPolishResultsCount } from "./admin-resource-list";
 import { DataTable, type DataTableColumn } from "./data-table";
 
 afterEach(() => {
   cleanup();
+  routerPush.mockClear();
 });
 
 type TestRow = {
@@ -57,6 +64,44 @@ describe("DataTable", () => {
 
     expect(row).not.toHaveAttribute("role", "button");
     expect(row).not.toHaveAttribute("tabindex");
+  });
+
+  it("navigates from neutral row space without hijacking nested links", async () => {
+    const user = userEvent.setup();
+    const { getAllByRole, getByRole } = render(
+      <DataTable
+        caption="Navigable records"
+        columns={[
+          {
+            id: "name",
+            header: "Name",
+            cell: (row) => <a href={`/records/${row.id}/link`}>{row.name}</a>,
+          },
+        ]}
+        data={[{ id: "1", name: "Alpha" }]}
+        getRowId={(row) => row.id}
+        getRowHref={(row) => `/records/${row.id}`}
+        getRowAriaLabel={(row) => `Open ${row.name}`}
+        emptyState={<p>Nothing here</p>}
+      />,
+    );
+
+    const row = getByRole("link", { name: "Open Alpha" });
+    const nestedLink = getAllByRole("link", { name: "Alpha" })[0];
+
+    expect(row).toHaveAttribute("tabindex", "0");
+    expect(row).toHaveAttribute("aria-label", "Open Alpha");
+
+    await user.click(nestedLink);
+    expect(routerPush).not.toHaveBeenCalled();
+
+    await user.click(row);
+    expect(routerPush).toHaveBeenCalledWith("/records/1");
+
+    routerPush.mockClear();
+    row.focus();
+    await user.keyboard("{Enter}");
+    expect(routerPush).toHaveBeenCalledWith("/records/1");
   });
 
   it("renders the empty state when there are no rows", () => {

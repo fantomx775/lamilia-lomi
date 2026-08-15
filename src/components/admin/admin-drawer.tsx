@@ -98,7 +98,7 @@ export function AdminDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50" data-slot="admin-drawer">
+    <div className="admin-drawer-backdrop fixed inset-0 z-50" data-slot="admin-drawer">
       <button
         type="button"
         aria-label="Zamknij panel"
@@ -111,7 +111,7 @@ export function AdminDrawer({
         aria-modal="true"
         aria-labelledby="admin-drawer-title"
         className={cn(
-          "absolute inset-y-0 right-0 flex h-dvh w-full max-w-xl flex-col border-l border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl",
+          "admin-drawer-panel absolute inset-y-0 right-0 flex h-dvh w-full max-w-xl flex-col border-l border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl",
           className,
         )}
       >

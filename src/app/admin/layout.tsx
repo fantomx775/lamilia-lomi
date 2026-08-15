@@ -1,4 +1,3 @@
-import { Box, FileText, LayoutDashboard, Settings, Tags, Users } from "lucide-react";
 import Link from "next/link";
 
 import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
@@ -9,13 +8,13 @@ import { hasAdminAccess } from "@/lib/auth";
 import { getDemoSession } from "@/lib/session.server";
 
 const nav: DashboardNavItem[] = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/products", label: "Produkty", icon: Box },
-  { href: "/admin/categories", label: "Kategorie", icon: Tags },
-  { href: "/admin/tags", label: "Tagi", icon: Tags },
-  { href: "/admin/users", label: "Użytkownicy", icon: Users },
-  { href: "/admin/pages", label: "Strony", icon: FileText },
-  { href: "/admin/settings", label: "Ustawienia", icon: Settings },
+  { href: "/admin", label: "Dashboard", icon: "dashboard" },
+  { href: "/admin/products", label: "Produkty", icon: "products" },
+  { href: "/admin/categories", label: "Kategorie", icon: "categories" },
+  { href: "/admin/tags", label: "Tagi", icon: "tags" },
+  { href: "/admin/users", label: "Użytkownicy", icon: "users" },
+  { href: "/admin/pages", label: "Strony", icon: "pages" },
+  { href: "/admin/settings", label: "Ustawienia", icon: "settings" },
 ];
 
 export const metadata = {
