@@ -13,9 +13,11 @@ This is an evidence-based public UX audit only. No production application code, 
 
 The public surface is a coherent seeded product experience with working localized routing, product pages, Amazon destinations, demo auth, QR context, premium unlock, Library re-entry, and protected-download decisions. The strongest foundation is the product-to-Amazon page and the end-to-end demo QR flow: the tested journey reached login, verification, unlock, Library, and the download endpoint.
 
-The largest risk is mobile continuation. At a 390 px viewport the shared header creates horizontal overflow (`scrollWidth=440` against a 375 px client width), hides Catalog/Library navigation, and the unlocked product state does not expose a Library link. A reader can complete unlock but cannot continue the intended journey through visible UI on a phone. The QR query reaches auth, but after verification the visible premium-code input is empty, forcing re-entry.
+The largest risk is mobile continuation. At a 390 px viewport the shared header creates horizontal overflow (`scrollWidth=440` against a 375 px client width), hides Catalog/Library navigation, and the unlocked product state does not expose a direct Library link. The reader is not blocked: the unlocked product exposes a direct premium download, Account remains reachable, and Account exposes My Library. The remaining issue is a high-impact discoverability detour. Separately, the QR query reaches auth, but after verification the visible premium-code input is empty, forcing re-entry.
 
 Localization is structurally present for EN/PL/DE/ES, but public copy is not consistently localized. PL product content is mixed with English CTAs and footer text; DE/ES product content falls back to English; the shared header/footer hard-code English for DE/ES; legal pages and author content contain explicit placeholders. This lowers trust and makes the four-locale promise less credible.
+
+Priority summary: **12 findings — 0 P0, 10 P1, and 2 P2.**
 
 The five highest-value opportunities are:
 
@@ -39,7 +41,7 @@ Status meanings: `AUDITED` means the route rendered and its relevant behavior wa
 | `/:locale/products/:slug` | Published slugs: `moon-garden-coloring-book`, `mindful-mandalas-for-adults`, `bedtime-forest-picture-book`, across all locales | `AUDITED` | Product, Amazon, QR, premium, invalid-slug 404, and locale paths inspected. Draft product is correctly not public. |
 | `/:locale/login` | `en`, `pl`, `de`, `es`; QR redirect context | `AUDITED` | EN login completed with unverified demo user; locale routing smoke passed. |
 | `/:locale/register` | Valid QR context across locale model; bare route guard | `AUDITED` | Valid form rendered; bare `/en/register` redirects 307 → `/en/products`. |
-| `/:locale/reset-password` | `en`, `pl`, `de`, `es` route model | `AUDITED` | Screen rendered; inert submit is recorded as UX-007. |
+| `/:locale/reset-password` | `en`, `pl`, `de`, `es` route model | `AUDITED` | Screen rendered; inert submit is recorded as UX-008. |
 | `/:locale/library` | Guest and unlocked states; all locale paths | `AUDITED` | Guest state observed before login; unlocked product observed after QR journey. |
 | `/:locale/account` | Guest and authenticated states; all locale paths | `AUDITED` | Authenticated dashboard observed; guest branch verified in code and route smoke. |
 | `/:locale/contact` | `en`, `pl`, `de`, `es` route model | `AUDITED` | Screen and labeled fields inspected. POST side effect is separately untestable. |
@@ -89,7 +91,7 @@ after click URL:    /pl/products/moon-garden-coloring-book
 expected context:   ?code=LOMI-BOOK-2026 preserved
 ```
 
-EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete gaps are findings UX-004 and UX-005.
+EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete locale gaps are findings UX-003 and UX-005; UX-004 is the separately reproduced post-verification input-population defect.
 
 ### Accessibility and state checks
 
@@ -124,19 +126,19 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 | Verification | `AUDITED` | Product showed an explicit verification-required state and demo verification action. |
 | Unlock form | `AUDITED with friction` | After verification the URL still contained `code`, but the visible input property was empty; the code had to be entered again manually. See UX-004. |
 | Unlock | `AUDITED` | Valid code redirected to `?unlocked=1`; product displayed “Premium content is unlocked” and a premium asset link. |
-| Library | `AUDITED with mobile gap` | Direct Library route showed the unlocked product. At 390 px the unlocked product page had no visible Library link and mobile header navigation was hidden. See UX-001. |
+| Library | `AUDITED with discoverability gap` | Direct Library route showed the unlocked product. At 390 px the product had a direct premium download and a visible Account link; Account navigation exposed and opened My Library, but the product state had no direct Library CTA and the shared Library nav was hidden. See UX-001. |
 | Download | `UNTESTABLE final delivery` | Click reached `/api/downloads/asset-moon-premium-pdf` and server logged 307; the browser did not emit a download event. Source authorization and the static demo PDF exist, but final file delivery is not claimed. |
 
 ## E. Findings
 
-### UX-001 — P0 — Mobile QR journey has no visible Library re-entry
+### UX-001 — P1 — Mobile QR journey lacks direct Library re-entry
 
 **Area:** QR/unlock/Library continuation
 **Route / screen:** `/:locale/products/:slug` unlocked state → `/:locale/library`
 **Viewport:** 390 px
-**Problem:** After unlock, the product state only says the Library keeps the product available. At mobile widths the shared Catalog/Library nav is hidden at `md`, so the user has no visible action to continue to Library.
-**Evidence:** Browser snapshot at 390 px showed `Premium content is unlocked`, `Your library keeps this product available for later downloads`, and no Library link. `src/components/site-header.tsx:43-52` hides the nav below `md`; `src/app/[locale]/products/[slug]/page.tsx:156-169` renders the unlocked asset without a Library CTA.
-**User/business impact:** The post-purchase journey is broken at its highest-value continuation point for QR-first mobile readers. Unlock can succeed while the intended next step remains undiscoverable.
+**Problem:** After unlock, the product state only says the Library keeps the product available. At mobile widths the shared Catalog/Library nav is hidden at `md`, so the user has no direct Library action from the product. The journey remains completable through the direct premium download or through Account → My Library.
+**Evidence:** At 390 px the unlocked product showed `Premium content is unlocked`, a `Premium printable PDF` link to `/api/downloads/asset-moon-premium-pdf`, and a visible `/en/account` link, but no product-state Library link. Clicking Account exposed a visible `My Library` link and clicking it reached `/en/library` with the unlocked product. `src/components/site-header.tsx:43-52` hides the shared nav below `md`; `src/app/[locale]/products/[slug]/page.tsx:156-169` renders the unlocked asset without a Library CTA; `src/app/[locale]/account/page.tsx:15-19` supplies the dashboard Library route.
+**User/business impact:** Adds a high-friction continuation detour for QR-first mobile readers and makes the intended Library destination less discoverable, but does not block the download or Library path.
 **Recommended change:** Add a primary `View Library` action to the unlocked state and a compact mobile navigation/menu that always exposes Library.
 **Acceptance criteria:**
 
@@ -144,9 +146,10 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 - Mobile navigation exposes Catalog, Library, locale, and Account without horizontal overflow.
 - The same CTA works in EN/PL/DE/ES and preserves locale.
 
-**Dependency:** NONE
+**Dependency:** `codex/core-unlock-funnel` handoff for the post-unlock continuation contract; standalone public-navigation work can ship independently.
 **Risk:** Low UI risk; verify against auth/session states.
 **Suggested slice:** Slice A — Mobile navigation and post-unlock re-entry
+**Workstream:** `codex/core-unlock-funnel`
 
 ### UX-002 — P1 — Shared mobile header overflows and clips controls
 
@@ -185,14 +188,15 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 **Dependency:** FUNNEL
 **Risk:** Medium; unsafe redirect/query propagation must be avoided.
 **Suggested slice:** Slice B — QR context contract across locale and auth
+**Workstream:** `codex/core-unlock-funnel`
 
 ### UX-004 — P1 — Verified QR flow does not prefill the visible unlock field
 
 **Area:** QR/auth/unlock continuity
 **Route / screen:** Product after verification
 **Viewport:** 390 px; applies to all viewports
-**Problem:** After verification, the URL retained `?code=LOMI-BOOK-2026`, but the visible `#premium-code` input property was empty. The user had to manually re-enter the code.
-**Evidence:** Browser snapshot after verification showed the unlock textbox without a value; read-only DOM evaluation returned `value=""` while `location.search` still contained the code. `src/components/unlock-form.tsx:72-75, 101-106` passes `initialCode` but the post-auth/hydration state did not present it as entered.
+**Problem:** After the user completes the verified-demo return path, the URL retains `?code=LOMI-BOOK-2026`, but the visible `#premium-code` input property is empty. The user has to manually re-enter the code.
+**Evidence / reproduction:** At 390 px, signed out, open `/en/products/moon-garden-coloring-book?code=LOMI-BOOK-2026`; click the product `Log in`; sign in as `unverified@lamilialomi.test` with the demo password; confirm the product returns with the same query; click `Mark demo email as verified`. Read-only DOM evaluation then returned `location.search=code=LOMI-BOOK-2026`, `#premium-code.value=""`, and no `value` attribute. Filling the code manually and clicking Unlock succeeded. `src/components/unlock-form.tsx:72-75, 101-106` passes `initialCode`, but this auth-return/hydration state did not present it as entered. This is distinct from UX-003: the locale-switch path drops the query before auth, while this path retains the query and still renders an empty field.
 **User/business impact:** Adds a re-entry step exactly where QR should reduce friction and risks abandonment if the code is not easily readable from the physical book.
 **Recommended change:** Make the auth-return contract populate the controlled input value and visibly confirm the code context; preserve it through verification and failed unlock states.
 **Acceptance criteria:**
@@ -204,6 +208,7 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 **Dependency:** FUNNEL
 **Risk:** Medium; coordinate with auth redirect and server action semantics.
 **Suggested slice:** Slice B — QR context contract across locale and auth
+**Workstream:** `codex/core-unlock-funnel`
 
 ### UX-005 — P1 — EN/PL/DE/ES public copy is not consistently localized
 
@@ -280,6 +285,7 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 **Dependency:** BACKEND
 **Risk:** High auth/security risk; requires Supabase foundation contract.
 **Suggested slice:** Slice F — Auth recovery and account states
+**Workstream:** Supabase foundation
 
 ### UX-009 — P1 — Legal, author, and social surfaces are explicit placeholders
 
@@ -326,7 +332,7 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 **Viewport:** All
 **Problem:** The product page labels a static placeholder asset `Public flipthrough video`, while the footer advertises placeholder social channels.
 **Evidence:** Product DOM showed `Public flipthrough video` over `/assets/video/flipthrough-placeholder.svg`; footer DOM showed `Instagram / Pinterest placeholders`.
-**Impact:** The main product promise still works, but perceived quality and content credibility are lower.
+**User/business impact:** The main product promise still works, but perceived quality and content credibility are lower.
 **Recommended change:** Use a real video/preview interaction or label the asset honestly as a preview; omit or link real social destinations.
 **Acceptance criteria:** Media label matches behavior and assets; no placeholder social text is public.
 **Dependency:** CONTENT
@@ -340,7 +346,7 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 **Viewport:** All; observed at 390 px
 **Problem:** Browser link names contain duplicated audience text such as `Kids Kids`, because the card repeats the label and display title.
 **Evidence:** Home DOM link names were `Bedtime Forest cover Kids Kids` and `Mindful Mandalas cover Adults Adults`; `src/app/[locale]/page.tsx:71-78` renders both label and title.
-**Impact:** Minor screen-reader and scan noise; does not block conversion.
+**User/business impact:** Minor screen-reader and scan noise; does not block conversion.
 **Recommended change:** Keep one semantic heading and expose the supporting taxonomy as secondary metadata.
 **Acceptance criteria:** Card accessible names are concise and unique; visual audience context remains.
 **Dependency:** NONE
@@ -351,13 +357,13 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 
 - The 390 px layout has a measurable horizontal overflow on every tested public screen because the header content is wider than the viewport.
 - Mobile hides the primary Catalog/Library navigation at `md` without a replacement.
-- The unlocked state has no direct Library CTA, making the QR journey incomplete through visible mobile UI.
+- The unlocked state has no direct Library CTA, adding a continuation detour; direct download and Account → My Library remain available.
 - Long locale controls and the icon-only Account action need a compact, labeled pattern.
 - Product cards and forms render without evidence of vertical clipping at 390 px, but the header overflow must be fixed before considering mobile QA green.
 
 ## G. Accessibility findings
 
-- `UX-001` and `UX-002`: mobile Library/account navigation is unavailable or unnamed at narrow widths.
+- `UX-001` and `UX-002`: mobile Library/account navigation lacks a direct product CTA or compact, named navigation at narrow widths.
 - `UX-007`: catalog search/select controls lack accessible names.
 - `UX-012`: duplicate audience text creates screen-reader noise.
 - Keyboard traversal remained inconclusive in this browser surface: eight Tab attempts left focus on `BODY`. A follow-up implementation slice must include real keyboard testing in Playwright/CI and a manual screen-reader pass.
@@ -377,8 +383,8 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 
 - **Scope:** Replace the overflowing mobile header with compact navigation; keep Catalog, Library, locale, and Account reachable; add `View Library` to the unlocked product state; add accessible names.
 - **Non-goals:** No auth, database, download authorization, or desktop redesign.
-- **Dependencies:** None.
-- **Expected value:** Removes the P0 continuation break and the most visible mobile defect.
+- **Dependencies:** `codex/core-unlock-funnel` handoff for UX-001; no backend dependency for the standalone header work.
+- **Expected value:** Removes the P1 continuation detour and the most visible mobile defect.
 - **Likely areas:** `site-header`, unlocked product section, shared button/navigation styles.
 - **QA strategy:** Playwright at 390/768/1440; no horizontal overflow; signed-out, unverified, unlocked, and logged-out states; keyboard focus order.
 
@@ -386,7 +392,7 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 
 - **Scope:** Preserve allowlisted QR/redirect context across locale switch, login, register, verification, failed unlock, and refresh; ensure the unlock input visibly retains the code.
 - **Non-goals:** No change to redemption rules, RLS, or storage authorization.
-- **Dependencies:** FUNNEL/core auth redirect contract.
+- **Dependencies:** Existing `codex/core-unlock-funnel` workstream and its core auth redirect contract.
 - **Expected value:** Reduces QR abandonment and removes forced code re-entry.
 - **Likely areas:** `language-switcher`, auth redirect builders/actions, `UnlockForm`, product/auth query handling.
 - **QA strategy:** Matrix for EN/PL/DE/ES and guest → login → unverified → verified → unlock; invalid/missing code; refresh and back navigation.
@@ -438,7 +444,7 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 
 ## J. Recommended execution order
 
-1. **Slice A** — remove the P0 mobile continuation break and overflow.
+1. **Slice A** — remove the P1 mobile continuation detour and overflow.
 2. **Slice B** — stabilize the QR/auth context contract before adding more funnel UI.
 3. **Slice C** — localize the shared shell and critical funnel copy.
 4. **Slice D** — sharpen acquisition/product CTA hierarchy and measure Amazon handoff.
@@ -446,7 +452,13 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 6. **Slice F** — complete auth recovery and account state coverage with the Supabase foundation.
 7. **Slice G** — finish content/legal/SEO readiness after owners supply approved copy.
 
-## K. Explicit non-goals
+## K. Cross-worktree handoff
+
+- **`codex/core-unlock-funnel`:** Own UX-001 (post-unlock Library continuation), UX-003 (locale/query preservation), and UX-004 (verified-return input population). The audit branch supplies evidence and acceptance criteria only; it does not compete with or implement that workstream.
+- **Supabase foundation:** Own UX-008 (reset-password contract), including secure recovery states and rate-limit/error behavior. No Supabase schema, RLS, migration, or auth implementation was changed here.
+- **Standalone public navigation:** UX-002 can be implemented independently, while coordinating its mobile Account/Library affordances with the core funnel acceptance checks.
+
+## L. Explicit non-goals
 
 - No production application-code implementation in this audit branch.
 - No Supabase schema, RLS, migration, storage, download authorization, or server redemption changes.
@@ -455,7 +467,7 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 - No merge to `main` and no production deployment.
 - No claim that the final premium file download succeeded in-browser; only the authorized 307 endpoint step was observed.
 
-## L. Quality gate
+## M. Quality gate
 
 - [x] Final audit artifact exists at `docs/audits/public-ux-audit-2026-08.md`.
 - [x] All 13 public UI route patterns are audited.
@@ -465,6 +477,9 @@ EN/PL/DE/ES are therefore routed, but not equivalently localized. The concrete g
 - [x] EN/PL/DE/ES routing and critical-screen coverage are recorded.
 - [x] Every finding has ID, priority, area, route/screen, viewport, problem, evidence, impact, recommendation, acceptance criteria, dependency, risk, and suggested slice.
 - [x] P0/P1 findings have concrete source and/or browser evidence.
+- [x] Review correction completed: UX-001 is P1 because direct download and Account → My Library remain reachable; UX-004 is retained only with a distinct reproduced post-verification empty-field path.
+- [x] Priority counts are reconciled: 12 findings, 0 P0, 10 P1, 2 P2.
+- [x] QR/auth/unlock/Library findings are handed to `codex/core-unlock-funnel`; reset-password is handed to the Supabase foundation.
 - [x] Mobile, accessibility, and localization sections are present.
 - [x] Seven prioritized implementation slices are defined.
 - [x] No production-code changes are present in the audit worktree.
