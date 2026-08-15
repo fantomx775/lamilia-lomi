@@ -78,6 +78,7 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
       rows={rows}
       columns={columns}
       getRowId={(row) => row.id}
+      getRowHref={(row) => `/admin/products/${row.id}`}
       getSearchText={(row) =>
         [row.title, row.slug, row.status, row.audience, row.productType, ...row.languageCodes].join(" ")
       }
@@ -90,7 +91,7 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
       renderMobileCard={(row) => (
         <Link
           href={`/admin/products/${row.id}`}
-          className="group block min-w-0 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+          className="admin-motion group block min-w-0 cursor-pointer rounded-md p-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] hover:bg-[var(--color-bg-alt)]"
           aria-label={`Edytuj produkt ${row.title}`}
         >
           <div className="flex min-w-0 items-start justify-between gap-3">

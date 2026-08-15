@@ -16,6 +16,8 @@
   --color-terracotta-ring: rgb(197 111 93 / 0.16);
   --color-blush: #ead1c8;
   --radius: 0.5rem;
+  --admin-motion-duration: 180ms;
+  --admin-motion-easing: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @theme inline {
@@ -34,6 +36,168 @@ body {
 ::selection {
   background: var(--color-blush);
   color: var(--color-ink);
+}
+
+@keyframes admin-page-enter-forward {
+  from {
+    opacity: 0.88;
+    transform: translate3d(0.75rem, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes admin-page-enter-back {
+  from {
+    opacity: 0.88;
+    transform: translate3d(-0.75rem, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes admin-drawer-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes admin-drawer-enter {
+  from {
+    opacity: 0.9;
+    transform: translate3d(1rem, 0, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes admin-drawer-backdrop-exit {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes admin-drawer-exit {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(1rem, 0, 0);
+  }
+}
+
+.admin-motion {
+  transition-property: background-color, border-color, box-shadow, color, transform;
+  transition-duration: var(--admin-motion-duration);
+  transition-timing-function: var(--admin-motion-easing);
+}
+
+.admin-page-transition {
+  animation: admin-page-enter-forward var(--admin-motion-duration) var(--admin-motion-easing) both;
+}
+
+.admin-page-transition[data-direction="back"] {
+  animation-name: admin-page-enter-back;
+}
+
+.admin-drawer-backdrop {
+  animation: admin-drawer-backdrop-enter var(--admin-motion-duration) var(--admin-motion-easing) both;
+}
+
+.admin-drawer-panel {
+  animation: admin-drawer-enter var(--admin-motion-duration) var(--admin-motion-easing) both;
+}
+
+.admin-drawer-backdrop.admin-drawer-exiting {
+  animation: admin-drawer-backdrop-exit var(--admin-motion-duration) var(--admin-motion-easing) both;
+  pointer-events: none;
+}
+
+.admin-drawer-panel.admin-drawer-exiting {
+  animation: admin-drawer-exit var(--admin-motion-duration) var(--admin-motion-easing) both;
+}
+
+.admin-disclosure > summary {
+  list-style: none;
+}
+
+.admin-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-disclosure-content {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    max-height var(--admin-motion-duration) var(--admin-motion-easing),
+    opacity var(--admin-motion-duration) var(--admin-motion-easing);
+}
+
+.admin-disclosure[data-state="open"] > .admin-disclosure-content {
+  max-height: 120rem;
+  opacity: 1;
+}
+
+.admin-disclosure[data-state="closed"] > .admin-disclosure-content {
+  max-height: 0;
+  opacity: 0;
+}
+
+.admin-disclosure-content > div {
+  min-height: 0;
+}
+
+.admin-disclosure[data-state="closed"] > .admin-disclosure-content {
+  pointer-events: none;
+}
+
+.admin-disclosure-chevron {
+  transition: transform var(--admin-motion-duration) var(--admin-motion-easing);
+}
+
+.admin-disclosure[data-state="open"] .admin-disclosure-chevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-motion {
+    transition: none;
+  }
+
+  .admin-page-transition {
+    animation: none;
+  }
+
+  .admin-drawer-backdrop,
+  .admin-drawer-panel {
+    animation: none;
+  }
+
+  .admin-disclosure-content,
+  .admin-disclosure-chevron {
+    transition: none;
+  }
 }
 
 .prose-lomi {

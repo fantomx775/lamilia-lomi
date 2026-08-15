@@ -18,6 +18,15 @@ type MutationResult = { ok: true; id: string } | { ok: false; errors: string[] }
 export type SaveAction = (formData: FormData) => Promise<MutationResult>;
 export type DeleteAction = (formData: FormData) => Promise<MutationResult>;
 
+type TaxonomyEditorProps = {
+  kind: TaxonomyKind;
+  item?: TaxonomyItem;
+  onClose: () => void;
+  onSaved: () => void;
+  saveAction?: SaveAction;
+  deleteAction?: DeleteAction;
+};
+
 export function TaxonomyEditorDrawer({
   kind,
   item,
@@ -27,16 +36,41 @@ export function TaxonomyEditorDrawer({
   saveAction,
   deleteAction,
   restoreFocusElement,
-}: {
-  kind: TaxonomyKind;
-  item?: TaxonomyItem;
+}: TaxonomyEditorProps & {
   open: boolean;
-  onClose: () => void;
-  onSaved: () => void;
-  saveAction?: SaveAction;
-  deleteAction?: DeleteAction;
   restoreFocusElement?: HTMLElement | null;
 }) {
+  const isCategory = kind === "category";
+
+  return (
+    <AdminDrawer
+      open={open}
+      onClose={onClose}
+      restoreFocusElement={restoreFocusElement}
+      title={item ? `Edytuj ${isCategory ? "kategorię" : "tag"}` : isCategory ? "Nowa kategoria" : "Nowy tag"}
+      description="Uzupełnij nazwy i opisy w wybranych językach."
+    >
+      <TaxonomyEditorForm
+        key={`${open ? "open" : "closed"}-${item?.id ?? "new"}`}
+        kind={kind}
+        item={item}
+        onClose={onClose}
+        onSaved={onSaved}
+        saveAction={saveAction}
+        deleteAction={deleteAction}
+      />
+    </AdminDrawer>
+  );
+}
+
+function TaxonomyEditorForm({
+  kind,
+  item,
+  onClose,
+  onSaved,
+  saveAction,
+  deleteAction,
+}: TaxonomyEditorProps) {
   const [locale, setLocale] = useState<Locale>("en");
   const [isPending, startTransition] = useTransition();
   const [errors, setErrors] = useState<string[]>([]);
@@ -101,13 +135,7 @@ export function TaxonomyEditorDrawer({
   };
 
   return (
-    <AdminDrawer
-      open={open}
-      onClose={onClose}
-      restoreFocusElement={restoreFocusElement}
-      title={item ? `Edytuj ${isCategory ? "kategorię" : "tag"}` : isCategory ? "Nowa kategoria" : "Nowy tag"}
-      description="Uzupełnij nazwy i opisy w wybranych językach."
-    >
+    <>
       <form className="grid gap-5" onSubmit={submit}>
         <input type="hidden" name="id" value={itemId} />
         {routing.locales.map((code) => (
@@ -180,7 +208,7 @@ export function TaxonomyEditorDrawer({
           </button>
         </div>
       ) : null}
-    </AdminDrawer>
+    </>
   );
 }
 

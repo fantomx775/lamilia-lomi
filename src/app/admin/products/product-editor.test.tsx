@@ -74,6 +74,30 @@ describe("ProductEditor V2", () => {
     expect(view.getByLabelText("Aktywny")).toBeChecked();
   });
 
+  it("reveals and collapses SEO details without leaving the native disclosure open", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Edycja produktu"
+        product={product}
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+      />,
+    );
+
+    const summary = view.getByText("SEO i wygląd w Google").closest("summary");
+    const disclosure = summary?.closest("details");
+
+    expect(summary).not.toBeNull();
+    expect(disclosure).not.toHaveAttribute("open");
+
+    await user.click(summary!);
+    await waitFor(() => expect(disclosure).toHaveAttribute("open"));
+
+    await user.click(summary!);
+    await waitFor(() => expect(disclosure).not.toHaveAttribute("open"));
+  });
+
   it("exposes validation feedback inline", () => {
     const view = render(
       <ProductEditor

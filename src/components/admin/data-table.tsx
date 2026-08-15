@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
@@ -22,8 +23,13 @@ type DataTableProps<T> = {
   loadingState?: ReactNode;
   isLoading?: boolean;
   renderMobileCard?: (row: T) => ReactNode;
+  getRowHref?: (row: T) => string;
+  onRowActivate?: (row: T, triggerElement: HTMLElement | null) => void;
   className?: string;
 };
+
+const INTERACTIVE_SELECTOR =
+  "a, button, input, select, textarea, summary, [role='button'], [role='link'], [contenteditable='true']";
 
 export function DataTable<T>({
   caption,
@@ -34,8 +40,12 @@ export function DataTable<T>({
   loadingState = <p className="p-8 text-center text-sm text-[var(--color-muted)]">Ładowanie…</p>,
   isLoading = false,
   renderMobileCard,
+  getRowHref,
+  onRowActivate,
   className,
 }: DataTableProps<T>) {
+  const router = useRouter();
+  const hasRowActivation = Boolean(getRowHref || onRowActivate);
   const renderDefaultMobileCard = (row: T) => (
     <dl className="grid gap-3">
       {columns.map((column) => (
@@ -77,7 +87,27 @@ export function DataTable<T>({
                 {data.map((row) => (
                   <tr
                     key={getRowId(row)}
-                    className="border-b border-[var(--color-border)] last:border-b-0"
+                    className={cn(
+                      "border-b border-[var(--color-border)] last:border-b-0",
+                      hasRowActivation &&
+                        "admin-motion cursor-pointer hover:bg-[var(--color-bg-alt)] focus-within:bg-[var(--color-bg-alt)]",
+                    )}
+                    onClick={
+                      hasRowActivation
+                        ? (event) => {
+                            if (isInteractiveTarget(event.target, event.currentTarget)) {
+                              return;
+                            }
+
+                            if (getRowHref) {
+                              router.push(getRowHref(row));
+                              return;
+                            }
+
+                            onRowActivate?.(row, getRowTrigger(event.currentTarget));
+                          }
+                        : undefined
+                    }
                   >
                     {columns.map((column) => (
                       <td
@@ -116,5 +146,21 @@ export function DataTable<T>({
         )}
       </div>
     </div>
+  );
+}
+
+function isInteractiveTarget(target: EventTarget | null, currentTarget: EventTarget | null) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  const interactiveTarget = target.closest(INTERACTIVE_SELECTOR);
+
+  return Boolean(interactiveTarget && interactiveTarget !== currentTarget);
+}
+
+function getRowTrigger(row: HTMLTableRowElement) {
+  return row.querySelector<HTMLElement>(
+    "td:first-child button, td:first-child a[href], td:first-child [role='button'], td:first-child [role='link']",
   );
 }

@@ -1,10 +1,11 @@
 "use client";
 
-import { Archive, ChevronDown, Plus, Save, Star, Trash2, Undo2 } from "lucide-react";
+import { Archive, Plus, Save, Star, Trash2, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
+import { AdminDisclosure } from "@/components/admin/admin-disclosure";
 import { LocaleTabs } from "@/components/admin/locale-tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonClassName } from "@/components/ui/button";
@@ -215,14 +216,13 @@ export function ProductEditor({
                   <Field label="Długi opis" htmlFor={`product-long-description-${locale}`}>
                     <Textarea id={`product-long-description-${locale}`} name={`longDescription_${locale}`} value={translations[locale].longDescription} onChange={(event) => updateTranslation("longDescription", event.target.value)} className="min-h-48" />
                   </Field>
-                  <details className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold"><span>SEO i wygląd w Google</span><ChevronDown className="size-4" aria-hidden /></summary>
+                  <AdminDisclosure className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-4" summary="SEO i wygląd w Google">
                     <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Puste pole użyje fallbacku: tytułu produktu lub krótkiego opisu.</p>
                     <div className="mt-4 grid gap-4">
                       <Field label="SEO title" htmlFor={`product-seo-title-${locale}`}><Input id={`product-seo-title-${locale}`} name={`seoTitle_${locale}`} value={translations[locale].seoTitle} onChange={(event) => updateTranslation("seoTitle", event.target.value)} /></Field>
                       <Field label="SEO description" htmlFor={`product-seo-description-${locale}`}><Textarea id={`product-seo-description-${locale}`} name={`seoDescription_${locale}`} value={translations[locale].seoDescription} onChange={(event) => updateTranslation("seoDescription", event.target.value)} className="min-h-28" /></Field>
                     </div>
-                  </details>
+                  </AdminDisclosure>
                 </div>
               </div>
             </AdminEditorSection>
@@ -334,7 +334,14 @@ function AssetEditor({
         <Field label="Tytuł" htmlFor={`asset-title-${asset.clientId}`}><Input id={`asset-title-${asset.clientId}`} name="assetTitle" value={asset.title} onChange={(event) => onChange(asset.clientId, "title", event.target.value)} /></Field>
         <Field label="Locale" htmlFor={`asset-locale-${asset.clientId}`}><select id={`asset-locale-${asset.clientId}`} name="assetLocale" value={asset.locale} onChange={(event) => onChange(asset.clientId, "locale", event.target.value as AssetDraft["locale"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="">Wszystkie</option>{routing.locales.map((code) => <option key={code} value={code}>{code.toUpperCase()}</option>)}</select></Field>
       </div>
-      <details className="rounded-md border border-dashed border-[var(--color-border)] p-3"><summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-medium"><ChevronDown className="size-4" aria-hidden />Zaawansowane metadane</summary><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Bucket" htmlFor={`asset-bucket-${asset.clientId}`}><Input id={`asset-bucket-${asset.clientId}`} name="assetBucket" value={asset.bucket} onChange={(event) => onChange(asset.clientId, "bucket", event.target.value)} /></Field><Field label="Filename" htmlFor={`asset-filename-${asset.clientId}`}><Input id={`asset-filename-${asset.clientId}`} name="assetFilename" value={asset.filename} onChange={(event) => onChange(asset.clientId, "filename", event.target.value)} /></Field><Field label="Content type" htmlFor={`asset-content-type-${asset.clientId}`}><Input id={`asset-content-type-${asset.clientId}`} name="assetContentType" value={asset.contentType} onChange={(event) => onChange(asset.clientId, "contentType", event.target.value)} placeholder="image/svg+xml" /></Field><Field label="Kolejność" htmlFor={`asset-sort-${asset.clientId}`}><Input id={`asset-sort-${asset.clientId}`} name="assetSortOrder" type="number" value={asset.sortOrder} onChange={(event) => onChange(asset.clientId, "sortOrder", Number(event.target.value) || 100)} /></Field></div></details>
+      <AdminDisclosure className="rounded-md border border-dashed border-[var(--color-border)] p-3" summary="Zaawansowane metadane">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Bucket" htmlFor={`asset-bucket-${asset.clientId}`}><Input id={`asset-bucket-${asset.clientId}`} name="assetBucket" value={asset.bucket} onChange={(event) => onChange(asset.clientId, "bucket", event.target.value)} /></Field>
+          <Field label="Filename" htmlFor={`asset-filename-${asset.clientId}`}><Input id={`asset-filename-${asset.clientId}`} name="assetFilename" value={asset.filename} onChange={(event) => onChange(asset.clientId, "filename", event.target.value)} /></Field>
+          <Field label="Content type" htmlFor={`asset-content-type-${asset.clientId}`}><Input id={`asset-content-type-${asset.clientId}`} name="assetContentType" value={asset.contentType} onChange={(event) => onChange(asset.clientId, "contentType", event.target.value)} placeholder="image/svg+xml" /></Field>
+          <Field label="Kolejność" htmlFor={`asset-sort-${asset.clientId}`}><Input id={`asset-sort-${asset.clientId}`} name="assetSortOrder" type="number" value={asset.sortOrder} onChange={(event) => onChange(asset.clientId, "sortOrder", Number(event.target.value) || 100)} /></Field>
+        </div>
+      </AdminDisclosure>
     </div>
   );
 }

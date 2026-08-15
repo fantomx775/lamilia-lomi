@@ -1,7 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -32,8 +32,13 @@ export function AdminDrawer({
   className?: string;
   restoreFocusElement?: HTMLElement | null;
 }) {
+  const [isRendered, setIsRendered] = useState(open);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const openRef = useRef(open);
+  const previousOpenRef = useRef(open);
+  const closeSequenceRef = useRef(0);
   const previousActiveElementRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
 
@@ -42,13 +47,80 @@ export function AdminDrawer({
   }, [onClose]);
 
   useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  if (open && !isRendered) {
+    setIsRendered(true);
+  }
+
+  const finishClose = useCallback((sequence: number) => {
+    if (openRef.current || closeSequenceRef.current !== sequence) {
+      return;
+    }
+
+    setIsRendered(false);
+    restoreFocus(previousActiveElementRef.current);
+    previousActiveElementRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      previousOpenRef.current = true;
+      closeSequenceRef.current += 1;
+      return;
+    }
+
+    if (!previousOpenRef.current || !isRendered) {
+      return;
+    }
+
+    previousOpenRef.current = false;
+    const sequence = closeSequenceRef.current + 1;
+    closeSequenceRef.current = sequence;
+
+    if (prefersReducedMotion()) {
+      finishClose(sequence);
+      return;
+    }
+
+    if (dialogRef.current?.contains(document.activeElement)) {
+      (document.activeElement as HTMLElement).blur();
+    }
+  }, [finishClose, isRendered, open]);
+
+  const isMounted = isRendered || open;
+  const isExitActive = !open && isMounted;
+
+  useEffect(() => {
+    if (!isExitActive || !backdropRef.current) {
+      return;
+    }
+
+    const backdrop = backdropRef.current;
+    const handleAnimationEnd = (event: AnimationEvent) => {
+      if (
+        event.target === backdrop &&
+        (!event.animationName || event.animationName === "admin-drawer-backdrop-exit")
+      ) {
+        finishClose(closeSequenceRef.current);
+      }
+    };
+
+    backdrop.addEventListener("animationend", handleAnimationEnd);
+    return () => backdrop.removeEventListener("animationend", handleAnimationEnd);
+  }, [finishClose, isExitActive]);
+
+  useEffect(() => {
     if (!open) {
       return;
     }
 
-    previousActiveElementRef.current = restoreFocusElement ?? (document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null);
+    if (!previousActiveElementRef.current) {
+      previousActiveElementRef.current = restoreFocusElement ?? (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    }
     closeButtonRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -88,20 +160,26 @@ export function AdminDrawer({
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      restoreFocus(previousActiveElementRef.current);
-      previousActiveElementRef.current = null;
     };
-  }, [open, restoreFocusElement]);
+  }, [isRendered, open, restoreFocusElement]);
 
-  if (!open) {
+  if (!isMounted) {
     return null;
   }
 
   return (
-    <div className="fixed inset-0 z-50" data-slot="admin-drawer">
+    <div
+      ref={backdropRef}
+      className={cn(
+        "admin-drawer-backdrop fixed inset-0 z-50",
+        isExitActive && "admin-drawer-exiting",
+      )}
+      data-slot="admin-drawer"
+    >
       <button
         type="button"
         aria-label="Zamknij panel"
+        tabIndex={isExitActive ? -1 : undefined}
         className="absolute inset-0 h-full w-full cursor-default bg-[rgb(62_52_47_/_0.28)]"
         onClick={onClose}
       />
@@ -110,8 +188,11 @@ export function AdminDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-drawer-title"
+        aria-hidden={isExitActive ? true : undefined}
+        inert={isExitActive || undefined}
         className={cn(
-          "absolute inset-y-0 right-0 flex h-dvh w-full max-w-xl flex-col border-l border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl",
+          "admin-drawer-panel absolute inset-y-0 right-0 flex h-dvh w-full max-w-xl flex-col border-l border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl",
+          isExitActive && "admin-drawer-exiting",
           className,
         )}
       >
@@ -156,4 +237,8 @@ function restoreFocus(element: HTMLElement | null) {
   }
 
   element.focus();
+}
+
+function prefersReducedMotion() {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
