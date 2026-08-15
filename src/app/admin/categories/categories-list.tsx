@@ -107,7 +107,6 @@ export function CategoriesResourceList({
         emptyState={<p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak kategorii.</p>}
       />
       <TaxonomyEditorDrawer
-        key={`${open ? "open" : "closed"}-${editingId ?? "new"}`}
         kind="category"
         item={editingItem}
         open={open}

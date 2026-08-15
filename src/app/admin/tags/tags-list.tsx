@@ -100,7 +100,6 @@ export function TagsResourceList({
         emptyState={<p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak tagów.</p>}
       />
       <TaxonomyEditorDrawer
-        key={`${open ? "open" : "closed"}-${editingId ?? "new"}`}
         kind="tag"
         item={editingItem}
         open={open}

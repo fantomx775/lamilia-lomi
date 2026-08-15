@@ -77,30 +77,42 @@ describe("DataTable", () => {
             header: "Name",
             cell: (row) => <a href={`/records/${row.id}/link`}>{row.name}</a>,
           },
+          {
+            id: "status",
+            header: "Status",
+            cell: () => <span>Neutral</span>,
+          },
+          {
+            id: "action",
+            header: "Action",
+            cell: () => <button type="button">Action</button>,
+          },
         ]}
         data={[{ id: "1", name: "Alpha" }]}
         getRowId={(row) => row.id}
         getRowHref={(row) => `/records/${row.id}`}
-        getRowAriaLabel={(row) => `Open ${row.name}`}
         emptyState={<p>Nothing here</p>}
       />,
     );
 
-    const row = getByRole("link", { name: "Open Alpha" });
+    const table = getByRole("table", { name: "Navigable records" });
+    const row = table.querySelector("tbody tr");
     const nestedLink = getAllByRole("link", { name: "Alpha" })[0];
+    const nestedButton = table.querySelector("button");
+    const neutralCell = row?.querySelector("td:nth-child(2)");
 
-    expect(row).toHaveAttribute("tabindex", "0");
-    expect(row).toHaveAttribute("aria-label", "Open Alpha");
+    expect(row).not.toHaveAttribute("role", "link");
+    expect(row).not.toHaveAttribute("tabindex");
+    expect(nestedLink).toHaveAttribute("href", "/records/1/link");
+    expect(neutralCell).not.toBeNull();
 
     await user.click(nestedLink);
     expect(routerPush).not.toHaveBeenCalled();
 
-    await user.click(row);
-    expect(routerPush).toHaveBeenCalledWith("/records/1");
+    await user.click(nestedButton!);
+    expect(routerPush).not.toHaveBeenCalled();
 
-    routerPush.mockClear();
-    row.focus();
-    await user.keyboard("{Enter}");
+    await user.click(neutralCell!);
     expect(routerPush).toHaveBeenCalledWith("/records/1");
   });
 

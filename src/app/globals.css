@@ -46,7 +46,7 @@ body {
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: none;
   }
 }
 
@@ -58,7 +58,7 @@ body {
 
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: none;
   }
 }
 
@@ -80,7 +80,29 @@ body {
 
   to {
     opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes admin-drawer-backdrop-exit {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes admin-drawer-exit {
+  from {
+    opacity: 1;
     transform: translate3d(0, 0, 0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translate3d(1rem, 0, 0);
   }
 }
 
@@ -106,6 +128,58 @@ body {
   animation: admin-drawer-enter var(--admin-motion-duration) var(--admin-motion-easing) both;
 }
 
+.admin-drawer-backdrop.admin-drawer-exiting {
+  animation: admin-drawer-backdrop-exit var(--admin-motion-duration) var(--admin-motion-easing) both;
+  pointer-events: none;
+}
+
+.admin-drawer-panel.admin-drawer-exiting {
+  animation: admin-drawer-exit var(--admin-motion-duration) var(--admin-motion-easing) both;
+}
+
+.admin-disclosure > summary {
+  list-style: none;
+}
+
+.admin-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-disclosure-content {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition:
+    max-height var(--admin-motion-duration) var(--admin-motion-easing),
+    opacity var(--admin-motion-duration) var(--admin-motion-easing);
+}
+
+.admin-disclosure[data-state="open"] > .admin-disclosure-content {
+  max-height: 120rem;
+  opacity: 1;
+}
+
+.admin-disclosure[data-state="closed"] > .admin-disclosure-content {
+  max-height: 0;
+  opacity: 0;
+}
+
+.admin-disclosure-content > div {
+  min-height: 0;
+}
+
+.admin-disclosure[data-state="closed"] > .admin-disclosure-content {
+  pointer-events: none;
+}
+
+.admin-disclosure-chevron {
+  transition: transform var(--admin-motion-duration) var(--admin-motion-easing);
+}
+
+.admin-disclosure[data-state="open"] .admin-disclosure-chevron {
+  transform: rotate(180deg);
+}
+
 .admin-row-link:focus-visible {
   outline: 2px solid var(--color-terracotta);
   outline-offset: -3px;
@@ -123,6 +197,11 @@ body {
   .admin-drawer-backdrop,
   .admin-drawer-panel {
     animation: none;
+  }
+
+  .admin-disclosure-content,
+  .admin-disclosure-chevron {
+    transition: none;
   }
 }
 

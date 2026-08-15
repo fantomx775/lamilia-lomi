@@ -79,7 +79,6 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
       columns={columns}
       getRowId={(row) => row.id}
       getRowHref={(row) => `/admin/products/${row.id}`}
-      getRowAriaLabel={(row) => `Edytuj produkt ${row.title}`}
       getSearchText={(row) =>
         [row.title, row.slug, row.status, row.audience, row.productType, ...row.languageCodes].join(" ")
       }

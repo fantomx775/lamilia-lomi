@@ -54,7 +54,6 @@ export function PagesResourceList({ rows }: { rows: AdminPageListRow[] }) {
       columns={columns}
       getRowId={(row) => row.id}
       getRowHref={(row) => `/admin/pages/${row.slug}`}
-      getRowAriaLabel={(row) => `Edytuj stronę ${row.title}`}
       getSearchText={(row) => [row.title, row.slug, ...row.languageCodes, row.updatedAt].join(" ")}
       renderMobileCard={(row) => (
         <Link

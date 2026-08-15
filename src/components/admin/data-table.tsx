@@ -24,7 +24,6 @@ type DataTableProps<T> = {
   isLoading?: boolean;
   renderMobileCard?: (row: T) => ReactNode;
   getRowHref?: (row: T) => string;
-  getRowAriaLabel?: (row: T) => string;
   className?: string;
 };
 
@@ -38,7 +37,6 @@ export function DataTable<T>({
   isLoading = false,
   renderMobileCard,
   getRowHref,
-  getRowAriaLabel,
   className,
 }: DataTableProps<T>) {
   const router = useRouter();
@@ -88,9 +86,6 @@ export function DataTable<T>({
                       getRowHref &&
                         "admin-motion cursor-pointer hover:bg-[var(--color-bg-alt)] focus-visible:bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-terracotta)]",
                     )}
-                    role={getRowHref ? "link" : undefined}
-                    tabIndex={getRowHref ? 0 : undefined}
-                    aria-label={getRowAriaLabel?.(row)}
                     onClick={
                       getRowHref
                         ? (event) => {
@@ -98,18 +93,6 @@ export function DataTable<T>({
                               return;
                             }
 
-                            router.push(getRowHref(row));
-                          }
-                        : undefined
-                    }
-                    onKeyDown={
-                      getRowHref
-                        ? (event) => {
-                            if (event.target !== event.currentTarget || !isRowNavigationKey(event.key)) {
-                              return;
-                            }
-
-                            event.preventDefault();
                             router.push(getRowHref(row));
                           }
                         : undefined
@@ -165,8 +148,4 @@ function isInteractiveTarget(target: EventTarget | null, currentTarget: EventTar
   );
 
   return Boolean(interactiveTarget && interactiveTarget !== currentTarget);
-}
-
-function isRowNavigationKey(key: string) {
-  return key === "Enter" || key === " ";
 }
