@@ -1,10 +1,10 @@
 import { getAdminLanguageCodes } from "@/lib/admin-list";
-import { getContentSnapshot } from "@/lib/content-store";
+import { getAdminContentSnapshot } from "@/lib/content-repository";
 
 import { PagesResourceList, type AdminPageListRow } from "./pages-list";
 
-export default function AdminPagesPage() {
-  const { staticPages } = getContentSnapshot();
+export default async function AdminPagesPage() {
+  const { staticPages } = await getAdminContentSnapshot();
   const slugs = Array.from(new Set(staticPages.map((page) => page.slug)));
   const rows: AdminPageListRow[] = slugs.map((slug) => {
     const records = staticPages.filter((page) => page.slug === slug);

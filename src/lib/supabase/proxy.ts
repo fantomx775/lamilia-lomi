@@ -1,19 +1,19 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { getPublicEnv } from "@/lib/config";
+import { getBackendMode, getRequiredSupabaseEnv } from "@/lib/config";
 
 export async function updateSession(
   request: NextRequest,
   response: NextResponse = NextResponse.next({ request }),
 ) {
-  const env = getPublicEnv();
-
-  if (!env.supabaseUrl || !env.supabasePublishableKey) {
+  if (getBackendMode() === "local") {
     return response;
   }
 
-  const supabase = createServerClient(env.supabaseUrl, env.supabasePublishableKey, {
+  const env = getRequiredSupabaseEnv();
+
+  const supabase = createServerClient(env.url, env.publishableKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();

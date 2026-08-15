@@ -5,23 +5,23 @@ import { redirect } from "next/navigation";
 
 import { hasAdminAccess } from "@/lib/auth";
 import {
-  archiveProduct,
-  deleteCategory,
-  deleteProduct,
-  deleteTag,
-  saveCategoryFromFormData,
-  saveProductFromFormData,
-  saveStaticPageFromFormData,
-  saveTagFromFormData,
-  saveStaticPagesFromFormData,
-} from "@/lib/admin-content";
+  archiveProductForRequest,
+  deleteCategoryForRequest,
+  deleteProductForRequest,
+  deleteTagForRequest,
+  saveCategoryForRequest,
+  savePageForRequest,
+  savePagesForRequest,
+  saveProductForRequest,
+  saveTagForRequest,
+} from "@/lib/supabase-content-admin";
 import { getDemoSession } from "@/lib/session.server";
 import type { StaticPageRecord } from "@/lib/types";
 
 export async function saveProductAction(formData: FormData) {
   await assertAdmin();
 
-  const result = saveProductFromFormData(formData);
+  const result = await saveProductForRequest(formData);
 
   revalidateContentPaths();
 
@@ -35,7 +35,7 @@ export async function saveProductAction(formData: FormData) {
 export async function deleteProductAction(formData: FormData) {
   await assertAdmin();
 
-  const result = deleteProduct(String(formData.get("id") ?? ""));
+  const result = await deleteProductForRequest(String(formData.get("id") ?? ""));
 
   revalidateContentPaths();
 
@@ -49,7 +49,7 @@ export async function deleteProductAction(formData: FormData) {
 export async function archiveProductAction(formData: FormData) {
   await assertAdmin();
 
-  const result = archiveProduct(String(formData.get("id") ?? ""));
+  const result = await archiveProductForRequest(String(formData.get("id") ?? ""));
 
   revalidateContentPaths();
 
@@ -63,7 +63,7 @@ export async function archiveProductAction(formData: FormData) {
 export async function saveCategoryAction(formData: FormData) {
   await assertAdmin();
 
-  const result = saveCategoryFromFormData(formData);
+  const result = await saveCategoryForRequest(formData);
 
   revalidateContentPaths();
 
@@ -77,21 +77,21 @@ export async function saveCategoryAction(formData: FormData) {
 export async function deleteCategoryAction(formData: FormData) {
   await assertAdmin();
 
-  deleteCategory(String(formData.get("id") ?? ""));
+  await deleteCategoryForRequest(String(formData.get("id") ?? ""));
   revalidateContentPaths();
   redirect("/admin/categories?deleted=1");
 }
 
 export async function saveCategoryInlineAction(formData: FormData) {
   await assertAdmin();
-  const result = saveCategoryFromFormData(formData);
+  const result = await saveCategoryForRequest(formData);
   revalidateContentPaths();
   return result;
 }
 
 export async function deleteCategoryInlineAction(formData: FormData) {
   await assertAdmin();
-  const result = deleteCategory(String(formData.get("id") ?? ""));
+  const result = await deleteCategoryForRequest(String(formData.get("id") ?? ""));
   revalidateContentPaths();
   return result;
 }
@@ -99,7 +99,7 @@ export async function deleteCategoryInlineAction(formData: FormData) {
 export async function saveTagAction(formData: FormData) {
   await assertAdmin();
 
-  const result = saveTagFromFormData(formData);
+  const result = await saveTagForRequest(formData);
 
   revalidateContentPaths();
 
@@ -113,21 +113,21 @@ export async function saveTagAction(formData: FormData) {
 export async function deleteTagAction(formData: FormData) {
   await assertAdmin();
 
-  deleteTag(String(formData.get("id") ?? ""));
+  await deleteTagForRequest(String(formData.get("id") ?? ""));
   revalidateContentPaths();
   redirect("/admin/tags?deleted=1");
 }
 
 export async function saveTagInlineAction(formData: FormData) {
   await assertAdmin();
-  const result = saveTagFromFormData(formData);
+  const result = await saveTagForRequest(formData);
   revalidateContentPaths();
   return result;
 }
 
 export async function deleteTagInlineAction(formData: FormData) {
   await assertAdmin();
-  const result = deleteTag(String(formData.get("id") ?? ""));
+  const result = await deleteTagForRequest(String(formData.get("id") ?? ""));
   revalidateContentPaths();
   return result;
 }
@@ -135,14 +135,14 @@ export async function deleteTagInlineAction(formData: FormData) {
 export async function saveStaticPageAction(formData: FormData) {
   await assertAdmin();
 
-  saveStaticPageFromFormData(formData);
+  await savePageForRequest(formData);
   revalidateContentPaths();
   redirect("/admin/pages?saved=1");
 }
 
 export async function saveStaticPagesAction(slug: StaticPageRecord["slug"], formData: FormData) {
   await assertAdmin();
-  const result = saveStaticPagesFromFormData(formData, slug);
+  const result = await savePagesForRequest(formData, slug);
   revalidateContentPaths();
 
   if (!result.ok) {

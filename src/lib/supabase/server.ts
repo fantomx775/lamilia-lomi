@@ -1,17 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-import { getPublicEnv } from "@/lib/config";
+import { getRequiredSupabaseEnv } from "@/lib/config";
 
 export async function createClient() {
-  const env = getPublicEnv();
+  const env = getRequiredSupabaseEnv();
   const cookieStore = await cookies();
 
-  if (!env.supabaseUrl || !env.supabasePublishableKey) {
-    throw new Error("Supabase public environment is not configured.");
-  }
-
-  return createServerClient(env.supabaseUrl, env.supabasePublishableKey, {
+  return createServerClient(env.url, env.publishableKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();

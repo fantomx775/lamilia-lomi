@@ -2,15 +2,18 @@
 
 import { redirect } from "next/navigation";
 
+import { getBackendMode } from "@/lib/config";
 import {
   buildAuthRedirect,
   createDemoSession,
   isUnlockRegistrationContext,
   validateRegistrationInput,
 } from "@/lib/auth";
-import { validatePremiumCode } from "@/lib/premium";
+import { redeemPremiumCodeForRequest } from "@/lib/premium-request";
 import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
 import { scheduleReviewReminder } from "@/lib/reminders";
+import { createClient } from "@/lib/supabase/server";
+import { getProductBySlugForRequest } from "@/lib/products-request";
 import type { Locale } from "@/i18n/routing";
 
 export async function loginDemoAction(formData: FormData) {
@@ -18,6 +21,21 @@ export async function loginDemoAction(formData: FormData) {
   const locale = String(formData.get("locale") ?? "en");
   const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/library`);
   const code = String(formData.get("code") ?? "");
+
+  if (getBackendMode() === "supabase") {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password: String(formData.get("password") ?? ""),
+    });
+
+    if (error) {
+      redirect(`/${locale}/login?error=invalid_credentials&redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`);
+    }
+
+    redirect(buildAuthRedirect({ locale, redirectTo, code }));
+  }
+
   const session = createDemoSession({
     email,
     emailVerified: !email.includes("unverified"),
@@ -55,6 +73,28 @@ export async function registerDemoAction(formData: FormData) {
     redirect(`/${locale}/register?${params.toString()}`);
   }
 
+  if (getBackendMode() === "supabase") {
+    const supabase = await createClient();
+    const { error } = await supabase.auth.signUp({
+      email: result.value.email,
+      password: result.value.password,
+      options: {
+        data: {
+          marketing_consent: result.value.marketingConsent,
+          preferred_locale: result.value.preferredLocale,
+          terms_accepted: true,
+        },
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/${locale}/account`,
+      },
+    });
+
+    if (error) {
+      redirect(`/${locale}/register?error=auth&redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`);
+    }
+
+    redirect(buildAuthRedirect({ locale, redirectTo, code }));
+  }
+
   await setDemoSession(
     createDemoSession({
       email: result.value.email,
@@ -69,6 +109,18 @@ export async function registerDemoAction(formData: FormData) {
 export async function verifyDemoEmailAction(formData: FormData) {
   const locale = String(formData.get("locale") ?? "en");
   const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/account`);
+
+  if (getBackendMode() === "supabase") {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+
+    if (!data.user) {
+      redirect(`/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+    }
+
+    redirect(data.user.email_confirmed_at ? redirectTo : `${redirectTo}${redirectTo.includes("?") ? "&" : "?"}verify=required`);
+  }
+
   const session = await getDemoSession();
 
   if (!session) {
@@ -91,35 +143,46 @@ export async function unlockPremiumAction(formData: FormData) {
   const productSlug = String(formData.get("productSlug") ?? "");
   const code = String(formData.get("code") ?? "");
   const redirectTo = `/${locale}/products/${productSlug}`;
+  const product = await getProductBySlugForRequest(productSlug);
+
+  if (!product) {
+    redirect(`${redirectTo}?unlock=product_not_found`);
+  }
+
   const session = await getDemoSession();
 
-  if (!session) {
+  if (!session && getBackendMode() === "local") {
     redirect(
       `/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`,
     );
   }
 
-  if (!session.emailVerified) {
+  if (session && !session.emailVerified && getBackendMode() === "local") {
     redirect(`${redirectTo}?code=${encodeURIComponent(code)}&verify=required`);
   }
 
-  const result = validatePremiumCode({
+  const result = await redeemPremiumCodeForRequest({
     productSlug,
+    productId: product.id,
     code,
-    session,
   });
 
   if (!result.ok) {
-    redirect(`${redirectTo}?code=${encodeURIComponent(code)}&unlock=${result.reason}`);
+    if (result.status === "auth_required") {
+      redirect(
+        `/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`,
+      );
+    }
+
+    if (result.status === "email_unverified") {
+      redirect(`${redirectTo}?code=${encodeURIComponent(code)}&verify=required`);
+    }
+
+    redirect(`${redirectTo}?code=${encodeURIComponent(code)}&unlock=${result.status}`);
   }
 
-  await setDemoSession({
-    ...session,
-    unlockedProductIds: Array.from(
-      new Set([...session.unlockedProductIds, result.productId]),
-    ),
-  });
-
-  scheduleReviewReminder({ unlockedAt: new Date(), delayDays: 14 });
+  if (result.status === "success") {
+    scheduleReviewReminder({ unlockedAt: new Date(), delayDays: product.reviewDelayDays });
+  }
   redirect(`${redirectTo}?unlocked=1`);
 }

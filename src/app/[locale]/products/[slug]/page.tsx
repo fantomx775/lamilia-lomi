@@ -9,11 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
 import type { Locale } from "@/i18n/routing";
 import { getDemoSession } from "@/lib/session.server";
+import { buildProductJsonLd, buildProductMetadata } from "@/lib/products";
 import {
-  buildProductJsonLd,
-  buildProductMetadata,
-  getLocalizedProductView,
-} from "@/lib/products";
+  getLocalizedProductViewForRequest,
+} from "@/lib/products-request";
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>;
@@ -22,7 +21,7 @@ type Props = {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, slug } = await params;
-  const product = getLocalizedProductView(slug, locale);
+  const product = await getLocalizedProductViewForRequest(slug, locale);
 
   if (!product) {
     return {};
@@ -39,8 +38,10 @@ export default async function ProductPage({ params, searchParams }: Props) {
   const { locale, slug } = await params;
   const query = await searchParams;
   const code = Array.isArray(query.code) ? query.code[0] : query.code;
-  const product = getLocalizedProductView(slug, locale);
-  const session = await getDemoSession();
+  const [product, session] = await Promise.all([
+    getLocalizedProductViewForRequest(slug, locale),
+    getDemoSession(),
+  ]);
 
   if (!product) {
     notFound();

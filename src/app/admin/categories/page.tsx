@@ -3,12 +3,12 @@ import {
   saveCategoryInlineAction,
 } from "@/app/admin/actions";
 import { getAdminDisplayName, getAdminLanguageCodes } from "@/lib/admin-list";
-import { getContentSnapshot } from "@/lib/content-store";
+import { getAdminContentSnapshot } from "@/lib/content-repository";
 
 import { CategoriesResourceList, type AdminCategoryListRow } from "./categories-list";
 
-export default function AdminCategoriesPage() {
-  const { categories, products } = getContentSnapshot();
+export default async function AdminCategoriesPage() {
+  const { categories, products } = await getAdminContentSnapshot();
   const rows: AdminCategoryListRow[] = categories.map((category) => ({
     id: category.id,
     name: getAdminDisplayName(category.translations, category.slug),

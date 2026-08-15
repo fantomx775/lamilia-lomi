@@ -5,8 +5,9 @@ import {
   deleteProductAction,
   saveProductAction,
 } from "@/app/admin/actions";
-import { getContentSnapshot } from "@/lib/content-store";
-import { getProductById, getTranslation } from "@/lib/products";
+import { getAdminContentSnapshot } from "@/lib/content-repository";
+import { getTranslation } from "@/lib/products";
+import { getProductByIdForRequest } from "@/lib/products-request";
 import { ProductEditor } from "../product-editor";
 
 type Props = {
@@ -19,8 +20,8 @@ export default async function EditProductPage({ params, searchParams }: Props) {
   const query = await searchParams;
   const error = Array.isArray(query.error) ? query.error[0] : query.error;
   const saved = query.saved ? "Zapisano zmiany." : undefined;
-  const product = getProductById(id);
-  const snapshot = getContentSnapshot();
+  const product = await getProductByIdForRequest(id, { includeDrafts: true });
+  const snapshot = await getAdminContentSnapshot();
 
   if (!product) {
     notFound();

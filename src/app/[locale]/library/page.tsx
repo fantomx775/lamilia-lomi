@@ -3,7 +3,10 @@ import Link from "next/link";
 import { ProductCard } from "@/components/product-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
-import { getLocalizedProductView, getProductById } from "@/lib/products";
+import {
+  getLocalizedProductViewForRequest,
+  getProductByIdForRequest,
+} from "@/lib/products-request";
 import { getDemoSession } from "@/lib/session.server";
 
 type Props = {
@@ -32,12 +35,15 @@ export default async function LibraryPage({ params }: Props) {
     );
   }
 
-  const unlockedProducts = session.unlockedProductIds
-    .map((productId) => {
-      const product = getProductById(productId);
+  const unlockedProducts = (await Promise.all(
+    session.unlockedProductIds.map(async (productId) => {
+      const product = await getProductByIdForRequest(productId);
 
-      return product ? getLocalizedProductView(product.slug, locale) : null;
-    })
+      return product
+        ? getLocalizedProductViewForRequest(product.slug, locale)
+        : null;
+    }),
+  ))
     .filter((product): product is NonNullable<typeof product> => Boolean(product));
 
   return (

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { saveStaticPagesAction } from "@/app/admin/actions";
-import { getContentSnapshot } from "@/lib/content-store";
+import { getAdminContentSnapshot } from "@/lib/content-repository";
 import { PageEditor } from "../page-editor";
 
 type Props = {
@@ -18,7 +18,9 @@ export default async function EditPage({ params, searchParams }: Props) {
   const query = await searchParams;
   const error = Array.isArray(query.error) ? query.error[0] : query.error;
   const feedback = error ?? (query.saved ? "Zapisano wszystkie wersje językowe." : undefined);
-  const records = getContentSnapshot().staticPages.filter((page) => page.slug === slug);
+  const records = (await getAdminContentSnapshot()).staticPages.filter(
+    (page) => page.slug === slug,
+  );
 
   const saveAction = saveStaticPagesAction.bind(null, slug);
 

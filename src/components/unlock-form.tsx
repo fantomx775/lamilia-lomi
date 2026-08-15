@@ -64,16 +64,18 @@ export function UnlockForm({
           <div>
             <p className="font-medium">Email verification required</p>
             <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
-              Premium downloads open after email verification. Demo mode lets you
-              simulate that step locally.
+              Premium downloads open after email verification. Check your inbox
+              and return here once the Supabase Auth email is confirmed.
             </p>
           </div>
         </div>
-        <form action={verifyDemoEmailAction}>
-          <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="redirectTo" value={`${redirectTo}?code=${initialCode ?? ""}`} />
-          <Button type="submit">Mark demo email as verified</Button>
-        </form>
+        {session.isDemo ? (
+          <form action={verifyDemoEmailAction}>
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="redirectTo" value={`${redirectTo}?code=${initialCode ?? ""}`} />
+            <Button type="submit">Mark demo email as verified</Button>
+          </form>
+        ) : null}
       </div>
     );
   }

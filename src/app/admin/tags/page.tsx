@@ -3,12 +3,12 @@ import {
   saveTagInlineAction,
 } from "@/app/admin/actions";
 import { getAdminDisplayName, getAdminLanguageCodes } from "@/lib/admin-list";
-import { getContentSnapshot } from "@/lib/content-store";
+import { getAdminContentSnapshot } from "@/lib/content-repository";
 
 import { TagsResourceList, type AdminTagListRow } from "./tags-list";
 
-export default function AdminTagsPage() {
-  const { products, tags } = getContentSnapshot();
+export default async function AdminTagsPage() {
+  const { products, tags } = await getAdminContentSnapshot();
   const rows: AdminTagListRow[] = tags.map((tag) => ({
     id: tag.id,
     name: getAdminDisplayName(tag.translations, tag.slug),

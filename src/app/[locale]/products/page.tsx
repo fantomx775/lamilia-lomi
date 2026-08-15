@@ -5,13 +5,13 @@ import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Locale } from "@/i18n/routing";
+import { parseCatalogFilters } from "@/lib/products";
 import {
-  getAllProductTypes,
-  getCatalogProducts,
-  getCategoryOptions,
-  getTagOptions,
-  parseCatalogFilters,
-} from "@/lib/products";
+  getAllProductTypesForRequest,
+  getCatalogProductsForRequest,
+  getCategoryOptionsForRequest,
+  getTagOptionsForRequest,
+} from "@/lib/products-request";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -21,10 +21,12 @@ type Props = {
 export default async function ProductsPage({ params, searchParams }: Props) {
   const { locale } = await params;
   const filters = parseCatalogFilters(await searchParams);
-  const products = getCatalogProducts(locale, filters);
-  const categories = getCategoryOptions(locale);
-  const tags = getTagOptions(locale);
-  const productTypes = getAllProductTypes();
+  const [products, categories, tags, productTypes] = await Promise.all([
+    getCatalogProductsForRequest(locale, filters),
+    getCategoryOptionsForRequest(locale),
+    getTagOptionsForRequest(locale),
+    getAllProductTypesForRequest(),
+  ]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">

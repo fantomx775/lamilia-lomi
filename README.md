@@ -5,11 +5,12 @@ Next.js App Router implementation for the LamiliaLomi content platform described
 - `LamiliaLomi_SOURCE_OF_TRUTH.md`
 - `LamiliaLomi_IMPLEMENTATION_PLAN.md`
 
-The app currently runs in local demo mode with deterministic seed data and Supabase-ready migrations. No real secrets are required to try the core flow.
+The app supports two explicit backend modes. Local demo mode uses deterministic seed data and the ignored JSON adapter; production mode uses Supabase Auth, Postgres, RLS, and private Storage. There is no automatic fallback between them.
 
 ## Getting Started
 
 ```bash
+$env:LAMILIA_BACKEND = "local"
 npm run dev
 ```
 
@@ -28,8 +29,8 @@ Premium code:
 Admin CRUD:
 
 - Log in as `admin@lamilialomi.test`, then open `/admin`.
-- Product, category, tag, static-page, media metadata, Amazon-link, and premium-code edits persist locally to `data/lamilialomi-content.local.json`.
-- That local content file is ignored by git and is meant for demo/development until Supabase production persistence is enabled.
+- In local mode, product, category, tag, static-page, media metadata, Amazon-link, and premium-code edits persist to `data/lamilialomi-content.local.json`.
+- In Supabase mode, these paths read/write the Supabase schema through the server repository; missing Supabase configuration is a controlled configuration failure.
 
 Useful commands:
 
@@ -43,8 +44,12 @@ npm run e2e
 
 ## Supabase
 
-The schema foundation is in:
+The schema and deterministic import are in:
 
 - `supabase/migrations/20260531093244_lamilialomi_foundation.sql`
+- `supabase/migrations/20260815120000_supabase_production_foundation.sql`
+- `supabase/seed.sql`
 
-Apply it to the intended Supabase project, then set the values from `.env.example`.
+Apply migrations and the seed/import only through the intended Supabase project workflow, then set `LAMILIA_BACKEND=supabase`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SERVICE_ROLE_KEY`. Promote an Auth user to admin by updating its `public.profiles.role` through an owner-controlled migration or SQL session; client-provided role/email values are never trusted.
+
+The atomic server contract is `redeem_premium_code(product_id, code)`. It returns `success`, `already_unlocked`, `invalid_code`, `inactive_code`, `wrong_product`, `auth_required`, or `email_unverified`. Premium download routes use the verified Supabase user, RLS-filtered asset metadata, private Storage signed URLs, and `record_download_event`; client-provided user IDs and stable private URLs are not authorities.

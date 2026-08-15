@@ -1,5 +1,5 @@
 import type { Locale } from "@/i18n/routing";
-import { getStaticPage } from "@/lib/static-pages";
+import { getStaticPageForRequest } from "@/lib/static-pages";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -7,7 +7,7 @@ type Props = {
 
 export default async function PrivacyPage({ params }: Props) {
   const { locale } = await params;
-  const page = getStaticPage("privacy", locale);
+  const page = await getStaticPageForRequest("privacy", locale);
 
   return <StaticPage title={page.title} body={page.body} />;
 }

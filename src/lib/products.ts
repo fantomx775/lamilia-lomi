@@ -7,6 +7,7 @@ import { getContentSnapshot } from "./content-store";
 import type {
   Audience,
   CatalogFilters,
+  ContentSnapshot,
   LocalizedProductView,
   Product,
   ProductAsset,
@@ -66,8 +67,22 @@ export function getLocalizedProductView(
   requestedLocale: string | undefined,
   options: { includeDrafts?: boolean } = {},
 ): LocalizedProductView | null {
-  const { categories, tags } = getContentSnapshot();
-  const product = getProductBySlug(slug);
+  return getLocalizedProductViewFromSnapshot(
+    getContentSnapshot(),
+    slug,
+    requestedLocale,
+    options,
+  );
+}
+
+export function getLocalizedProductViewFromSnapshot(
+  snapshot: ContentSnapshot,
+  slug: string,
+  requestedLocale: string | undefined,
+  options: { includeDrafts?: boolean } = {},
+): LocalizedProductView | null {
+  const { categories, tags } = snapshot;
+  const product = snapshot.products.find((item) => item.slug === slug);
   const locale = normalizeLocale(requestedLocale);
 
   if (!product) {
@@ -124,15 +139,30 @@ export function getLocalizedProductView(
 }
 
 export function getPublishedProductViews(locale: Locale) {
-  return getContentSnapshot()
+  return getPublishedProductViewsFromSnapshot(getContentSnapshot(), locale);
+}
+
+export function getPublishedProductViewsFromSnapshot(
+  snapshot: ContentSnapshot,
+  locale: Locale,
+) {
+  return snapshot
     .products
     .filter(isPublicProduct)
-    .map((product) => getLocalizedProductView(product.slug, locale))
+    .map((product) => getLocalizedProductViewFromSnapshot(snapshot, product.slug, locale))
     .filter((product): product is LocalizedProductView => Boolean(product));
 }
 
 export function getFeaturedProducts(locale: Locale, audience?: Audience) {
-  return getPublishedProductViews(locale)
+  return getFeaturedProductsFromSnapshot(getContentSnapshot(), locale, audience);
+}
+
+export function getFeaturedProductsFromSnapshot(
+  snapshot: ContentSnapshot,
+  locale: Locale,
+  audience?: Audience,
+) {
+  return getPublishedProductViewsFromSnapshot(snapshot, locale)
     .filter((product) => (audience ? product.audience === audience : true))
     .sort((a, b) => a.reviewDelayDays - b.reviewDelayDays || a.title.localeCompare(b.title))
     .slice(0, audience ? 2 : 4);
@@ -160,9 +190,17 @@ export function parseCatalogFilters(
 }
 
 export function getCatalogProducts(locale: Locale, filters: CatalogFilters) {
+  return getCatalogProductsFromSnapshot(getContentSnapshot(), locale, filters);
+}
+
+export function getCatalogProductsFromSnapshot(
+  snapshot: ContentSnapshot,
+  locale: Locale,
+  filters: CatalogFilters,
+) {
   const normalizedQuery = normalizeText(filters.q);
 
-  const filtered = getPublishedProductViews(locale).filter((product) => {
+  const filtered = getPublishedProductViewsFromSnapshot(snapshot, locale).filter((product) => {
     if (filters.audience && product.audience !== filters.audience) {
       return false;
     }
@@ -206,21 +244,26 @@ export function getCatalogProducts(locale: Locale, filters: CatalogFilters) {
 
     if (filters.sort === "newest") {
       return (
-        Date.parse(getProductById(b.id)?.createdAt ?? "") -
-        Date.parse(getProductById(a.id)?.createdAt ?? "")
+        Date.parse(snapshot.products.find((item) => item.id === b.id)?.createdAt ?? "") -
+        Date.parse(snapshot.products.find((item) => item.id === a.id)?.createdAt ?? "")
       );
     }
 
     return (
-      (getProductById(a.id)?.sortOrder ?? 0) - (getProductById(b.id)?.sortOrder ?? 0)
+      (snapshot.products.find((item) => item.id === a.id)?.sortOrder ?? 0) -
+      (snapshot.products.find((item) => item.id === b.id)?.sortOrder ?? 0)
     );
   });
 }
 
 export function getAllProductTypes() {
+  return getAllProductTypesFromSnapshot(getContentSnapshot());
+}
+
+export function getAllProductTypesFromSnapshot(snapshot: ContentSnapshot) {
   return Array.from(
     new Set(
-      getContentSnapshot()
+      snapshot
         .products.filter(isPublicProduct)
         .map((product) => product.productType),
     ),

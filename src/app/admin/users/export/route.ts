@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { exportUsersToCsv } from "@/lib/admin";
+import {
+  exportAdminUsersToCsv,
+  getAdminUserRowsForRequest,
+} from "@/lib/admin-users";
 import { hasAdminAccess } from "@/lib/auth";
 import { getDemoSession } from "@/lib/session.server";
 
@@ -12,7 +15,7 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
-  const csv = exportUsersToCsv({
+  const csv = exportAdminUsersToCsv(await getAdminUserRowsForRequest(), {
     marketingOnly: url.searchParams.get("marketingOnly") === "1",
   });
 

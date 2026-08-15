@@ -1,8 +1,8 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { getContentSnapshot } from "@/lib/content-store";
+import { getAdminContentSnapshot } from "@/lib/content-repository";
 
-export default function AdminDashboardPage() {
-  const { products } = getContentSnapshot();
+export default async function AdminDashboardPage() {
+  const { products } = await getAdminContentSnapshot();
   const published = products.filter((product) => product.status === "published").length;
 
   return (

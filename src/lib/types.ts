@@ -146,6 +146,7 @@ export type DemoSession = {
   termsAcceptedAt: string;
   preferredLocale: Locale;
   unlockedProductIds: string[];
+  isDemo?: boolean;
 };
 
 export type DownloadDecision =

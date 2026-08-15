@@ -100,6 +100,7 @@ export function createDemoSession(input: {
     preferredLocale: normalizeLocale(input.preferredLocale ?? defaultLocale),
     unlockedProductIds:
       input.unlockedProductIds ?? knownUser?.unlockedProductIds ?? [],
+    isDemo: true,
   };
 }
 
@@ -134,6 +135,7 @@ export function parseDemoSession(value: string | undefined): DemoSession | null 
         unlockedProductIds: session.unlockedProductIds.filter(
           (id: unknown): id is string => typeof id === "string",
         ),
+        isDemo: true,
       };
     }
   } catch {

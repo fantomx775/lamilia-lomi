@@ -70,7 +70,7 @@ export default async function AccountPage({ params }: Props) {
               <dd>{session.marketingConsent ? "yes" : "no"}</dd>
             </div>
           </dl>
-          {!session.emailVerified ? (
+          {!session.emailVerified && session.isDemo ? (
             <form action={verifyDemoEmailAction}>
               <input type="hidden" name="locale" value={locale} />
               <input type="hidden" name="redirectTo" value={`/${locale}/account`} />
