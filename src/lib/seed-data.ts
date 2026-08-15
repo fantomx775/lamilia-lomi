@@ -104,7 +104,8 @@ function asset(
     title,
     sortOrder,
     isPublic,
-    demoDownloadPath: isPublic ? undefined : "/demo-premium/moon-garden-bonus.pdf",
+    demoDownloadPath: undefined,
+    demoPrivatePath: isPublic ? undefined : "moon-garden-bonus.pdf",
   };
 }
 
@@ -278,6 +279,12 @@ export const products: Product[] = [
         productId: productIds.mindfulMandalas,
         code: "LOMI-CALM-2026",
         active: true,
+      },
+      {
+        id: "code-mandala-inactive-2026",
+        productId: productIds.mindfulMandalas,
+        code: "LOMI-CALM-OFFLINE-2026",
+        active: false,
       },
     ],
   },

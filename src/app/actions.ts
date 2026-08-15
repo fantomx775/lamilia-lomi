@@ -8,51 +8,87 @@ import {
   isUnlockRegistrationContext,
   validateRegistrationInput,
 } from "@/lib/auth";
-import { validatePremiumCode } from "@/lib/premium";
-import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
+import { normalizeLocale } from "@/lib/locale";
+import { getProductBySlug, isPublicProduct } from "@/lib/products";
+import { applyProductUnlock, validatePremiumCode } from "@/lib/premium";
+import {
+  clearUnlockIntent,
+  getUnlockIntent,
+  setUnlockIntent,
+} from "@/lib/unlock-intent";
+import { productSlugFromReturnTo, sanitizeReturnTo } from "@/lib/return-to";
 import { scheduleReviewReminder } from "@/lib/reminders";
-import type { Locale } from "@/i18n/routing";
+import { clearDemoSession, getDemoSession, setDemoSession } from "@/lib/session.server";
 
-export async function loginDemoAction(formData: FormData) {
-  const email = String(formData.get("email") ?? "demo@lamilialomi.test");
-  const locale = String(formData.get("locale") ?? "en");
-  const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/library`);
-  const code = String(formData.get("code") ?? "");
-  const session = createDemoSession({
-    email,
-    emailVerified: !email.includes("unverified"),
-    preferredLocale: locale,
+export async function startUnlockAuthAction(formData: FormData) {
+  const locale = normalizeLocale(text(formData, "locale"));
+  const productSlug = text(formData, "productSlug");
+  const product = getProductBySlug(productSlug);
+
+  if (!product || !isPublicProduct(product)) {
+    redirect(`/${locale}/products?unlock=product_not_found`);
+  }
+
+  const returnTo = `/${locale}/products/${product.slug}`;
+  const mode = text(formData, "mode") === "register" ? "register" : "login";
+
+  await setUnlockIntent({
+    locale,
+    productSlug: product.slug,
+    returnTo,
+    code: text(formData, "code"),
   });
 
-  await setDemoSession(session);
-  redirect(buildAuthRedirect({ locale, redirectTo, code }));
+  redirect(`/${locale}/${mode}?returnTo=${encodeURIComponent(returnTo)}`);
+}
+
+export async function loginDemoAction(formData: FormData) {
+  const locale = normalizeLocale(text(formData, "locale"));
+  const returnTo = sanitizeReturnTo(
+    text(formData, "returnTo") || text(formData, "redirectTo"),
+    locale,
+  );
+  const code = text(formData, "code");
+
+  await preserveUnlockIntent({ locale, returnTo, code });
+
+  await setDemoSession(
+    createDemoSession({
+      email: text(formData, "email") || "demo@lamilialomi.test",
+      emailVerified: !text(formData, "email").toLowerCase().includes("unverified"),
+      preferredLocale: locale,
+    }),
+  );
+
+  redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
 }
 
 export async function registerDemoAction(formData: FormData) {
-  const locale = String(formData.get("locale") ?? "en") as Locale;
-  const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/library`);
-  const code = String(formData.get("code") ?? "");
+  const locale = normalizeLocale(text(formData, "locale"));
+  const returnTo = sanitizeReturnTo(
+    text(formData, "returnTo") || text(formData, "redirectTo"),
+    locale,
+  );
+  const code = text(formData, "code");
 
-  if (!isUnlockRegistrationContext({ locale, redirectTo, code })) {
+  if (!isUnlockRegistrationContext({ locale, redirectTo: returnTo })) {
     redirect(`/${locale}/products`);
   }
 
+  await preserveUnlockIntent({ locale, returnTo, code });
+
   const result = validateRegistrationInput({
-    email: String(formData.get("email") ?? ""),
-    password: String(formData.get("password") ?? ""),
+    email: text(formData, "email"),
+    password: text(formData, "password"),
     termsAccepted: formData.get("termsAccepted") === "on",
     marketingConsent: formData.get("marketingConsent") === "on",
     preferredLocale: locale,
   });
 
   if (!result.ok) {
-    const params = new URLSearchParams({ error: "consent", redirectTo });
-
-    if (code) {
-      params.set("code", code);
-    }
-
-    redirect(`/${locale}/register?${params.toString()}`);
+    redirect(
+      `/${locale}/register?error=invalid&returnTo=${encodeURIComponent(returnTo)}`,
+    );
   }
 
   await setDemoSession(
@@ -63,63 +99,127 @@ export async function registerDemoAction(formData: FormData) {
       preferredLocale: locale,
     }),
   );
-  redirect(buildAuthRedirect({ locale, redirectTo, code }));
+  redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
 }
 
 export async function verifyDemoEmailAction(formData: FormData) {
-  const locale = String(formData.get("locale") ?? "en");
-  const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/account`);
+  const locale = normalizeLocale(text(formData, "locale"));
+  const returnTo = sanitizeReturnTo(
+    text(formData, "returnTo") || text(formData, "redirectTo"),
+    locale,
+    `/${locale}/account`,
+  );
   const session = await getDemoSession();
 
   if (!session) {
-    redirect(`/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+    redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
-  await setDemoSession({ ...session, emailVerified: true });
-  redirect(redirectTo);
+  if (!session.emailVerified) {
+    await setDemoSession({ ...session, emailVerified: true });
+  }
+
+  redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
 }
 
 export async function logoutAction(formData: FormData) {
-  const locale = String(formData.get("locale") ?? "en");
+  const locale = normalizeLocale(text(formData, "locale"));
 
   await clearDemoSession();
+  await clearUnlockIntent();
   redirect(`/${locale}`);
 }
 
 export async function unlockPremiumAction(formData: FormData) {
-  const locale = String(formData.get("locale") ?? "en");
-  const productSlug = String(formData.get("productSlug") ?? "");
-  const code = String(formData.get("code") ?? "");
-  const redirectTo = `/${locale}/products/${productSlug}`;
+  const locale = normalizeLocale(text(formData, "locale"));
+  const productSlug = text(formData, "productSlug");
+  const product = getProductBySlug(productSlug);
+  const returnTo = `/${locale}/products/${productSlug}`;
+  const existingIntent = await getUnlockIntent();
+  const code = text(formData, "code") || existingIntent?.code || "";
+
+  if (!product || !isPublicProduct(product)) {
+    redirect(`/${locale}/products?unlock=product_not_found`);
+  }
+
   const session = await getDemoSession();
 
   if (!session) {
-    redirect(
-      `/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`,
-    );
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
   if (!session.emailVerified) {
-    redirect(`${redirectTo}?code=${encodeURIComponent(code)}&verify=required`);
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(`${returnTo}?step=verify`);
   }
 
-  const result = validatePremiumCode({
-    productSlug,
-    code,
-    session,
-  });
+  let result;
+
+  try {
+    result = validatePremiumCode({ productSlug: product.slug, code, session });
+  } catch {
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(`${returnTo}?unlock=unexpected`);
+  }
 
   if (!result.ok) {
-    redirect(`${redirectTo}?code=${encodeURIComponent(code)}&unlock=${result.reason}`);
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(`${returnTo}?unlock=${result.reason}`);
   }
 
-  await setDemoSession({
-    ...session,
-    unlockedProductIds: Array.from(
-      new Set([...session.unlockedProductIds, result.productId]),
-    ),
-  });
+  const unlock = applyProductUnlock(session, result.productId);
 
-  scheduleReviewReminder({ unlockedAt: new Date(), delayDays: 14 });
-  redirect(`${redirectTo}?unlocked=1`);
+  if (unlock.alreadyUnlocked) {
+    await clearUnlockIntent();
+    redirect(`${returnTo}?unlocked=already`);
+  }
+
+  try {
+    await setDemoSession({ ...session, unlockedProductIds: unlock.unlockedProductIds });
+  } catch {
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(`${returnTo}?unlock=unexpected`);
+  }
+
+  await clearUnlockIntent();
+  scheduleReviewReminder({ unlockedAt: new Date(), delayDays: product.reviewDelayDays });
+  redirect(`${returnTo}?unlocked=1`);
+}
+
+async function preserveUnlockIntent(input: {
+  locale: string;
+  returnTo: string;
+  code?: string;
+}) {
+  const productSlug = productSlugFromReturnTo(input.returnTo, input.locale);
+
+  if (!productSlug) {
+    await clearUnlockIntent();
+    return;
+  }
+
+  const product = getProductBySlug(productSlug);
+
+  if (!product || !isPublicProduct(product)) {
+    await clearUnlockIntent();
+    return;
+  }
+
+  const existing = await getUnlockIntent();
+
+  await setUnlockIntent({
+    locale: input.locale,
+    productSlug: product.slug,
+    returnTo: input.returnTo,
+    code:
+      input.code ||
+      (existing?.productSlug === product.slug ? existing.code : undefined),
+  });
+}
+
+function text(formData: FormData, key: string) {
+  const value = formData.get(key);
+
+  return typeof value === "string" ? value.trim() : "";
 }

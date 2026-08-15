@@ -16,6 +16,7 @@ const localeLabels = {
 export function LanguageSwitcher() {
   const pathname = usePathname();
   const localePattern = new RegExp(`^/(${routing.locales.join("|")})(?=/|$)`);
+  const currentLocale = pathname.match(localePattern)?.[1];
   const withoutLocale = pathname.replace(localePattern, "") || "";
 
   return (
@@ -24,7 +25,7 @@ export function LanguageSwitcher() {
       {routing.locales.map((locale) => (
         <Link
           key={locale}
-          className="rounded px-2 py-1 text-[var(--color-ink)] hover:bg-[var(--color-blush)]"
+          className={`rounded px-2 py-1 text-[var(--color-ink)] hover:bg-[var(--color-blush)] ${locale === currentLocale ? "inline-flex" : "hidden sm:inline-flex"}`}
           href={`/${locale}${withoutLocale}`}
         >
           {localeLabels[locale]}

@@ -53,6 +53,7 @@ export type ProductAsset = {
   sortOrder: number;
   isPublic: boolean;
   demoDownloadPath?: string;
+  demoPrivatePath?: string;
 };
 
 export type AmazonLink = {
