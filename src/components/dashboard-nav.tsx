@@ -43,7 +43,9 @@ export function getActiveHref(pathname: string, nav: DashboardNavItem[]) {
   const sorted = [...nav].sort((a, b) => b.href.length - a.href.length);
 
   for (const item of sorted) {
-    if (pathname === item.href || pathname.startsWith(`${item.href}/`)) {
+    const isNestedRoute = item.href !== "/admin" && pathname.startsWith(`${item.href}/`);
+
+    if (pathname === item.href || isNestedRoute) {
       return item.href;
     }
   }

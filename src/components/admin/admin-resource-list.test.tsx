@@ -116,6 +116,48 @@ describe("DataTable", () => {
     expect(routerPush).toHaveBeenCalledWith("/records/1");
   });
 
+  it("activates drawer rows from neutral space and preserves the first-column trigger", async () => {
+    const user = userEvent.setup();
+    const onRowActivate = vi.fn();
+    const rowValue = { id: "1", name: "Alpha" };
+    const { getByRole } = render(
+      <DataTable
+        caption="Drawer records"
+        columns={[
+          {
+            id: "name",
+            header: "Name",
+            cell: (row) => <button type="button">{row.name}</button>,
+          },
+          {
+            id: "status",
+            header: "Status",
+            cell: () => <span>Neutral</span>,
+          },
+        ]}
+        data={[rowValue]}
+        getRowId={(row) => row.id}
+        onRowActivate={onRowActivate}
+        emptyState={<p>Nothing here</p>}
+      />,
+    );
+
+    const table = getByRole("table", { name: "Drawer records" });
+    const row = table.querySelector("tbody tr");
+    const trigger = table.querySelector("tbody tr td:first-child button");
+    const neutralCell = row?.querySelector("td:nth-child(2)");
+
+    expect(row).not.toHaveAttribute("role");
+    expect(row).not.toHaveAttribute("tabindex");
+    expect(row).toHaveClass("focus-within:bg-[var(--color-bg-alt)]");
+
+    await user.click(neutralCell!);
+    expect(onRowActivate).toHaveBeenCalledWith(rowValue, trigger);
+
+    await user.click(trigger!);
+    expect(onRowActivate).toHaveBeenCalledTimes(1);
+  });
+
   it("renders the empty state when there are no rows", () => {
     const { getAllByText } = render(
       <DataTable

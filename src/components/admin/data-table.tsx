@@ -24,8 +24,12 @@ type DataTableProps<T> = {
   isLoading?: boolean;
   renderMobileCard?: (row: T) => ReactNode;
   getRowHref?: (row: T) => string;
+  onRowActivate?: (row: T, triggerElement: HTMLElement | null) => void;
   className?: string;
 };
+
+const INTERACTIVE_SELECTOR =
+  "a, button, input, select, textarea, summary, [role='button'], [role='link'], [contenteditable='true']";
 
 export function DataTable<T>({
   caption,
@@ -37,9 +41,11 @@ export function DataTable<T>({
   isLoading = false,
   renderMobileCard,
   getRowHref,
+  onRowActivate,
   className,
 }: DataTableProps<T>) {
   const router = useRouter();
+  const hasRowActivation = Boolean(getRowHref || onRowActivate);
   const renderDefaultMobileCard = (row: T) => (
     <dl className="grid gap-3">
       {columns.map((column) => (
@@ -83,17 +89,22 @@ export function DataTable<T>({
                     key={getRowId(row)}
                     className={cn(
                       "border-b border-[var(--color-border)] last:border-b-0",
-                      getRowHref &&
-                        "admin-motion cursor-pointer hover:bg-[var(--color-bg-alt)] focus-visible:bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-terracotta)]",
+                      hasRowActivation &&
+                        "admin-motion cursor-pointer hover:bg-[var(--color-bg-alt)] focus-within:bg-[var(--color-bg-alt)]",
                     )}
                     onClick={
-                      getRowHref
+                      hasRowActivation
                         ? (event) => {
                             if (isInteractiveTarget(event.target, event.currentTarget)) {
                               return;
                             }
 
-                            router.push(getRowHref(row));
+                            if (getRowHref) {
+                              router.push(getRowHref(row));
+                              return;
+                            }
+
+                            onRowActivate?.(row, getRowTrigger(event.currentTarget));
                           }
                         : undefined
                     }
@@ -139,13 +150,17 @@ export function DataTable<T>({
 }
 
 function isInteractiveTarget(target: EventTarget | null, currentTarget: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) {
+  if (!(target instanceof Element)) {
     return false;
   }
 
-  const interactiveTarget = target.closest(
-    "a, button, input, select, textarea, summary, [role='button'], [role='link'], [contenteditable='true']",
-  );
+  const interactiveTarget = target.closest(INTERACTIVE_SELECTOR);
 
   return Boolean(interactiveTarget && interactiveTarget !== currentTarget);
+}
+
+function getRowTrigger(row: HTMLTableRowElement) {
+  return row.querySelector<HTMLElement>(
+    "td:first-child button, td:first-child a[href], td:first-child [role='button'], td:first-child [role='link']",
+  );
 }

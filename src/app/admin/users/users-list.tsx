@@ -57,7 +57,7 @@ export function UsersResourceList({ rows }: { rows: AdminUserListRow[] }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [restoreFocusElement, setRestoreFocusElement] = useState<HTMLElement | null>(null);
   const selected = rows.find((row) => row.id === selectedId);
-  const openUser = (id: string, trigger: HTMLElement) => {
+  const openUser = (id: string, trigger: HTMLElement | null) => {
     setRestoreFocusElement(trigger);
     setSelectedId(id);
     setOpen(true);
@@ -75,6 +75,7 @@ export function UsersResourceList({ rows }: { rows: AdminUserListRow[] }) {
         columns={buildColumns(openUser)}
         getRowId={(row) => row.id}
         getSearchText={(row) => [row.email, row.role, row.emailVerified ? "verified zweryfikowany" : "unverified niezweryfikowany"].join(" ")}
+        onRowActivate={(row, trigger) => openUser(row.id, trigger)}
         toolbarActions={<Link className={buttonClassName({ variant: "outline", size: "sm" })} href="/admin/users/export?marketingOnly=1">Eksport marketing CSV</Link>}
         renderMobileCard={(row) => (
           <button

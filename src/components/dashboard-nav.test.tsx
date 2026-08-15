@@ -13,7 +13,7 @@ describe("getActiveHref", () => {
   });
 
   it("does not treat a similar route as a nested section", () => {
-    expect(getActiveHref("/admin/users-extra", nav)).toBe("/admin");
+    expect(getActiveHref("/admin/users-extra", nav)).toBeNull();
   });
 
   it("prefers the most specific matching section", () => {

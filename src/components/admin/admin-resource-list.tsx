@@ -24,6 +24,7 @@ type AdminResourceListProps<T> = {
   noResultsState?: React.ReactNode;
   renderMobileCard?: (row: T) => React.ReactNode;
   getRowHref?: (row: T) => string;
+  onRowActivate?: (row: T, triggerElement: HTMLElement | null) => void;
   isLoading?: boolean;
   loadingState?: React.ReactNode;
   resultsLabel?: (visibleCount: number) => string;
@@ -45,6 +46,7 @@ export function AdminResourceList<T>({
   noResultsState = <p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak wyników.</p>,
   renderMobileCard,
   getRowHref,
+  onRowActivate,
   isLoading = false,
   loadingState,
   resultsLabel = formatPolishResultsCount,
@@ -81,6 +83,7 @@ export function AdminResourceList<T>({
         data={filteredRows}
         getRowId={getRowId}
         getRowHref={getRowHref}
+        onRowActivate={onRowActivate}
         emptyState={visibleEmptyState}
         renderMobileCard={renderMobileCard}
         isLoading={isLoading}

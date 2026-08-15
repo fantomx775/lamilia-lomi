@@ -66,7 +66,7 @@ export function CategoriesResourceList({
     setOpen(true);
   };
 
-  const openEdit = (id: string, trigger: HTMLElement) => {
+  const openEdit = (id: string, trigger: HTMLElement | null) => {
     setRestoreFocusElement(trigger);
     setEditingId(id);
     setOpen(true);
@@ -91,6 +91,7 @@ export function CategoriesResourceList({
         columns={columns}
         getRowId={(row) => row.id}
         getSearchText={(row) => [row.name, row.slug, ...row.languageCodes].join(" ")}
+        onRowActivate={(row, trigger) => openEdit(row.id, trigger)}
         toolbarActions={<Button type="button" size="sm" onClick={(event) => openCreate(event.currentTarget)}><Plus className="size-4" aria-hidden />Dodaj kategorię</Button>}
         renderMobileCard={(row) => (
           <button

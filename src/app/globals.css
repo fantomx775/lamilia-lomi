@@ -180,11 +180,6 @@ body {
   transform: rotate(180deg);
 }
 
-.admin-row-link:focus-visible {
-  outline: 2px solid var(--color-terracotta);
-  outline-offset: -3px;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .admin-motion {
     transition: none;
