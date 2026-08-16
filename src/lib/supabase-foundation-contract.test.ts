@@ -50,7 +50,10 @@ describe("Supabase production foundation contracts", () => {
     expect(seed).toContain("on conflict (slug, locale) do update");
     expect(rlsTest).toContain("set local role anon");
     expect(rlsTest).toContain("set local role authenticated");
-    expect(rlsTest).toContain("RLS matrix complete: 23 positive scenarios passed");
+    expect(migration).toContain("status = 'published'");
+    expect(migration).toContain("p.status = 'published'");
+    expect(rlsTest).toContain("LOMI-DRAFT-2026");
+    expect(rlsTest).toContain("RLS matrix complete: 26 positive scenarios passed");
     expect(playwrightConfig).toContain('env: { LAMILIA_BACKEND: "local" }');
 
     for (const table of [

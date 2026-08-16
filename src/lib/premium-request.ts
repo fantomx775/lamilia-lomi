@@ -219,7 +219,8 @@ function mapPremiumRedemptionResult(
     status === "email_unverified" ||
     status === "invalid_code" ||
     status === "inactive_code" ||
-    status === "wrong_product"
+    status === "wrong_product" ||
+    status === "product_not_found"
   ) {
     return { ok: false, status };
   }

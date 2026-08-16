@@ -9,7 +9,7 @@ where bucket_id = 'premium-files'
 delete from public.product_assets
 where id = '22222222-2222-4222-8222-222222222205';
 delete from public.premium_codes
-where id = '99999999-9999-4999-8999-999999999994';
+where id in ('99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999995');
 delete from auth.users
 where id in ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb');
 
@@ -22,7 +22,9 @@ values
   ('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', 'b@example.test', now(), '{}'::jsonb, '{}'::jsonb);
 
 insert into public.premium_codes (id, product_id, code, active)
-values ('99999999-9999-4999-8999-999999999994', '11111111-1111-4111-8111-111111111111', 'LOMI-INACTIVE-2026', false);
+values
+  ('99999999-9999-4999-8999-999999999994', '11111111-1111-4111-8111-111111111111', 'LOMI-INACTIVE-2026', false),
+  ('99999999-9999-4999-8999-999999999995', '44444444-4444-4444-8444-444444444444', 'LOMI-DRAFT-2026', true);
 
 insert into public.product_assets (
   id, product_id, kind, bucket, path, filename, content_type, is_public, sort_order
@@ -96,6 +98,11 @@ select case when count(*) = 0 then 'PASS user A cannot see another product premi
 from storage.objects where bucket_id = 'premium-files' and name = 'mindful-mandalas/bonus.pdf';
 select case when public.record_download_event('11111111-1111-4111-8111-111111111105') is not null then 'PASS unlocked download event recorded' else 'FAIL unlocked download event missing' end;
 select case when public.record_download_event('22222222-2222-4222-8222-222222222205') is null then 'PASS locked download event rejected' else 'FAIL locked download event recorded' end;
+select case when (public.redeem_premium_code('44444444-4444-4444-8444-444444444444', 'LOMI-DRAFT-2026') ->> 'status') = 'product_not_found' then 'PASS draft product cannot be unlocked' else 'FAIL draft product redemption=' || (public.redeem_premium_code('44444444-4444-4444-8444-444444444444', 'LOMI-DRAFT-2026'))::text end;
+update public.products set status = 'archived' where id = '11111111-1111-4111-8111-111111111111';
+select case when count(*) = 0 then 'PASS archived product premium storage is hidden' else 'FAIL archived product storage count=' || count(*) end
+from storage.objects where bucket_id = 'premium-files' and name = 'moon-garden/bonus.pdf';
+select case when public.record_download_event('11111111-1111-4111-8111-111111111105') is null then 'PASS archived download event rejected' else 'FAIL archived download event recorded' end;
 rollback;
 
 \echo 'RLS matrix: admin policy'
@@ -133,8 +140,8 @@ where bucket_id = 'premium-files'
 delete from public.product_assets
 where id = '22222222-2222-4222-8222-222222222205';
 delete from public.premium_codes
-where id = '99999999-9999-4999-8999-999999999994';
+where id in ('99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999995');
 delete from auth.users
 where id in ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb');
 
-\echo 'RLS matrix complete: 23 positive scenarios passed'
+\echo 'RLS matrix complete: 26 positive scenarios passed'

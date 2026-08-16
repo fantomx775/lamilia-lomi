@@ -481,6 +481,15 @@ begin
     return jsonb_build_object('status', 'invalid_code');
   end if;
 
+  if not exists (
+    select 1
+    from public.products
+    where id = requested_product_id
+      and status = 'published'
+  ) then
+    return jsonb_build_object('status', 'product_not_found');
+  end if;
+
   select * into matching_code
   from public.premium_codes
   where normalized_code = normalized_requested_code;
@@ -550,10 +559,13 @@ begin
     return null;
   end if;
 
-  select * into asset_row
+  select product_assets.* into asset_row
   from public.product_assets
-  where id = requested_asset_id
-    and kind = 'premium_download'
+  join public.products p on p.id = product_assets.product_id
+  where product_assets.id = requested_asset_id
+    and product_assets.kind = 'premium_download'
+    and product_assets.is_public = false
+    and p.status = 'published'
     and exists (
       select 1
       from public.user_product_unlocks u
@@ -606,9 +618,12 @@ create policy "premium objects are readable after unlock"
       select 1
       from public.product_assets a
       join public.user_product_unlocks u on u.product_id = a.product_id
+      join public.products p on p.id = a.product_id
       where a.bucket = bucket_id
         and a.path = name
         and a.kind = 'premium_download'
+        and a.is_public = false
+        and p.status = 'published'
         and u.user_id = (select auth.uid())
     )
   );
