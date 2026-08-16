@@ -108,8 +108,22 @@ export function createSignedDownloadUrl(input: {
 
   return {
     ok: true as const,
-    url: `${input.asset.demoDownloadPath ?? `/api/downloads/${input.asset.id}`}?token=${token}`,
+    url: `/api/downloads/${input.asset.id}?token=${token}`,
     expiresAt,
+  };
+}
+
+export function applyProductUnlock(
+  session: Pick<DemoSession, "unlockedProductIds">,
+  productId: string,
+) {
+  const alreadyUnlocked = session.unlockedProductIds.includes(productId);
+
+  return {
+    alreadyUnlocked,
+    unlockedProductIds: alreadyUnlocked
+      ? session.unlockedProductIds
+      : Array.from(new Set([...session.unlockedProductIds, productId])),
   };
 }
 

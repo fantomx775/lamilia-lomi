@@ -44,7 +44,7 @@ export default async function HomePage({ params }: Props) {
             </Link>
             <Link
               className={buttonClassName({ variant: "outline" })}
-              href={`/${locale}/products/moon-garden-coloring-book?code=LOMI-BOOK-2026`}
+              href={`/${locale}/unlock/moon-garden-coloring-book`}
             >
               Try QR unlock
             </Link>

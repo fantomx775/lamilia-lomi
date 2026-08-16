@@ -494,6 +494,7 @@ function parseAssets(
       sortOrder: numberFromValue(valueAt(sortOrders, index), existing?.sortOrder ?? 100),
       isPublic,
       demoDownloadPath: existing?.demoDownloadPath,
+      demoPrivatePath: existing?.demoPrivatePath,
     });
   }
 
