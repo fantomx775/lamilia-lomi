@@ -8,7 +8,7 @@ This document describes the frontend/orchestration workstream only. The branch d
 
 | State | Entry | Server-owned result / next transition |
 | --- | --- | --- |
-| `qr_entry` | `/[locale]/unlock/[slug]` | Validate published product context; invalid slug is a controlled 404. |
+| `qr_entry` | `/[locale]/unlock/[slug]` | Validate the published product context; an optional QR code is materialized by the server route handler into the HTTP-only intent cookie, then the browser is redirected to a clean product URL. Invalid slug is a controlled 404. |
 | `product_context` | Product page `#premium` | Show product title/cover and owner-vs-prospect distinction. |
 | `guest_auth` | Guest chooses log in or registration | Store short-lived HTTP-only unlock intent; return to the same locale/product. |
 | `verification_required` | Authenticated session has no verified email | Show verification-required state; resume the stored product/code intent. |
@@ -21,7 +21,7 @@ This document describes the frontend/orchestration workstream only. The branch d
 
 ## Trust boundaries
 
-- URL: locale, product slug, and optional transient UI outcome. `returnTo` is restricted to same-locale internal paths; absolute and protocol-relative URLs fall back to the locale Library.
+- URL: locale, product slug, and optional transient UI outcome. A QR code may carry an optional code only at the QR ingress boundary; the route handler validates the public product, stores prefill context in the short-lived HTTP-only intent cookie, and removes the code before the product page renders. `returnTo` is restricted to same-locale internal paths; absolute and protocol-relative URLs fall back to the locale Library.
 - Form: code and display context are untrusted input. Code is trimmed/normalized and checked server-side against the selected product. It is not logged, sent to analytics, or copied into post-submit URLs.
 - Session: identity, email verification, role, and current unlocks come from the server session. The client cannot choose `userId`, `isVerified`, `unlocked`, or an asset path as authorization.
 - Product/asset adapter: product and asset relationships are loaded server-side. Download authorization checks the asset's server-known `productId` against the server session's unlocks.
@@ -43,4 +43,4 @@ The Supabase foundation must provide these contracts before final merge:
 
 ## Evidence map
 
-The complete 37-row automated/browser matrix is maintained in `docs/verification/qr-unlock-funnel-matrix.md` and is exercised by `tests/e2e/unlock-funnel.spec.ts` plus the focused unit/integration tests. The local checkpoint ledger is `.codex/goal-progress-core-funnel.md` and is intentionally not committed.
+The complete 42-row automated/browser matrix is maintained in `docs/verification/qr-unlock-funnel-matrix.md` and is exercised by `tests/e2e/unlock-funnel.spec.ts` plus the focused unit/integration tests. The local checkpoint ledger is `.codex/goal-progress-core-funnel.md` and is intentionally not committed.

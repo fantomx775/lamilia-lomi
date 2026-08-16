@@ -46,7 +46,8 @@ export function productSlugFromReturnTo(
 ) {
   const locale = normalizeLocale(localeInput);
   const safe = sanitizeReturnTo(value, locale);
-  const match = safe.match(new RegExp(`^/${locale}/products/([^/?]+)$`));
+  const pathname = new URL(safe, LOCAL_ORIGIN).pathname;
+  const match = pathname.match(new RegExp(`^/${locale}/products/([^/?]+)$`));
 
   if (!match?.[1]) {
     return undefined;
@@ -64,4 +65,27 @@ export function isProductReturnTo(
   localeInput: string | undefined,
 ) {
   return Boolean(productSlugFromReturnTo(value, localeInput));
+}
+
+export function switchLocalePath(
+  value: string | null | undefined,
+  fromLocaleInput: string | undefined,
+  targetLocaleInput: string | undefined,
+) {
+  const fromLocale = normalizeLocale(fromLocaleInput);
+  const targetLocale = normalizeLocale(targetLocaleInput);
+  const safe = sanitizeReturnTo(value, fromLocale, `/${fromLocale}/library`);
+  const url = new URL(safe, LOCAL_ORIGIN);
+
+  if (url.pathname === "/admin" || url.pathname.startsWith("/admin/")) {
+    return `${url.pathname}${url.search}`;
+  }
+
+  const sourcePrefix = `/${fromLocale}`;
+
+  if (url.pathname !== sourcePrefix && !url.pathname.startsWith(`${sourcePrefix}/`)) {
+    return `/${targetLocale}/library`;
+  }
+
+  return `/${targetLocale}${url.pathname.slice(sourcePrefix.length)}${url.search}`;
 }

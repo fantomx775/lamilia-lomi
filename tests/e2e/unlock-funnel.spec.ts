@@ -1,7 +1,15 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const productSlug = "moon-garden-coloring-book";
 const premiumAssetId = "asset-moon-premium-pdf";
+const secondProductSlug = "bedtime-forest-picture-book";
+
+const localeOptionNames = {
+  en: "English (EN)",
+  pl: "Polski (PL)",
+  de: "Deutsch (DE)",
+  es: "Español (ES)",
+} as const;
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -13,13 +21,14 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("valid QR entry keeps product and locale context", async ({ page }) => {
-  const response = await page.goto(`/pl/unlock/${productSlug}`);
+  const response = await page.goto(`/pl/unlock/${productSlug}?code=LOMI-BOOK-2026`);
 
   expect(response?.status()).toBe(200);
   await expect(page).toHaveURL(new RegExp(`/pl/products/${productSlug}#premium`));
+  expect(page.url()).not.toContain("code=");
   await expect(page.getByRole("heading", { name: "Księżycowy Ogród. Kolorowanka" })).toBeVisible();
   await expect(page.getByTestId("unlock-guest-state")).toBeVisible();
-  await expect(page.getByLabel("Kod premium")).toBeVisible();
+  await expect(page.getByLabel("Kod premium")).toHaveValue("LOMI-BOOK-2026");
 });
 
 test("guest login preserves code intent without putting code in the auth return URL", async ({ page }) => {
@@ -124,21 +133,74 @@ test("unknown QR product, guest download, and external return targets are contro
   await expect(page).toHaveURL(/\/en\/library/);
 });
 
-test("critical funnel is usable at 375px and all supported locales keep funnel copy", async ({ page }) => {
+test("mobile locale switcher exposes every locale and preserves code intent through auth", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto(`/en/unlock/${productSlug}`);
+  await page.goto(`/en/products/${productSlug}?code=LOMI-BOOK-2026&step=verify`);
   await expect(page.getByLabel("Premium code")).toBeVisible();
+  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
-  const localeCopy: Record<string, string> = {
-    pl: "Odblokuj bonus do książki",
-    de: "Bonus zu deinem Buch freischalten",
-    es: "Desbloquea el bonus de tu libro",
-  };
+  const menu = page.getByRole("button", { name: "Language: EN" });
+  await menu.focus();
+  await page.keyboard.press("Enter");
+  const polishOption = page.getByRole("button", { name: localeOptionNames.pl });
+  await expect(polishOption).toBeVisible();
+  await polishOption.click();
+  await expect(page).toHaveURL(new RegExp(`/pl/products/${productSlug}\\?step=verify$`));
+  expect(page.url()).not.toContain("code=");
+  await expect(page.getByLabel("Kod premium")).toHaveValue("LOMI-BOOK-2026");
 
-  for (const [locale, title] of Object.entries(localeCopy)) {
-    await page.goto(`/${locale}/unlock/${productSlug}`);
-    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+  for (const locale of ["de", "es"] as const) {
+    await switchLocaleThroughMobileMenu(page, locale as keyof typeof localeOptionNames);
+    await expect(page).toHaveURL(new RegExp(`/${locale}/products/${productSlug}\\?step=verify$`));
+    expect(page.url()).not.toContain("code=");
+    await expect(page.getByRole("button", { name: new RegExp(`^Language: ${locale.toUpperCase()}$`) })).toBeVisible();
+    await expect(page.getByLabel(locale === "de" ? "Premium-Code" : "Código premium")).toHaveValue("LOMI-BOOK-2026");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   }
+
+  await switchLocaleThroughMobileMenu(page, "en");
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}\\?step=verify$`));
+  await page.reload();
+  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
+
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL(new RegExp(`/en/login\\?returnTo=`));
+  expect(page.url()).not.toContain("code=");
+  await switchLocaleThroughMobileMenu(page, "de");
+  await expect(page).toHaveURL(new RegExp(`/de/login\\?returnTo=%2Fde%2Fproducts%2F${productSlug}$`));
+  expect(page.url()).not.toContain("code=");
+  await page.getByLabel("E-Mail").fill("locked@example.com");
+  await page.getByRole("button", { name: "Weiter" }).click();
+  expect(page.url()).not.toContain("code=");
+  await expect(page.getByLabel("Premium-Code")).toHaveValue("LOMI-BOOK-2026");
 });
+
+test("mobile locale switching keeps no-code state and prevents cross-product intent leakage", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/en/products/${productSlug}?code=LOMI-BOOK-2026`);
+  await switchLocaleThroughMobileMenu(page, "pl");
+  await expect(page.getByLabel("Kod premium")).toHaveValue("LOMI-BOOK-2026");
+
+  await page.goto(`/en/products/${secondProductSlug}?step=verify`);
+  await expect(page.getByLabel("Premium code")).toHaveValue("");
+  await switchLocaleThroughMobileMenu(page, "de");
+  await expect(page).toHaveURL(new RegExp(`/de/products/${secondProductSlug}\\?step=verify$`));
+  await expect(page.getByLabel("Premium-Code")).toHaveValue("");
+  await page.reload();
+  await expect(page.getByLabel("Premium-Code")).toHaveValue("");
+
+  await page.goto(`/en/products/${productSlug}`);
+  await expect(page.getByLabel("Premium code")).toHaveValue("");
+});
+
+async function switchLocaleThroughMobileMenu(
+  page: Page,
+  locale: keyof typeof localeOptionNames,
+) {
+  const currentLocale = (new URL(page.url()).pathname.match(/^\/(en|pl|de|es)/)?.[1] ?? "en").toUpperCase();
+  await page.getByRole("button", { name: `Language: ${currentLocale}` }).click();
+  const option = page.getByRole("button", { name: localeOptionNames[locale] });
+  await expect(option).toBeVisible();
+  await option.click();
+}

@@ -6,7 +6,7 @@ Baseline: `93df7575b133b165dece9e9d2dd691a822aef265`
 
 ## Result
 
-All 37 applicable scenarios pass. Nine rows have focused automated unit/integration evidence and 28 rows have browser evidence. The browser evidence runs the funnel in Chromium and mobile emulation; the focused funnel suite is 16/16 and the complete browser suite is 22/22 when run with one worker.
+All 42 applicable scenarios pass. Nine rows have focused automated unit/integration evidence and 33 rows have browser evidence. The browser evidence runs the funnel in Chromium and mobile emulation; the focused funnel suite is 18/18 and the complete browser suite is 24/24 when run with one worker.
 
 Evidence sources:
 
@@ -57,6 +57,11 @@ Evidence sources:
 | M5 | German and Spanish funnel copy render | Browser: DE and ES title assertions | PASS |
 | M6 | Labels, alerts, keyboard submit, and pending controls are present | Browser: accessible labels, Enter submit, alert, and disabled pending button | PASS |
 | M7 | Existing public browse/login/admin smoke paths remain green | Browser: `tests/e2e/smoke.spec.ts`, complete suite | PASS |
+| M8 | Mobile language control is discoverable, keyboard reachable, and exposes EN/PL/DE/ES at 375–390px | Browser: `mobile locale switcher exposes every locale and preserves code intent through auth` | PASS |
+| M9 | Actual mobile UI locale switching changes the route and keeps the page within the viewport | Browser: mobile switcher test clicks each locale option and asserts translated route plus no overflow | PASS |
+| M10 | Code intent survives actual UI locale switching, a clean URL, reload, and auth returnTo | Browser: mobile switcher test asserts code value after each locale, reload, translated login returnTo, and resume | PASS |
+| M11 | No-code locale switching preserves safe UI query state and never carries a code in the destination URL | Browser: `mobile locale switching keeps no-code state and prevents cross-product intent leakage` | PASS |
+| M12 | Cross-product/stale intent cannot prefill another product; malformed locale/path input falls back safely | Browser: second-product switch/reload checks; Automated: `return-to.test.ts` locale/path safety | PASS |
 
 ## Complete verification commands
 
@@ -65,10 +70,10 @@ Evidence sources:
 | `npm ci` | PASS |
 | `npm run lint` | PASS |
 | `npm run typecheck` | PASS |
-| `npm test -- --reporter=dot` | PASS — 18 files, 78 tests |
+| `npm test -- --reporter=dot` | PASS — 18 files, 79 tests |
 | `npm run build` | PASS — Next build and 62/62 static pages |
-| `npm run e2e -- tests/e2e/unlock-funnel.spec.ts` | PASS — 16/16 Chromium/mobile executions |
-| `npx playwright test --workers=1` | PASS — 22/22 complete browser executions |
+| `npm run e2e -- tests/e2e/unlock-funnel.spec.ts` | PASS — 18/18 Chromium/mobile executions |
+| `npx playwright test --workers=1` | PASS — 24/24 complete browser executions |
 
 The build emits non-fatal Next image performance warnings for pre-existing gallery/video assets and a non-fatal file-tracing warning for the local demo download adapter. No test or build gate is blocked by them.
 
@@ -77,4 +82,5 @@ The build emits non-fatal Next image performance warnings for pre-existing galle
 - No `supabase/` file changed.
 - No migration, schema, RLS policy, service-role, storage-policy, or competing production persistence implementation was added.
 - The only persistence introduced by this workstream is the short-lived HTTP-only unlock-intent cookie, which carries prefill/navigation context only and cannot authorize unlock or download.
+- QR code contract is Option B: optional QR code context is accepted only by the server route handler, validated against a public product, and removed from the visible URL before the product page.
 - The demo PDF moved outside `public/` so it is served only through the authorization route.

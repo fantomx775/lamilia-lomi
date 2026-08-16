@@ -8,7 +8,7 @@ import {
   isUnlockRegistrationContext,
   validateRegistrationInput,
 } from "@/lib/auth";
-import { normalizeLocale } from "@/lib/locale";
+import { isSupportedLocale, normalizeLocale } from "@/lib/locale";
 import { getProductBySlug, isPublicProduct } from "@/lib/products";
 import { applyProductUnlock, validatePremiumCode } from "@/lib/premium";
 import {
@@ -16,7 +16,11 @@ import {
   getUnlockIntent,
   setUnlockIntent,
 } from "@/lib/unlock-intent";
-import { productSlugFromReturnTo, sanitizeReturnTo } from "@/lib/return-to";
+import {
+  productSlugFromReturnTo,
+  sanitizeReturnTo,
+  switchLocalePath,
+} from "@/lib/return-to";
 import { scheduleReviewReminder } from "@/lib/reminders";
 import { clearDemoSession, getDemoSession, setDemoSession } from "@/lib/session.server";
 
@@ -40,6 +44,99 @@ export async function startUnlockAuthAction(formData: FormData) {
   });
 
   redirect(`/${locale}/${mode}?returnTo=${encodeURIComponent(returnTo)}`);
+}
+
+export async function switchLocaleAction(formData: FormData) {
+  const sourceLocaleInput = text(formData, "sourceLocale");
+  const targetLocaleInput = text(formData, "targetLocale");
+
+  if (!isSupportedLocale(sourceLocaleInput) || !isSupportedLocale(targetLocaleInput)) {
+    redirect("/en/library");
+  }
+
+  const sourceLocale = sourceLocaleInput;
+  const targetLocale = targetLocaleInput;
+  let currentUrl: URL;
+
+  try {
+    currentUrl = new URL(
+      `${text(formData, "pathname")}${withSearchPrefix(text(formData, "search"))}`,
+      "http://lamilialomi.local",
+    );
+  } catch {
+    redirect(`/${targetLocale}/library`);
+  }
+  const safeCurrent = sanitizeReturnTo(
+    `${currentUrl.pathname}${currentUrl.search}`,
+    sourceLocale,
+    `/${sourceLocale}/library`,
+  );
+  const safeCurrentUrl = new URL(safeCurrent, "http://lamilialomi.local");
+  const productSlug = productSlugFromReturnTo(safeCurrent, sourceLocale);
+  const nestedReturnTo =
+    currentUrl.searchParams.get("returnTo") ?? currentUrl.searchParams.get("redirectTo");
+  const safeNestedReturnTo = nestedReturnTo
+    ? sanitizeReturnTo(nestedReturnTo, sourceLocale, `/${sourceLocale}/library`)
+    : undefined;
+  const nestedProductSlug = safeNestedReturnTo
+    ? productSlugFromReturnTo(safeNestedReturnTo, sourceLocale)
+    : undefined;
+  const contextProductSlug = productSlug ?? nestedProductSlug;
+  const translatedPath = switchLocalePath(
+    safeCurrentUrl.pathname,
+    sourceLocale,
+    targetLocale,
+  );
+  const translatedNestedReturnTo = safeNestedReturnTo
+    ? switchLocalePath(safeNestedReturnTo, sourceLocale, targetLocale)
+    : undefined;
+  const targetSearchParams = new URLSearchParams();
+
+  for (const key of ["returnTo", "redirectTo", "error", "unlock", "step", "unlocked"]) {
+    const value = currentUrl.searchParams.get(key);
+
+    if (!value) {
+      continue;
+    }
+
+    if ((key === "returnTo" || key === "redirectTo") && translatedNestedReturnTo) {
+      targetSearchParams.set(key, translatedNestedReturnTo);
+    } else if (key !== "returnTo" && key !== "redirectTo") {
+      targetSearchParams.set(key, value.slice(0, 128));
+    }
+  }
+
+  const targetPath = `${translatedPath}${targetSearchParams.toString() ? `?${targetSearchParams}` : ""}`;
+
+  if (contextProductSlug) {
+    const product = getProductBySlug(contextProductSlug);
+
+    if (!product || !isPublicProduct(product)) {
+      await clearUnlockIntent();
+      redirect(`/${targetLocale}/products`);
+    }
+
+    const existingIntent = await getUnlockIntent();
+    const code = productSlug
+      ? currentUrl.searchParams.get("code") ??
+        currentUrl.searchParams.get("premiumCode") ??
+        undefined
+      : undefined;
+    const returnTo = productSlug ? targetPath : translatedNestedReturnTo;
+
+    await setUnlockIntent({
+      locale: targetLocale,
+      productSlug: product.slug,
+      returnTo,
+      code:
+        code ||
+        (existingIntent?.productSlug === product.slug ? existingIntent.code : undefined),
+    });
+  } else if (productSlug) {
+    await clearUnlockIntent();
+  }
+
+  redirect(targetPath);
 }
 
 export async function loginDemoAction(formData: FormData) {
@@ -222,4 +319,12 @@ function text(formData: FormData, key: string) {
   const value = formData.get(key);
 
   return typeof value === "string" ? value.trim() : "";
+}
+
+function withSearchPrefix(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?") ? value : `?${value}`;
 }

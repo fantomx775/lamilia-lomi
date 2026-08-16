@@ -51,7 +51,7 @@ export async function SiteHeader({
           </Link>
         </nav>
         <div className="flex items-center gap-2">
-          {showLanguageSwitcher ? <LanguageSwitcher /> : null}
+          {showLanguageSwitcher ? <LanguageSwitcher locale={locale} /> : null}
           <Link
             className={buttonClassName({ variant: session ? "outline" : "default", size: "sm" })}
             href={session ? (isAdmin ? "/admin" : `/${locale}/account`) : `/${locale}/login`}
