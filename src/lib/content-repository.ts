@@ -201,6 +201,7 @@ function mapAsset(row: DbRow): ProductAsset {
     title: optionalString(row.title),
     sortOrder: numberValue(row.sort_order, 100),
     isPublic: Boolean(row.is_public),
+    isActive: row.is_active === undefined ? true : Boolean(row.is_active),
   };
 }
 

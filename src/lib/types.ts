@@ -52,6 +52,7 @@ export type ProductAsset = {
   title?: string;
   sortOrder: number;
   isPublic: boolean;
+  isActive?: boolean;
   demoDownloadPath?: string;
 };
 

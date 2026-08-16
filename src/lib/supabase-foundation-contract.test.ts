@@ -36,6 +36,17 @@ describe("Supabase production foundation contracts", () => {
     const foundationMigration = read(
       "supabase/migrations/20260531093244_lamilialomi_foundation.sql",
     );
+    const atomicMigration = read(
+      "supabase/migrations/20260816113722_atomic_product_save.sql",
+    );
+    const concurrencyTest = read(
+      "supabase/tests/atomic-product-save-concurrency.sql",
+    );
+    const concurrencyRunner = read(
+      "supabase/tests/run-atomic-product-save-concurrency.ps1",
+    );
+    const productAdmin = read("src/lib/supabase-content-admin.ts");
+    const authActions = read("src/app/actions.ts");
 
     expect(migration).toContain("create or replace function private.redeem_premium_code");
     expect(migration).toContain("on conflict (user_id, product_id) do nothing");
@@ -53,7 +64,21 @@ describe("Supabase production foundation contracts", () => {
     expect(migration).toContain("status = 'published'");
     expect(migration).toContain("p.status = 'published'");
     expect(rlsTest).toContain("LOMI-DRAFT-2026");
-    expect(rlsTest).toContain("RLS matrix complete: 26 positive scenarios passed");
+    expect(rlsTest).toContain("RLS matrix complete: 53 positive scenarios passed");
+    expect(atomicMigration).toContain("create or replace function private.save_product(product_state jsonb)");
+    expect(atomicMigration).toContain("pg_advisory_xact_lock");
+    expect(atomicMigration).toContain("is_active boolean not null default true");
+    expect(atomicMigration).toContain("download_events");
+    expect(atomicMigration).toContain("revoke all on function public.save_product(jsonb) from public");
+    expect(concurrencyTest).toContain("public.save_product");
+    expect(concurrencyRunner).toContain("pg_advisory_xact_lock");
+    expect(concurrencyTest).toContain("33333333-3333-4333-8333-333333333333");
+    expect(productAdmin).toContain('supabase.rpc("save_product"');
+    expect(productAdmin).not.toContain('from("product_assets").delete');
+    expect(productAdmin).not.toContain('from("premium_codes").delete');
+    expect(authActions).toContain("buildSupabaseAuthCallbackUrl(locale)");
+    expect(authActions).toContain("setAuthResumeIntent");
+    expect(authActions).toContain("redeemAuthResumeIntent");
     expect(playwrightConfig).toContain('env: { LAMILIA_BACKEND: "local" }');
 
     for (const table of [

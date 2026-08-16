@@ -51,12 +51,11 @@ export function buildProductFromFormData(
   const coverAssetId =
     textField(formData, "coverAssetId") ||
     assets.find((asset) => asset.kind === "cover")?.id ||
-    existing?.coverAssetId ||
     "";
   const videoAssetId =
     textField(formData, "videoAssetId") ||
     assets.find((asset) => asset.kind === "video")?.id ||
-    existing?.videoAssetId;
+    undefined;
 
   const product: Product = {
     id,
@@ -493,6 +492,7 @@ function parseAssets(
       title: valueAt(titles, index) || existing?.title || filename,
       sortOrder: numberFromValue(valueAt(sortOrders, index), existing?.sortOrder ?? 100),
       isPublic,
+      isActive: existing?.isActive !== false,
       demoDownloadPath: existing?.demoDownloadPath,
     });
   }

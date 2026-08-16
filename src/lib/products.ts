@@ -94,7 +94,8 @@ export function getLocalizedProductViewFromSnapshot(
   }
 
   const translation = getTranslation(product.translations, locale);
-  const cover = product.assets.find((asset) => asset.id === product.coverAssetId);
+  const activeAssets = product.assets.filter((asset) => asset.isActive !== false);
+  const cover = activeAssets.find((asset) => asset.id === product.coverAssetId);
 
   if (!cover) {
     throw new Error(`Product ${product.slug} has no cover asset`);
@@ -113,10 +114,10 @@ export function getLocalizedProductViewFromSnapshot(
     seoTitle: translation.seoTitle ?? translation.title,
     seoDescription: translation.seoDescription ?? translation.shortDescription,
     cover,
-    gallery: sortAssets(product.assets.filter((asset) => asset.kind === "gallery")),
-    video: product.assets.find((asset) => asset.kind === "video"),
+    gallery: sortAssets(activeAssets.filter((asset) => asset.kind === "gallery")),
+    video: activeAssets.find((asset) => asset.kind === "video"),
     premiumAssets: sortAssets(
-      product.assets.filter((asset) => asset.kind === "premium_download"),
+      activeAssets.filter((asset) => asset.kind === "premium_download"),
     ),
     categories: product.categoryIds
       .map((categoryId) => categories.find((category) => category.id === categoryId))

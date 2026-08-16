@@ -24,6 +24,7 @@ export function UnlockForm({
   session,
 }: Props) {
   const redirectTo = `/${locale}/products/${productSlug}`;
+  const authQuery = `redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(initialCode ?? "")}`;
 
   if (!session) {
     return (
@@ -41,13 +42,13 @@ export function UnlockForm({
         <div className="flex flex-col gap-3 sm:flex-row">
           <Link
             className={buttonClassName()}
-            href={`/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(initialCode ?? "")}`}
+            href={`/${locale}/login?${authQuery}`}
           >
             Log in
           </Link>
           <Link
             className={buttonClassName({ variant: "outline" })}
-            href={`/${locale}/register?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(initialCode ?? "")}`}
+            href={`/${locale}/register?${authQuery}`}
           >
             Create account
           </Link>

@@ -134,8 +134,9 @@ export async function authorizePremiumDownloadForRequest(assetId: string) {
 
   const { data: assetRow, error: assetError } = await supabase
     .from("product_assets")
-    .select("id, product_id, kind, bucket, path, filename, content_type, size_bytes, locale, title, sort_order, is_public")
+    .select("id, product_id, kind, bucket, path, filename, content_type, size_bytes, locale, title, sort_order, is_public, is_active")
     .eq("id", assetId)
+    .eq("is_active", true)
     .maybeSingle();
 
   if (assetError) {
@@ -162,6 +163,7 @@ export async function authorizePremiumDownloadForRequest(assetId: string) {
     title: assetRow.title ?? undefined,
     sortOrder: assetRow.sort_order,
     isPublic: assetRow.is_public,
+    isActive: assetRow.is_active,
   } satisfies ProductAsset;
 
   if (asset.kind !== "premium_download" || asset.isPublic) {

@@ -9,6 +9,12 @@ import {
   isUnlockRegistrationContext,
   validateRegistrationInput,
 } from "@/lib/auth";
+import {
+  buildSupabaseAuthCallbackUrl,
+  createAuthResumeIntent,
+  redeemAuthResumeIntent,
+  setAuthResumeIntent,
+} from "@/lib/auth-resume";
 import { redeemPremiumCodeForRequest } from "@/lib/premium-request";
 import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
 import { scheduleReviewReminder } from "@/lib/reminders";
@@ -23,6 +29,12 @@ export async function loginDemoAction(formData: FormData) {
   const code = String(formData.get("code") ?? "");
 
   if (getBackendMode() === "supabase") {
+    const intent = createAuthResumeIntent({
+      locale,
+      returnTo: redirectTo,
+      code,
+    });
+    const safeRedirectTo = intent.returnTo;
     const supabase = await createClient();
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -30,10 +42,13 @@ export async function loginDemoAction(formData: FormData) {
     });
 
     if (error) {
-      redirect(`/${locale}/login?error=invalid_credentials&redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`);
+      await setAuthResumeIntent({ locale, returnTo: redirectTo, code });
+      redirect(`/${locale}/login?error=invalid_credentials&redirectTo=${encodeURIComponent(safeRedirectTo)}`);
     }
 
-    redirect(buildAuthRedirect({ locale, redirectTo, code }));
+    await setAuthResumeIntent({ locale, returnTo: redirectTo, code });
+    await redeemAuthResumeIntent(intent);
+    redirect(buildAuthRedirect({ locale, redirectTo: safeRedirectTo }));
   }
 
   const session = createDemoSession({
@@ -64,6 +79,16 @@ export async function registerDemoAction(formData: FormData) {
   });
 
   if (!result.ok) {
+    if (getBackendMode() === "supabase") {
+      const safeRedirectTo = createAuthResumeIntent({
+        locale,
+        returnTo: redirectTo,
+        code,
+      }).returnTo;
+      await setAuthResumeIntent({ locale, returnTo: redirectTo, code });
+      redirect(`/${locale}/register?error=consent&redirectTo=${encodeURIComponent(safeRedirectTo)}`);
+    }
+
     const params = new URLSearchParams({ error: "consent", redirectTo });
 
     if (code) {
@@ -74,6 +99,12 @@ export async function registerDemoAction(formData: FormData) {
   }
 
   if (getBackendMode() === "supabase") {
+    await setAuthResumeIntent({ locale, returnTo: redirectTo, code });
+    const safeRedirectTo = createAuthResumeIntent({
+      locale,
+      returnTo: redirectTo,
+      code,
+    }).returnTo;
     const supabase = await createClient();
     const { error } = await supabase.auth.signUp({
       email: result.value.email,
@@ -84,15 +115,15 @@ export async function registerDemoAction(formData: FormData) {
           preferred_locale: result.value.preferredLocale,
           terms_accepted: true,
         },
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/${locale}/account`,
+        emailRedirectTo: buildSupabaseAuthCallbackUrl(locale),
       },
     });
 
     if (error) {
-      redirect(`/${locale}/register?error=auth&redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`);
+      redirect(`/${locale}/register?error=auth&redirectTo=${encodeURIComponent(safeRedirectTo)}`);
     }
 
-    redirect(buildAuthRedirect({ locale, redirectTo, code }));
+    redirect(buildAuthRedirect({ locale, redirectTo: safeRedirectTo }));
   }
 
   await setDemoSession(
@@ -111,14 +142,15 @@ export async function verifyDemoEmailAction(formData: FormData) {
   const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/account`);
 
   if (getBackendMode() === "supabase") {
+    const safeRedirectTo = createAuthResumeIntent({ locale, returnTo: redirectTo }).returnTo;
     const supabase = await createClient();
     const { data } = await supabase.auth.getUser();
 
     if (!data.user) {
-      redirect(`/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+      redirect(`/${locale}/login?redirectTo=${encodeURIComponent(safeRedirectTo)}`);
     }
 
-    redirect(data.user.email_confirmed_at ? redirectTo : `${redirectTo}${redirectTo.includes("?") ? "&" : "?"}verify=required`);
+    redirect(data.user.email_confirmed_at ? safeRedirectTo : `${safeRedirectTo}${safeRedirectTo.includes("?") ? "&" : "?"}verify=required`);
   }
 
   const session = await getDemoSession();
@@ -169,13 +201,35 @@ export async function unlockPremiumAction(formData: FormData) {
 
   if (!result.ok) {
     if (result.status === "auth_required") {
+      if (getBackendMode() === "supabase") {
+        await setAuthResumeIntent({ locale, productSlug, returnTo: redirectTo, code });
+        const safeRedirectTo = createAuthResumeIntent({
+          locale,
+          productSlug,
+          returnTo: redirectTo,
+          code,
+        }).returnTo;
+        redirect(`/${locale}/login?redirectTo=${encodeURIComponent(safeRedirectTo)}`);
+      }
+
       redirect(
-        `/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`,
+        `/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}`,
       );
     }
 
     if (result.status === "email_unverified") {
-      redirect(`${redirectTo}?code=${encodeURIComponent(code)}&verify=required`);
+      if (getBackendMode() === "supabase") {
+        await setAuthResumeIntent({ locale, productSlug, returnTo: redirectTo, code });
+        const safeRedirectTo = createAuthResumeIntent({
+          locale,
+          productSlug,
+          returnTo: redirectTo,
+          code,
+        }).returnTo;
+        redirect(`${safeRedirectTo}?verify=required`);
+      }
+
+      redirect(`${redirectTo}?verify=required`);
     }
 
     redirect(`${redirectTo}?code=${encodeURIComponent(code)}&unlock=${result.status}`);

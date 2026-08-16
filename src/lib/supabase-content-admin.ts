@@ -20,6 +20,7 @@ import {
 } from "./admin-content";
 import { getAdminContentSnapshot } from "./content-repository";
 import type { AdminMutationResult } from "./admin-content";
+import type { Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
   if (getBackendMode() === "local") {
@@ -35,116 +36,78 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   }
 
   assertUuidSet(product.id, "product");
+  if (product.coverAssetId) {
+    assertUuidSet(product.coverAssetId, "cover asset");
+  }
+  if (product.videoAssetId) {
+    assertUuidSet(product.videoAssetId, "video asset");
+  }
   product.assets.forEach((asset) => assertUuidSet(asset.id, "asset"));
   product.amazonLinks.forEach((link) => assertUuidSet(link.id, "Amazon link"));
   product.premiumCodes.forEach((code) => assertUuidSet(code.id, "premium code"));
 
   const supabase = await createClient();
-  await run(
-    supabase
-      .from("products")
-      .upsert({
-        id: product.id,
-        slug: product.slug,
-        status: product.status,
-        audience: product.audience,
-        product_type: product.productType,
-        cover_asset_id: null,
-        video_asset_id: null,
-        review_delay_days: product.reviewDelayDays,
-        sort_order: product.sortOrder,
-        updated_at: product.updatedAt,
-      }),
-    "product",
-  );
+  const { data, error } = await supabase.rpc("save_product", {
+    product_state: buildProductMutationPayload(product),
+  });
 
-  await deleteByProduct(supabase, "product_translations", product.id);
-  await deleteByProduct(supabase, "product_categories", product.id);
-  await deleteByProduct(supabase, "product_tags", product.id);
-  await deleteByProduct(supabase, "product_assets", product.id);
-  await deleteByProduct(supabase, "amazon_links", product.id);
-  await deleteByProduct(supabase, "premium_codes", product.id);
+  if (error) {
+    throw new Error(`Supabase product mutation failed: ${error.message}`);
+  }
 
-  await run(
-    supabase.from("product_translations").insert(
-      product.translations.map((translation) => ({
-        product_id: product.id,
-        locale: translation.locale,
-        title: translation.title,
-        short_description: translation.shortDescription,
-        long_description: translation.longDescription,
-        seo_title: translation.seoTitle ?? null,
-        seo_description: translation.seoDescription ?? null,
-      })),
-    ),
-    "product translations",
-  );
-  await run(
-    supabase.from("product_categories").insert(
-      product.categoryIds.map((categoryId) => ({ product_id: product.id, category_id: categoryId })),
-    ),
-    "product categories",
-  );
-  await run(
-    supabase.from("product_tags").insert(
-      product.tagIds.map((tagId) => ({ product_id: product.id, tag_id: tagId })),
-    ),
-    "product tags",
-  );
-  await run(
-    supabase.from("product_assets").insert(
-      product.assets.map((asset) => ({
-        id: asset.id,
-        product_id: product.id,
-        kind: asset.kind,
-        bucket: asset.bucket,
-        path: asset.path,
-        filename: asset.filename,
-        content_type: asset.contentType,
-        size_bytes: asset.sizeBytes ?? null,
-        locale: asset.locale ?? null,
-        title: asset.title ?? null,
-        sort_order: asset.sortOrder,
-        is_public: asset.isPublic,
-      })),
-    ),
-    "product assets",
-  );
-  await run(
-    supabase.from("amazon_links").insert(
-      product.amazonLinks.map((link) => ({
-        id: link.id,
-        product_id: product.id,
-        market: link.market,
-        url: link.url,
-        is_primary: link.isPrimary,
-      })),
-    ),
-    "Amazon links",
-  );
-  await run(
-    supabase.from("premium_codes").insert(
-      product.premiumCodes.map((code) => ({
-        id: code.id,
-        product_id: product.id,
-        code: code.code,
-        active: code.active,
-      })),
-    ),
-    "premium codes",
-  );
-  await run(
-    supabase
-      .from("products")
-      .update({
-        cover_asset_id: product.coverAssetId || null,
-        video_asset_id: product.videoAssetId || null,
-      })
-      .eq("id", product.id),
-    "product asset references",
-  );
+  if (!data || typeof data !== "object" || data.status !== "success") {
+    throw new Error("Supabase product mutation returned an unknown result.");
+  }
 
   return { ok: true, id: product.id };
+}
+
+export function buildProductMutationPayload(product: Product) {
+  return {
+    id: product.id,
+    slug: product.slug,
+    status: product.status,
+    audience: product.audience,
+    productType: product.productType,
+    coverAssetId: product.coverAssetId || null,
+    videoAssetId: product.videoAssetId || null,
+    reviewDelayDays: product.reviewDelayDays,
+    sortOrder: product.sortOrder,
+    updatedAt: product.updatedAt,
+    translations: product.translations.map((translation) => ({
+      locale: translation.locale,
+      title: translation.title,
+      shortDescription: translation.shortDescription,
+      longDescription: translation.longDescription,
+      seoTitle: translation.seoTitle ?? null,
+      seoDescription: translation.seoDescription ?? null,
+    })),
+    categoryIds: product.categoryIds,
+    tagIds: product.tagIds,
+    assets: product.assets.map((asset) => ({
+      id: asset.id,
+      kind: asset.kind,
+      bucket: asset.bucket,
+      path: asset.path,
+      filename: asset.filename,
+      contentType: asset.contentType,
+      sizeBytes: asset.sizeBytes ?? null,
+      locale: asset.locale ?? null,
+      title: asset.title ?? null,
+      sortOrder: asset.sortOrder,
+    })),
+    amazonLinks: product.amazonLinks.map((link) => ({
+      id: link.id,
+      market: link.market,
+      url: link.url,
+      isPrimary: link.isPrimary,
+    })),
+    premiumCodes: product.premiumCodes.map((code) => ({
+      id: code.id,
+      code: code.code,
+      active: code.active,
+    })),
+  };
 }
 
 export async function deleteProductForRequest(productId: string): Promise<AdminMutationResult> {
@@ -297,14 +260,6 @@ export async function savePageForRequest(formData: FormData): Promise<AdminMutat
   }
 
   return savePagesForRequest(formData, slug);
-}
-
-async function deleteByProduct(
-  client: Awaited<ReturnType<typeof createClient>>,
-  table: string,
-  productId: string,
-) {
-  await run(client.from(table).delete().eq("product_id", productId), `${table} cleanup`);
 }
 
 async function run(query: PromiseLike<{ error: { message: string } | null }>, label: string) {
