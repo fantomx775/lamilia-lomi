@@ -416,7 +416,9 @@ function buildTranslations(product?: Product): Record<Locale, TranslationDraft> 
 }
 
 function buildAssets(product?: Product): AssetDraft[] {
-  return (product?.assets ?? []).map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, filename: asset.filename, contentType: asset.contentType, locale: asset.locale ?? "", title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false }));
+  return (product?.assets ?? [])
+    .filter((asset) => asset.isActive !== false)
+    .map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, filename: asset.filename, contentType: asset.contentType, locale: asset.locale ?? "", title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false }));
 }
 
 function buildAmazonLinks(product?: Product): AmazonDraft[] {

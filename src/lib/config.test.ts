@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { getLocaleConfig, normalizeLocale } from "./locale";
-import { getMissingPublicEnv, getPublicEnv } from "./config";
+import {
+  AppConfigurationError,
+  getBackendMode,
+  getMissingPublicEnv,
+  getPublicEnv,
+  getRequiredSupabaseEnv,
+} from "./config";
 
 describe("app configuration", () => {
   it("reads public environment values with safe fallbacks", () => {
@@ -30,5 +36,20 @@ describe("app configuration", () => {
     expect(normalizeLocale("pl")).toBe("pl");
     expect(normalizeLocale("de")).toBe("de");
     expect(normalizeLocale("fr")).toBe("en");
+  });
+
+  it("requires an explicit backend and rejects local mode in production", () => {
+    expect(getBackendMode({ LAMILIA_BACKEND: "local", NODE_ENV: "development" })).toBe("local");
+    expect(getBackendMode({ LAMILIA_BACKEND: "supabase", NODE_ENV: "production" })).toBe("supabase");
+    expect(() => getBackendMode({ NODE_ENV: "production" })).toThrow(AppConfigurationError);
+    expect(() => getBackendMode({ LAMILIA_BACKEND: "local", NODE_ENV: "production" })).toThrow(
+      "not allowed in production",
+    );
+  });
+
+  it("fails closed when Supabase server configuration is missing", () => {
+    expect(() => getRequiredSupabaseEnv({})).toThrow(
+      "Supabase configuration is missing",
+    );
   });
 });

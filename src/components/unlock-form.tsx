@@ -24,6 +24,7 @@ export function UnlockForm({
   session,
 }: Props) {
   const redirectTo = `/${locale}/products/${productSlug}`;
+  const authQuery = `redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(initialCode ?? "")}`;
 
   if (!session) {
     return (
@@ -41,13 +42,13 @@ export function UnlockForm({
         <div className="flex flex-col gap-3 sm:flex-row">
           <Link
             className={buttonClassName()}
-            href={`/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(initialCode ?? "")}`}
+            href={`/${locale}/login?${authQuery}`}
           >
             Log in
           </Link>
           <Link
             className={buttonClassName({ variant: "outline" })}
-            href={`/${locale}/register?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(initialCode ?? "")}`}
+            href={`/${locale}/register?${authQuery}`}
           >
             Create account
           </Link>
@@ -64,16 +65,18 @@ export function UnlockForm({
           <div>
             <p className="font-medium">Email verification required</p>
             <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
-              Premium downloads open after email verification. Demo mode lets you
-              simulate that step locally.
+              Premium downloads open after email verification. Check your inbox
+              and return here once the Supabase Auth email is confirmed.
             </p>
           </div>
         </div>
-        <form action={verifyDemoEmailAction}>
-          <input type="hidden" name="locale" value={locale} />
-          <input type="hidden" name="redirectTo" value={`${redirectTo}?code=${initialCode ?? ""}`} />
-          <Button type="submit">Mark demo email as verified</Button>
-        </form>
+        {session.isDemo ? (
+          <form action={verifyDemoEmailAction}>
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="redirectTo" value={`${redirectTo}?code=${initialCode ?? ""}`} />
+            <Button type="submit">Mark demo email as verified</Button>
+          </form>
+        ) : null}
       </div>
     );
   }

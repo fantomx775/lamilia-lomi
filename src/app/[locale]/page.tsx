@@ -9,8 +9,8 @@ import type { Locale } from "@/i18n/routing";
 import {
   getAudienceLabel,
   getAudiencePath,
-  getFeaturedProducts,
 } from "@/lib/products";
+import { getFeaturedProductsForRequest } from "@/lib/products-request";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -18,9 +18,13 @@ type Props = {
 
 export default async function HomePage({ params }: Props) {
   const { locale } = await params;
-  const kids = getFeaturedProducts(locale, "kids")[0];
-  const adults = getFeaturedProducts(locale, "adults")[0];
-  const featured = getFeaturedProducts(locale);
+  const [kidsProducts, adultsProducts, featured] = await Promise.all([
+    getFeaturedProductsForRequest(locale, "kids"),
+    getFeaturedProductsForRequest(locale, "adults"),
+    getFeaturedProductsForRequest(locale),
+  ]);
+  const kids = kidsProducts[0];
+  const adults = adultsProducts[0];
 
   return (
     <div>

@@ -52,6 +52,7 @@ export type ProductAsset = {
   title?: string;
   sortOrder: number;
   isPublic: boolean;
+  isActive?: boolean;
   demoDownloadPath?: string;
 };
 
@@ -146,6 +147,7 @@ export type DemoSession = {
   termsAcceptedAt: string;
   preferredLocale: Locale;
   unlockedProductIds: string[];
+  isDemo?: boolean;
 };
 
 export type DownloadDecision =
