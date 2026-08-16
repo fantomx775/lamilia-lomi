@@ -31,6 +31,7 @@ describe("Supabase production foundation contracts", () => {
       "supabase/migrations/20260815120000_supabase_production_foundation.sql",
     );
     const seed = read("supabase/seed.sql");
+    const rlsTest = read("supabase/tests/production-foundation-rls.sql");
     const foundationMigration = read(
       "supabase/migrations/20260531093244_lamilialomi_foundation.sql",
     );
@@ -38,10 +39,17 @@ describe("Supabase production foundation contracts", () => {
     expect(migration).toContain("create or replace function private.redeem_premium_code");
     expect(migration).toContain("on conflict (user_id, product_id) do nothing");
     expect(migration).toContain("revoke all on public.premium_codes from anon");
+    expect(migration).toContain('create policy "unlocks_no_anon_access"');
+    expect(migration).toContain(
+      "grant select on public.user_product_unlocks to anon, authenticated",
+    );
     expect(migration).toContain("create policy \"premium objects are readable after unlock\"");
     expect(migration).toContain("security definer");
     expect(seed).toContain("on conflict (id) do update");
     expect(seed).toContain("on conflict (slug, locale) do update");
+    expect(rlsTest).toContain("set local role anon");
+    expect(rlsTest).toContain("set local role authenticated");
+    expect(rlsTest).toContain("RLS matrix complete: 23 positive scenarios passed");
 
     for (const table of [
       "profiles",

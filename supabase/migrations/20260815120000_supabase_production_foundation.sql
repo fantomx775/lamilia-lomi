@@ -175,6 +175,7 @@ drop policy if exists "premium_codes_admin_select" on public.premium_codes;
 drop policy if exists "premium_codes_admin_all" on public.premium_codes;
 drop policy if exists "unlocks_select_own_or_admin" on public.user_product_unlocks;
 drop policy if exists "unlocks_insert_own" on public.user_product_unlocks;
+drop policy if exists "unlocks_no_anon_access" on public.user_product_unlocks;
 drop policy if exists "download_events_select_own_or_admin" on public.download_events;
 drop policy if exists "download_events_insert_own" on public.download_events;
 drop policy if exists "review_reminders_select_own_or_admin" on public.review_reminders;
@@ -367,6 +368,14 @@ create policy "unlocks_select_admin"
   to authenticated
   using ((select private.is_admin()));
 
+-- The premium asset policy contains an unlock existence check. Keep that
+-- subquery executable for public metadata reads while returning no unlock rows
+-- to anon; authenticated users still receive only their own rows below.
+create policy "unlocks_no_anon_access"
+  on public.user_product_unlocks for select
+  to anon
+  using (false);
+
 create policy "download_events_select_own"
   on public.download_events for select
   to authenticated
@@ -403,7 +412,7 @@ revoke all on public.profiles from anon, authenticated;
 grant select on public.profiles to authenticated;
 revoke all on public.premium_codes from anon;
 revoke all on public.user_product_unlocks from anon, authenticated;
-grant select on public.user_product_unlocks to authenticated;
+grant select on public.user_product_unlocks to anon, authenticated;
 revoke all on public.download_events from anon, authenticated;
 grant select on public.download_events to authenticated;
 revoke all on public.review_reminders from anon, authenticated;
