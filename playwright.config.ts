@@ -23,6 +23,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run dev",
+    env: { LAMILIA_BACKEND: "local" },
     url: "http://127.0.0.1:3000/en",
     reuseExistingServer: true,
     timeout: 120_000,

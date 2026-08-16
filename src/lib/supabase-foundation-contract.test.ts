@@ -32,6 +32,7 @@ describe("Supabase production foundation contracts", () => {
     );
     const seed = read("supabase/seed.sql");
     const rlsTest = read("supabase/tests/production-foundation-rls.sql");
+    const playwrightConfig = read("playwright.config.ts");
     const foundationMigration = read(
       "supabase/migrations/20260531093244_lamilialomi_foundation.sql",
     );
@@ -50,6 +51,7 @@ describe("Supabase production foundation contracts", () => {
     expect(rlsTest).toContain("set local role anon");
     expect(rlsTest).toContain("set local role authenticated");
     expect(rlsTest).toContain("RLS matrix complete: 23 positive scenarios passed");
+    expect(playwrightConfig).toContain('env: { LAMILIA_BACKEND: "local" }');
 
     for (const table of [
       "profiles",
