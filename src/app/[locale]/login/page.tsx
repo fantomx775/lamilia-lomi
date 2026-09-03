@@ -1,13 +1,16 @@
 import { LogIn } from "lucide-react";
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 
 import { loginDemoAction } from "@/app/actions";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/submit-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Locale } from "@/i18n/routing";
 import { isUnlockRegistrationContext } from "@/lib/auth";
+import { productSlugFromReturnTo, sanitizeReturnTo } from "@/lib/return-to";
+import { getUnlockIntent } from "@/lib/unlock-intent";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -17,13 +20,18 @@ type Props = {
 export default async function LoginPage({ params, searchParams }: Props) {
   const { locale } = await params;
   const query = await searchParams;
-  const redirectTo = stringParam(query.redirectTo) ?? `/${locale}/library`;
-  const code = stringParam(query.code) ?? "";
-  const canCreateAccount = isUnlockRegistrationContext({
+  const t = await getTranslations("Auth");
+  const redirectTo = sanitizeReturnTo(
+    stringParam(query.returnTo) ?? stringParam(query.redirectTo),
     locale,
-    redirectTo,
-    code,
-  });
+  );
+  const unlockIntent = await getUnlockIntent();
+  const code =
+    unlockIntent && unlockIntent.productSlug === productSlugFromReturnTo(redirectTo, locale)
+      ? unlockIntent.code ?? ""
+      : "";
+  const error = stringParam(query.error);
+  const canCreateAccount = isUnlockRegistrationContext({ locale, redirectTo });
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">
@@ -32,37 +40,41 @@ export default async function LoginPage({ params, searchParams }: Props) {
           <div className="mb-2 grid size-11 place-items-center rounded-md bg-[var(--color-sage)]">
             <LogIn className="size-5" aria-hidden />
           </div>
-          <h1 className="font-serif text-3xl font-semibold">Log in</h1>
+          <h1 className="font-serif text-3xl font-semibold">{t("loginTitle")}</h1>
           <p className="text-sm leading-6 text-[var(--color-muted)]">
-            Demo users: `demo@lamilialomi.test`, `unverified@lamilialomi.test`,
-            or `admin@lamilialomi.test`.
+            {t("loginDescription")}
           </p>
+          {error ? (
+            <p className="rounded-md bg-[var(--color-blush)] p-3 text-sm" role="alert">
+              {t("invalid")}
+            </p>
+          ) : null}
         </CardHeader>
         <CardContent>
           <form action={loginDemoAction} className="grid gap-4">
             <input type="hidden" name="locale" value={locale} />
-            <input type="hidden" name="redirectTo" value={redirectTo} />
+            <input type="hidden" name="returnTo" value={redirectTo} />
             <input type="hidden" name="code" value={code} />
             <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" defaultValue="demo@lamilialomi.test" />
+              <Label htmlFor="email">{t("email")}</Label>
+              <Input id="email" name="email" type="email" defaultValue="demo@lamilialomi.test" autoComplete="email" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" name="password" type="password" defaultValue="demo-password" />
+              <Label htmlFor="password">{t("password")}</Label>
+              <Input id="password" name="password" type="password" defaultValue="demo-password" autoComplete="current-password" />
             </div>
-            <Button type="submit">Continue</Button>
+            <SubmitButton pendingLabel={t("pending")}>{t("continue")}</SubmitButton>
           </form>
-          <div className="mt-5 flex items-center justify-between text-sm">
+          <div className="mt-5 flex items-center justify-between gap-3 text-sm">
             <Link className="text-[var(--color-terracotta)]" href={`/${locale}/reset-password`}>
-              Reset password
+              {t("reset")}
             </Link>
             {canCreateAccount ? (
               <Link
                 className="text-[var(--color-terracotta)]"
-                href={`/${locale}/register?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`}
+                href={`/${locale}/register?returnTo=${encodeURIComponent(redirectTo)}`}
               >
-                Create account
+                {t("createAccount")}
               </Link>
             ) : null}
           </div>

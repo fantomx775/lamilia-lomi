@@ -1,6 +1,8 @@
+import crypto from "node:crypto";
 import { z } from "zod";
 
 import { defaultLocale, normalizeLocale } from "./locale";
+import { productSlugFromReturnTo, sanitizeReturnTo } from "./return-to";
 import { demoUsers } from "./seed-data";
 import type { DemoSession, UserRole } from "./types";
 
@@ -49,21 +51,7 @@ export function buildAuthRedirect(input: {
   code?: string | null;
 }) {
   const locale = normalizeLocale(input.locale);
-  const fallback = `/${locale}/library`;
-  const safeRedirect =
-    input.redirectTo === "/admin" ||
-    input.redirectTo?.startsWith("/admin/") ||
-    input.redirectTo?.startsWith(`/${locale}/`) ||
-    input.redirectTo === `/${locale}`
-      ? input.redirectTo
-      : fallback;
-  const url = new URL(safeRedirect, "http://local.test");
-
-  if (input.code) {
-    url.searchParams.set("code", input.code);
-  }
-
-  return `${url.pathname}${url.search}`;
+  return sanitizeReturnTo(input.redirectTo, locale);
 }
 
 export function isUnlockRegistrationContext(input: {
@@ -73,10 +61,7 @@ export function isUnlockRegistrationContext(input: {
 }) {
   const locale = normalizeLocale(input.locale);
 
-  return (
-    Boolean(input.code?.trim()) ||
-    Boolean(input.redirectTo?.startsWith(`/${locale}/products/`))
-  );
+  return Boolean(productSlugFromReturnTo(input.redirectTo, locale));
 }
 
 export function createDemoSession(input: {
@@ -114,7 +99,13 @@ export function parseDemoSession(value: string | undefined): DemoSession | null 
   }
 
   try {
-    const session = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    const [payload, signature] = value.split(".");
+
+    if (!payload || !signature || !hasValidSignature(payload, signature)) {
+      return null;
+    }
+
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
 
     if (
       typeof session.email === "string" &&
@@ -146,5 +137,28 @@ export function parseDemoSession(value: string | undefined): DemoSession | null 
 }
 
 export function serializeDemoSession(session: DemoSession) {
-  return Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
+  const payload = Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
+
+  return `${payload}.${signDemoSession(payload)}`;
+}
+
+function signDemoSession(payload: string) {
+  return crypto
+    .createHmac(
+      "sha256",
+      process.env.DEMO_SESSION_SECRET ?? "local-demo-session-secret-change-in-production",
+    )
+    .update(payload)
+    .digest("base64url");
+}
+
+function hasValidSignature(payload: string, signature: string) {
+  const expected = signDemoSession(payload);
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+
+  return (
+    actualBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(actualBuffer, expectedBuffer)
+  );
 }

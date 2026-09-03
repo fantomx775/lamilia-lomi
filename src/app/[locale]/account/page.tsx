@@ -1,5 +1,6 @@
 import { logoutAction, verifyDemoEmailAction } from "@/app/actions";
 import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
+import { SubmitButton } from "@/components/submit-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
@@ -73,8 +74,8 @@ export default async function AccountPage({ params }: Props) {
           {!session.emailVerified && session.isDemo ? (
             <form action={verifyDemoEmailAction}>
               <input type="hidden" name="locale" value={locale} />
-              <input type="hidden" name="redirectTo" value={`/${locale}/account`} />
-              <Button type="submit">Mark demo email as verified</Button>
+              <input type="hidden" name="returnTo" value={`/${locale}/account`} />
+              <SubmitButton pendingLabel="Working…">Mark demo email as verified</SubmitButton>
             </form>
           ) : null}
           <form action={logoutAction}>

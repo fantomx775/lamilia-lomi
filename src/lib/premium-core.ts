@@ -113,6 +113,20 @@ export function createSignedDownloadUrl(input: {
   };
 }
 
+export function applyProductUnlock(
+  session: Pick<DemoSession, "unlockedProductIds">,
+  productId: string,
+) {
+  const alreadyUnlocked = session.unlockedProductIds.includes(productId);
+
+  return {
+    alreadyUnlocked,
+    unlockedProductIds: alreadyUnlocked
+      ? session.unlockedProductIds
+      : Array.from(new Set([...session.unlockedProductIds, productId])),
+  };
+}
+
 export function getUnlockedProductViews(session: Pick<DemoSession, "unlockedProductIds">) {
   return session.unlockedProductIds
     .map((productId) => getProductById(productId))

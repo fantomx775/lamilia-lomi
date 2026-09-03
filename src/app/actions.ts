@@ -12,99 +12,269 @@ import {
 import {
   buildSupabaseAuthCallbackUrl,
   createAuthResumeIntent,
+  clearAuthResumeIntent,
   redeemAuthResumeIntent,
   setAuthResumeIntent,
 } from "@/lib/auth-resume";
+import { isSupportedLocale, normalizeLocale } from "@/lib/locale";
 import { redeemPremiumCodeForRequest } from "@/lib/premium-request";
 import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
 import { scheduleReviewReminder } from "@/lib/reminders";
 import { createClient } from "@/lib/supabase/server";
 import { getProductBySlugForRequest } from "@/lib/products-request";
-import type { Locale } from "@/i18n/routing";
+import {
+  clearUnlockIntent,
+  getUnlockIntent,
+  setUnlockIntent,
+} from "@/lib/unlock-intent";
+import {
+  productSlugFromReturnTo,
+  sanitizeReturnTo,
+  switchLocalePath,
+} from "@/lib/return-to";
+
+export async function startUnlockAuthAction(formData: FormData) {
+  const locale = normalizeLocale(text(formData, "locale"));
+  const productSlug = text(formData, "productSlug");
+  const product = await getProductBySlugForRequest(productSlug);
+
+  if (!product) {
+    redirect(`/${locale}/products?unlock=product_not_found`);
+  }
+
+  const returnTo = `/${locale}/products/${product.slug}`;
+  const mode = text(formData, "mode") === "register" ? "register" : "login";
+
+  await setUnlockIntent({
+    locale,
+    productSlug: product.slug,
+    returnTo,
+    code: text(formData, "code"),
+  });
+
+  redirect(`/${locale}/${mode}?returnTo=${encodeURIComponent(returnTo)}`);
+}
+
+export async function switchLocaleAction(formData: FormData) {
+  const sourceLocaleInput = text(formData, "sourceLocale");
+  const targetLocaleInput = text(formData, "targetLocale");
+
+  if (!isSupportedLocale(sourceLocaleInput) || !isSupportedLocale(targetLocaleInput)) {
+    redirect("/en/library");
+  }
+
+  const sourceLocale = sourceLocaleInput;
+  const targetLocale = targetLocaleInput;
+  let currentUrl: URL;
+
+  try {
+    currentUrl = new URL(
+      `${text(formData, "pathname")}${withSearchPrefix(text(formData, "search"))}`,
+      "http://lamilialomi.local",
+    );
+  } catch {
+    redirect(`/${targetLocale}/library`);
+  }
+
+  const safeCurrent = sanitizeReturnTo(
+    `${currentUrl.pathname}${currentUrl.search}`,
+    sourceLocale,
+    `/${sourceLocale}/library`,
+  );
+  const safeCurrentUrl = new URL(safeCurrent, "http://lamilialomi.local");
+  const productSlug = productSlugFromReturnTo(safeCurrent, sourceLocale);
+  const nestedReturnTo =
+    currentUrl.searchParams.get("returnTo") ?? currentUrl.searchParams.get("redirectTo");
+  const safeNestedReturnTo = nestedReturnTo
+    ? sanitizeReturnTo(nestedReturnTo, sourceLocale, `/${sourceLocale}/library`)
+    : undefined;
+  const nestedProductSlug = safeNestedReturnTo
+    ? productSlugFromReturnTo(safeNestedReturnTo, sourceLocale)
+    : undefined;
+  const contextProductSlug = productSlug ?? nestedProductSlug;
+  const translatedPath = switchLocalePath(
+    safeCurrentUrl.pathname,
+    sourceLocale,
+    targetLocale,
+  );
+  const translatedNestedReturnTo = safeNestedReturnTo
+    ? switchLocalePath(safeNestedReturnTo, sourceLocale, targetLocale)
+    : undefined;
+  const targetSearchParams = new URLSearchParams();
+
+  for (const key of ["returnTo", "redirectTo", "error", "unlock", "step", "unlocked"]) {
+    const value = currentUrl.searchParams.get(key);
+
+    if (!value) {
+      continue;
+    }
+
+    if ((key === "returnTo" || key === "redirectTo") && translatedNestedReturnTo) {
+      targetSearchParams.set(key, translatedNestedReturnTo);
+    } else if (key !== "returnTo" && key !== "redirectTo") {
+      targetSearchParams.set(key, value.slice(0, 128));
+    }
+  }
+
+  const targetPath = `${translatedPath}${targetSearchParams.toString() ? `?${targetSearchParams}` : ""}`;
+
+  if (contextProductSlug) {
+    const product = await getProductBySlugForRequest(contextProductSlug);
+
+    if (!product) {
+      await clearUnlockIntent();
+      redirect(`/${targetLocale}/products`);
+    }
+
+    const existingIntent = await getUnlockIntent();
+    const code = productSlug
+      ? currentUrl.searchParams.get("code") ??
+        currentUrl.searchParams.get("premiumCode") ??
+        undefined
+      : undefined;
+
+    await setUnlockIntent({
+      locale: targetLocale,
+      productSlug: product.slug,
+      returnTo: productSlug ? targetPath : translatedNestedReturnTo,
+      code:
+        code ||
+        (existingIntent?.productSlug === product.slug ? existingIntent.code : undefined),
+    });
+  }
+
+  redirect(targetPath);
+}
 
 export async function loginDemoAction(formData: FormData) {
-  const email = String(formData.get("email") ?? "demo@lamilialomi.test");
-  const locale = String(formData.get("locale") ?? "en");
-  const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/library`);
-  const code = String(formData.get("code") ?? "");
+  const locale = normalizeLocale(text(formData, "locale"));
+  const returnTo = sanitizeReturnTo(
+    text(formData, "returnTo") || text(formData, "redirectTo"),
+    locale,
+  );
+  const existingIntent = await getUnlockIntent();
+  const returnProductSlug = productSlugFromReturnTo(returnTo, locale);
+  const currentIntent =
+    existingIntent?.locale === locale && existingIntent.productSlug === returnProductSlug
+      ? existingIntent
+      : null;
+
+  if (existingIntent && !currentIntent) {
+    await clearUnlockIntent();
+  }
+
+  const code = text(formData, "code") || currentIntent?.code || "";
 
   if (getBackendMode() === "supabase") {
     const intent = createAuthResumeIntent({
       locale,
-      returnTo: redirectTo,
+      productSlug: returnProductSlug,
+      returnTo,
       code,
     });
-    const safeRedirectTo = intent.returnTo;
     const supabase = await createClient();
     const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password: String(formData.get("password") ?? ""),
+      email: text(formData, "email"),
+      password: text(formData, "password"),
     });
 
     if (error) {
-      await setAuthResumeIntent({ locale, returnTo: redirectTo, code });
-      redirect(`/${locale}/login?error=invalid_credentials&redirectTo=${encodeURIComponent(safeRedirectTo)}`);
+      await setAuthResumeIntent({ locale, returnTo, code });
+      redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
-    await setAuthResumeIntent({ locale, returnTo: redirectTo, code });
-    await redeemAuthResumeIntent(intent);
-    redirect(buildAuthRedirect({ locale, redirectTo: safeRedirectTo }));
+    await setAuthResumeIntent({
+      locale,
+      productSlug: intent.productSlug,
+      returnTo,
+      code,
+    });
+
+    const redemption = await redeemAuthResumeIntent(intent);
+    await clearAuthResumeIntent();
+
+    if (redemption?.ok) {
+      await clearUnlockIntent();
+      if (redemption.status === "success") {
+        const product = intent.productSlug
+          ? await getProductBySlugForRequest(intent.productSlug)
+          : null;
+        scheduleReviewReminder({
+          unlockedAt: new Date(),
+          delayDays: product?.reviewDelayDays,
+        });
+      }
+      redirect(
+        appendQueryPath(
+          intent.returnTo,
+          "unlocked",
+          redemption.status === "already_unlocked" ? "already" : "1",
+        ),
+      );
+    }
+
+    if (redemption && !redemption.ok) {
+      if (redemption.status === "email_unverified") {
+        redirect(appendQueryPath(intent.returnTo, "step", "verify"));
+      }
+
+      await setUnlockIntent({
+        locale,
+        productSlug: intent.productSlug ?? "",
+        returnTo: intent.returnTo,
+        code,
+      });
+      redirect(appendQueryPath(intent.returnTo, "unlock", redemption.status));
+    }
+
+    redirect(buildAuthRedirect({ locale, redirectTo: intent.returnTo }));
   }
 
-  const session = createDemoSession({
-    email,
-    emailVerified: !email.includes("unverified"),
-    preferredLocale: locale,
-  });
+  await preserveUnlockIntent({ locale, returnTo, code });
+  await setDemoSession(
+    createDemoSession({
+      email: text(formData, "email") || "demo@lamilialomi.test",
+      emailVerified: !text(formData, "email").toLowerCase().includes("unverified"),
+      preferredLocale: locale,
+    }),
+  );
 
-  await setDemoSession(session);
-  redirect(buildAuthRedirect({ locale, redirectTo, code }));
+  redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
 }
 
 export async function registerDemoAction(formData: FormData) {
-  const locale = String(formData.get("locale") ?? "en") as Locale;
-  const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/library`);
-  const code = String(formData.get("code") ?? "");
+  const locale = normalizeLocale(text(formData, "locale"));
+  const returnTo = sanitizeReturnTo(
+    text(formData, "returnTo") || text(formData, "redirectTo"),
+    locale,
+  );
+  const code = text(formData, "code");
 
-  if (!isUnlockRegistrationContext({ locale, redirectTo, code })) {
+  if (!isUnlockRegistrationContext({ locale, redirectTo: returnTo })) {
     redirect(`/${locale}/products`);
   }
 
+  await preserveUnlockIntent({ locale, returnTo, code });
+
   const result = validateRegistrationInput({
-    email: String(formData.get("email") ?? ""),
-    password: String(formData.get("password") ?? ""),
+    email: text(formData, "email"),
+    password: text(formData, "password"),
     termsAccepted: formData.get("termsAccepted") === "on",
     marketingConsent: formData.get("marketingConsent") === "on",
     preferredLocale: locale,
   });
 
   if (!result.ok) {
-    if (getBackendMode() === "supabase") {
-      const safeRedirectTo = createAuthResumeIntent({
-        locale,
-        returnTo: redirectTo,
-        code,
-      }).returnTo;
-      await setAuthResumeIntent({ locale, returnTo: redirectTo, code });
-      redirect(`/${locale}/register?error=consent&redirectTo=${encodeURIComponent(safeRedirectTo)}`);
-    }
-
-    const params = new URLSearchParams({ error: "consent", redirectTo });
-
-    if (code) {
-      params.set("code", code);
-    }
-
-    redirect(`/${locale}/register?${params.toString()}`);
+    redirect(`/${locale}/register?error=invalid&returnTo=${encodeURIComponent(returnTo)}`);
   }
 
   if (getBackendMode() === "supabase") {
-    await setAuthResumeIntent({ locale, returnTo: redirectTo, code });
     const safeRedirectTo = createAuthResumeIntent({
       locale,
-      returnTo: redirectTo,
+      returnTo,
       code,
     }).returnTo;
+    await setAuthResumeIntent({ locale, returnTo, code });
     const supabase = await createClient();
     const { error } = await supabase.auth.signUp({
       email: result.value.email,
@@ -120,10 +290,10 @@ export async function registerDemoAction(formData: FormData) {
     });
 
     if (error) {
-      redirect(`/${locale}/register?error=auth&redirectTo=${encodeURIComponent(safeRedirectTo)}`);
+      redirect(`/${locale}/register?error=auth&returnTo=${encodeURIComponent(safeRedirectTo)}`);
     }
 
-    redirect(buildAuthRedirect({ locale, redirectTo: safeRedirectTo }));
+    redirect(appendQueryPath(safeRedirectTo, "step", "verify"));
   }
 
   await setDemoSession(
@@ -134,63 +304,78 @@ export async function registerDemoAction(formData: FormData) {
       preferredLocale: locale,
     }),
   );
-  redirect(buildAuthRedirect({ locale, redirectTo, code }));
+  redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
 }
 
 export async function verifyDemoEmailAction(formData: FormData) {
-  const locale = String(formData.get("locale") ?? "en");
-  const redirectTo = String(formData.get("redirectTo") ?? `/${locale}/account`);
+  const locale = normalizeLocale(text(formData, "locale"));
+  const returnTo = sanitizeReturnTo(
+    text(formData, "returnTo") || text(formData, "redirectTo"),
+    locale,
+    `/${locale}/account`,
+  );
 
   if (getBackendMode() === "supabase") {
-    const safeRedirectTo = createAuthResumeIntent({ locale, returnTo: redirectTo }).returnTo;
     const supabase = await createClient();
     const { data } = await supabase.auth.getUser();
 
     if (!data.user) {
-      redirect(`/${locale}/login?redirectTo=${encodeURIComponent(safeRedirectTo)}`);
+      redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
     }
 
-    redirect(data.user.email_confirmed_at ? safeRedirectTo : `${safeRedirectTo}${safeRedirectTo.includes("?") ? "&" : "?"}verify=required`);
+    redirect(
+      data.user.email_confirmed_at
+        ? returnTo
+        : appendQueryPath(returnTo, "step", "verify"),
+    );
   }
 
   const session = await getDemoSession();
 
   if (!session) {
-    redirect(`/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+    redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
   await setDemoSession({ ...session, emailVerified: true });
-  redirect(redirectTo);
+  redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
 }
 
 export async function logoutAction(formData: FormData) {
-  const locale = String(formData.get("locale") ?? "en");
+  const locale = normalizeLocale(text(formData, "locale"));
 
   await clearDemoSession();
+  await clearUnlockIntent();
+  await clearAuthResumeIntent();
   redirect(`/${locale}`);
 }
 
 export async function unlockPremiumAction(formData: FormData) {
-  const locale = String(formData.get("locale") ?? "en");
-  const productSlug = String(formData.get("productSlug") ?? "");
-  const code = String(formData.get("code") ?? "");
-  const redirectTo = `/${locale}/products/${productSlug}`;
+  const locale = normalizeLocale(text(formData, "locale"));
+  const productSlug = text(formData, "productSlug");
   const product = await getProductBySlugForRequest(productSlug);
+  const returnTo = `/${locale}/products/${productSlug}`;
+  const existingIntent = await getUnlockIntent();
+  const code =
+    text(formData, "code") ||
+    (existingIntent?.locale === locale && existingIntent.productSlug === productSlug
+      ? existingIntent.code
+      : undefined) ||
+    "";
 
   if (!product) {
-    redirect(`${redirectTo}?unlock=product_not_found`);
+    redirect(`/${locale}/products?unlock=product_not_found`);
   }
 
   const session = await getDemoSession();
 
-  if (!session && getBackendMode() === "local") {
-    redirect(
-      `/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}&code=${encodeURIComponent(code)}`,
-    );
+  if (!session) {
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
-  if (session && !session.emailVerified && getBackendMode() === "local") {
-    redirect(`${redirectTo}?code=${encodeURIComponent(code)}&verify=required`);
+  if (!session.emailVerified) {
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(appendQueryPath(returnTo, "step", "verify"));
   }
 
   const result = await redeemPremiumCodeForRequest({
@@ -201,42 +386,80 @@ export async function unlockPremiumAction(formData: FormData) {
 
   if (!result.ok) {
     if (result.status === "auth_required") {
-      if (getBackendMode() === "supabase") {
-        await setAuthResumeIntent({ locale, productSlug, returnTo: redirectTo, code });
-        const safeRedirectTo = createAuthResumeIntent({
-          locale,
-          productSlug,
-          returnTo: redirectTo,
-          code,
-        }).returnTo;
-        redirect(`/${locale}/login?redirectTo=${encodeURIComponent(safeRedirectTo)}`);
-      }
-
-      redirect(
-        `/${locale}/login?redirectTo=${encodeURIComponent(redirectTo)}`,
-      );
+      await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+      redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
     }
 
     if (result.status === "email_unverified") {
-      if (getBackendMode() === "supabase") {
-        await setAuthResumeIntent({ locale, productSlug, returnTo: redirectTo, code });
-        const safeRedirectTo = createAuthResumeIntent({
-          locale,
-          productSlug,
-          returnTo: redirectTo,
-          code,
-        }).returnTo;
-        redirect(`${safeRedirectTo}?verify=required`);
-      }
-
-      redirect(`${redirectTo}?verify=required`);
+      await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+      redirect(appendQueryPath(returnTo, "step", "verify"));
     }
 
-    redirect(`${redirectTo}?code=${encodeURIComponent(code)}&unlock=${result.status}`);
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(appendQueryPath(returnTo, "unlock", result.status));
   }
 
+  await clearUnlockIntent();
   if (result.status === "success") {
     scheduleReviewReminder({ unlockedAt: new Date(), delayDays: product.reviewDelayDays });
   }
-  redirect(`${redirectTo}?unlocked=1`);
+  redirect(
+    appendQueryPath(
+      returnTo,
+      "unlocked",
+      result.status === "already_unlocked" ? "already" : "1",
+    ),
+  );
+}
+
+async function preserveUnlockIntent(input: {
+  locale: string;
+  returnTo: string;
+  code?: string;
+}) {
+  const productSlug = productSlugFromReturnTo(input.returnTo, input.locale);
+
+  if (!productSlug) {
+    await clearUnlockIntent();
+    return;
+  }
+
+  const product = await getProductBySlugForRequest(productSlug);
+
+  if (!product) {
+    await clearUnlockIntent();
+    return;
+  }
+
+  const existing = await getUnlockIntent();
+
+  await setUnlockIntent({
+    locale: input.locale,
+    productSlug: product.slug,
+    returnTo: input.returnTo,
+    code:
+      input.code ||
+      (existing?.productSlug === product.slug ? existing.code : undefined),
+  });
+}
+
+function text(formData: FormData, key: string) {
+  const value = formData.get(key);
+
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function withSearchPrefix(value: string) {
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?") ? value : `?${value}`;
+}
+
+function appendQueryPath(path: string, key: string, value: string) {
+  const url = new URL(path, "http://lamilialomi.local");
+  url.searchParams.set(key, value);
+
+  return `${url.pathname}${url.search}`;
 }

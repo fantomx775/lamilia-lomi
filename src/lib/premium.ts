@@ -1,4 +1,5 @@
 export {
+  applyProductUnlock,
   canDownloadPremiumAsset,
   createSignedDownloadUrl,
   getUnlockedProductViews,

@@ -1,18 +1,21 @@
 import { Download, LockKeyhole, PlayCircle } from "lucide-react";
 import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
 import Image from "next/image";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { AmazonLink } from "@/components/amazon-link";
 import { UnlockForm } from "@/components/unlock-form";
 import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
 import type { Locale } from "@/i18n/routing";
+import { getUnlockIntent } from "@/lib/unlock-intent";
 import { getDemoSession } from "@/lib/session.server";
-import { buildProductJsonLd, buildProductMetadata } from "@/lib/products";
 import {
-  getLocalizedProductViewForRequest,
-} from "@/lib/products-request";
+  buildProductJsonLd,
+  buildProductMetadata,
+} from "@/lib/products";
+import { getLocalizedProductViewForRequest } from "@/lib/products-request";
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>;
@@ -37,7 +40,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function ProductPage({ params, searchParams }: Props) {
   const { locale, slug } = await params;
   const query = await searchParams;
-  const code = Array.isArray(query.code) ? query.code[0] : query.code;
+  const code = stringParam(query.code) ?? stringParam(query.premiumCode);
+  const error = stringParam(query.unlock);
   const [product, session] = await Promise.all([
     getLocalizedProductViewForRequest(slug, locale),
     getDemoSession(),
@@ -47,7 +51,27 @@ export default async function ProductPage({ params, searchParams }: Props) {
     notFound();
   }
 
+  if (code?.trim()) {
+    const unlockParams = new URLSearchParams({ code });
+    const step = stringParam(query.step);
+
+    if (step) {
+      unlockParams.set("step", step.slice(0, 128));
+    }
+
+    redirect(
+      `/api/unlock/${locale}/${product.slug}?${unlockParams.toString()}`,
+    );
+  }
+
+  const unlockIntent = await getUnlockIntent();
+  const hasCurrentIntent =
+    unlockIntent?.locale === locale && unlockIntent.productSlug === product.slug;
+
   const isUnlocked = session?.unlockedProductIds.includes(product.id) ?? false;
+  const copy = await getTranslations("Funnel");
+  const initialCode =
+    hasCurrentIntent ? unlockIntent?.code : undefined;
   const jsonLd = buildProductJsonLd(
     product,
     locale,
@@ -135,15 +159,13 @@ export default async function ProductPage({ params, searchParams }: Props) {
         <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
             <p className="text-sm font-medium text-[var(--color-terracotta)]">
-              Premium
+              {copy("ownerEyebrow")}
             </p>
             <h2 className="mt-2 font-serif text-3xl font-semibold">
-              Unlock product-specific files
+              {copy("ownerTitle")}
             </h2>
             <p className="mt-4 text-[var(--color-muted)]">
-              Premium access is stored per user and product. The demo mode uses
-              a secure HTTP-only cookie; production mode is ready for Supabase
-              Auth, RLS, and private Storage signed URLs.
+              {copy("ownerDescription")}
             </p>
           </div>
           <div className="rounded-lg border border-[var(--color-border)] bg-white/75 p-5">
@@ -151,8 +173,34 @@ export default async function ProductPage({ params, searchParams }: Props) {
               locale={locale}
               productSlug={product.slug}
               productId={product.id}
-              initialCode={code}
+              initialCode={initialCode}
               session={session}
+              error={error}
+              alreadyUnlocked={stringParam(query.unlocked) === "already"}
+              copy={{
+                loginRequired: copy("loginRequired"),
+                loginRequiredDescription: copy("loginRequiredDescription"),
+                verificationRequired: copy("verificationRequired"),
+                verificationRequiredDescription: copy("verificationRequiredDescription"),
+                verifyDemo: copy("verifyDemo"),
+                codeLabel: copy("codeLabel"),
+                codePlaceholder: copy("codePlaceholder"),
+                unlock: copy("unlock"),
+                pending: copy("pending"),
+                login: copy("login"),
+                register: copy("register"),
+                success: copy("success"),
+                already: copy("already"),
+                successDescription: copy("successDescription"),
+                goLibrary: copy("goLibrary"),
+                errors: {
+                  missing_code: copy("missing_code"),
+                  invalid_code: copy("invalid_code"),
+                  inactive_code: copy("inactive_code"),
+                  product_not_found: copy("product_not_found"),
+                  unexpected: copy("unexpected"),
+                },
+              }}
             />
             {isUnlocked && product.premiumAssets.length ? (
               <div className="mt-5 grid gap-3">
@@ -160,10 +208,10 @@ export default async function ProductPage({ params, searchParams }: Props) {
                   <a
                     key={asset.id}
                     className={buttonClassName({ variant: "secondary", className: "w-full" })}
-                    href={`/api/downloads/${asset.id}`}
+                    href={`/api/downloads/${asset.id}?locale=${locale}&returnTo=${encodeURIComponent(`/${locale}/products/${product.slug}`)}`}
                   >
                     <Download className="size-4" aria-hidden />
-                    {asset.title ?? "Download premium file"}
+                    {asset.title ?? copy("download")}
                   </a>
                 ))}
               </div>
@@ -173,4 +221,8 @@ export default async function ProductPage({ params, searchParams }: Props) {
       </section>
     </div>
   );
+}
+
+function stringParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
 }

@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth-resume";
 import { normalizeLocale } from "@/lib/locale";
 import { createClient } from "@/lib/supabase/server";
+import { clearUnlockIntent } from "@/lib/unlock-intent";
 
 export const dynamic = "force-dynamic";
 
@@ -44,9 +45,36 @@ export async function GET(request: Request) {
     return failureResponse(requestUrl, locale);
   }
 
-  await redeemAuthResumeIntent(intent ?? {});
+  const redemption = await redeemAuthResumeIntent(intent ?? {});
   await clearAuthResumeIntent();
+
+  if (redemption?.ok) {
+    await clearUnlockIntent();
+    return successResponse(
+      requestUrl,
+      appendQuery(
+        getAuthResumeRedirect(intent, locale),
+        "unlocked",
+        redemption.status === "already_unlocked" ? "already" : "1",
+      ),
+    );
+  }
+
+  if (redemption && !redemption.ok) {
+    return successResponse(
+      requestUrl,
+      appendQuery(getAuthResumeRedirect(intent, locale), "unlock", redemption.status),
+    );
+  }
+
   return successResponse(requestUrl, getAuthResumeRedirect(intent, locale));
+}
+
+function appendQuery(path: string, key: string, value: string) {
+  const url = new URL(path, "http://lamilialomi.local");
+  url.searchParams.set(key, value);
+
+  return `${url.pathname}${url.search}`;
 }
 
 function successResponse(requestUrl: URL, path: string) {

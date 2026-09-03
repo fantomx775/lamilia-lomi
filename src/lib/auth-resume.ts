@@ -6,21 +6,13 @@ import { normalizeLocale } from "./locale";
 import { getPublicEnv } from "./config";
 import { redeemPremiumCodeForRequest } from "./premium-request";
 import { getProductBySlugForRequest } from "./products-request";
+import { productSlugFromReturnTo, sanitizeReturnTo } from "./return-to";
 import type { Locale } from "@/i18n/routing";
 
 export const authResumeCookieName = "ll_auth_resume";
 export const authResumeMaxAgeSeconds = 15 * 60;
 
-const localOrigin = "http://local.test";
 const productSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const sensitiveQueryKeys = [
-  "code",
-  "premiumCode",
-  "token",
-  "token_hash",
-  "access_token",
-  "refresh_token",
-];
 
 export type AuthResumeIntent = {
   locale: Locale;
@@ -50,7 +42,9 @@ export function createAuthResumeIntent(input: {
     ? `/${locale}/products/${requestedProductSlug}`
     : `/${locale}/account`;
   const returnTo = sanitizeInternalReturnTo(input.returnTo, locale, fallback);
-  const productSlug = requestedProductSlug ?? productSlugFromReturnTo(returnTo, locale);
+  const productSlug =
+    productSlugFromReturnTo(returnTo, locale) ??
+    (input.returnTo == null ? requestedProductSlug : undefined);
 
   return {
     locale,
@@ -66,33 +60,7 @@ export function sanitizeInternalReturnTo(
   locale: Locale,
   fallback = `/${locale}/account`,
 ) {
-  if (!value || value.startsWith("//") || !value.startsWith("/")) {
-    return fallback;
-  }
-
-  try {
-    const url = new URL(value, localOrigin);
-
-    if (url.origin !== localOrigin || url.username || url.password || url.hostname !== "local.test") {
-      return fallback;
-    }
-
-    const localeRoot = `/${locale}`;
-    const isLocalePath = url.pathname === localeRoot || url.pathname.startsWith(`${localeRoot}/`);
-    const isAdminPath = url.pathname === "/admin" || url.pathname.startsWith("/admin/");
-
-    if (!isLocalePath && !isAdminPath) {
-      return fallback;
-    }
-
-    for (const key of sensitiveQueryKeys) {
-      url.searchParams.delete(key);
-    }
-
-    return `${url.pathname}${url.search}`;
-  } catch {
-    return fallback;
-  }
+  return sanitizeReturnTo(value, locale, fallback);
 }
 
 export function getAuthResumeRedirect(
@@ -189,15 +157,6 @@ function normalizeProductSlug(value: string | null | undefined) {
   const normalized = value?.trim().toLowerCase();
 
   return normalized && productSlugPattern.test(normalized) ? normalized : undefined;
-}
-
-function productSlugFromReturnTo(value: string, locale: Locale) {
-  const prefix = `/${locale}/products/`;
-  if (!value.startsWith(prefix)) {
-    return undefined;
-  }
-
-  return normalizeProductSlug(value.slice(prefix.length).split(/[/?#]/, 1)[0]);
 }
 
 function normalizeCode(value: string | null | undefined) {

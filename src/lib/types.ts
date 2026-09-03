@@ -54,6 +54,7 @@ export type ProductAsset = {
   isPublic: boolean;
   isActive?: boolean;
   demoDownloadPath?: string;
+  demoPrivatePath?: string;
 };
 
 export type AmazonLink = {
