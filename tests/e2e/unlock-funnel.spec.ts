@@ -57,6 +57,14 @@ test("generic login opens account creation without unlock context", async ({ pag
   await createAccountLink.click();
   await expect(page).toHaveURL(/\/en\/register$/);
   await expect(page.getByRole("heading", { name: "Create account" })).toBeVisible();
+
+  await page.getByLabel("Email").fill("new-reader@example.com");
+  await page.getByLabel("Password").fill("password123");
+  await page.getByRole("checkbox", { name: /Terms/ }).check();
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(page).toHaveURL(/\/en\/account$/);
+  await expect(page.getByRole("heading", { name: "Account" })).toBeVisible();
 });
 
 test("registration and verification resume the unlock journey", async ({ page }) => {

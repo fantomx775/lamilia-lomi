@@ -102,6 +102,9 @@ beforeEach(() => {
   actionMocks.createAuthResumeIntent.mockImplementation(({ locale, returnTo, code }) => ({
     locale: locale ?? "en",
     returnTo: returnTo ?? "/en/account",
+    productSlug: returnTo?.includes("/products/")
+      ? "moon-garden-coloring-book"
+      : undefined,
     code,
   }));
   actionMocks.redirect.mockImplementation((location: string) => {
@@ -112,7 +115,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-function registrationForm(returnTo?: string) {
+function registrationForm(returnTo?: string, code?: string) {
   const formData = new FormData();
   formData.set("locale", "en");
   formData.set("email", "reader@example.com");
@@ -121,6 +124,10 @@ function registrationForm(returnTo?: string) {
 
   if (returnTo) {
     formData.set("returnTo", returnTo);
+  }
+
+  if (code) {
+    formData.set("code", code);
   }
 
   return formData;
@@ -177,7 +184,10 @@ describe("registration auth action", () => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     actionMocks.createClient.mockResolvedValue({
       auth: {
-        signUp: vi.fn().mockResolvedValue({ error: null }),
+        signUp: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-id" }, session: null },
+          error: null,
+        }),
       },
     });
 
@@ -199,7 +209,10 @@ describe("registration auth action", () => {
     });
     actionMocks.createClient.mockResolvedValue({
       auth: {
-        signUp: vi.fn().mockResolvedValue({ error: null }),
+        signUp: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-id" }, session: null },
+          error: null,
+        }),
       },
     });
 
@@ -209,5 +222,102 @@ describe("registration auth action", () => {
       ),
       "/en/products/moon-garden-coloring-book?step=verify",
     );
+  });
+
+  it("redirects a generic Supabase signup with an active session to the account", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.createClient.mockResolvedValue({
+      auth: {
+        signUp: vi.fn().mockResolvedValue({
+          data: {
+            user: { id: "user-id", email_confirmed_at: "2026-09-04T10:00:00.000Z" },
+            session: { access_token: "access-token" },
+          },
+          error: null,
+        }),
+      },
+    });
+
+    await expectRedirect(registerDemoAction(registrationForm()), "/en/account");
+
+    expect(actionMocks.redirect.mock.calls[0]?.[0]).toBe("/en/account");
+    expect(actionMocks.redirect.mock.calls[0]?.[0]).not.toContain("verification_sent");
+    expect(actionMocks.clearAuthResumeIntent).toHaveBeenCalledTimes(1);
+    expect(actionMocks.redeemAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ returnTo: "/en/account", productSlug: undefined }),
+    );
+  });
+
+  it("continues an active-session Supabase unlock signup through redemption", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+      reviewDelayDays: 7,
+    });
+    actionMocks.redeemAuthResumeIntent.mockResolvedValue({
+      ok: true,
+      status: "success",
+    });
+    actionMocks.createClient.mockResolvedValue({
+      auth: {
+        signUp: vi.fn().mockResolvedValue({
+          data: {
+            user: { id: "user-id", email_confirmed_at: "2026-09-04T10:00:00.000Z" },
+            session: { access_token: "access-token" },
+          },
+          error: null,
+        }),
+      },
+    });
+
+    await expectRedirect(
+      registerDemoAction(
+        registrationForm("/en/products/moon-garden-coloring-book", "LOMI-BOOK-2026"),
+      ),
+      "/en/products/moon-garden-coloring-book?unlocked=1",
+    );
+
+    expect(actionMocks.redeemAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productSlug: "moon-garden-coloring-book",
+        code: "LOMI-BOOK-2026",
+      }),
+    );
+    expect(actionMocks.scheduleReviewReminder).toHaveBeenCalled();
+    expect(actionMocks.redirect.mock.calls.flat().join(" ")).not.toContain("LOMI-BOOK-2026");
+  });
+
+  it.each([
+    ["already_unlocked", "/en/products/moon-garden-coloring-book?unlocked=already"],
+    ["email_unverified", "/en/products/moon-garden-coloring-book?step=verify"],
+    ["invalid_code", "/en/products/moon-garden-coloring-book?unlock=invalid_code"],
+  ] as const)("maps active-session unlock signup result %s safely", async (status, location) => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+    });
+    actionMocks.redeemAuthResumeIntent.mockResolvedValue({
+      ok: status === "already_unlocked",
+      status,
+    });
+    actionMocks.createClient.mockResolvedValue({
+      auth: {
+        signUp: vi.fn().mockResolvedValue({
+          data: { user: { id: "user-id" }, session: { access_token: "access-token" } },
+          error: null,
+        }),
+      },
+    });
+
+    await expectRedirect(
+      registerDemoAction(
+        registrationForm("/en/products/moon-garden-coloring-book", "LOMI-BOOK-2026"),
+      ),
+      location,
+    );
+
+    expect(actionMocks.redirect.mock.calls.flat().join(" ")).not.toContain("LOMI-BOOK-2026");
   });
 });
