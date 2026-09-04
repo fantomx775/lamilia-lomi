@@ -9,6 +9,7 @@ const auth = {
 
 vi.mock("@/lib/config", () => ({
   getBackendMode: () => "supabase",
+  getCanonicalAppUrl: () => new URL("https://canonical.lamilialomi.example"),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -37,7 +38,9 @@ describe("Supabase auth callback", () => {
 
     expect(auth.exchangeCodeForSession).toHaveBeenCalledWith("valid");
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toBe("https://app.example/en/account");
+    expect(response.headers.get("location")).toBe(
+      "https://canonical.lamilialomi.example/en/account",
+    );
     expect(response.headers.get("location")).not.toContain("valid");
   });
 
@@ -48,7 +51,7 @@ describe("Supabase auth callback", () => {
 
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toBe(
-      "https://app.example/pl/login?error=verification_failed",
+      "https://canonical.lamilialomi.example/pl/login?error=verification_failed",
     );
   });
 
@@ -59,7 +62,7 @@ describe("Supabase auth callback", () => {
     const response = await GET(new Request("https://app.example/auth/callback?code=invalid&locale=en"));
 
     expect(response.headers.get("location")).toBe(
-      "https://app.example/en/login?error=verification_failed",
+      "https://canonical.lamilialomi.example/en/login?error=verification_failed",
     );
   });
 
@@ -71,6 +74,8 @@ describe("Supabase auth callback", () => {
 
     const response = await GET(new Request("https://app.example/auth/callback?code=reused&locale=en"));
 
-    expect(response.headers.get("location")).toBe("https://app.example/en/account");
+    expect(response.headers.get("location")).toBe(
+      "https://canonical.lamilialomi.example/en/account",
+    );
   });
 });

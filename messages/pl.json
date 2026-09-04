@@ -64,6 +64,9 @@
     "createAccountButton": "Utwórz konto",
     "registerPending": "Tworzenie konta…",
     "invalid": "Użyj prawidłowego e-maila i hasła oraz zaakceptuj Regulamin i Politykę prywatności.",
+    "emailNotConfirmed": "Twój adres e-mail nie został jeszcze zweryfikowany. Sprawdź skrzynkę lub poproś o nową wiadomość weryfikacyjną.",
+    "verificationSent": "Jeśli konto może odbierać wiadomości, wysłaliśmy link weryfikacyjny. Sprawdź skrzynkę i spam.",
+    "resendVerification": "Wyślij ponownie wiadomość weryfikacyjną",
     "termsLink": "Regulamin",
     "privacyLink": "Polityka prywatności"
   },

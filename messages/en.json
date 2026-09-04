@@ -64,6 +64,9 @@
     "createAccountButton": "Create account",
     "registerPending": "Creating account…",
     "invalid": "Please use a valid email and password and accept the Terms and Privacy Policy.",
+    "emailNotConfirmed": "Your email address is not verified yet. Check your inbox or request a new verification email.",
+    "verificationSent": "If that account can receive email, we sent a verification link. Check your inbox and spam folder.",
+    "resendVerification": "Send verification email again",
     "termsLink": "Terms",
     "privacyLink": "Privacy Policy"
   },

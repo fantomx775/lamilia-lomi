@@ -3,7 +3,7 @@ import "server-only";
 import { cookies } from "next/headers";
 
 import { normalizeLocale } from "./locale";
-import { getPublicEnv } from "./config";
+import { getCanonicalAppUrl } from "./config";
 import { redeemPremiumCodeForRequest } from "./premium-request";
 import { getProductBySlugForRequest } from "./products-request";
 import { productSlugFromReturnTo, sanitizeReturnTo } from "./return-to";
@@ -23,7 +23,7 @@ export type AuthResumeIntent = {
 };
 
 export function buildSupabaseAuthCallbackUrl(locale: string) {
-  const url = new URL("/auth/callback", getPublicEnv().appUrl);
+  const url = new URL("/auth/callback", getCanonicalAppUrl());
   url.searchParams.set("locale", normalizeLocale(locale));
 
   return url.toString();

@@ -64,6 +64,9 @@
     "createAccountButton": "Crear cuenta",
     "registerPending": "Creando cuenta…",
     "invalid": "Usa un correo y una contraseña válidos y acepta los Términos y la Política de privacidad.",
+    "emailNotConfirmed": "Tu correo electrónico aún no está verificado. Revisa tu bandeja de entrada o solicita un nuevo correo de verificación.",
+    "verificationSent": "Si la cuenta puede recibir correos, enviamos un enlace de verificación. Revisa también la carpeta de spam.",
+    "resendVerification": "Enviar de nuevo el correo de verificación",
     "termsLink": "Términos",
     "privacyLink": "Política de privacidad"
   },

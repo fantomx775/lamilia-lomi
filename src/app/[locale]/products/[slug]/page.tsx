@@ -11,6 +11,8 @@ import { buttonClassName } from "@/components/ui/button";
 import type { Locale } from "@/i18n/routing";
 import { getUnlockIntent } from "@/lib/unlock-intent";
 import { getDemoSession } from "@/lib/session.server";
+import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
+import { createSignedDownloadUrl } from "@/lib/premium-core";
 import {
   buildProductJsonLd,
   buildProductMetadata,
@@ -33,7 +35,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return buildProductMetadata(
     product,
     locale,
-    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    getCanonicalAppUrl().origin,
   );
 }
 
@@ -69,13 +71,40 @@ export default async function ProductPage({ params, searchParams }: Props) {
     unlockIntent?.locale === locale && unlockIntent.productSlug === product.slug;
 
   const isUnlocked = session?.unlockedProductIds.includes(product.id) ?? false;
+  const backendMode = getBackendMode();
+  const localDownloadUrls = new Map<string, string>();
+
+  if (backendMode === "local" && session?.emailVerified && isUnlocked) {
+    for (const asset of product.premiumAssets) {
+      const signedUrl = createSignedDownloadUrl({
+        asset,
+        product: { id: product.id, status: product.status },
+        session,
+      });
+
+      if (signedUrl.ok) {
+        localDownloadUrls.set(asset.id, signedUrl.url);
+      }
+    }
+  }
+
+  const downloadLinks = product.premiumAssets
+    .map((asset) => ({
+      asset,
+      href:
+        backendMode === "local"
+          ? localDownloadUrls.get(asset.id)
+          : `/api/downloads/${asset.id}?locale=${locale}&returnTo=${encodeURIComponent(`/${locale}/products/${product.slug}`)}`,
+    }))
+    .filter((link): link is { asset: (typeof product.premiumAssets)[number]; href: string } => Boolean(link.href));
+
   const copy = await getTranslations("Funnel");
   const initialCode =
     hasCurrentIntent ? unlockIntent?.code : undefined;
   const jsonLd = buildProductJsonLd(
     product,
     locale,
-    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    getCanonicalAppUrl().origin,
   );
 
   return (
@@ -202,13 +231,13 @@ export default async function ProductPage({ params, searchParams }: Props) {
                 },
               }}
             />
-            {isUnlocked && product.premiumAssets.length ? (
+            {session?.emailVerified && isUnlocked && product.premiumAssets.length ? (
               <div className="mt-5 grid gap-3">
-                {product.premiumAssets.map((asset) => (
+                {downloadLinks.map(({ asset, href }) => (
                   <a
                     key={asset.id}
                     className={buttonClassName({ variant: "secondary", className: "w-full" })}
-                    href={`/api/downloads/${asset.id}?locale=${locale}&returnTo=${encodeURIComponent(`/${locale}/products/${product.slug}`)}`}
+                    href={href}
                   >
                     <Download className="size-4" aria-hidden />
                     {asset.title ?? copy("download")}

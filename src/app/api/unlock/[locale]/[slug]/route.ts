@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getCanonicalAppUrl } from "@/lib/config";
 import { isSupportedLocale } from "@/lib/locale";
 import { getLocalizedProductViewForRequest } from "@/lib/products-request";
 import {
@@ -53,7 +54,7 @@ export async function GET(request: Request, { params }: Props) {
 
   const target = new URL(
     `/${locale}/products/${product.slug}`,
-    getRequestOrigin(request, requestUrl),
+    getCanonicalAppUrl(),
   );
 
   for (const key of ["step", "unlock", "unlocked"]) {
@@ -69,11 +70,4 @@ export async function GET(request: Request, { params }: Props) {
   response.headers.set("Cache-Control", "private, no-store");
 
   return response;
-}
-
-function getRequestOrigin(request: Request, requestUrl: URL) {
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
-  const protocol = request.headers.get("x-forwarded-proto")?.split(",", 1)[0] ?? requestUrl.protocol.slice(0, -1);
-
-  return host ? `${protocol}://${host}` : requestUrl.origin;
 }

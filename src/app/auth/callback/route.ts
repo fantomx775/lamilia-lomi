@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getBackendMode } from "@/lib/config";
+import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import {
   clearAuthResumeIntent,
   getAuthResumeRedirect,
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const intent = await readAuthResumeIntent();
 
   if (getBackendMode() !== "supabase") {
-    return failureResponse(requestUrl, locale);
+    return failureResponse(locale);
   }
 
   const supabase = await createClient();
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       const { data } = await supabase.auth.getUser();
 
       if (!data.user?.email_confirmed_at) {
-        return failureResponse(requestUrl, locale);
+        return failureResponse(locale);
       }
     }
   }
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
   const { data } = await supabase.auth.getUser();
 
   if (!data.user?.email_confirmed_at) {
-    return failureResponse(requestUrl, locale);
+    return failureResponse(locale);
   }
 
   const redemption = await redeemAuthResumeIntent(intent ?? {});
@@ -51,7 +51,6 @@ export async function GET(request: Request) {
   if (redemption?.ok) {
     await clearUnlockIntent();
     return successResponse(
-      requestUrl,
       appendQuery(
         getAuthResumeRedirect(intent, locale),
         "unlocked",
@@ -62,12 +61,11 @@ export async function GET(request: Request) {
 
   if (redemption && !redemption.ok) {
     return successResponse(
-      requestUrl,
       appendQuery(getAuthResumeRedirect(intent, locale), "unlock", redemption.status),
     );
   }
 
-  return successResponse(requestUrl, getAuthResumeRedirect(intent, locale));
+  return successResponse(getAuthResumeRedirect(intent, locale));
 }
 
 function appendQuery(path: string, key: string, value: string) {
@@ -77,16 +75,16 @@ function appendQuery(path: string, key: string, value: string) {
   return `${url.pathname}${url.search}`;
 }
 
-function successResponse(requestUrl: URL, path: string) {
-  const response = NextResponse.redirect(new URL(path, requestUrl.origin));
+function successResponse(path: string) {
+  const response = NextResponse.redirect(new URL(path, getCanonicalAppUrl()));
   response.headers.set("Cache-Control", "private, no-store");
 
   return response;
 }
 
-function failureResponse(requestUrl: URL, locale: string) {
+function failureResponse(locale: string) {
   const response = NextResponse.redirect(
-    new URL(`/${locale}/login?error=verification_failed`, requestUrl.origin),
+    new URL(`/${locale}/login?error=verification_failed`, getCanonicalAppUrl()),
   );
   response.headers.set("Cache-Control", "private, no-store");
 

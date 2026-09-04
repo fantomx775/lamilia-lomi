@@ -85,7 +85,16 @@ test("verified owner reaches Library and downloads only through the authorized r
   await page.getByRole("link", { name: "Go to My Library" }).click();
   await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
   await page.getByRole("link", { name: /Moon Garden Coloring Book/ }).click();
-  const downloadResponse = await page.request.get(`/api/downloads/${premiumAssetId}?locale=en&returnTo=%2Fen%2Fproducts%2F${productSlug}`);
+  const directDownloadResponse = await page.request.get(
+    `/api/downloads/${premiumAssetId}?locale=en&returnTo=%2Fen%2Fproducts%2F${productSlug}`,
+  );
+  expect(directDownloadResponse.status()).toBe(403);
+
+  const downloadLink = page.locator(`a[href*="/api/downloads/${premiumAssetId}"]`);
+  await expect(downloadLink).toHaveAttribute("href", /expires=.*token=/);
+  const downloadHref = await downloadLink.getAttribute("href");
+  expect(downloadHref).toBeTruthy();
+  const downloadResponse = await page.request.get(downloadHref!);
 
   expect(downloadResponse.status()).toBe(200);
   expect(downloadResponse.headers()["content-disposition"]).toContain("moon-garden-bonus.pdf");

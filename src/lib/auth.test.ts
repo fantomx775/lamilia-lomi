@@ -5,6 +5,7 @@ import {
   createDemoSession,
   hasAdminAccess,
   isUnlockRegistrationContext,
+  isSupabaseEmailNotConfirmedError,
   parseDemoSession,
   serializeDemoSession,
   validateRegistrationInput,
@@ -81,6 +82,12 @@ describe("auth behavior", () => {
     expect(isUnlockRegistrationContext({ locale: "en", redirectTo: "/en/library" })).toBe(
       false,
     );
+  });
+
+  it("recognizes Supabase email confirmation failures without trusting error text", () => {
+    expect(isSupabaseEmailNotConfirmedError({ code: "email_not_confirmed" })).toBe(true);
+    expect(isSupabaseEmailNotConfirmedError({ message: "email not confirmed" })).toBe(false);
+    expect(isSupabaseEmailNotConfirmedError({ code: "invalid_credentials" })).toBe(false);
   });
 
   it("detects admin access from role, not editable metadata", () => {

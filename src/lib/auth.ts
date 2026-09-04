@@ -93,6 +93,15 @@ export function hasAdminAccess(session?: Pick<DemoSession, "role"> | null) {
   return session?.role === "admin";
 }
 
+export function isSupabaseEmailNotConfirmedError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "email_not_confirmed"
+  );
+}
+
 export function parseDemoSession(value: string | undefined): DemoSession | null {
   if (!value) {
     return null;

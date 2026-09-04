@@ -15,8 +15,14 @@ export async function GET(
   context: { params: Promise<{ assetId: string }> },
 ) {
   const { assetId } = await context.params;
+  const requestUrl = new URL(request.url);
   const asset = await getAssetByIdForRequest(assetId);
-  const signedUrl = await authorizePremiumDownloadForRequest(assetId);
+  const token = requestUrl.searchParams.get("token");
+  const expires = requestUrl.searchParams.get("expires");
+  const signedUrl = await authorizePremiumDownloadForRequest(assetId, {
+    ...(token !== null ? { token } : {}),
+    ...(expires !== null ? { expires } : {}),
+  });
 
   if (!signedUrl.ok) {
     const next =
@@ -57,7 +63,7 @@ export async function GET(
     let file: Buffer;
 
     try {
-      file = await readFile(filePath);
+      file = await readFile(/* turbopackIgnore: true */ filePath);
     } catch {
       return NextResponse.json(
         { ok: false, reason: "unavailable" },
@@ -77,6 +83,13 @@ export async function GET(
 
     setDownloadEvent(response, asset);
     return response;
+  }
+
+  if (!("url" in signedUrl) || typeof signedUrl.url !== "string") {
+    return NextResponse.json(
+      { ok: false, reason: "backend_contract_missing" },
+      { status: 503 },
+    );
   }
 
   const redirectTarget = new URL(signedUrl.url, request.url);

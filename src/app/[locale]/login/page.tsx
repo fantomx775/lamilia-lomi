@@ -2,7 +2,7 @@ import { LogIn } from "lucide-react";
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
-import { loginDemoAction } from "@/app/actions";
+import { loginDemoAction, resendSupabaseVerificationEmailAction } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,18 @@ export default async function LoginPage({ params, searchParams }: Props) {
       : "";
   const error = stringParam(query.error);
   const canCreateAccount = isUnlockRegistrationContext({ locale, redirectTo });
+  const verificationMessage =
+    error === "email_unverified"
+      ? t("emailNotConfirmed")
+      : error === "verification_sent" || error === "verification_unavailable"
+        ? t("verificationSent")
+        : error
+          ? t("invalid")
+          : null;
+  const canResendVerification =
+    error === "email_unverified" ||
+    error === "verification_sent" ||
+    error === "verification_unavailable";
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">
@@ -44,9 +56,9 @@ export default async function LoginPage({ params, searchParams }: Props) {
           <p className="text-sm leading-6 text-[var(--color-muted)]">
             {t("loginDescription")}
           </p>
-          {error ? (
+          {verificationMessage ? (
             <p className="rounded-md bg-[var(--color-blush)] p-3 text-sm" role="alert">
-              {t("invalid")}
+              {verificationMessage}
             </p>
           ) : null}
         </CardHeader>
@@ -65,6 +77,16 @@ export default async function LoginPage({ params, searchParams }: Props) {
             </div>
             <SubmitButton pendingLabel={t("pending")}>{t("continue")}</SubmitButton>
           </form>
+          {canResendVerification ? (
+            <form action={resendSupabaseVerificationEmailAction} className="mt-6 grid gap-3 border-t border-[var(--color-border)] pt-5">
+              <input type="hidden" name="locale" value={locale} />
+              <input type="hidden" name="returnTo" value={redirectTo} />
+              <input type="hidden" name="code" value={code} />
+              <Label htmlFor="verification-email">{t("email")}</Label>
+              <Input id="verification-email" name="email" type="email" autoComplete="email" required />
+              <SubmitButton pendingLabel={t("pending")}>{t("resendVerification")}</SubmitButton>
+            </form>
+          ) : null}
           <div className="mt-5 flex items-center justify-between gap-3 text-sm">
             <Link className="text-[var(--color-terracotta)]" href={`/${locale}/reset-password`}>
               {t("reset")}

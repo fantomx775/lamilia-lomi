@@ -7,6 +7,8 @@ type EnvLike = Record<string, string | undefined>;
 
 export type BackendMode = "supabase" | "local";
 
+const localAppUrl = "http://127.0.0.1:3000";
+
 export class AppConfigurationError extends Error {
   readonly code = "CONFIGURATION_ERROR";
 
@@ -25,33 +27,100 @@ export function getPublicEnv(
       env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
       env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
       "",
-    appUrl: env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    appUrl: getCanonicalAppUrl(env).origin,
   };
+}
+
+export function getCanonicalAppUrl(env: EnvLike = process.env) {
+  const configuredAppUrl = env.NEXT_PUBLIC_APP_URL?.trim();
+  const rawAppUrl = configuredAppUrl || (allowsLocalDefaults(env) ? localAppUrl : "");
+
+  if (!rawAppUrl) {
+    throw new AppConfigurationError(
+      "NEXT_PUBLIC_APP_URL is required in Supabase and production mode.",
+    );
+  }
+
+  let parsed: URL;
+
+  try {
+    parsed = new URL(rawAppUrl);
+  } catch {
+    throw new AppConfigurationError(
+      "NEXT_PUBLIC_APP_URL must be an absolute URL.",
+    );
+  }
+
+  if (
+    !["http:", "https:"].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== "/" ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new AppConfigurationError(
+      "NEXT_PUBLIC_APP_URL must be an absolute origin without credentials, path, query, or hash.",
+    );
+  }
+
+  if (requiresHttps(env) && parsed.protocol !== "https:") {
+    throw new AppConfigurationError(
+      "NEXT_PUBLIC_APP_URL must use HTTPS in Supabase and production mode.",
+    );
+  }
+
+  if (
+    parsed.protocol === "http:" &&
+    (!allowsLocalDefaults(env) || !isLocalHostname(parsed.hostname))
+  ) {
+    throw new AppConfigurationError(
+      "HTTP NEXT_PUBLIC_APP_URL is only allowed for an explicit local or test configuration.",
+    );
+  }
+
+  return new URL(parsed.origin);
 }
 
 export function getMissingPublicEnv(
   env: EnvLike = process.env,
 ) {
-  const values = getPublicEnv(env);
+  const values = {
+    supabaseUrl: env.NEXT_PUBLIC_SUPABASE_URL ?? "",
+    supabasePublishableKey:
+      env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+      env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
+      "",
+  };
+  let appUrlIsValid = true;
+
+  try {
+    getCanonicalAppUrl(env);
+  } catch {
+    appUrlIsValid = false;
+  }
 
   return [
     values.supabaseUrl ? null : "NEXT_PUBLIC_SUPABASE_URL",
     values.supabasePublishableKey ? null : "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-    values.appUrl ? null : "NEXT_PUBLIC_APP_URL",
+    appUrlIsValid ? null : "NEXT_PUBLIC_APP_URL",
   ].filter((name): name is PublicEnvName => Boolean(name));
 }
 
 export function isSupabaseConfigured() {
-  const env = getPublicEnv();
+  const env = process.env;
 
-  return Boolean(env.supabaseUrl && env.supabasePublishableKey);
+  return Boolean(
+    env.NEXT_PUBLIC_SUPABASE_URL &&
+      (env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+  );
 }
 
 export function getBackendMode(env: EnvLike = process.env): BackendMode {
   const configuredMode = env.LAMILIA_BACKEND?.trim().toLowerCase();
 
   if (configuredMode === "local") {
-    if (env.NODE_ENV === "production") {
+    if (env.NODE_ENV === "production" && env.NEXT_PHASE !== "phase-production-build") {
       throw new AppConfigurationError(
         "LAMILIA_BACKEND=local is not allowed in production.",
       );
@@ -64,24 +133,15 @@ export function getBackendMode(env: EnvLike = process.env): BackendMode {
     return "supabase";
   }
 
-  if (env.NODE_ENV === "test" || env.VITEST) {
-    return "local";
-  }
-
-  if (env.NEXT_PHASE === "phase-production-build") {
-    return "local";
-  }
-
   throw new AppConfigurationError(
     "LAMILIA_BACKEND must be explicitly set to supabase or local.",
   );
 }
 
 export function getRequiredSupabaseEnv(env: EnvLike = process.env) {
-  const publicEnv = getPublicEnv(env);
   const missing = [
-    publicEnv.supabaseUrl ? null : "NEXT_PUBLIC_SUPABASE_URL",
-    publicEnv.supabasePublishableKey
+    env.NEXT_PUBLIC_SUPABASE_URL ? null : "NEXT_PUBLIC_SUPABASE_URL",
+    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY
       ? null
       : "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   ].filter((name): name is string => Boolean(name));
@@ -92,9 +152,13 @@ export function getRequiredSupabaseEnv(env: EnvLike = process.env) {
     );
   }
 
+  const appUrl = getCanonicalAppUrl(env);
+
   return {
-    url: publicEnv.supabaseUrl,
-    publishableKey: publicEnv.supabasePublishableKey,
+    url: env.NEXT_PUBLIC_SUPABASE_URL!,
+    publishableKey:
+      env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    appUrl: appUrl.origin,
   };
 }
 
@@ -108,4 +172,30 @@ export function getServiceRoleKey(env: EnvLike = process.env) {
   }
 
   return value;
+}
+
+function requiresHttps(env: EnvLike) {
+  return (
+    env.LAMILIA_BACKEND?.trim().toLowerCase() === "supabase" ||
+    (env.NODE_ENV === "production" && env.NEXT_PHASE !== "phase-production-build")
+  );
+}
+
+function allowsLocalDefaults(env: EnvLike) {
+  const configuredMode = env.LAMILIA_BACKEND?.trim().toLowerCase();
+
+  if (configuredMode === "supabase") {
+    return false;
+  }
+
+  return (
+    configuredMode === "local" ||
+    env.NODE_ENV === "test" ||
+    Boolean(env.VITEST) ||
+    (!configuredMode && env.NODE_ENV !== "production")
+  );
+}
+
+function isLocalHostname(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }

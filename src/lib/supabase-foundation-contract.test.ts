@@ -39,6 +39,9 @@ describe("Supabase production foundation contracts", () => {
     const atomicMigration = read(
       "supabase/migrations/20260816113722_atomic_product_save.sql",
     );
+    const verifiedDownloadsMigration = read(
+      "supabase/migrations/20260904120000_require_verified_premium_downloads.sql",
+    );
     const concurrencyTest = read(
       "supabase/tests/atomic-product-save-concurrency.sql",
     );
@@ -64,7 +67,15 @@ describe("Supabase production foundation contracts", () => {
     expect(migration).toContain("status = 'published'");
     expect(migration).toContain("p.status = 'published'");
     expect(rlsTest).toContain("LOMI-DRAFT-2026");
-    expect(rlsTest).toContain("RLS matrix complete: 53 positive scenarios passed");
+    expect(rlsTest).toContain("RLS matrix complete: 56 positive scenarios passed");
+    expect(verifiedDownloadsMigration).toContain(
+      "create or replace function private.is_email_verified()",
+    );
+    expect(verifiedDownloadsMigration).toContain("email_confirmed_at is not null");
+    expect(verifiedDownloadsMigration).toContain("private.is_email_verified()");
+    expect(verifiedDownloadsMigration).toContain(
+      'create policy "premium objects are readable after unlock"',
+    );
     expect(atomicMigration).toContain("create or replace function private.save_product(product_state jsonb)");
     expect(atomicMigration).toContain("pg_advisory_xact_lock");
     expect(atomicMigration).toContain("is_active boolean not null default true");
@@ -79,7 +90,9 @@ describe("Supabase production foundation contracts", () => {
     expect(authActions).toContain("buildSupabaseAuthCallbackUrl(locale)");
     expect(authActions).toContain("setAuthResumeIntent");
     expect(authActions).toContain("redeemAuthResumeIntent");
-    expect(playwrightConfig).toContain('env: { LAMILIA_BACKEND: "local" }');
+    expect(authActions).toContain("await supabase.auth.resend({");
+    expect(playwrightConfig).toContain('LAMILIA_BACKEND: "local"');
+    expect(playwrightConfig).toContain('NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000"');
 
     for (const table of [
       "profiles",

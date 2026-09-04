@@ -7,6 +7,7 @@ import {
   buildAuthRedirect,
   createDemoSession,
   isUnlockRegistrationContext,
+  isSupabaseEmailNotConfirmedError,
   validateRegistrationInput,
 } from "@/lib/auth";
 import {
@@ -180,7 +181,10 @@ export async function loginDemoAction(formData: FormData) {
 
     if (error) {
       await setAuthResumeIntent({ locale, returnTo, code });
-      redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
+      const errorCode = isSupabaseEmailNotConfirmedError(error)
+        ? "email_unverified"
+        : "invalid_credentials";
+      redirect(`/${locale}/login?error=${errorCode}&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
     await setAuthResumeIntent({
@@ -240,6 +244,37 @@ export async function loginDemoAction(formData: FormData) {
   );
 
   redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
+}
+
+export async function resendSupabaseVerificationEmailAction(formData: FormData) {
+  const locale = normalizeLocale(text(formData, "locale"));
+  const returnTo = sanitizeReturnTo(
+    text(formData, "returnTo") || text(formData, "redirectTo"),
+    locale,
+  );
+  const code = text(formData, "code");
+
+  if (getBackendMode() !== "supabase") {
+    redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
+  }
+
+  await setAuthResumeIntent({
+    locale,
+    productSlug: productSlugFromReturnTo(returnTo, locale),
+    returnTo,
+    code,
+  });
+
+  const supabase = await createClient();
+  await supabase.auth.resend({
+    type: "signup",
+    email: text(formData, "email"),
+    options: { emailRedirectTo: buildSupabaseAuthCallbackUrl(locale) },
+  });
+
+  redirect(
+    `/${locale}/login?error=verification_sent&returnTo=${encodeURIComponent(returnTo)}`,
+  );
 }
 
 export async function registerDemoAction(formData: FormData) {

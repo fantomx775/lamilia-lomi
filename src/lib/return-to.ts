@@ -43,6 +43,22 @@ export function sanitizeReturnTo(
       url.searchParams.delete(key);
     }
 
+    for (const key of ["returnTo", "redirectTo"]) {
+      const nested = url.searchParams.get(key);
+
+      if (nested === null) {
+        continue;
+      }
+
+      const safeNested = sanitizeReturnTo(nested, locale, "");
+
+      if (!safeNested) {
+        return safeFallback;
+      }
+
+      url.searchParams.set(key, safeNested);
+    }
+
     return `${url.pathname}${url.search}`;
   } catch {
     return safeFallback;

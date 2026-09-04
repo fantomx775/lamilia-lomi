@@ -155,5 +155,5 @@ export type DownloadDecision =
   | { allowed: true; reason: "allowed" }
   | {
       allowed: false;
-      reason: "guest" | "unverified" | "locked" | "wrong_asset";
+      reason: "guest" | "unverified" | "locked" | "wrong_asset" | "invalid_token";
     };

@@ -8,6 +8,7 @@ import {
   createSignedDownloadUrl,
   normalizePremiumCode,
   validatePremiumCode,
+  verifySignedDownloadUrl,
 } from "./premium";
 
 describe("premium access behavior", () => {
@@ -123,12 +124,58 @@ describe("premium access behavior", () => {
 
     const signedUrl = createSignedDownloadUrl({
       asset,
+      product: { id: product.id, status: product.status },
       session,
       now: new Date("2026-05-31T10:00:00.000Z"),
     });
 
     expect(signedUrl.ok).toBe(true);
     expect(signedUrl.ok && signedUrl.url).toContain("token=");
+    expect(signedUrl.ok && signedUrl.url).toContain("expires=");
     expect(signedUrl.ok && signedUrl.url).not.toContain("/demo-premium/");
+
+    if (signedUrl.ok) {
+      const signed = new URL(signedUrl.url, "http://localhost:3000");
+      expect(
+        verifySignedDownloadUrl({
+          asset,
+          product: { id: product.id, status: product.status },
+          session,
+          token: signed.searchParams.get("token"),
+          expires: signed.searchParams.get("expires"),
+          now: new Date("2026-05-31T10:05:00.000Z"),
+        }).ok,
+      ).toBe(true);
+      expect(
+        verifySignedDownloadUrl({
+          asset,
+          product: { id: product.id, status: product.status },
+          session,
+          token: "forged",
+          expires: signed.searchParams.get("expires"),
+          now: new Date("2026-05-31T10:05:00.000Z"),
+        }),
+      ).toMatchObject({ ok: false, decision: { reason: "invalid_token" } });
+      expect(
+        verifySignedDownloadUrl({
+          asset,
+          product: { id: product.id, status: product.status },
+          session,
+          token: null,
+          expires: null,
+          now: new Date("2026-05-31T10:05:00.000Z"),
+        }),
+      ).toMatchObject({ ok: false, decision: { reason: "invalid_token" } });
+      expect(
+        verifySignedDownloadUrl({
+          asset,
+          product: { id: product.id, status: "archived" },
+          session,
+          token: signed.searchParams.get("token"),
+          expires: signed.searchParams.get("expires"),
+          now: new Date("2026-05-31T10:05:00.000Z"),
+        }),
+      ).toMatchObject({ ok: false, decision: { reason: "wrong_asset" } });
+    }
   });
 });

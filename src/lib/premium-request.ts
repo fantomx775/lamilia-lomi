@@ -3,13 +3,13 @@ import "server-only";
 import { getBackendMode } from "./config";
 import { getContentSnapshot } from "./content-store";
 import { getSupabaseAuthContext, getDemoSession, setDemoSession } from "./session.server";
-import { getAssetByIdForRequest } from "./products-request";
+import { getAssetByIdForRequest, getProductByIdForRequest } from "./products-request";
 import type { ProductAsset } from "./types";
 import { getProductBySlug } from "./products";
 import {
   canDownloadPremiumAsset,
-  createSignedDownloadUrl,
   normalizePremiumCode,
+  verifySignedDownloadUrl,
 } from "./premium-core";
 
 export type PremiumRedemptionResult =
@@ -108,19 +108,29 @@ export async function redeemPremiumCodeForRequest(input: {
   return mapPremiumRedemptionResult(data, normalizedCode, input.productId);
 }
 
-export async function authorizePremiumDownloadForRequest(assetId: string) {
+export async function authorizePremiumDownloadForRequest(
+  assetId: string,
+  input: { token?: string | null; expires?: string | null } = {},
+) {
   if (getBackendMode() === "local") {
     const session = await getDemoSession();
     const asset = await getAssetByIdForRequest(assetId);
+    const product = asset ? await getProductByIdForRequest(asset.productId) : null;
 
-    if (!session || !asset) {
+    if (!session || !asset || !product) {
       return {
         ok: false as const,
-        decision: canDownloadPremiumAsset({ session, asset }),
+        decision: canDownloadPremiumAsset({ session, asset, product }),
       };
     }
 
-    return createSignedDownloadUrl({ asset, session });
+    return verifySignedDownloadUrl({
+      asset,
+      product,
+      session,
+      token: input.token,
+      expires: input.expires,
+    });
   }
 
   const { supabase, user } = await getSupabaseAuthContext();
@@ -132,10 +142,19 @@ export async function authorizePremiumDownloadForRequest(assetId: string) {
     };
   }
 
+  if (!user.email_confirmed_at) {
+    return {
+      ok: false as const,
+      decision: { allowed: false as const, reason: "unverified" as const },
+    };
+  }
+
   const { data: assetRow, error: assetError } = await supabase
     .from("product_assets")
     .select("id, product_id, kind, bucket, path, filename, content_type, size_bytes, locale, title, sort_order, is_public, is_active")
     .eq("id", assetId)
+    .eq("kind", "premium_download")
+    .eq("is_public", false)
     .eq("is_active", true)
     .maybeSingle();
 
@@ -147,6 +166,24 @@ export async function authorizePremiumDownloadForRequest(assetId: string) {
     return {
       ok: false as const,
       decision: { allowed: false as const, reason: "locked" as const },
+    };
+  }
+
+  const { data: productRow, error: productError } = await supabase
+    .from("products")
+    .select("id, status")
+    .eq("id", assetRow.product_id)
+    .eq("status", "published")
+    .maybeSingle();
+
+  if (productError) {
+    throw new Error(`Supabase premium product authorization failed: ${productError.message}`);
+  }
+
+  if (!productRow) {
+    return {
+      ok: false as const,
+      decision: { allowed: false as const, reason: "wrong_asset" as const },
     };
   }
 
@@ -166,13 +203,6 @@ export async function authorizePremiumDownloadForRequest(assetId: string) {
     isActive: assetRow.is_active,
   } satisfies ProductAsset;
 
-  if (asset.kind !== "premium_download" || asset.isPublic) {
-    return {
-      ok: false as const,
-      decision: { allowed: false as const, reason: "wrong_asset" as const },
-    };
-  }
-
   const { data: signedUrl, error: signedUrlError } = await supabase.storage
     .from(asset.bucket)
     .createSignedUrl(asset.path, 10 * 60);
@@ -183,12 +213,14 @@ export async function authorizePremiumDownloadForRequest(assetId: string) {
     );
   }
 
-  const { error: eventError } = await supabase.rpc("record_download_event", {
+  const { data: eventId, error: eventError } = await supabase.rpc("record_download_event", {
     requested_asset_id: asset.id,
   });
 
-  if (eventError) {
-    throw new Error(`Supabase download event write failed: ${eventError.message}`);
+  if (eventError || !eventId) {
+    throw new Error(
+      `Supabase download event write failed: ${eventError?.message ?? "authorization was rejected"}`,
+    );
   }
 
   return {

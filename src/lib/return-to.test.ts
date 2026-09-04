@@ -28,10 +28,22 @@ describe("return target safety", () => {
   it.each([
     "https://evil.example/phish",
     "//evil.example/phish",
+    "%2F%2Fevil.example%2Fphish",
     "/en/products/moon-garden",
     "\\\\evil.example\\phish",
+    "/pl/products/moon-garden?returnTo=https%3A%2F%2Fevil.example%2Fphish",
   ])("rejects unsafe return target %s", (value) => {
     expect(sanitizeReturnTo(value, "pl")).toBe("/pl/library");
+  });
+
+  it("rejects nested external targets even when the outer locale is valid", () => {
+    expect(sanitizeReturnTo("/pl/products/moon-garden?returnTo=https%3A%2F%2Fevil.example", "pl")).toBe(
+      "/pl/library",
+    );
+    expect(sanitizeReturnTo("/pl/products/moon-garden?next=%2F%2Fevil.example", "pl")).toBe(
+      "/pl/products/moon-garden?next=%2F%2Fevil.example",
+    );
+    expect(sanitizeReturnTo("/en/products/moon-garden", "pl")).toBe("/pl/library");
   });
 
   it("switches only an allowlisted locale prefix", () => {
