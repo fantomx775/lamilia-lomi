@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
-import { redirect } from "next/navigation";
 
 import { registerDemoAction } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
@@ -8,7 +7,6 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Locale } from "@/i18n/routing";
-import { isUnlockRegistrationContext } from "@/lib/auth";
 import { productSlugFromReturnTo, sanitizeReturnTo } from "@/lib/return-to";
 import { getUnlockIntent } from "@/lib/unlock-intent";
 
@@ -24,6 +22,7 @@ export default async function RegisterPage({ params, searchParams }: Props) {
   const redirectTo = sanitizeReturnTo(
     stringParam(query.returnTo) ?? stringParam(query.redirectTo),
     locale,
+    `/${locale}/account`,
   );
   const unlockIntent = await getUnlockIntent();
   const productSlug = productSlugFromReturnTo(redirectTo, locale);
@@ -32,10 +31,6 @@ export default async function RegisterPage({ params, searchParams }: Props) {
       ? unlockIntent.code ?? ""
       : "";
   const error = stringParam(query.error);
-
-  if (!isUnlockRegistrationContext({ locale, redirectTo })) {
-    redirect(`/${locale}/products`);
-  }
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">

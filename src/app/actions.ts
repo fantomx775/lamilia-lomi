@@ -282,12 +282,10 @@ export async function registerDemoAction(formData: FormData) {
   const returnTo = sanitizeReturnTo(
     text(formData, "returnTo") || text(formData, "redirectTo"),
     locale,
+    `/${locale}/account`,
   );
   const code = text(formData, "code");
-
-  if (!isUnlockRegistrationContext({ locale, redirectTo: returnTo })) {
-    redirect(`/${locale}/products`);
-  }
+  const isUnlockContext = isUnlockRegistrationContext({ locale, redirectTo: returnTo });
 
   await preserveUnlockIntent({ locale, returnTo, code });
 
@@ -328,7 +326,13 @@ export async function registerDemoAction(formData: FormData) {
       redirect(`/${locale}/register?error=auth&returnTo=${encodeURIComponent(safeRedirectTo)}`);
     }
 
-    redirect(appendQueryPath(safeRedirectTo, "step", "verify"));
+    if (isUnlockContext) {
+      redirect(appendQueryPath(safeRedirectTo, "step", "verify"));
+    }
+
+    redirect(
+      `/${locale}/login?error=verification_sent&returnTo=${encodeURIComponent(safeRedirectTo)}`,
+    );
   }
 
   await setDemoSession(

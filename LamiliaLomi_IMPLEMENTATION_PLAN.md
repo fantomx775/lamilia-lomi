@@ -387,20 +387,20 @@ Guest can view product details, gallery, video, tags/categories, and click Amazo
 
 ---
 
-## Slice 5 - Auth: unlock-context registration, login, logout, reset password
+## Slice 5 - Auth: registration, login, logout, reset password
 
 ### Goal
 
-Enable session handling and account creation only when the user is unlocking a product.
+Enable session handling and normal account creation from login while preserving the product unlock resume flow.
 
 ### Product capability
 
-User can create an account from a product unlock context, log in, log out, and request password reset. Casual visitors should not see a generic sign-up path.
+User can create an account from login or a product unlock context, log in, log out, and request password reset. The public site does not promote sign-up as a primary acquisition CTA.
 
 ### Implementation
 
 - Add Supabase Auth integration.
-- Add register page guarded to QR/product unlock context.
+- Add a register page available from login and QR/product unlock context.
 - Add login page.
 - Add logout action.
 - Add reset password flow.
@@ -411,8 +411,8 @@ User can create an account from a product unlock context, log in, log out, and r
 ### TDD/unit tests
 
 - Test registration input validation.
-- Test generic registration redirects away or is unavailable.
-- Test product/QR registration context is allowed.
+- Test generic registration renders and uses a neutral account destination.
+- Test product/QR registration context preserves its resume destination.
 - Test consent validation:
   - terms required,
   - marketing optional,
