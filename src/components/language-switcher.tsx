@@ -77,6 +77,8 @@ function LocaleForm({
   targetLocale: Locale;
   mobile?: boolean;
 }) {
+  const isActive = targetLocale === currentLocale;
+
   return (
     <form action={switchLocaleAction}>
       <input type="hidden" name="sourceLocale" value={currentLocale} />
@@ -85,8 +87,9 @@ function LocaleForm({
       <input type="hidden" name="search" value={search} />
       <button
         type="submit"
-        className={`rounded px-2 py-1 text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] ${mobile ? "flex w-full items-center justify-between gap-3" : "inline-flex"}`}
-        aria-current={targetLocale === currentLocale ? "page" : undefined}
+        className={`rounded px-2 py-1 text-[var(--color-ink)] transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] ${isActive ? "bg-[var(--color-sage)] font-semibold shadow-sm" : "font-medium hover:bg-[var(--color-blush)]"} ${mobile ? "flex w-full items-center justify-between gap-3" : "inline-flex"}`}
+        aria-current={isActive ? "page" : undefined}
+        data-active={isActive ? "true" : "false"}
         aria-label={`${localeNames[targetLocale]} (${localeLabels[targetLocale]})`}
       >
         <span>{localeLabels[targetLocale]}</span>
