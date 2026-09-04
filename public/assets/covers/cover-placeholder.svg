@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200" viewBox="0 0 900 1200" role="img" aria-labelledby="title description">
+  <title id="title">LamiliaLomi cover coming soon</title>
+  <desc id="description">A temporary cover placeholder for a product awaiting its artwork.</desc>
+  <rect width="900" height="1200" fill="#f2e7df"/>
+  <circle cx="450" cy="400" r="220" fill="#d9b8a3" opacity=".65"/>
+  <path d="M450 225c42 82 119 159 201 201-82 42-159 119-201 201-42-82-119-159-201-201 82-42 159-119 201-201Z" fill="#fffaf6" opacity=".9"/>
+  <text x="450" y="770" fill="#3e342f" font-family="Georgia, serif" font-size="54" text-anchor="middle">LamiliaLomi</text>
+  <text x="450" y="850" fill="#7b675b" font-family="Arial, sans-serif" font-size="30" text-anchor="middle">Cover coming soon</text>
+</svg>

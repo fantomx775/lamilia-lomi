@@ -96,11 +96,9 @@ export function getLocalizedProductViewFromSnapshot(
 
   const translation = getTranslation(product.translations, locale);
   const activeAssets = product.assets.filter((asset) => asset.isActive !== false);
-  const cover = activeAssets.find((asset) => asset.id === product.coverAssetId);
-
-  if (!cover) {
-    throw new Error(`Product ${product.slug} has no cover asset`);
-  }
+  const cover =
+    activeAssets.find((asset) => asset.id === product.coverAssetId) ??
+    createCoverPlaceholder(product);
 
   return {
     id: product.id,
@@ -354,6 +352,23 @@ export function getTagOptions(locale: Locale) {
 
 function sortAssets(assets: ProductAsset[]) {
   return assets.slice().sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+function createCoverPlaceholder(product: Product): ProductAsset {
+  return {
+    id: `${product.id}-cover-placeholder`,
+    productId: product.id,
+    kind: "cover",
+    bucket: "public-media",
+    path: "/assets/covers/cover-placeholder.svg",
+    filename: "cover-placeholder.svg",
+    contentType: "image/svg+xml",
+    locale: defaultLocale,
+    title: "Cover coming soon",
+    sortOrder: 0,
+    isPublic: true,
+    isActive: true,
+  };
 }
 
 function normalizeText(value: string | undefined) {

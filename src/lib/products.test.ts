@@ -5,8 +5,10 @@ import {
   buildProductMetadata,
   getCatalogProducts,
   getLocalizedProductView,
+  getLocalizedProductViewFromSnapshot,
   parseCatalogFilters,
 } from "./products";
+import type { ContentSnapshot } from "./types";
 
 describe("product catalog behavior", () => {
   it("hides draft products from public product lookup", () => {
@@ -44,5 +46,48 @@ describe("product catalog behavior", () => {
       "@type": "Book",
       name: "Moon Garden Coloring Book",
     });
+  });
+
+  it("keeps a published product renderable while its cover asset is pending", () => {
+    const snapshot: ContentSnapshot = {
+      products: [
+        {
+          id: "product-without-cover",
+          slug: "product-without-cover",
+          status: "published",
+          audience: "adults",
+          productType: "coloring-book",
+          coverAssetId: "missing-cover",
+          reviewDelayDays: 14,
+          sortOrder: 1,
+          createdAt: "2026-09-04T00:00:00.000Z",
+          updatedAt: "2026-09-04T00:00:00.000Z",
+          translations: [
+            {
+              locale: "en",
+              title: "Product without cover",
+              shortDescription: "A product waiting for media.",
+              longDescription: "A product waiting for media.",
+            },
+          ],
+          categoryIds: [],
+          tagIds: [],
+          assets: [],
+          amazonLinks: [],
+          premiumCodes: [],
+        },
+      ],
+      categories: [],
+      tags: [],
+      staticPages: [],
+    };
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "product-without-cover",
+      "en",
+    );
+
+    expect(product?.cover.path).toBe("/assets/covers/cover-placeholder.svg");
   });
 });
