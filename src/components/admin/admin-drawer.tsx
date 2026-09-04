@@ -1,7 +1,8 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ export function AdminDrawer({
   onClose,
   children,
   className,
+  bodyClassName,
   restoreFocusElement,
 }: {
   open: boolean;
@@ -30,12 +32,14 @@ export function AdminDrawer({
   onClose: () => void;
   children: React.ReactNode;
   className?: string;
+  bodyClassName?: string;
   restoreFocusElement?: HTMLElement | null;
 }) {
   const [isRendered, setIsRendered] = useState(open);
   const backdropRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const titleId = useId();
   const openRef = useRef(open);
   const previousOpenRef = useRef(open);
   const closeSequenceRef = useRef(0);
@@ -167,7 +171,7 @@ export function AdminDrawer({
     return null;
   }
 
-  return (
+  const drawer = (
     <div
       ref={backdropRef}
       className={cn(
@@ -187,22 +191,22 @@ export function AdminDrawer({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="admin-drawer-title"
+        aria-labelledby={titleId}
         aria-hidden={isExitActive ? true : undefined}
         inert={isExitActive || undefined}
         className={cn(
-          "admin-drawer-panel absolute inset-y-0 right-0 flex h-dvh w-full max-w-xl flex-col border-l border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl",
+          "admin-drawer-panel absolute inset-y-0 right-0 flex h-dvh w-full max-w-2xl flex-col border-l border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl sm:rounded-l-2xl",
           isExitActive && "admin-drawer-exiting",
           className,
         )}
       >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--color-border)] bg-white/80 px-5 py-4 sm:px-6">
+        <div className="sticky top-0 z-20 flex shrink-0 items-start justify-between gap-4 border-b border-[var(--color-border)] bg-white/95 px-4 py-3 shadow-[0_4px_16px_rgba(62,52,47,0.05)] backdrop-blur sm:px-6 sm:py-4">
           <div className="min-w-0">
-            <h2 id="admin-drawer-title" className="font-serif text-2xl font-semibold">
+            <h2 id={titleId} className="font-serif text-xl font-semibold sm:text-2xl">
               {title}
             </h2>
             {description ? (
-              <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">{description}</p>
+              <p className="mt-1 max-w-xl text-sm leading-5 text-[var(--color-muted)]">{description}</p>
             ) : null}
           </div>
           <button
@@ -215,10 +219,16 @@ export function AdminDrawer({
             <span className="sr-only">Zamknij panel</span>
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
+        <div className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-pb-8 px-4 py-5 sm:px-6", bodyClassName)}>{children}</div>
       </aside>
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(drawer, document.body);
 }
 
 function getFocusableElements(dialog: HTMLElement | null) {

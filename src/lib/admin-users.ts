@@ -34,18 +34,31 @@ export async function getAdminUserRowsForRequest(): Promise<AdminUserRow[]> {
   }
 
   const supabase = createServiceRoleClient();
-  const [{ data: authData, error: authError }, { data: profiles, error: profilesError }, { data: unlocks, error: unlocksError }, snapshot] = await Promise.all([
+  const [
+    { data: authData, error: authError },
+    { data: profiles, error: profilesError },
+    { data: unlocks, error: unlocksError },
+    { data: productTranslations, error: productTranslationsError },
+  ] = await Promise.all([
     supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
     supabase.from("profiles").select("id, role, marketing_consent"),
     supabase.from("user_product_unlocks").select("user_id, product_id"),
-    getAdminContentSnapshot(),
+    supabase.from("product_translations").select("product_id, locale, title"),
   ]);
 
   if (authError) throw new Error(`Supabase auth user read failed: ${authError.message}`);
   if (profilesError) throw new Error(`Supabase profile read failed: ${profilesError.message}`);
   if (unlocksError) throw new Error(`Supabase unlock read failed: ${unlocksError.message}`);
+  if (productTranslationsError) {
+    throw new Error(`Supabase product translation read failed: ${productTranslationsError.message}`);
+  }
 
   const profilesById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+  const productTitlesById = new Map(
+    (productTranslations ?? [])
+      .filter((translation) => translation.locale === "en")
+      .map((translation) => [translation.product_id, translation.title]),
+  );
   const unlocksByUser = new Map<string, string[]>();
 
   for (const unlock of unlocks ?? []) {
@@ -66,7 +79,7 @@ export async function getAdminUserRowsForRequest(): Promise<AdminUserRow[]> {
       marketingConsent: Boolean(profile?.marketing_consent),
       unlockCount: unlockedProductIds.length,
       unlockedProducts: unlockedProductIds
-        .map((productId) => snapshot.products.find((product) => product.id === productId)?.translations.find((translation) => translation.locale === "en")?.title)
+        .map((productId) => productTitlesById.get(productId))
         .filter((title): title is string => Boolean(title)),
     };
   });

@@ -8,6 +8,7 @@ import {
   getMissingPublicEnv,
   getPublicEnv,
   getRequiredSupabaseEnv,
+  getServiceRoleKey,
 } from "./config";
 
 describe("app configuration", () => {
@@ -101,5 +102,20 @@ describe("app configuration", () => {
         LAMILIA_BACKEND: "supabase",
       }),
     ).toThrow("NEXT_PUBLIC_APP_URL");
+  });
+
+  it("prefers the modern Supabase secret key and keeps the legacy key as a fallback", () => {
+    expect(
+      getServiceRoleKey({
+        SUPABASE_SECRET_KEY: " sb_secret_current ",
+        SUPABASE_SERVICE_ROLE_KEY: "legacy-key",
+      }),
+    ).toBe("sb_secret_current");
+    expect(
+      getServiceRoleKey({ SUPABASE_SERVICE_ROLE_KEY: " legacy-key " }),
+    ).toBe("legacy-key");
+    expect(() => getServiceRoleKey({})).toThrow(
+      "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY",
+    );
   });
 });

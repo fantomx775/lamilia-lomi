@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -37,7 +37,7 @@ describe("TaxonomyEditorDrawer", () => {
     saveCategoryInlineAction.mockResolvedValue({ ok: true, id: "new-category" });
     const user = userEvent.setup();
     const onSaved = vi.fn();
-    const view = render(
+    render(
       <TaxonomyEditorDrawer
         kind="category"
         open
@@ -48,10 +48,10 @@ describe("TaxonomyEditorDrawer", () => {
       />,
     );
 
-    await user.click(view.getByRole("tab", { name: /DE/ }));
-    expect(view.getByLabelText("Nazwa")).toHaveAttribute("name", "name_de");
-    await user.type(view.getByLabelText("Nazwa"), "Calm books");
-    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await user.click(screen.getByRole("tab", { name: /DE/ }));
+    expect(screen.getByLabelText("Nazwa")).toHaveAttribute("name", "name_de");
+    await user.type(screen.getByLabelText("Nazwa"), "Calm books");
+    await user.click(screen.getByRole("button", { name: "Zapisz" }));
 
     expect(saveCategoryInlineAction).toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalled();
@@ -62,7 +62,7 @@ describe("TaxonomyEditorDrawer", () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     const user = userEvent.setup();
     const onSaved = vi.fn();
-    const view = render(
+    render(
       <TaxonomyEditorDrawer
         kind="category"
         item={{ id: "category-1", slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }}
@@ -74,7 +74,7 @@ describe("TaxonomyEditorDrawer", () => {
       />,
     );
 
-    await user.click(view.getByRole("button", { name: "Usuń kategorię" }));
+    await user.click(screen.getByRole("button", { name: "Usuń kategorię" }));
     expect(deleteCategoryInlineAction).toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalled();
     vi.unstubAllGlobals();
@@ -84,7 +84,7 @@ describe("TaxonomyEditorDrawer", () => {
     saveTagInlineAction.mockResolvedValue({ ok: true, id: "new-tag" });
     const user = userEvent.setup();
     const onSaved = vi.fn();
-    const view = render(
+    render(
       <TaxonomyEditorDrawer
         kind="tag"
         open
@@ -95,8 +95,8 @@ describe("TaxonomyEditorDrawer", () => {
       />,
     );
 
-    await user.type(view.getByLabelText("Nazwa"), "Calm");
-    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await user.type(screen.getByLabelText("Nazwa"), "Calm");
+    await user.click(screen.getByRole("button", { name: "Zapisz" }));
 
     expect(saveTagInlineAction).toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalled();

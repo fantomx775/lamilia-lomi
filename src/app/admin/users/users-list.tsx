@@ -52,7 +52,13 @@ function buildColumns(onOpen: (id: string, trigger: HTMLElement) => void): DataT
   ];
 }
 
-export function UsersResourceList({ rows }: { rows: AdminUserListRow[] }) {
+export function UsersResourceList({
+  rows,
+  loadError = false,
+}: {
+  rows: AdminUserListRow[];
+  loadError?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [restoreFocusElement, setRestoreFocusElement] = useState<HTMLElement | null>(null);
@@ -88,7 +94,27 @@ export function UsersResourceList({ rows }: { rows: AdminUserListRow[] }) {
             <p className="mt-1 text-sm text-[var(--color-muted)]">{row.role === "admin" ? "Administrator" : "Użytkownik"} · {row.unlockCount} odblokowań</p>
           </button>
         )}
-        emptyState={<p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak użytkowników.</p>}
+        emptyState={
+          loadError ? (
+            <div className="mx-auto max-w-lg p-8 text-center" role="alert">
+              <p className="text-sm font-semibold text-[var(--color-ink)]">
+                Lista użytkowników jest chwilowo niedostępna.
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                Sprawdź konfigurację połączenia z usługą kont i spróbuj ponownie.
+              </p>
+              <button
+                type="button"
+                className={buttonClassName({ variant: "outline", size: "sm", className: "mt-4" })}
+                onClick={() => window.location.reload()}
+              >
+                Spróbuj ponownie
+              </button>
+            </div>
+          ) : (
+            <p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak użytkowników.</p>
+          )
+        }
       />
       <AdminDrawer
         open={open}
