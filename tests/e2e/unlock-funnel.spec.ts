@@ -47,6 +47,26 @@ test("guest login preserves code intent without putting code in the auth return 
   await expect(page.getByLabel("Kod premium")).toHaveValue("LOMI-BOOK-2026");
 });
 
+test("generic login opens account creation without unlock context", async ({ page }) => {
+  await page.goto("/en/login");
+
+  await expect(page.getByText("Don't have an account?")).toBeVisible();
+  const createAccountLink = page.getByRole("link", { name: "Create account" });
+  await expect(createAccountLink).toHaveAttribute("href", "/en/register");
+
+  await createAccountLink.click();
+  await expect(page).toHaveURL(/\/en\/register$/);
+  await expect(page.getByRole("heading", { name: "Create account" })).toBeVisible();
+
+  await page.getByLabel("Email").fill("new-reader@example.com");
+  await page.getByLabel("Password").fill("password123");
+  await page.getByRole("checkbox", { name: /Terms/ }).check();
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(page).toHaveURL(/\/en\/account$/);
+  await expect(page.getByRole("heading", { name: "Account" })).toBeVisible();
+});
+
 test("registration and verification resume the unlock journey", async ({ page }) => {
   await page.goto(`/de/unlock/${productSlug}`);
   await page.getByRole("button", { name: "Konto erstellen" }).click();

@@ -91,14 +91,19 @@ export default async function LoginPage({ params, searchParams }: Props) {
             <Link className="text-[var(--color-terracotta)]" href={`/${locale}/reset-password`}>
               {t("reset")}
             </Link>
-            {canCreateAccount ? (
+            <span>
+              {t("noAccount")} {" "}
               <Link
                 className="text-[var(--color-terracotta)]"
-                href={`/${locale}/register?returnTo=${encodeURIComponent(redirectTo)}`}
+                href={
+                  canCreateAccount
+                    ? `/${locale}/register?returnTo=${encodeURIComponent(redirectTo)}`
+                    : `/${locale}/register`
+                }
               >
                 {t("createAccount")}
               </Link>
-            ) : null}
+            </span>
           </div>
         </CardContent>
       </Card>

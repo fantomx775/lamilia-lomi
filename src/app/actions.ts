@@ -17,6 +17,7 @@ import {
   redeemAuthResumeIntent,
   setAuthResumeIntent,
 } from "@/lib/auth-resume";
+import type { AuthResumeIntent } from "@/lib/auth-resume";
 import { isSupportedLocale, normalizeLocale } from "@/lib/locale";
 import { redeemPremiumCodeForRequest } from "@/lib/premium-request";
 import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
@@ -187,51 +188,7 @@ export async function loginDemoAction(formData: FormData) {
       redirect(`/${locale}/login?error=${errorCode}&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
-    await setAuthResumeIntent({
-      locale,
-      productSlug: intent.productSlug,
-      returnTo,
-      code,
-    });
-
-    const redemption = await redeemAuthResumeIntent(intent);
-    await clearAuthResumeIntent();
-
-    if (redemption?.ok) {
-      await clearUnlockIntent();
-      if (redemption.status === "success") {
-        const product = intent.productSlug
-          ? await getProductBySlugForRequest(intent.productSlug)
-          : null;
-        scheduleReviewReminder({
-          unlockedAt: new Date(),
-          delayDays: product?.reviewDelayDays,
-        });
-      }
-      redirect(
-        appendQueryPath(
-          intent.returnTo,
-          "unlocked",
-          redemption.status === "already_unlocked" ? "already" : "1",
-        ),
-      );
-    }
-
-    if (redemption && !redemption.ok) {
-      if (redemption.status === "email_unverified") {
-        redirect(appendQueryPath(intent.returnTo, "step", "verify"));
-      }
-
-      await setUnlockIntent({
-        locale,
-        productSlug: intent.productSlug ?? "",
-        returnTo: intent.returnTo,
-        code,
-      });
-      redirect(appendQueryPath(intent.returnTo, "unlock", redemption.status));
-    }
-
-    redirect(buildAuthRedirect({ locale, redirectTo: intent.returnTo }));
+    await completeSupabaseAuthResume(intent, code);
   }
 
   await preserveUnlockIntent({ locale, returnTo, code });
@@ -282,12 +239,10 @@ export async function registerDemoAction(formData: FormData) {
   const returnTo = sanitizeReturnTo(
     text(formData, "returnTo") || text(formData, "redirectTo"),
     locale,
+    `/${locale}/account`,
   );
   const code = text(formData, "code");
-
-  if (!isUnlockRegistrationContext({ locale, redirectTo: returnTo })) {
-    redirect(`/${locale}/products`);
-  }
+  const isUnlockContext = isUnlockRegistrationContext({ locale, redirectTo: returnTo });
 
   await preserveUnlockIntent({ locale, returnTo, code });
 
@@ -304,14 +259,15 @@ export async function registerDemoAction(formData: FormData) {
   }
 
   if (getBackendMode() === "supabase") {
-    const safeRedirectTo = createAuthResumeIntent({
+    const intent = createAuthResumeIntent({
       locale,
       returnTo,
       code,
-    }).returnTo;
+    });
+    const safeRedirectTo = intent.returnTo;
     await setAuthResumeIntent({ locale, returnTo, code });
     const supabase = await createClient();
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: result.value.email,
       password: result.value.password,
       options: {
@@ -328,7 +284,17 @@ export async function registerDemoAction(formData: FormData) {
       redirect(`/${locale}/register?error=auth&returnTo=${encodeURIComponent(safeRedirectTo)}`);
     }
 
-    redirect(appendQueryPath(safeRedirectTo, "step", "verify"));
+    if (data.session) {
+      await completeSupabaseAuthResume(intent, code);
+    }
+
+    if (isUnlockContext) {
+      redirect(appendQueryPath(safeRedirectTo, "step", "verify"));
+    }
+
+    redirect(
+      `/${locale}/login?error=verification_sent&returnTo=${encodeURIComponent(safeRedirectTo)}`,
+    );
   }
 
   await setDemoSession(
@@ -340,6 +306,54 @@ export async function registerDemoAction(formData: FormData) {
     }),
   );
   redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
+}
+
+async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string) {
+  await setAuthResumeIntent({
+    locale: intent.locale,
+    productSlug: intent.productSlug,
+    returnTo: intent.returnTo,
+    code,
+  });
+
+  const redemption = await redeemAuthResumeIntent(intent);
+  await clearAuthResumeIntent();
+
+  if (redemption?.ok) {
+    await clearUnlockIntent();
+    if (redemption.status === "success") {
+      const product = intent.productSlug
+        ? await getProductBySlugForRequest(intent.productSlug)
+        : null;
+      scheduleReviewReminder({
+        unlockedAt: new Date(),
+        delayDays: product?.reviewDelayDays,
+      });
+    }
+    redirect(
+      appendQueryPath(
+        intent.returnTo,
+        "unlocked",
+        redemption.status === "already_unlocked" ? "already" : "1",
+      ),
+    );
+  }
+
+  if (redemption && !redemption.ok) {
+    if (redemption.status === "email_unverified") {
+      redirect(appendQueryPath(intent.returnTo, "step", "verify"));
+    }
+
+    await setUnlockIntent({
+      locale: intent.locale,
+      productSlug: intent.productSlug ?? "",
+      returnTo: intent.returnTo,
+      code,
+    });
+    redirect(appendQueryPath(intent.returnTo, "unlock", redemption.status));
+  }
+
+  redirect(buildAuthRedirect({ locale: intent.locale, redirectTo: intent.returnTo }));
 }
 
 export async function verifyDemoEmailAction(formData: FormData) {

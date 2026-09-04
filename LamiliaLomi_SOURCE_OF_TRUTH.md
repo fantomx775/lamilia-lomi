@@ -119,11 +119,12 @@ A guest cannot:
 
 ## Customer Account
 
-A customer account is created for the premium unlock journey, not as a standalone browsing tier.
+A customer account supports both the premium unlock journey and normal account access. Creating an account does not grant premium access by itself.
 
 A customer can:
 
 - Log in with email and password.
+- Create an account from the login flow, including without a product or unlock context.
 - Verify email address.
 - Reset password.
 - View public product content.
@@ -131,7 +132,7 @@ A customer can:
 - Download unlocked premium files.
 - See their unlocked products in "My Library".
 
-There should be no broad "create an account" acquisition CTA for casual visitors. Account creation is shown from a product unlock context, such as a QR/code journey or the locked downloads section on a product page. Returning customers can still log in directly.
+The public site does not promote sign-up as a primary acquisition CTA. A user who reaches `/[locale]/login` can always follow a normal create-account link, and `/[locale]/register` is valid without a product or unlock context. Registration started from a QR or product unlock flow preserves its product and unlock intent through verification. Returning customers can still log in directly.
 
 ## Premium Access
 
