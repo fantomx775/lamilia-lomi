@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getBackendMode } from "@/lib/config";
+import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import {
   clearAuthResumeIntent,
   getAuthResumeRedirect,
@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth-resume";
 import { normalizeLocale } from "@/lib/locale";
 import { createClient } from "@/lib/supabase/server";
+import { clearUnlockIntent } from "@/lib/unlock-intent";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
   const intent = await readAuthResumeIntent();
 
   if (getBackendMode() !== "supabase") {
-    return failureResponse(requestUrl, locale);
+    return failureResponse(locale);
   }
 
   const supabase = await createClient();
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
       const { data } = await supabase.auth.getUser();
 
       if (!data.user?.email_confirmed_at) {
-        return failureResponse(requestUrl, locale);
+        return failureResponse(locale);
       }
     }
   }
@@ -41,24 +42,49 @@ export async function GET(request: Request) {
   const { data } = await supabase.auth.getUser();
 
   if (!data.user?.email_confirmed_at) {
-    return failureResponse(requestUrl, locale);
+    return failureResponse(locale);
   }
 
-  await redeemAuthResumeIntent(intent ?? {});
+  const redemption = await redeemAuthResumeIntent(intent ?? {});
   await clearAuthResumeIntent();
-  return successResponse(requestUrl, getAuthResumeRedirect(intent, locale));
+
+  if (redemption?.ok) {
+    await clearUnlockIntent();
+    return successResponse(
+      appendQuery(
+        getAuthResumeRedirect(intent, locale),
+        "unlocked",
+        redemption.status === "already_unlocked" ? "already" : "1",
+      ),
+    );
+  }
+
+  if (redemption && !redemption.ok) {
+    return successResponse(
+      appendQuery(getAuthResumeRedirect(intent, locale), "unlock", redemption.status),
+    );
+  }
+
+  return successResponse(getAuthResumeRedirect(intent, locale));
 }
 
-function successResponse(requestUrl: URL, path: string) {
-  const response = NextResponse.redirect(new URL(path, requestUrl.origin));
+function appendQuery(path: string, key: string, value: string) {
+  const url = new URL(path, "http://lamilialomi.local");
+  url.searchParams.set(key, value);
+
+  return `${url.pathname}${url.search}`;
+}
+
+function successResponse(path: string) {
+  const response = NextResponse.redirect(new URL(path, getCanonicalAppUrl()));
   response.headers.set("Cache-Control", "private, no-store");
 
   return response;
 }
 
-function failureResponse(requestUrl: URL, locale: string) {
+function failureResponse(locale: string) {
   const response = NextResponse.redirect(
-    new URL(`/${locale}/login?error=verification_failed`, requestUrl.origin),
+    new URL(`/${locale}/login?error=verification_failed`, getCanonicalAppUrl()),
   );
   response.headers.set("Cache-Control", "private, no-store");
 

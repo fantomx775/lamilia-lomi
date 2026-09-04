@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import type { Locale } from "@/i18n/routing";
 
 import { defaultLocale, normalizeLocale } from "./locale";
+import { getCanonicalAppUrl } from "./config";
 import { getContentSnapshot } from "./content-store";
 import type {
   Audience,
@@ -274,7 +275,7 @@ export function getAllProductTypesFromSnapshot(snapshot: ContentSnapshot) {
 export function buildProductMetadata(
   product: LocalizedProductView,
   locale: Locale,
-  appUrl = "http://localhost:3000",
+  appUrl = getCanonicalAppUrl().origin,
 ): Metadata {
   const canonical = `${appUrl}/${locale}/products/${product.slug}`;
 
@@ -310,7 +311,7 @@ export function buildProductMetadata(
 export function buildProductJsonLd(
   product: LocalizedProductView,
   locale: Locale,
-  appUrl = "http://localhost:3000",
+  appUrl = getCanonicalAppUrl().origin,
 ) {
   return {
     "@context": "https://schema.org",

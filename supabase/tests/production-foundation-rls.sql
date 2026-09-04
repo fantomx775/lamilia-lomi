@@ -10,8 +10,14 @@ delete from public.product_assets
 where id = '22222222-2222-4222-8222-222222222205';
 delete from public.premium_codes
 where id in ('99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999995');
+delete from public.user_product_unlocks
+where user_id = 'cccccccc-3333-4333-8333-cccccccccccc';
 delete from auth.users
-where id in ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb');
+where id in (
+  'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+  'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+  'cccccccc-3333-4333-8333-cccccccccccc'
+);
 
 grant usage on schema auth, storage to anon, authenticated;
 grant select on storage.objects to anon, authenticated;
@@ -19,12 +25,20 @@ grant select on storage.objects to anon, authenticated;
 insert into auth.users (id, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 values
   ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'a@example.test', now(), '{}'::jsonb, '{}'::jsonb),
-  ('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', 'b@example.test', now(), '{}'::jsonb, '{}'::jsonb);
+  ('bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb', 'b@example.test', now(), '{}'::jsonb, '{}'::jsonb),
+  ('cccccccc-3333-4333-8333-cccccccccccc', 'c@example.test', null, '{}'::jsonb, '{}'::jsonb);
 
 insert into public.premium_codes (id, product_id, code, active)
 values
   ('99999999-9999-4999-8999-999999999994', '11111111-1111-4111-8111-111111111111', 'LOMI-INACTIVE-2026', false),
   ('99999999-9999-4999-8999-999999999995', '44444444-4444-4444-8444-444444444444', 'LOMI-DRAFT-2026', true);
+
+insert into public.user_product_unlocks (user_id, product_id, premium_code_id)
+values (
+  'cccccccc-3333-4333-8333-cccccccccccc',
+  '11111111-1111-4111-8111-111111111111',
+  null
+);
 
 insert into public.product_assets (
   id, product_id, kind, bucket, path, filename, content_type, is_public, sort_order
@@ -74,6 +88,18 @@ select case when count(*) = 0 then 'PASS user B has no visible unlocks' else 'FA
 from public.user_product_unlocks;
 select case when count(*) = 0 then 'PASS user B cannot read premium storage before unlock' else 'FAIL user B premium storage count=' || count(*) end
 from storage.objects where bucket_id = 'premium-files';
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub = 'cccccccc-3333-4333-8333-cccccccccccc';
+select case when count(*) = 0 then 'PASS unverified user cannot read premium metadata after unlock' else 'FAIL unverified premium asset count=' || count(*) end
+from public.product_assets
+where product_id = '11111111-1111-4111-8111-111111111111' and kind = 'premium_download';
+select case when count(*) = 0 then 'PASS unverified user cannot read premium storage after unlock' else 'FAIL unverified premium storage count=' || count(*) end
+from storage.objects
+where bucket_id = 'premium-files';
+select case when private.record_download_event('11111111-1111-4111-8111-111111111105') is null then 'PASS unverified download event is denied' else 'FAIL unverified download event was recorded' end;
 rollback;
 
 \echo 'RLS matrix: atomic redemption and authorization contracts'
@@ -436,11 +462,21 @@ rollback;
 
 -- Leave the local database as it was before this harness ran.
 update public.profiles set role = 'user'
-where id in ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb');
+where id in (
+  'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+  'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+  'cccccccc-3333-4333-8333-cccccccccccc'
+);
 delete from public.download_events
-where user_id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+where user_id in (
+  'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+  'cccccccc-3333-4333-8333-cccccccccccc'
+);
 delete from public.user_product_unlocks
-where user_id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+where user_id in (
+  'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+  'cccccccc-3333-4333-8333-cccccccccccc'
+);
 delete from storage.objects
 where bucket_id = 'premium-files'
   and name in ('moon-garden/bonus.pdf', 'mindful-mandalas/bonus.pdf');
@@ -449,6 +485,10 @@ where id = '22222222-2222-4222-8222-222222222205';
 delete from public.premium_codes
 where id in ('99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999995');
 delete from auth.users
-where id in ('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb');
+where id in (
+  'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+  'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+  'cccccccc-3333-4333-8333-cccccccccccc'
+);
 
-\echo 'RLS matrix complete: 53 positive scenarios passed'
+\echo 'RLS matrix complete: 56 positive scenarios passed'

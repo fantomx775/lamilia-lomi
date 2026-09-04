@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import { createDemoSession } from "./auth";
 import { getLocalizedProductView } from "./products";
 import {
+  applyProductUnlock,
   canDownloadPremiumAsset,
   createSignedDownloadUrl,
   normalizePremiumCode,
   validatePremiumCode,
+  verifySignedDownloadUrl,
 } from "./premium";
 
 describe("premium access behavior", () => {
@@ -36,6 +38,37 @@ describe("premium access behavior", () => {
     ).toEqual({ ok: false, reason: "invalid_code" });
   });
 
+  it("rejects inactive and wrong-product codes without creating access", () => {
+    expect(
+      validatePremiumCode({
+        productSlug: "mindful-mandalas-for-adults",
+        code: "lomi-calm-offline-2026",
+      }),
+    ).toEqual({ ok: false, reason: "inactive_code" });
+    expect(
+      validatePremiumCode({
+        productSlug: "moon-garden-coloring-book",
+        code: "LOMI-CALM-2026",
+      }),
+    ).toEqual({ ok: false, reason: "invalid_code" });
+  });
+
+  it("makes an existing unlock a positive idempotent result", () => {
+    const session = createDemoSession({
+      email: "reader@example.com",
+      emailVerified: true,
+      unlockedProductIds: [],
+    });
+    const first = applyProductUnlock(session, "product-a");
+    const second = applyProductUnlock(
+      { unlockedProductIds: first.unlockedProductIds },
+      "product-a",
+    );
+
+    expect(first).toEqual({ alreadyUnlocked: false, unlockedProductIds: ["product-a"] });
+    expect(second).toEqual({ alreadyUnlocked: true, unlockedProductIds: ["product-a"] });
+  });
+
   it("denies guests, unverified users, and locked users before signed URL creation", () => {
     const product = getLocalizedProductView("moon-garden-coloring-book", "en")!;
     const asset = product.premiumAssets[0];
@@ -47,6 +80,11 @@ describe("premium access behavior", () => {
     const unverified = createDemoSession({
       email: "unverified@lamilialomi.test",
       emailVerified: false,
+      unlockedProductIds: [product.id],
+    });
+    const owner = createDemoSession({
+      email: "owner@example.com",
+      emailVerified: true,
       unlockedProductIds: [product.id],
     });
 
@@ -62,6 +100,17 @@ describe("premium access behavior", () => {
       allowed: false,
       reason: "locked",
     });
+
+    expect(
+      canDownloadPremiumAsset({
+        asset: {
+          ...asset,
+          id: "asset-product-b",
+          productId: "22222222-2222-4222-8222-222222222222",
+        },
+        session: owner,
+      }),
+    ).toEqual({ allowed: false, reason: "locked" });
   });
 
   it("creates signed URL only for verified users with matching unlock", () => {
@@ -75,11 +124,58 @@ describe("premium access behavior", () => {
 
     const signedUrl = createSignedDownloadUrl({
       asset,
+      product: { id: product.id, status: product.status },
       session,
       now: new Date("2026-05-31T10:00:00.000Z"),
     });
 
     expect(signedUrl.ok).toBe(true);
     expect(signedUrl.ok && signedUrl.url).toContain("token=");
+    expect(signedUrl.ok && signedUrl.url).toContain("expires=");
+    expect(signedUrl.ok && signedUrl.url).not.toContain("/demo-premium/");
+
+    if (signedUrl.ok) {
+      const signed = new URL(signedUrl.url, "http://localhost:3000");
+      expect(
+        verifySignedDownloadUrl({
+          asset,
+          product: { id: product.id, status: product.status },
+          session,
+          token: signed.searchParams.get("token"),
+          expires: signed.searchParams.get("expires"),
+          now: new Date("2026-05-31T10:05:00.000Z"),
+        }).ok,
+      ).toBe(true);
+      expect(
+        verifySignedDownloadUrl({
+          asset,
+          product: { id: product.id, status: product.status },
+          session,
+          token: "forged",
+          expires: signed.searchParams.get("expires"),
+          now: new Date("2026-05-31T10:05:00.000Z"),
+        }),
+      ).toMatchObject({ ok: false, decision: { reason: "invalid_token" } });
+      expect(
+        verifySignedDownloadUrl({
+          asset,
+          product: { id: product.id, status: product.status },
+          session,
+          token: null,
+          expires: null,
+          now: new Date("2026-05-31T10:05:00.000Z"),
+        }),
+      ).toMatchObject({ ok: false, decision: { reason: "invalid_token" } });
+      expect(
+        verifySignedDownloadUrl({
+          asset,
+          product: { id: product.id, status: "archived" },
+          session,
+          token: signed.searchParams.get("token"),
+          expires: signed.searchParams.get("expires"),
+          now: new Date("2026-05-31T10:05:00.000Z"),
+        }),
+      ).toMatchObject({ ok: false, decision: { reason: "wrong_asset" } });
+    }
   });
 });

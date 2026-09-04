@@ -5,6 +5,7 @@ import {
   createDemoSession,
   hasAdminAccess,
   isUnlockRegistrationContext,
+  isSupabaseEmailNotConfirmedError,
   parseDemoSession,
   serializeDemoSession,
   validateRegistrationInput,
@@ -39,7 +40,7 @@ describe("auth behavior", () => {
         redirectTo: "/en/products/moon-garden-coloring-book",
         code: "LOMI-BOOK-2026",
       }),
-    ).toBe("/en/products/moon-garden-coloring-book?code=LOMI-BOOK-2026");
+    ).toBe("/en/products/moon-garden-coloring-book");
 
     expect(
       buildAuthRedirect({
@@ -54,6 +55,18 @@ describe("auth behavior", () => {
         redirectTo: "https://evil.example/phish",
       }),
     ).toBe("/en/library");
+    expect(
+      buildAuthRedirect({
+        locale: "en",
+        redirectTo: "//evil.example/phish",
+      }),
+    ).toBe("/en/library");
+    expect(
+      buildAuthRedirect({
+        locale: "pl",
+        redirectTo: "/en/products/moon-garden-coloring-book",
+      }),
+    ).toBe("/pl/library");
   });
 
   it("allows registration only in a product unlock context", () => {
@@ -64,11 +77,17 @@ describe("auth behavior", () => {
       }),
     ).toBe(true);
     expect(isUnlockRegistrationContext({ locale: "en", code: "LOMI-BOOK-2026" })).toBe(
-      true,
+      false,
     );
     expect(isUnlockRegistrationContext({ locale: "en", redirectTo: "/en/library" })).toBe(
       false,
     );
+  });
+
+  it("recognizes Supabase email confirmation failures without trusting error text", () => {
+    expect(isSupabaseEmailNotConfirmedError({ code: "email_not_confirmed" })).toBe(true);
+    expect(isSupabaseEmailNotConfirmedError({ message: "email not confirmed" })).toBe(false);
+    expect(isSupabaseEmailNotConfirmedError({ code: "invalid_credentials" })).toBe(false);
   });
 
   it("detects admin access from role, not editable metadata", () => {
@@ -86,5 +105,6 @@ describe("auth behavior", () => {
 
     expect(parseDemoSession(serialized)).toEqual(session);
     expect(parseDemoSession("not-json")).toBeNull();
+    expect(parseDemoSession(`${serialized.slice(0, -1)}x`)).toBeNull();
   });
 });

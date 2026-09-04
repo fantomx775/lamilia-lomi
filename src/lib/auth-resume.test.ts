@@ -68,6 +68,18 @@ describe("Supabase auth resume contract", () => {
     expect(intent.productSlug).toBe("moon-garden-coloring-book");
   });
 
+  it("does not carry an explicit product into a non-product return target", () => {
+    const intent = createAuthResumeIntent({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/account",
+      code: "LOMI-BOOK-2026",
+    });
+
+    expect(intent.productSlug).toBeUndefined();
+    expect(intent.returnTo).toBe("/en/account");
+  });
+
   it("redeems the preserved code server-side after confirmation", async () => {
     resumeMocks.getProductBySlugForRequest.mockResolvedValue({ id: "product-id" });
     resumeMocks.redeemPremiumCodeForRequest.mockResolvedValue({ ok: true, status: "success" });

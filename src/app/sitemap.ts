@@ -1,9 +1,10 @@
 import type { MetadataRoute } from "next";
 
+import { getCanonicalAppUrl } from "@/lib/config";
 import { getPublishedProductViewsForRequest } from "@/lib/products-request";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = getCanonicalAppUrl().origin;
   const staticRoutes = ["", "/products", "/privacy", "/terms", "/contact", "/author"];
   const localeRoutes = (
     await Promise.all(

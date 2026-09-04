@@ -1,7 +1,9 @@
 import type { MetadataRoute } from "next";
 
+import { getCanonicalAppUrl } from "@/lib/config";
+
 export default function robots(): MetadataRoute.Robots {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = getCanonicalAppUrl().origin;
 
   return {
     rules: [

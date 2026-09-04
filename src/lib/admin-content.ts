@@ -494,6 +494,7 @@ function parseAssets(
       isPublic,
       isActive: existing?.isActive !== false,
       demoDownloadPath: existing?.demoDownloadPath,
+      demoPrivatePath: existing?.demoPrivatePath,
     });
   }
 

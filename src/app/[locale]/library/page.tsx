@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 
 import { ProductCard } from "@/components/product-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -16,18 +17,22 @@ type Props = {
 export default async function LibraryPage({ params }: Props) {
   const { locale } = await params;
   const session = await getDemoSession();
+  const t = await getTranslations("Library");
 
   if (!session) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-12">
+      <div className="mx-auto max-w-3xl px-4 py-12" data-testid="library-guest-state">
         <Card>
           <CardHeader>
-            <h1 className="font-serif text-3xl font-semibold">My Library</h1>
+            <h1 className="font-serif text-3xl font-semibold">{t("title")}</h1>
           </CardHeader>
           <CardContent>
-            <p className="text-[var(--color-muted)]">Log in to see unlocked products.</p>
-            <Link className="mt-4 inline-flex text-[var(--color-terracotta)]" href={`/${locale}/login`}>
-              Log in
+            <p className="text-[var(--color-muted)]">{t("guest")}</p>
+            <Link
+              className="mt-4 inline-flex text-[var(--color-terracotta)]"
+              href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/library`)}`}
+            >
+              {t("login")}
             </Link>
           </CardContent>
         </Card>
@@ -47,11 +52,9 @@ export default async function LibraryPage({ params }: Props) {
     .filter((product): product is NonNullable<typeof product> => Boolean(product));
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-      <h1 className="font-serif text-4xl font-semibold">My Library</h1>
-      <p className="mt-3 text-[var(--color-muted)]">
-        Permanent product unlocks for {session.email}.
-      </p>
+    <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8" data-testid="library-page">
+      <h1 className="font-serif text-4xl font-semibold">{t("title")}</h1>
+      <p className="mt-3 text-[var(--color-muted)]">{t("description")}</p>
       {unlockedProducts.length ? (
         <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {unlockedProducts.map((product) => (
@@ -59,15 +62,15 @@ export default async function LibraryPage({ params }: Props) {
           ))}
         </div>
       ) : (
-        <Card className="mt-8">
+        <Card className="mt-8" data-testid="library-empty-state">
           <CardHeader>
-            <h2 className="font-serif text-2xl font-semibold">No unlocked products yet</h2>
+            <h2 className="font-serif text-2xl font-semibold">{t("emptyTitle")}</h2>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-[var(--color-muted)]">
-              Open a product page and enter the code printed in your physical
-              book.
-            </p>
+            <p className="text-sm text-[var(--color-muted)]">{t("emptyDescription")}</p>
+            <Link className="mt-5 inline-flex text-sm font-medium text-[var(--color-terracotta)]" href={`/${locale}/products`}>
+              {t("browse")}
+            </Link>
           </CardContent>
         </Card>
       )}

@@ -54,6 +54,7 @@ export type ProductAsset = {
   isPublic: boolean;
   isActive?: boolean;
   demoDownloadPath?: string;
+  demoPrivatePath?: string;
 };
 
 export type AmazonLink = {
@@ -154,5 +155,5 @@ export type DownloadDecision =
   | { allowed: true; reason: "allowed" }
   | {
       allowed: false;
-      reason: "guest" | "unverified" | "locked" | "wrong_asset";
+      reason: "guest" | "unverified" | "locked" | "wrong_asset" | "invalid_token";
     };
