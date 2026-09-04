@@ -47,6 +47,7 @@ export function TaxonomyEditorDrawer({
       open={open}
       onClose={onClose}
       restoreFocusElement={restoreFocusElement}
+      bodyClassName="!overflow-hidden !p-0"
       title={item ? `Edytuj ${isCategory ? "kategorię" : "tag"}` : isCategory ? "Nowa kategoria" : "Nowy tag"}
       description="Uzupełnij nazwy i opisy w wybranych językach."
     >
@@ -135,8 +136,8 @@ function TaxonomyEditorForm({
   };
 
   return (
-    <>
-      <form className="grid gap-5" onSubmit={submit}>
+    <form className="flex h-full min-h-0 flex-col" onSubmit={submit}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
         <input type="hidden" name="id" value={itemId} />
         {routing.locales.map((code) => (
           <span key={code}>
@@ -145,70 +146,72 @@ function TaxonomyEditorForm({
           </span>
         ))}
 
-        {errors.length ? (
-          <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
-            <p className="font-medium">Nie udało się zapisać zmian.</p>
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {errors.map((error) => <li key={error}>{error}</li>)}
-            </ul>
-          </div>
-        ) : null}
-
-        <AdminEditorSection title="Treść" description="W formularzu widoczny jest jeden język naraz.">
-          <div className="grid gap-4">
-            <LocaleTabs value={locale} onChange={setLocale} missingLocales={missingLocales} id="taxonomy-locale-panel" />
-            <div id="taxonomy-locale-panel" className="grid gap-4" role="tabpanel">
-              <Field label="Nazwa" htmlFor={`taxonomy-name-${locale}`}>
-                <Input
-                  id={`taxonomy-name-${locale}`}
-                  name={`name_${locale}`}
-                  value={values[locale].name}
-                  onChange={(event) => updateValue("name", event.target.value)}
-                  autoFocus={locale === "en" && !item}
-                />
-              </Field>
-              <Field label="Opis" htmlFor={`taxonomy-description-${locale}`}>
-                <textarea
-                  id={`taxonomy-description-${locale}`}
-                  name={`description_${locale}`}
-                  value={values[locale].description}
-                  onChange={(event) => updateValue("description", event.target.value)}
-                  className="min-h-28 w-full rounded-md border border-[var(--color-border)] bg-white px-3 py-3 text-sm outline-none transition placeholder:text-[var(--color-muted)] focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]"
-                />
-              </Field>
+        <div className="grid gap-5 pb-5">
+          {errors.length ? (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+              <p className="font-medium">Nie udało się zapisać zmian.</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {errors.map((error) => <li key={error}>{error}</li>)}
+              </ul>
             </div>
-          </div>
-        </AdminEditorSection>
+          ) : null}
 
-        <AdminEditorSection title="Ustawienia" description="Slug jest używany w adresach i publicznym katalogu.">
-          <div className="grid gap-4">
-            <Field label="Slug">
-              <Input name="slug" defaultValue={item?.slug ?? ""} placeholder={isCategory ? "coloring-books" : "calm-evening"} />
-            </Field>
-            {isCategory ? (
-              <Field label="Kolejność">
-                <Input name="sortOrder" type="number" defaultValue={(item as Category | undefined)?.sortOrder ?? 100} />
+          <AdminEditorSection title="Treść" description="W formularzu widoczny jest jeden język naraz.">
+            <div className="grid gap-4">
+              <LocaleTabs value={locale} onChange={setLocale} missingLocales={missingLocales} id="taxonomy-locale-panel" />
+              <div id="taxonomy-locale-panel" className="grid gap-4" role="tabpanel">
+                <Field label="Nazwa" htmlFor={`taxonomy-name-${locale}`}>
+                  <Input
+                    id={`taxonomy-name-${locale}`}
+                    name={`name_${locale}`}
+                    value={values[locale].name}
+                    onChange={(event) => updateValue("name", event.target.value)}
+                    autoFocus={locale === "en" && !item}
+                  />
+                </Field>
+                <Field label="Opis" htmlFor={`taxonomy-description-${locale}`}>
+                  <textarea
+                    id={`taxonomy-description-${locale}`}
+                    name={`description_${locale}`}
+                    value={values[locale].description}
+                    onChange={(event) => updateValue("description", event.target.value)}
+                    className="min-h-28 w-full resize-y rounded-md border border-[var(--color-border)] bg-white px-3 py-3 text-sm leading-6 outline-none transition placeholder:text-[var(--color-muted)] focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]"
+                  />
+                </Field>
+              </div>
+            </div>
+          </AdminEditorSection>
+
+          <AdminEditorSection title="Ustawienia" description="Slug jest używany w adresach i publicznym katalogu.">
+            <div className="grid gap-4">
+              <Field label="Slug">
+                <Input name="slug" defaultValue={item?.slug ?? ""} placeholder={isCategory ? "coloring-books" : "calm-evening"} />
               </Field>
-            ) : null}
-          </div>
-        </AdminEditorSection>
+              {isCategory ? (
+                <Field label="Kolejność">
+                  <Input name="sortOrder" type="number" defaultValue={(item as Category | undefined)?.sortOrder ?? 100} />
+                </Field>
+              ) : null}
+            </div>
+          </AdminEditorSection>
 
-        <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border)] pt-4">
-          <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>Anuluj</Button>
-          <Button type="submit" disabled={isPending}>{isPending ? "Zapisywanie…" : "Zapisz"}</Button>
+          {item ? (
+            <div className="rounded-lg border border-red-200 bg-red-50/50 p-4">
+              <p className="text-sm font-semibold text-red-900">Strefa niebezpieczna</p>
+              <p className="mt-1 text-sm leading-6 text-red-900/70">Usunięcie odłączy ten element od przypisanych produktów.</p>
+              <button type="button" className={buttonClassName({ variant: "outline", className: "mt-3 border-red-200 bg-white text-red-800 hover:bg-red-50" })} onClick={remove} disabled={isPending}>
+                Usuń {isCategory ? "kategorię" : "tag"}
+              </button>
+            </div>
+          ) : null}
         </div>
-      </form>
+      </div>
 
-      {item ? (
-        <div className="mt-8 border-t border-red-200 pt-5">
-          <p className="text-sm font-semibold text-red-900">Strefa niebezpieczna</p>
-          <p className="mt-1 text-sm text-[var(--color-muted)]">Usunięcie odłączy ten element od przypisanych produktów.</p>
-          <button type="button" className={buttonClassName({ variant: "outline", className: "mt-3 border-red-200 text-red-800 hover:bg-red-50" })} onClick={remove} disabled={isPending}>
-            Usuń {isCategory ? "kategorię" : "tag"}
-          </button>
-        </div>
-      ) : null}
-    </>
+      <div className="sticky bottom-0 z-10 flex shrink-0 flex-wrap justify-end gap-2 border-t border-[var(--color-border)] bg-white/95 px-4 py-3 shadow-[0_-4px_16px_rgba(62,52,47,0.06)] backdrop-blur sm:px-6">
+        <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>Anuluj</Button>
+        <Button type="submit" disabled={isPending}>{isPending ? "Zapisywanie…" : "Zapisz"}</Button>
+      </div>
+    </form>
   );
 }
 

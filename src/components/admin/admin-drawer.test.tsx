@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
@@ -32,8 +32,8 @@ describe("AdminDrawer", () => {
 
     await user.click(trigger);
 
-    const close = within(view.getByRole("dialog")).getByRole("button", { name: "Zamknij panel" });
-    const action = view.getByRole("button", { name: "Akcja" });
+    const close = within(screen.getByRole("dialog")).getByRole("button", { name: "Zamknij panel" });
+    const action = screen.getByRole("button", { name: "Akcja" });
     expect(close).toHaveFocus();
 
     fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
@@ -42,11 +42,11 @@ describe("AdminDrawer", () => {
     expect(close).toHaveFocus();
 
     await user.keyboard("{Escape}");
-    const backdrop = view.container.querySelector('[data-slot="admin-drawer"]');
+    const backdrop = document.body.querySelector('[data-slot="admin-drawer"]');
     expect(backdrop).toHaveClass("admin-drawer-exiting");
-    expect(view.container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     fireEvent(backdrop!, new Event("animationend", { bubbles: true }));
-    await waitFor(() => expect(view.container.querySelector('[role="dialog"]')).toBeNull());
+    await waitFor(() => expect(document.body.querySelector('[role="dialog"]')).toBeNull());
     expect(trigger).toHaveFocus();
   });
 
@@ -57,12 +57,12 @@ describe("AdminDrawer", () => {
 
     await user.click(trigger);
     await user.keyboard("{Escape}");
-    const backdrop = view.container.querySelector('[data-slot="admin-drawer"]');
+    const backdrop = document.body.querySelector('[data-slot="admin-drawer"]');
 
     await user.click(trigger);
     fireEvent(backdrop!, new Event("animationend", { bubbles: true }));
 
-    expect(view.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("closes from the backdrop and waits for its exit animation", async () => {
@@ -71,7 +71,7 @@ describe("AdminDrawer", () => {
     const trigger = view.getByRole("button", { name: "Otwórz drawer" });
 
     await user.click(trigger);
-    const backdrop = view.container.querySelector('[data-slot="admin-drawer"]');
+    const backdrop = document.body.querySelector('[data-slot="admin-drawer"]');
     const backdropButton = backdrop?.querySelector<HTMLButtonElement>('button[aria-label="Zamknij panel"]');
 
     expect(backdropButton).not.toBeNull();
@@ -79,7 +79,7 @@ describe("AdminDrawer", () => {
     expect(backdrop).toHaveClass("admin-drawer-exiting");
 
     fireEvent(backdrop!, new Event("animationend", { bubbles: true }));
-    await waitFor(() => expect(view.container.querySelector('[role="dialog"]')).toBeNull());
+    await waitFor(() => expect(document.body.querySelector('[role="dialog"]')).toBeNull());
     expect(trigger).toHaveFocus();
   });
 
@@ -92,7 +92,7 @@ describe("AdminDrawer", () => {
     await user.click(trigger);
     await user.keyboard("{Escape}");
 
-    await waitFor(() => expect(view.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(trigger).toHaveFocus();
     vi.unstubAllGlobals();
   });

@@ -163,11 +163,12 @@ export function getRequiredSupabaseEnv(env: EnvLike = process.env) {
 }
 
 export function getServiceRoleKey(env: EnvLike = process.env) {
-  const value = env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const value =
+    env.SUPABASE_SECRET_KEY?.trim() || env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
   if (!value) {
     throw new AppConfigurationError(
-      "SUPABASE_SERVICE_ROLE_KEY is required for the server-only admin user read path.",
+      "SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY is required for the server-only admin user read path.",
     );
   }
 

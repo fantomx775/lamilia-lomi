@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -123,13 +123,21 @@ describe("admin resource list adapters", () => {
       />,
     );
     await user.click(category.getAllByRole("button", { name: "Edytuj kategorię Books" })[0]);
-    expect(category.getByRole("dialog", { name: "Edytuj kategorię" })).toBeInTheDocument();
-    expect(category.getByRole("tab", { name: /EN/ })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Edytuj kategorię" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /EN/ })).toBeInTheDocument();
 
     cleanup();
     const users = render(<UsersResourceList rows={[{ id: "user@example.com", email: "user@example.com", role: "user", emailVerified: true, marketingConsent: false, unlockCount: 1, unlockedProducts: ["Moon Garden"] }]} />);
     await user.click(users.getAllByRole("button", { name: /Pokaż szczegóły użytkownika user@example.com/ })[0]);
-    expect(users.getByRole("dialog", { name: "Szczegóły użytkownika" })).toHaveTextContent("Moon Garden");
-    expect(users.getByText(/tylko do odczytu/i)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Szczegóły użytkownika" })).toHaveTextContent("Moon Garden");
+    expect(screen.getByText(/tylko do odczytu/i)).toBeInTheDocument();
+  });
+
+  it("shows a safe retry state when the admin user reader is unavailable", () => {
+    const users = render(<UsersResourceList rows={[]} loadError />);
+
+    expect(users.getAllByRole("alert")[0]).toHaveTextContent("Lista użytkowników jest chwilowo niedostępna.");
+    expect(users.getAllByRole("button", { name: "Spróbuj ponownie" })).toHaveLength(2);
+    expect(users.queryByText(/Invalid API key/i)).not.toBeInTheDocument();
   });
 });

@@ -11,7 +11,7 @@ The app supports two explicit backend modes. Local demo mode uses deterministic 
 
 Copy `.env.example` and choose the backend explicitly. Local development and the local E2E harness use `LAMILIA_BACKEND=local`. A production or Supabase build must use `LAMILIA_BACKEND=supabase`, a configured absolute `NEXT_PUBLIC_APP_URL` with an HTTPS origin, and the required Supabase variables. Missing, malformed, or unsafe values fail closed with a configuration error; request `Host` or forwarded headers never determine redirect origins.
 
-For a production-style local build, set the variables in the shell before running `npm run build`; the build does not silently select local mode. Do not put `SUPABASE_SERVICE_ROLE_KEY` in client-exposed variables.
+For a production-style local build, set the variables in the shell before running `npm run build`; the build does not silently select local mode. Keep `SUPABASE_SECRET_KEY` (or the legacy `SUPABASE_SERVICE_ROLE_KEY`) server-only; never put either key in client-exposed variables.
 
 ## Getting Started
 
@@ -57,7 +57,7 @@ The schema and deterministic import are in:
 - `supabase/migrations/20260904120000_require_verified_premium_downloads.sql`
 - `supabase/seed.sql`
 
-Apply migrations and the seed/import only through the intended Supabase project workflow, then set `LAMILIA_BACKEND=supabase`, `NEXT_PUBLIC_APP_URL` to the deployed HTTPS origin, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SERVICE_ROLE_KEY`. The verified-download follow-up migration is forward-only and must be reviewed/applied in the intended non-Production workflow; it was not applied to Production by this change. Promote an Auth user to admin by updating its `public.profiles.role` through an owner-controlled migration or SQL session; client-provided role/email values are never trusted.
+Apply migrations and the seed/import only through the intended Supabase project workflow, then set `LAMILIA_BACKEND=supabase`, `NEXT_PUBLIC_APP_URL` to the deployed HTTPS origin, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY` (the legacy `SUPABASE_SERVICE_ROLE_KEY` remains supported during key migration). The verified-download follow-up migration is forward-only and must be reviewed/applied in the intended non-Production workflow; it was not applied to Production by this change. Promote an Auth user to admin by updating its `public.profiles.role` through an owner-controlled migration or SQL session; client-provided role/email values are never trusted.
 
 The atomic server contract is `redeem_premium_code(product_id, code)`. It returns `success`, `already_unlocked`, `invalid_code`, `inactive_code`, `wrong_product`, `product_not_found`, `auth_required`, or `email_unverified`. Redemption and private Storage authorization both require the product to remain published; client-provided user IDs, product visibility, and stable private URLs are not authorities. Premium download routes use the verified Supabase user, RLS-filtered asset metadata, private Storage signed URLs, and `record_download_event`.
 
