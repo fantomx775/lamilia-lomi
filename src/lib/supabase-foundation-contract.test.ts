@@ -42,6 +42,9 @@ describe("Supabase production foundation contracts", () => {
     const verifiedDownloadsMigration = read(
       "supabase/migrations/20260904120000_require_verified_premium_downloads.sql",
     );
+    const tagDescriptionsMigration = read(
+      "supabase/migrations/20260905100000_add_tag_translation_descriptions.sql",
+    );
     const concurrencyTest = read(
       "supabase/tests/atomic-product-save-concurrency.sql",
     );
@@ -75,6 +78,12 @@ describe("Supabase production foundation contracts", () => {
     expect(verifiedDownloadsMigration).toContain("private.is_email_verified()");
     expect(verifiedDownloadsMigration).toContain(
       'create policy "premium objects are readable after unlock"',
+    );
+    expect(tagDescriptionsMigration).toContain(
+      "alter table public.tag_translations",
+    );
+    expect(tagDescriptionsMigration).toContain(
+      "add column if not exists description text",
     );
     expect(atomicMigration).toContain("create or replace function private.save_product(product_state jsonb)");
     expect(atomicMigration).toContain("pg_advisory_xact_lock");

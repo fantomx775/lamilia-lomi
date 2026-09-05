@@ -132,4 +132,20 @@ describe("ProductEditor V2", () => {
     const formData = saveAction.mock.calls[0][0] as FormData;
     expect(formData.get("title_en")).toBe("Ocean Calm");
   });
+
+  it("switches a new premium asset to the private storage bucket", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+      />,
+    );
+
+    await user.click(view.getByRole("button", { name: "Dodaj asset" }));
+    await user.selectOptions(view.getAllByLabelText("Typ")[0], "premium_download");
+
+    expect(view.container.querySelector<HTMLInputElement>('input[name="assetBucket"]')).toHaveValue("premium-files");
+  });
 });
