@@ -1,6 +1,17 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
 
-import { getActiveHref, type DashboardNavItem } from "@/components/dashboard-nav";
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/admin/users/42",
+}));
+
+import { DashboardNav, getActiveHref, type DashboardNavItem } from "@/components/dashboard-nav";
+
+afterEach(() => {
+  cleanup();
+});
 
 const nav: DashboardNavItem[] = [
   { href: "/admin", label: "Dashboard", icon: "dashboard" },
@@ -18,5 +29,17 @@ describe("getActiveHref", () => {
 
   it("prefers the most specific matching section", () => {
     expect(getActiveHref("/admin/users", nav)).toBe("/admin/users");
+  });
+});
+
+describe("DashboardNav", () => {
+  it("keeps every mobile item visible without a horizontal scroller", () => {
+    const view = render(<DashboardNav nav={nav} />);
+    const navigation = view.getByRole("navigation");
+
+    expect(navigation).toHaveClass("grid", "grid-cols-2", "lg:grid-cols-1");
+    expect(navigation).not.toHaveClass("overflow-x-auto");
+    expect(view.getAllByRole("link")).toHaveLength(nav.length);
+    expect(view.getByRole("link", { name: "Users" })).toHaveAttribute("aria-current", "page");
   });
 });

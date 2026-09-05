@@ -58,7 +58,7 @@ export function DashboardNav({ nav }: { nav: DashboardNavItem[] }) {
   const activeHref = getActiveHref(pathname, nav);
 
   return (
-    <nav className="mt-5 flex gap-2 overflow-x-auto pb-1 lg:grid lg:overflow-visible lg:pb-0">
+    <nav className="mt-5 grid grid-cols-2 gap-2 pb-1 lg:grid-cols-1 lg:pb-0">
       {nav.map((item) => {
         const isActive = item.href === activeHref;
         const Icon = dashboardNavIcons[item.icon];
@@ -71,7 +71,7 @@ export function DashboardNav({ nav }: { nav: DashboardNavItem[] }) {
             className={buttonClassName({
               variant: "ghost",
               className: cn(
-                "admin-motion shrink-0 justify-start",
+                "admin-motion min-w-0 w-full justify-start",
                 isActive && "bg-[var(--color-blush)] hover:bg-[var(--color-blush)]",
               ),
             })}
