@@ -166,4 +166,5 @@ Audit started. Live application and browser evidence will be added below as each
 
 - FAIL / unchanged A-001: the authenticated live URL still renders the generic server-error screen with `ERROR 882554858` on `/admin/users`.
 - Evidence: the live screenshot was captured after `origin/main` reached `4edb8c0d404d4ec985331487d3855598c01812b0`; the runtime is therefore not serving that commit yet.
+- Independent read-only Vercel evidence: the latest promoted Production deployment is associated with commit `039d81…`, not the current `main` commit `edf12a5…`.
 - Interpretation: the source fix is verified locally, but live verification remains pending deployment. No Production deployment was initiated because automatic Git deployments are disabled and the request was to push `main`, not deploy Production.
