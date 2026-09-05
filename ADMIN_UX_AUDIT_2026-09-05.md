@@ -161,3 +161,9 @@ Audit started. Live application and browser evidence will be added below as each
 - PASS: source-level resolution confirmed for A-001, A-004, A-005, A-006, and A-007.
 - PENDING: live Vercel re-check, because automatic Git deployments are disabled and no Production deployment was requested.
 - PENDING: owner-approved Privacy/Terms copy (A-002), approved Moon Garden media/purchase content (A-003), and application of the tag description migration to the intended remote Supabase project.
+
+### 2026-09-05 — live re-check after main push
+
+- FAIL / unchanged A-001: the authenticated live URL still renders the generic server-error screen with `ERROR 882554858` on `/admin/users`.
+- Evidence: the live screenshot was captured after `origin/main` reached `4edb8c0d404d4ec985331487d3855598c01812b0`; the runtime is therefore not serving that commit yet.
+- Interpretation: the source fix is verified locally, but live verification remains pending deployment. No Production deployment was initiated because automatic Git deployments are disabled and the request was to push `main`, not deploy Production.
