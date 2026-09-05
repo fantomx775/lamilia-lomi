@@ -1,11 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createServiceRoleClient: vi.fn(),
-  from: vi.fn(),
+  createClient: vi.fn(),
   getAdminContentSnapshot: vi.fn(),
   getBackendMode: vi.fn(),
-  listUsers: vi.fn(),
+  rpc: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -18,8 +17,8 @@ vi.mock("@/lib/content-repository", () => ({
   getAdminContentSnapshot: mocks.getAdminContentSnapshot,
 }));
 
-vi.mock("@/lib/supabase/admin", () => ({
-  createServiceRoleClient: mocks.createServiceRoleClient,
+vi.mock("@/lib/supabase/server", () => ({
+  createClient: mocks.createClient,
 }));
 
 import { getAdminUserRowsForRequest } from "./admin-users";
@@ -28,39 +27,35 @@ describe("getAdminUserRowsForRequest", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getBackendMode.mockReturnValue("supabase");
-    mocks.createServiceRoleClient.mockReturnValue({
-      auth: { admin: { listUsers: mocks.listUsers } },
-      from: mocks.from,
-    });
+    mocks.createClient.mockResolvedValue({ rpc: mocks.rpc });
   });
 
-  it("maps optional profile and unlock data without reading premium_codes", async () => {
+  it("maps the admin-only RPC response without requiring a service-role key", async () => {
     const adminId = "admin-id";
     const userId = "user-id";
-    const tableData = {
-      profiles: [{ id: adminId, role: "admin", marketing_consent: true }],
-      user_product_unlocks: [
-        { user_id: adminId, product_id: "product-id" },
-        { user_id: userId, product_id: "missing-product-id" },
+    mocks.rpc.mockResolvedValue({
+      data: [
+        {
+          id: adminId,
+          email: "admin@example.com",
+          role: "admin",
+          email_verified: true,
+          marketing_consent: true,
+          unlock_count: 1,
+          unlocked_products: ["Moon Garden"],
+        },
+        {
+          id: userId,
+          email: null,
+          role: "user",
+          email_verified: false,
+          marketing_consent: false,
+          unlock_count: "1",
+          unlocked_products: null,
+        },
       ],
-      product_translations: [
-        { product_id: "product-id", locale: "en", title: "Moon Garden" },
-        { product_id: "product-id", locale: "pl", title: "Ogród księżycowy" },
-      ],
-    } as const;
-
-    mocks.listUsers.mockResolvedValue({
-      data: {
-        users: [
-          { id: adminId, email: "admin@example.com", email_confirmed_at: "2026-09-04T00:00:00Z" },
-          { id: userId, email: null, email_confirmed_at: null },
-        ],
-      },
       error: null,
     });
-    mocks.from.mockImplementation((table: keyof typeof tableData) => ({
-      select: vi.fn().mockResolvedValue({ data: tableData[table], error: null }),
-    }));
 
     await expect(getAdminUserRowsForRequest()).resolves.toEqual([
       {
@@ -83,10 +78,7 @@ describe("getAdminUserRowsForRequest", () => {
       },
     ]);
 
-    expect(mocks.from.mock.calls.map(([table]) => table)).toEqual(
-      expect.arrayContaining(["profiles", "user_product_unlocks", "product_translations"]),
-    );
-    expect(mocks.from.mock.calls.map(([table]) => table)).not.toContain("premium_codes");
+    expect(mocks.rpc).toHaveBeenCalledWith("list_admin_users");
     expect(mocks.getAdminContentSnapshot).not.toHaveBeenCalled();
   });
 });
