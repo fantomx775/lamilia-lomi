@@ -104,6 +104,22 @@ describe("admin behavior", () => {
     ).toMatchObject({ ok: true });
   });
 
+  it("normalizes premium assets to the private storage bucket", () => {
+    const form = new FormData();
+    form.set("title_en", "Private bonus");
+    form.set("assetKind", "premium_download");
+    form.set("assetBucket", "public-media");
+    form.set("assetPath", "private/bonus.pdf");
+
+    const result = buildProductFromFormData(form, { snapshot: getSeedContentSnapshot() });
+
+    expect(result.product.assets[0]).toMatchObject({
+      kind: "premium_download",
+      bucket: "premium-files",
+      isPublic: false,
+    });
+  });
+
   it("preserves existing product locales, taxonomy, assets, markets, and premium codes on edit", () => {
     const snapshot = getSeedContentSnapshot();
     const existing = snapshot.products[0];

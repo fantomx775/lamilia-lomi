@@ -195,6 +195,7 @@ export async function saveTagForRequest(formData: FormData): Promise<AdminMutati
   const translations = ["en", "pl", "de", "es"].map((locale) => ({
     locale: locale as "en" | "pl" | "de" | "es",
     name: stringField(formData, `name_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.name || "",
+    description: stringField(formData, `description_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.description,
   })).filter((translation) => translation.name);
 
   if (!translations.some((translation) => translation.locale === "en")) {
@@ -204,7 +205,12 @@ export async function saveTagForRequest(formData: FormData): Promise<AdminMutati
   const supabase = await createClient();
   await run(supabase.from("tags").upsert({ id: tagId, slug }), "tag");
   await run(supabase.from("tag_translations").delete().eq("tag_id", tagId), "tag translations cleanup");
-  await run(supabase.from("tag_translations").insert(translations.map((translation) => ({ tag_id: tagId, locale: translation.locale, name: translation.name }))), "tag translations");
+  await run(supabase.from("tag_translations").insert(translations.map((translation) => ({
+    tag_id: tagId,
+    locale: translation.locale,
+    name: translation.name,
+    description: translation.description ?? null,
+  }))), "tag translations");
   return { ok: true, id: tagId };
 }
 
@@ -271,8 +277,17 @@ async function run(query: PromiseLike<{ error: { message: string } | null }>, la
 }
 
 function stringField(formData: FormData, key: string) {
-  const value = formData.get(key);
-  return typeof value === "string" ? value.trim() : "";
+  const values = formData.getAll(key);
+
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = values[index];
+
+    if (typeof value === "string") {
+      return value.trim();
+    }
+  }
+
+  return "";
 }
 
 function numberField(formData: FormData, key: string, fallback: number) {

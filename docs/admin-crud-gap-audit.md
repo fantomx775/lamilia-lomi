@@ -12,7 +12,7 @@ This audit records the CRUD gaps found in the admin area and how they were close
 | Products | Product list and editor were read-only demo screens backed by `seed-data`. The save button did not persist anything. | Product create/edit/archive/delete now goes through Server Actions and writes to `data/lamilialomi-content.local.json` in local demo mode. |
 | Product translations | Editor only exposed EN/PL title and long description. DE/ES and SEO fields were missing. | Product editor now supports EN/PL/DE/ES title, short description, long description, SEO title, and SEO description. |
 | Categories | Categories were list-only; no create, update, or delete. | `/admin/categories` now supports inline create/update/delete with EN/PL/DE/ES names and descriptions. Deleting detaches the category from products. |
-| Tags | Tags were list-only; no create, update, or delete. | `/admin/tags` now supports inline create/update/delete with EN/PL/DE/ES names. Deleting detaches the tag from products. |
+| Tags | Tags were list-only; no create, update, or delete. | `/admin/tags` now supports inline create/update/delete with EN/PL/DE/ES names and descriptions. Deleting detaches the tag from products. |
 | Product-taxonomy assignment | Product editor did not assign categories or tags. | Product editor now has category/tag checkbox assignment. |
 | Amazon links | Only one input existed, with no market or primary link management. | Product editor now supports multiple Amazon links, `amazon.com`/`amazon.de`, primary flag, and removal. |
 | Premium codes | Only one code input existed; no active flag or multi-code management. | Product editor now supports multiple premium codes, active flag, and removal. |

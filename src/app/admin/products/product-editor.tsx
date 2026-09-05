@@ -98,7 +98,19 @@ export function ProductEditor({
   };
 
   const updateAsset = <K extends keyof AssetDraft>(clientId: string, field: K, value: AssetDraft[K]) => {
-    setAssets((current) => current.map((asset) => asset.clientId === clientId ? { ...asset, [field]: value } : asset));
+    setAssets((current) => current.map((asset) => {
+      if (asset.clientId !== clientId) {
+        return asset;
+      }
+
+      const next = { ...asset, [field]: value } as AssetDraft;
+
+      if (field === "kind") {
+        next.bucket = defaultBucketForKind(next.kind);
+      }
+
+      return next;
+    }));
   };
 
   const addAsset = () => {
@@ -431,6 +443,18 @@ function buildPremiumCodes(product?: Product): PremiumDraft[] {
 
 function assetLabel(kind: ProductAsset["kind"]) {
   return { cover: "Okładka", gallery: "Galeria", video: "Wideo", public_download: "Publiczny download", premium_download: "Premium download" }[kind];
+}
+
+function defaultBucketForKind(kind: ProductAsset["kind"]) {
+  if (kind === "premium_download") {
+    return "premium-files";
+  }
+
+  if (kind === "video") {
+    return "public-videos";
+  }
+
+  return "public-media";
 }
 
 function formatProductType(value: string) {

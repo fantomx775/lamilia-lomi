@@ -55,6 +55,7 @@ The schema and deterministic import are in:
 - `supabase/migrations/20260531093244_lamilialomi_foundation.sql`
 - `supabase/migrations/20260815120000_supabase_production_foundation.sql`
 - `supabase/migrations/20260904120000_require_verified_premium_downloads.sql`
+- `supabase/migrations/20260905100000_add_tag_translation_descriptions.sql`
 - `supabase/seed.sql`
 
 Apply migrations and the seed/import only through the intended Supabase project workflow, then set `LAMILIA_BACKEND=supabase`, `NEXT_PUBLIC_APP_URL` to the deployed HTTPS origin, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY` (the legacy `SUPABASE_SERVICE_ROLE_KEY` remains supported during key migration). The verified-download follow-up migration is forward-only and must be reviewed/applied in the intended non-Production workflow; it was not applied to Production by this change. Promote an Auth user to admin by updating its `public.profiles.role` through an owner-controlled migration or SQL session; client-provided role/email values are never trusted.

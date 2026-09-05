@@ -476,10 +476,10 @@ function parseAssets(
       id: existingId || randomUUID(),
       productId,
       kind,
-      bucket:
-        valueAt(buckets, index) ||
-        existing?.bucket ||
-        defaultBucketForKind(kind),
+      bucket: bucketForAssetKind(
+        kind,
+        valueAt(buckets, index) || existing?.bucket,
+      ),
       path,
       filename,
       contentType:
@@ -651,9 +651,17 @@ function validateTaxonomy<T extends { id: string; slug: string; translations: Ta
 }
 
 function textField(formData: FormData, key: string) {
-  const value = formData.get(key);
+  const values = formData.getAll(key);
 
-  return typeof value === "string" ? value.trim() : "";
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = values[index];
+
+    if (typeof value === "string") {
+      return value.trim();
+    }
+  }
+
+  return "";
 }
 
 function existingIds(formData: FormData, key: string) {
@@ -806,6 +814,21 @@ function defaultBucketForKind(kind: ProductAsset["kind"]) {
   }
 
   return "public-media";
+}
+
+function bucketForAssetKind(
+  kind: ProductAsset["kind"],
+  requestedBucket: string | undefined,
+) {
+  if (kind === "premium_download") {
+    return "premium-files";
+  }
+
+  if (requestedBucket === "premium-files") {
+    return defaultBucketForKind(kind);
+  }
+
+  return requestedBucket || defaultBucketForKind(kind);
 }
 
 function filenameFromPath(assetPath: string) {
