@@ -3,7 +3,7 @@
 Date: 2026-09-05
 Environment: live Vercel URL (`https://lamilia-lomi.vercel.app/en/login`)
 Account: dedicated admin test account (credentials intentionally not recorded)
-Status: code fixes complete; live deployment and content inputs still pending
+Status: admin code fixes deployed and live-verified; owner content inputs remain pending
 
 ## Scope
 
@@ -22,16 +22,16 @@ Exercise the complete admin surface through the browser, including navigation, a
 | --- | --- | --- |
 | Login and admin access | PASS | Login succeeded; redirected to `/en/library`, then Account opened `/admin`. No credential or redirect error observed. |
 | Admin dashboard and navigation | PASS | Dashboard loaded with sidebar links for Dashboard, Produkty, Kategorie, Tagi, Użytkownicy, Strony, Ustawienia. Summary showed 2 published products, 2 premium codes, 0 premium files. |
-| Products: list, search/filter, create, edit, archive/delete | PASS (code fix pending live deploy) | List/search, minimal create, edit, publish, archive, and delete passed live. The full one-shot form and premium asset save were hardened in code and covered by regression tests. |
+| Products: list, search/filter, create, edit, archive/delete | PASS | List/search, minimal create, edit, publish, archive, and delete passed live. The full one-shot form and premium asset save are hardened in the deployed code and covered by regression tests. Empty-save validation was also rechecked live. |
 | Product translations and SEO fields | PASS | EN/PL/DE/ES content and SEO fields were saved and reloaded successfully. SEO is an expandable disclosure, not a missing field. |
 | Categories: create, edit, delete | PASS | Audit fixture was created with EN/PL content, edited, verified in the list, and deleted. Existing categories were left unchanged. |
-| Tags: create, edit, delete | PASS (code fix + migration pending live apply) | Audit fixture CRUD passed live. Tag descriptions now flow through the Supabase adapter and the new `tag_translations.description` migration. |
+| Tags: create, edit, delete | PASS | Audit fixture CRUD passed live. Tag descriptions now flow through the Supabase adapter; `tag_translations.description` is applied in the connected Supabase project. |
 | Product category/tag assignment | PASS | Audit product retained the selected `Coloring books` category and `Printable bonus` tag after save/reload. |
 | Amazon links | PASS | Amazon.com and Amazon.de links saved; Amazon.com remained the single default link and rendered publicly. |
 | Premium codes | PASS | Active and inactive codes saved with the expected checked state. Active code unlocked the product and added it to My Library. |
-| Media/assets and public vs premium metadata | PASS (code fix pending live deploy) | Cover, gallery, video, and public download assets passed live. Premium asset bucket classification is now normalized in both UI and backend, with regression coverage. |
+| Media/assets and public vs premium metadata | PASS (deployed code) | Cover, gallery, video, and public download assets passed in the audit flow. Premium asset bucket classification is normalized in both UI and backend, with regression coverage. |
 | Static pages | PASS (UI) / CONTENT BLOCKER | Admin list and EN/PL/DE/ES editor loaded. Public EN Privacy/Terms currently show owner-placeholder copy; see A-002. |
-| Users | PASS (code fix pending live deploy) | The Supabase user reader no longer depends on request-scoped content loading, and the page has a controlled retry state. Regression tests and build pass. |
+| Users | PASS | The live page lists 3 users, including the administrator. It now uses a protected authenticated RPC instead of the stale Auth service key; regression tests and the Production build pass. |
 | Settings | PASS (read-only) | Integration status page loaded and showed Resend, GA4, and Supabase as configured; Cron as protected. No settings were changed. |
 | Public-facing verification | PARTIAL | Existing Moon Garden remains incomplete (A-003) and legal copy remains owner input (A-002). The audit fixture rendered cover, gallery, video, Amazon CTA, unlock flow, and My Library entry before cleanup. |
 
@@ -48,7 +48,7 @@ Findings are recorded below.
 - Actual: “This page couldn’t load — A server error occurred. Reload to try again.” with `ERROR 882554858`.
 - Additional evidence: browser console recorded minified React error `#441` twice during the two loads.
 - Screenshot: captured in the audit conversation immediately after reproduction.
-- Resolution: the Supabase path now reads product titles through the server-only service-role client, and the page renders a controlled retry state if the account service is unavailable. The fix is present on `main` and covered by admin-user tests/build; the live URL requires a deployment before re-checking.
+- Resolution: replaced the stale service-role Auth dependency with the protected `public.list_admin_users()` RPC, authorized by `private.is_admin()`. The RPC migration is applied remotely as `list_admin_users` version `20260905152853`. Production deployment `dpl_2KZxjPnoSuDEmdZWBWWM1YuRn1zu` (commit `779a8682097ac6a6655ea592c91f9cb35945014d`) is `READY` and `PROMOTED`; the live page now shows 3 users and no unavailable-state message.
 
 ### Finding A-002 — Public legal pages still contain production placeholder copy
 
@@ -93,7 +93,7 @@ Findings are recorded below.
 - Expected: the saved description is shown again.
 - Actual: the tag name and slug persisted, but the description field was empty after reopening for both EN and PL. The same behavior was observed on the audit fixture after two saves.
 - Impact: admins can believe a description was saved when it was silently lost; localized tag metadata cannot be maintained reliably.
-- Resolution: added the missing `tag_translations.description` column migration, included descriptions in Supabase writes, and made the adapter choose the visible/latest mirrored form value. Regression coverage passed; the migration must be applied to the connected Supabase project.
+- Resolution: added the missing `tag_translations.description` column migration, included descriptions in Supabase writes, and made the adapter choose the visible/latest mirrored form value. Regression coverage passed; migration `add_tag_translation_descriptions` version `20260905151208` is applied to the connected Supabase project.
 
 ### Finding A-007 — Full one-shot product creation is not reliable
 
@@ -105,7 +105,7 @@ Findings are recorded below.
 
 ## Chronological test log
 
-Audit started. Live application and browser evidence will be added below as each flow is exercised.
+Audit started. Live application and browser evidence is recorded below as each flow is exercised.
 
 ### 2026-09-05 — login and dashboard
 
@@ -159,12 +159,17 @@ Audit started. Live application and browser evidence will be added below as each
 - PASS: full Playwright suite — 26 tests across Chromium desktop and mobile.
 - PASS: `git diff --check` on the fix branch.
 - PASS: source-level resolution confirmed for A-001, A-004, A-005, A-006, and A-007.
-- PENDING: live Vercel re-check, because automatic Git deployments are disabled and no Production deployment was requested.
-- PENDING: owner-approved Privacy/Terms copy (A-002), approved Moon Garden media/purchase content (A-003), and application of the tag description migration to the intended remote Supabase project.
+- RESOLVED: live Vercel re-check completed after the explicitly approved Production deployment; A-001 is now live-verified.
+- RESOLVED: the tag description migration was applied to the connected Supabase project.
+- PENDING CONTENT INPUTS: owner-approved Privacy/Terms copy (A-002) and approved Moon Garden media/purchase content (A-003).
 
-### 2026-09-05 — live re-check after main push
+### 2026-09-05 — live Production re-check after RPC deployment
 
-- FAIL / unchanged A-001: the authenticated live URL still renders the generic server-error screen with `ERROR 882554858` on `/admin/users`.
-- Evidence: the live screenshot was captured after `origin/main` reached `4edb8c0d404d4ec985331487d3855598c01812b0`; the runtime is therefore not serving that commit yet.
-- Independent read-only Vercel evidence: the latest promoted Production deployment is associated with commit `039d81…`, not the current `main` commit `edf12a5…`.
-- Interpretation: the source fix is verified locally, but live verification remains pending deployment. No Production deployment was initiated because automatic Git deployments are disabled and the request was to push `main`, not deploy Production.
+- PASS: Production deployment `dpl_2KZxjPnoSuDEmdZWBWWM1YuRn1zu` completed `READY` / `PROMOTED` under the canonical alias `https://lamilia-lomi.vercel.app`.
+- PASS: deployment metadata identifies commit `779a8682097ac6a6655ea592c91f9cb35945014d` on `main`; the build completed dependency installation, optimized Next build, TypeScript, page-data collection, and output deployment.
+- PASS / resolved A-001: authenticated `/admin/users` shows 3 results: `user@lamilialomi.test`, `admin@lamilialomi.test`, and `tomi@seller.pl`. The former stale-service-key error is absent. A screenshot of the working table was captured in the audit conversation.
+- PASS: `/admin`, `/admin/products`, `/admin/products/new`, `/admin/categories`, `/admin/tags`, `/admin/pages`, `/admin/pages/privacy`, `/admin/pages/terms`, and `/admin/settings` all loaded in the authenticated browser session. The empty product save returned the visible `English title is required.` validation without creating data.
+- PASS (runtime request): `/admin/users/export` reached the deployed function and emitted an informational request log. The browser correctly treated the CSV response as a download and blocked direct tab navigation with `ERR_BLOCKED_BY_CLIENT`; file bytes were not claimed as independently downloaded in this session.
+- PASS: Vercel runtime logs for the smoke window contain requests for all tested admin routes and no server-error entry for the new users RPC path.
+- PASS: connected Supabase migration ledger contains `add_tag_translation_descriptions` (`20260905151208`) and `list_admin_users_rpc` (`20260905152853`).
+- REMAINING CONTENT INPUTS: A-002 (owner-approved Privacy/Terms) and A-003 (approved Moon Garden media/Amazon content) remain unchanged and are explicitly not fabricated by this audit.
