@@ -2,7 +2,7 @@ import "server-only";
 
 import { getBackendMode } from "@/lib/config";
 import { getAdminContentSnapshot } from "@/lib/content-repository";
-import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { demoUsers } from "./seed-data";
 import type { UserRole } from "./types";
 
@@ -33,57 +33,33 @@ export async function getAdminUserRowsForRequest(): Promise<AdminUserRow[]> {
     }));
   }
 
-  const supabase = createServiceRoleClient();
-  const [
-    { data: authData, error: authError },
-    { data: profiles, error: profilesError },
-    { data: unlocks, error: unlocksError },
-    { data: productTranslations, error: productTranslationsError },
-  ] = await Promise.all([
-    supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
-    supabase.from("profiles").select("id, role, marketing_consent"),
-    supabase.from("user_product_unlocks").select("user_id, product_id"),
-    supabase.from("product_translations").select("product_id, locale, title"),
-  ]);
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("list_admin_users");
 
-  if (authError) throw new Error(`Supabase auth user read failed: ${authError.message}`);
-  if (profilesError) throw new Error(`Supabase profile read failed: ${profilesError.message}`);
-  if (unlocksError) throw new Error(`Supabase unlock read failed: ${unlocksError.message}`);
-  if (productTranslationsError) {
-    throw new Error(`Supabase product translation read failed: ${productTranslationsError.message}`);
-  }
+  if (error) throw new Error(`Supabase admin user read failed: ${error.message}`);
 
-  const profilesById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
-  const productTitlesById = new Map(
-    (productTranslations ?? [])
-      .filter((translation) => translation.locale === "en")
-      .map((translation) => [translation.product_id, translation.title]),
-  );
-  const unlocksByUser = new Map<string, string[]>();
-
-  for (const unlock of unlocks ?? []) {
-    const current = unlocksByUser.get(unlock.user_id) ?? [];
-    current.push(unlock.product_id);
-    unlocksByUser.set(unlock.user_id, current);
-  }
-
-  return authData.users.map((user) => {
-    const profile = profilesById.get(user.id);
-    const unlockedProductIds = unlocksByUser.get(user.id) ?? [];
-
-    return {
-      id: user.id,
-      email: user.email ?? "",
-      role: profile?.role === "admin" ? "admin" : "user",
-      emailVerified: Boolean(user.email_confirmed_at),
-      marketingConsent: Boolean(profile?.marketing_consent),
-      unlockCount: unlockedProductIds.length,
-      unlockedProducts: unlockedProductIds
-        .map((productId) => productTitlesById.get(productId))
-        .filter((title): title is string => Boolean(title)),
-    };
-  });
+  return ((data ?? []) as unknown as AdminUsersRpcRow[]).map((row) => ({
+    id: row.id,
+    email: row.email ?? "",
+    role: row.role === "admin" ? "admin" : "user",
+    emailVerified: Boolean(row.email_verified),
+    marketingConsent: Boolean(row.marketing_consent),
+    unlockCount: Number(row.unlock_count ?? 0),
+    unlockedProducts: Array.isArray(row.unlocked_products)
+      ? row.unlocked_products.filter((title): title is string => typeof title === "string")
+      : [],
+  }));
 }
+
+type AdminUsersRpcRow = {
+  id: string;
+  email: string | null;
+  role: string | null;
+  email_verified: boolean | null;
+  marketing_consent: boolean | null;
+  unlock_count: number | string | null;
+  unlocked_products: unknown;
+};
 
 export function exportAdminUsersToCsv(
   rows: AdminUserRow[],
