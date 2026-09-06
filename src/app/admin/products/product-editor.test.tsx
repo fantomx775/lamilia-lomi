@@ -13,7 +13,10 @@ vi.mock("@/app/admin/actions", () => ({
 import { ProductEditor } from "./product-editor";
 import { getSeedContentSnapshot } from "@/lib/content-store";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("ProductEditor V2", () => {
   const snapshot = getSeedContentSnapshot();
@@ -39,7 +42,7 @@ describe("ProductEditor V2", () => {
     expect(view.getByText("SEO i wygląd w Google")).toBeInTheDocument();
   });
 
-  it("shows readable organization, media, Amazon, premium and publishing controls", () => {
+  it("shows five purpose-built media sections without the legacy asset builder", () => {
     const view = render(
       <ProductEditor
         title="Nowy produkt"
@@ -50,11 +53,15 @@ describe("ProductEditor V2", () => {
 
     expect(view.getByRole("heading", { name: "Organizacja" })).toBeInTheDocument();
     expect(view.getByLabelText("Segment")).toHaveValue("kids");
-    expect(view.getByRole("heading", { name: "Okładka i media" })).toBeInTheDocument();
+    for (const title of ["OKŁADKA", "GALERIA", "WIDEO FLIPTHROUGH", "PUBLICZNE PLIKI DO POBRANIA", "MATERIAŁY PREMIUM"]) {
+      expect(view.getByRole("heading", { name: title })).toBeInTheDocument();
+    }
     expect(view.getByRole("heading", { name: "Sprzedaż na Amazon" })).toBeInTheDocument();
     expect(view.getByRole("heading", { name: "Dostęp premium" })).toBeInTheDocument();
     expect(view.getByLabelText("Status")).toHaveValue("draft");
     expect(view.queryByText("Bucket")).not.toBeInTheDocument();
+    expect(view.queryByText("Ścieżka / URL")).not.toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "Dodaj asset" })).not.toBeInTheDocument();
   });
 
   it("keeps existing taxonomy, primary Amazon link, and premium code values visible", () => {
@@ -133,7 +140,26 @@ describe("ProductEditor V2", () => {
     expect(formData.get("title_en")).toBe("Ocean Calm");
   });
 
-  it("switches a new premium asset to the private storage bucket", async () => {
+  it("uploads a selected file through the admin binary endpoint and keeps its filename", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ asset: {
+        id: "asset-uploaded-cover",
+        productId: "product-upload",
+        kind: "cover",
+        bucket: "public-media",
+        path: "/uploads/product-upload/cover/moon-garden-cover.jpg",
+        storagePath: "/uploads/product-upload/cover/moon-garden-cover.jpg",
+        filename: "moon-garden-cover.jpg",
+        contentType: "image/jpeg",
+        sizeBytes: 12,
+        title: "moon-garden-cover.jpg",
+        sortOrder: 1,
+        isPublic: true,
+        isActive: true,
+        uploaded: true,
+      } }),
+    }));
     const user = userEvent.setup();
     const view = render(
       <ProductEditor
@@ -143,9 +169,29 @@ describe("ProductEditor V2", () => {
       />,
     );
 
-    await user.click(view.getByRole("button", { name: "Dodaj asset" }));
-    await user.selectOptions(view.getAllByLabelText("Typ")[0], "premium_download");
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
+    expect(input).not.toBeNull();
+    await user.upload(input!, new File(["cover"], "moon-garden-cover.jpg", { type: "image/jpeg" }));
 
-    expect(view.container.querySelector<HTMLInputElement>('input[name="assetBucket"]')).toHaveValue("premium-files");
+    await waitFor(() => expect(view.getByText("moon-garden-cover.jpg")).toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({ method: "POST" }));
+    expect(view.getByText("Przesłano")).toBeInTheDocument();
+
+    await user.click(view.getByRole("button", { name: "Usuń" }));
+    await waitFor(() => expect(view.queryByText("moon-garden-cover.jpg")).not.toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("rejects a gallery selection above the twenty-image limit before uploading", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />,
+    );
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-gallery");
+    const files = Array.from({ length: 21 }, (_, index) => new File(["image"], `page-${index}.png`, { type: "image/png" }));
+
+    await user.upload(input!, files);
+
+    expect(view.getByRole("alert")).toHaveTextContent("maksymalnie 20");
   });
 });

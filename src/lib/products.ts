@@ -115,6 +115,10 @@ export function getLocalizedProductViewFromSnapshot(
     cover,
     gallery: sortAssets(activeAssets.filter((asset) => asset.kind === "gallery")),
     video: activeAssets.find((asset) => asset.kind === "video"),
+    publicDownloads: localizedAssets(
+      activeAssets.filter((asset) => asset.kind === "public_download"),
+      locale,
+    ),
     premiumAssets: sortAssets(
       activeAssets.filter((asset) => asset.kind === "premium_download"),
     ),
@@ -136,6 +140,14 @@ export function getLocalizedProductViewFromSnapshot(
     primaryAmazonLink: pickPrimaryAmazonLink(product),
     reviewDelayDays: product.reviewDelayDays,
   };
+}
+
+export function localizedAssets(assets: ProductAsset[], locale: Locale) {
+  const global = assets.filter((asset) => !asset.locale);
+  const exact = assets.filter((asset) => asset.locale === locale);
+  const fallback = assets.filter((asset) => asset.locale === defaultLocale);
+
+  return sortAssets([...global, ...(exact.length ? exact : fallback)]);
 }
 
 export function getPublishedProductViews(locale: Locale) {

@@ -120,6 +120,22 @@ describe("admin behavior", () => {
     });
   });
 
+  it("rejects more than twenty active gallery assets server-side", () => {
+    const form = new FormData();
+    form.set("title_en", "Gallery limit");
+    for (let index = 0; index < 21; index += 1) {
+      form.append("assetId", `asset-${index}`);
+      form.append("assetKind", "gallery");
+      form.append("assetPath", `/uploads/gallery/page-${index}.png`);
+      form.append("assetFilename", `page-${index}.png`);
+      form.append("assetContentType", "image/png");
+      form.append("assetSortOrder", String(index + 1));
+    }
+
+    const result = buildProductFromFormData(form, { snapshot: getSeedContentSnapshot() });
+    expect(result.errors).toContain("Galeria może zawierać maksymalnie 20 obrazów.");
+  });
+
   it("preserves existing product locales, taxonomy, assets, markets, and premium codes on edit", () => {
     const snapshot = getSeedContentSnapshot();
     const existing = snapshot.products[0];

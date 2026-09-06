@@ -185,15 +185,20 @@ function mapTaxonomyTranslation(row: DbRow): TaxonomyTranslation {
 
 function mapAsset(row: DbRow): ProductAsset {
   const kind = row.kind as ProductAsset["kind"];
+  const rawPath = stringValue(row.path);
+  const isUploadedStorageAsset = rawPath.startsWith("products/");
 
   return {
     id: stringValue(row.id),
     productId: stringValue(row.product_id),
     kind,
     bucket: stringValue(row.bucket),
-    path: Boolean(row.is_public) && !stringValue(row.path).startsWith("/")
-      ? `/${stringValue(row.path)}`
-      : stringValue(row.path),
+    path: Boolean(row.is_public) && isUploadedStorageAsset
+      ? `/api/media/${stringValue(row.id)}`
+      : Boolean(row.is_public) && !rawPath.startsWith("/")
+        ? `/${rawPath}`
+        : rawPath,
+    storagePath: isUploadedStorageAsset ? rawPath : undefined,
     filename: stringValue(row.filename),
     contentType: stringValue(row.content_type),
     sizeBytes: numberOrUndefined(row.size_bytes),

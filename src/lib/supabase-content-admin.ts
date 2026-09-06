@@ -19,12 +19,17 @@ import {
   saveTagFromFormData,
 } from "./admin-content";
 import { getAdminContentSnapshot } from "./content-repository";
+import { cleanupNewMediaFromFormData } from "./media-storage";
 import type { AdminMutationResult } from "./admin-content";
 import type { Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
   if (getBackendMode() === "local") {
-    return saveProductFromFormData(formData);
+    const result = saveProductFromFormData(formData);
+    if (!result.ok) {
+      await cleanupNewMediaFromFormData(formData);
+    }
+    return result;
   }
 
   const snapshot = await getAdminContentSnapshot();
@@ -32,6 +37,7 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   const { product, errors } = buildProductFromFormData(formData, { existing, snapshot });
 
   if (errors.length) {
+    await cleanupNewMediaFromFormData(formData);
     return { ok: false, errors };
   }
 
@@ -47,16 +53,21 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   product.premiumCodes.forEach((code) => assertUuidSet(code.id, "premium code"));
 
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("save_product", {
-    product_state: buildProductMutationPayload(product),
-  });
+  try {
+    const { data, error } = await supabase.rpc("save_product", {
+      product_state: buildProductMutationPayload(product),
+    });
 
-  if (error) {
-    throw new Error(`Supabase product mutation failed: ${error.message}`);
-  }
+    if (error) {
+      throw new Error(`Supabase product mutation failed: ${error.message}`);
+    }
 
-  if (!data || typeof data !== "object" || data.status !== "success") {
-    throw new Error("Supabase product mutation returned an unknown result.");
+    if (!data || typeof data !== "object" || data.status !== "success") {
+      throw new Error("Supabase product mutation returned an unknown result.");
+    }
+  } catch (error) {
+    await cleanupNewMediaFromFormData(formData);
+    throw error;
   }
 
   return { ok: true, id: product.id };
@@ -88,7 +99,7 @@ export function buildProductMutationPayload(product: Product) {
       id: asset.id,
       kind: asset.kind,
       bucket: asset.bucket,
-      path: asset.path,
+      path: asset.storagePath ?? asset.path,
       filename: asset.filename,
       contentType: asset.contentType,
       sizeBytes: asset.sizeBytes ?? null,

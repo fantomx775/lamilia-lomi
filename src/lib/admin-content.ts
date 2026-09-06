@@ -621,6 +621,23 @@ function validateProductDraft(product: Product) {
     }
   });
 
+  const activeAssets = product.assets.filter((asset) => asset.isActive !== false);
+  const coverCount = activeAssets.filter((asset) => asset.kind === "cover").length;
+  const videoCount = activeAssets.filter((asset) => asset.kind === "video").length;
+  const galleryCount = activeAssets.filter((asset) => asset.kind === "gallery").length;
+
+  if (coverCount > 1) {
+    errors.push("Może istnieć tylko jedna okładka.");
+  }
+
+  if (videoCount > 1) {
+    errors.push("Może istnieć tylko jedno wideo.");
+  }
+
+  if (galleryCount > 20) {
+    errors.push("Galeria może zawierać maksymalnie 20 obrazów.");
+  }
+
   return Array.from(new Set(errors));
 }
 

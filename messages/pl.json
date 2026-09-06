@@ -17,7 +17,11 @@
   "Product": {
     "amazon": "Zobacz na Amazon",
     "premium": "Odblokuj materiały premium",
-    "download": "Pobierz plik premium"
+    "download": "Pobierz plik premium",
+    "publicDownloads": "Darmowe pliki do pobrania",
+    "publicDownloadsDescription": "Dostępne od razu — bez konta i bez odblokowywania produktu.",
+    "downloadPublic": "Pobierz plik",
+    "availableNow": "Dostępne od razu"
   },
   "Funnel": {
     "ownerEyebrow": "Masz już tę książkę?",

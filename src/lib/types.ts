@@ -45,6 +45,8 @@ export type ProductAsset = {
   kind: AssetKind;
   bucket: string;
   path: string;
+  /** Internal Storage key for uploaded Supabase assets; never shown in the normal editor. */
+  storagePath?: string;
   filename: string;
   contentType: string;
   sizeBytes?: number;
@@ -123,6 +125,7 @@ export type LocalizedProductView = {
   cover: ProductAsset;
   gallery: ProductAsset[];
   video?: ProductAsset;
+  publicDownloads: ProductAsset[];
   premiumAssets: ProductAsset[];
   categories: Array<Category & { name: string }>;
   tags: Array<Tag & { name: string }>;

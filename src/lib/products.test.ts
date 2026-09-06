@@ -90,4 +90,18 @@ describe("product catalog behavior", () => {
 
     expect(product?.cover.path).toBe("/assets/covers/cover-placeholder.svg");
   });
+
+  it("surfaces active public downloads and respects locale fallback", () => {
+    const product = getLocalizedProductView("moon-garden-coloring-book", "de");
+
+    expect(product?.publicDownloads).toEqual([
+      expect.objectContaining({ id: "asset-moon-public-guide", isPublic: true }),
+    ]);
+  });
+
+  it("does not surface inactive public downloads or premium files in the public list", () => {
+    const snapshot = getLocalizedProductView("moon-garden-coloring-book", "en");
+    expect(snapshot?.publicDownloads.every((asset) => asset.kind === "public_download" && asset.isActive !== false)).toBe(true);
+    expect(snapshot?.publicDownloads.some((asset) => asset.kind === "premium_download")).toBe(false);
+  });
 });
