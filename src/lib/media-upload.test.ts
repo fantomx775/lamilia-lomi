@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MEDIA_UPLOAD_SPECS, filenameWithCollisionSuffix, mediaBucketForKind, validateMediaFile } from "./media-upload";
+import { MEDIA_UPLOAD_SPECS, filenameWithCollisionSuffix, isMediaKind, mediaBucketForKind, validateMediaFile } from "./media-upload";
 
 describe("media upload rules", () => {
   it("keeps each asset kind in its intended storage class", () => {
@@ -15,6 +15,14 @@ describe("media upload rules", () => {
     expect(validateMediaFile("public_download", { name: "guide.pdf", size: 100, type: "" })).toEqual({ ok: true, contentType: "application/pdf" });
     expect(validateMediaFile("premium_download", { name: "script.exe", size: 100, type: "application/x-msdownload" })).toMatchObject({ ok: false });
     expect(validateMediaFile("video", { name: "large.mp4", size: 51 * 1024 * 1024, type: "video/mp4" })).toMatchObject({ ok: false });
+    expect(validateMediaFile("video", { name: "preview.svg", size: 100, type: "image/svg+xml" })).toMatchObject({ ok: false });
+    expect(validateMediaFile("cover", { name: "cover.svg", size: 100, type: "image/svg+xml" })).toMatchObject({ ok: false });
+  });
+
+  it("accepts only own media kind keys", () => {
+    expect(isMediaKind("cover")).toBe(true);
+    expect(isMediaKind("constructor")).toBe(false);
+    expect(isMediaKind("toString")).toBe(false);
   });
 
   it("adds deterministic suffixes without losing the extension", () => {

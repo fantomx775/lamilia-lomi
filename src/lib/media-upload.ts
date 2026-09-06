@@ -16,29 +16,29 @@ export const MEDIA_UPLOAD_SPECS: Record<
     bucket: "public-media",
     maxBytes: 20 * 1024 * 1024,
     multiple: false,
-    accept: "image/png,image/jpeg,image/webp,image/svg+xml",
-    allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+    accept: "image/png,image/jpeg,image/webp",
+    allowedMimeTypes: ["image/png", "image/jpeg", "image/webp"],
   },
   gallery: {
     bucket: "public-media",
     maxBytes: 20 * 1024 * 1024,
     multiple: true,
-    accept: "image/png,image/jpeg,image/webp,image/svg+xml",
-    allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+    accept: "image/png,image/jpeg,image/webp",
+    allowedMimeTypes: ["image/png", "image/jpeg", "image/webp"],
   },
   video: {
     bucket: "public-videos",
     maxBytes: 50 * 1024 * 1024,
     multiple: false,
-    accept: "video/mp4,video/webm,image/svg+xml",
-    allowedMimeTypes: ["video/mp4", "video/webm", "image/svg+xml"],
+    accept: "video/mp4,video/webm",
+    allowedMimeTypes: ["video/mp4", "video/webm"],
   },
   public_download: {
     bucket: "public-media",
     maxBytes: 20 * 1024 * 1024,
     multiple: true,
-    accept: "application/pdf,image/png,image/jpeg,image/webp,image/svg+xml",
-    allowedMimeTypes: ["application/pdf", "image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+    accept: "application/pdf,image/png,image/jpeg,image/webp",
+    allowedMimeTypes: ["application/pdf", "image/png", "image/jpeg", "image/webp"],
   },
   premium_download: {
     bucket: "premium-files",
@@ -111,7 +111,7 @@ export function filenameWithCollisionSuffix(filename: string, suffix: number) {
 }
 
 export function isMediaKind(value: string): value is AssetKind {
-  return value in MEDIA_UPLOAD_SPECS;
+  return Object.prototype.hasOwnProperty.call(MEDIA_UPLOAD_SPECS, value);
 }
 
 function inferContentType(filename: string) {

@@ -17,6 +17,7 @@ import type {
   Tag,
   TaxonomyTranslation,
 } from "./types";
+import { mediaBucketForKind, validateMediaFile } from "./media-upload";
 import { slugify } from "./utils";
 
 const locales = routing.locales;
@@ -90,6 +91,67 @@ export function buildProductFromFormData(
     product,
     errors: validateProductDraft(product),
   };
+}
+
+export function validateProductMediaSubmission(formData: FormData) {
+  const uploadState = textField(formData, "mediaUploadState");
+
+  if (uploadState === "active") {
+    return ["Zakończ przesyłanie plików przed zapisaniem produktu."];
+  }
+
+  if (uploadState && uploadState !== "idle") {
+    return ["Nie udało się potwierdzić stanu przesyłania plików."];
+  }
+
+  return [];
+}
+
+export function validateProductAssetSubmission(
+  formData: FormData,
+  product: Product,
+  existing?: Product,
+) {
+  const ids = formData.getAll("assetId");
+  const uploaded = formData.getAll("assetUploaded");
+  const existingIds = new Set(existing?.assets.map((asset) => asset.id) ?? []);
+  const uploadedById = new Map<string, string>();
+
+  ids.forEach((value, index) => {
+    if (typeof value === "string" && value.trim()) {
+      uploadedById.set(value.trim(), typeof uploaded[index] === "string" ? uploaded[index].trim() : "");
+    }
+  });
+
+  return product.assets.flatMap((asset) => {
+    if (existingIds.has(asset.id)) {
+      return [];
+    }
+
+    if (uploadedById.get(asset.id) !== "1") {
+      return [`${asset.filename}: potwierdź zakończenie przesyłania przed zapisaniem.`];
+    }
+
+    const storagePath = asset.storagePath ?? asset.path;
+    const expectedSupabasePrefix = `products/${product.id}/${asset.kind}/${asset.id}-`;
+    const expectedLocalPrefix = `/uploads/${product.id}/${asset.kind}/`;
+
+    if (!storagePath.startsWith(expectedSupabasePrefix) && !storagePath.startsWith(expectedLocalPrefix)) {
+      return [`${asset.filename}: nieprawidłowa ścieżka pliku.`];
+    }
+
+    const validation = validateMediaFile(asset.kind, {
+      name: asset.filename,
+      size: asset.sizeBytes ?? 0,
+      type: asset.contentType,
+    });
+
+    if (!validation.ok) {
+      return [validation.error];
+    }
+
+    return [];
+  });
 }
 
 export function saveProductFromFormData(formData: FormData): AdminMutationResult {
@@ -442,10 +504,10 @@ function parseAssets(
   const removed = new Set(existingIds(formData, "assetRemove"));
   const ids = formData.getAll("assetId");
   const kinds = formData.getAll("assetKind");
-  const buckets = formData.getAll("assetBucket");
   const paths = formData.getAll("assetPath");
   const filenames = formData.getAll("assetFilename");
   const contentTypes = formData.getAll("assetContentType");
+  const sizes = formData.getAll("assetSizeBytes");
   const localesFromForm = formData.getAll("assetLocale");
   const titles = formData.getAll("assetTitle");
   const sortOrders = formData.getAll("assetSortOrder");
@@ -461,32 +523,30 @@ function parseAssets(
       continue;
     }
 
-    const kind = assetKindValue(valueAt(kinds, index) || existing?.kind || "gallery");
-    const path = valueAt(paths, index) || existing?.path || "";
+    const kind = existing?.kind ?? assetKindValue(valueAt(kinds, index) || "gallery");
+    const path = existing
+      ? existing.storagePath ?? existing.path
+      : valueAt(paths, index);
 
     if (!path) {
       continue;
     }
 
     const isPublic = kind !== "premium_download";
-    const filename =
-      valueAt(filenames, index) || existing?.filename || filenameFromPath(path);
+    const filename = existing?.filename || valueAt(filenames, index) || filenameFromPath(path);
 
     assets.push({
       id: existingId || randomUUID(),
       productId,
       kind,
-      bucket: bucketForAssetKind(
-        kind,
-        valueAt(buckets, index) || existing?.bucket,
-      ),
+      bucket: mediaBucketForKind(kind),
       path,
       filename,
       contentType:
-        valueAt(contentTypes, index) ||
         existing?.contentType ||
+        valueAt(contentTypes, index) ||
         inferContentType(filename),
-      sizeBytes: existing?.sizeBytes,
+      sizeBytes: existing?.sizeBytes ?? (numberFromValue(valueAt(sizes, index), 0) || undefined),
       locale:
         localeFieldValue(valueAt(localesFromForm, index)) ?? existing?.locale,
       title: valueAt(titles, index) || existing?.title || filename,
@@ -819,33 +879,6 @@ function upsertManyByComposite<T>(
     (result, item) => upsertByComposite(result, item, keySelector),
     collection,
   );
-}
-
-function defaultBucketForKind(kind: ProductAsset["kind"]) {
-  if (kind === "premium_download") {
-    return "premium-files";
-  }
-
-  if (kind === "video") {
-    return "public-videos";
-  }
-
-  return "public-media";
-}
-
-function bucketForAssetKind(
-  kind: ProductAsset["kind"],
-  requestedBucket: string | undefined,
-) {
-  if (kind === "premium_download") {
-    return "premium-files";
-  }
-
-  if (requestedBucket === "premium-files") {
-    return defaultBucketForKind(kind);
-  }
-
-  return requestedBucket || defaultBucketForKind(kind);
 }
 
 function filenameFromPath(assetPath: string) {

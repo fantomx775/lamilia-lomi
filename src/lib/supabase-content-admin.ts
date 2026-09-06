@@ -14,20 +14,44 @@ import {
   deleteTag,
   saveCategoryFromFormData,
   saveProductFromFormData,
+  validateProductAssetSubmission,
+  validateProductMediaSubmission,
   saveStaticPageFromFormData,
   saveStaticPagesFromFormData,
   saveTagFromFormData,
 } from "./admin-content";
+import { getContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
-import { cleanupNewMediaFromFormData } from "./media-storage";
+import { cleanupNewMediaFromFormData, cleanupPersistedMedia } from "./media-storage";
+import { mediaBucketForKind } from "./media-upload";
+import { createServiceRoleClient } from "./supabase/admin";
 import type { AdminMutationResult } from "./admin-content";
 import type { Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
+  const mediaErrors = validateProductMediaSubmission(formData);
+
+  if (mediaErrors.length) {
+    await cleanupNewMediaFromFormData(formData);
+    return { ok: false, errors: mediaErrors };
+  }
+
   if (getBackendMode() === "local") {
+    const snapshot = getContentSnapshot();
+    const existing = snapshot.products.find((product) => product.id === stringField(formData, "id"));
+    const { product, errors } = buildProductFromFormData(formData, { existing, snapshot });
+    const assetErrors = validateProductAssetSubmission(formData, product, existing);
+
+    if (errors.length || assetErrors.length) {
+      await cleanupNewMediaFromFormData(formData);
+      return { ok: false, errors: [...errors, ...assetErrors] };
+    }
+
     const result = saveProductFromFormData(formData);
     if (!result.ok) {
       await cleanupNewMediaFromFormData(formData);
+    } else {
+      await cleanupPersistedMedia({ previous: existing?.assets ?? [], next: product.assets });
     }
     return result;
   }
@@ -36,9 +60,11 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   const existing = snapshot.products.find((product) => product.id === stringField(formData, "id"));
   const { product, errors } = buildProductFromFormData(formData, { existing, snapshot });
 
-  if (errors.length) {
+  const assetErrors = validateProductAssetSubmission(formData, product, existing);
+
+  if (errors.length || assetErrors.length) {
     await cleanupNewMediaFromFormData(formData);
-    return { ok: false, errors };
+    return { ok: false, errors: [...errors, ...assetErrors] };
   }
 
   assertUuidSet(product.id, "product");
@@ -54,6 +80,7 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
 
   const supabase = await createClient();
   try {
+    await assertSupabaseUploadsExist(product.assets.filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id)));
     const { data, error } = await supabase.rpc("save_product", {
       product_state: buildProductMutationPayload(product),
     });
@@ -69,6 +96,8 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
     await cleanupNewMediaFromFormData(formData);
     throw error;
   }
+
+  await cleanupPersistedMedia({ previous: existing?.assets ?? [], next: product.assets });
 
   return { ok: true, id: product.id };
 }
@@ -98,7 +127,7 @@ export function buildProductMutationPayload(product: Product) {
     assets: product.assets.map((asset) => ({
       id: asset.id,
       kind: asset.kind,
-      bucket: asset.bucket,
+      bucket: mediaBucketForKind(asset.kind),
       path: asset.storagePath ?? asset.path,
       filename: asset.filename,
       contentType: asset.contentType,
@@ -123,11 +152,19 @@ export function buildProductMutationPayload(product: Product) {
 
 export async function deleteProductForRequest(productId: string): Promise<AdminMutationResult> {
   if (getBackendMode() === "local") {
-    return deleteProduct(productId);
+    const previous = getContentSnapshot().products.find((product) => product.id === productId);
+    const result = deleteProduct(productId);
+    if (result.ok) {
+      await cleanupPersistedMedia({ previous: previous?.assets ?? [], next: [] });
+    }
+    return result;
   }
 
+  const snapshot = await getAdminContentSnapshot();
+  const previous = snapshot.products.find((product) => product.id === productId);
   const supabase = await createClient();
   await run(supabase.from("products").delete().eq("id", productId), "product deletion");
+  await cleanupPersistedMedia({ previous: previous?.assets ?? [], next: [] });
   return { ok: true, id: productId };
 }
 
@@ -284,6 +321,26 @@ async function run(query: PromiseLike<{ error: { message: string } | null }>, la
 
   if (error) {
     throw new Error(`Supabase ${label} write failed: ${error.message}`);
+  }
+}
+
+async function assertSupabaseUploadsExist(assets: Product["assets"]) {
+  if (!assets.length) return;
+
+  const storage = createServiceRoleClient().storage;
+
+  for (const asset of assets) {
+    const storagePath = asset.storagePath ?? asset.path;
+    const slash = storagePath.lastIndexOf("/");
+    const folder = slash === -1 ? "" : storagePath.slice(0, slash);
+    const filename = slash === -1 ? storagePath : storagePath.slice(slash + 1);
+    const { data, error } = await storage
+      .from(mediaBucketForKind(asset.kind))
+      .list(folder, { limit: 100, search: filename });
+
+    if (error || !data?.some((entry) => entry.name === filename)) {
+      throw new Error(`Nie znaleziono przesłanego pliku „${asset.filename}” w Storage.`);
+    }
   }
 }
 

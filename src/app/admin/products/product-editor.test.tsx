@@ -2,7 +2,15 @@
 
 import { cleanup, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const editorMocks = vi.hoisted(() => ({
+  uploadMediaWithTus: vi.fn(),
+}));
+
+vi.mock("@/lib/media-upload-client", () => ({
+  uploadMediaWithTus: editorMocks.uploadMediaWithTus,
+}));
 
 vi.mock("@/app/admin/actions", () => ({
   archiveProductAction: vi.fn(),
@@ -16,6 +24,10 @@ import { getSeedContentSnapshot } from "@/lib/content-store";
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  editorMocks.uploadMediaWithTus.mockReset();
 });
 
 describe("ProductEditor V2", () => {
@@ -180,6 +192,65 @@ describe("ProductEditor V2", () => {
     await user.click(view.getByRole("button", { name: "Usuń" }));
     await waitFor(() => expect(view.queryByText("moon-garden-cover.jpg")).not.toBeInTheDocument());
     expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("keeps Save disabled until a signed resumable upload completes", async () => {
+    let finishUpload!: () => void;
+    editorMocks.uploadMediaWithTus.mockImplementation(() => new Promise<void>((resolve) => {
+      finishUpload = resolve;
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        asset: {
+          id: "11111111-1111-4111-8111-111111111199",
+          productId: "11111111-1111-4111-8111-111111111111",
+          kind: "cover",
+          bucket: "public-media",
+          path: "/api/media/11111111-1111-4111-8111-111111111199",
+          storagePath: "products/11111111-1111-4111-8111-111111111111/cover/11111111-1111-4111-8111-111111111199-cover.jpg",
+          filename: "cover.jpg",
+          contentType: "image/jpeg",
+          sizeBytes: 5,
+          title: "cover.jpg",
+          sortOrder: 1,
+          isPublic: true,
+          isActive: true,
+          uploaded: false,
+        },
+        upload: {
+          endpoint: "https://project.storage.supabase.co/storage/v1/upload/resumable",
+          token: "signed-token",
+          bucket: "public-media",
+          path: "products/11111111-1111-4111-8111-111111111111/cover/11111111-1111-4111-8111-111111111199-cover.jpg",
+        },
+      }),
+    }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />);
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
+
+    await user.upload(input!, new File(["cover"], "cover.jpg", { type: "image/jpeg" }));
+    await waitFor(() => expect(view.getByRole("button", { name: "Zapisz" })).toBeDisabled());
+    expect(view.getByText("Zapis produktu będzie dostępny po zakończeniu przesyłania plików.")).toBeInTheDocument();
+
+    finishUpload();
+    await waitFor(() => expect(view.getByText("Przesłano")).toBeInTheDocument());
+    expect(view.getByRole("button", { name: "Zapisz" })).not.toBeDisabled();
+  });
+
+  it("preserves the existing cover when a replacement upload fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "Upload nie powiódł się." }),
+    }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Edycja produktu" product={product} categories={snapshot.categories} tags={snapshot.tags} />);
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
+
+    await user.upload(input!, new File(["cover"], "replacement.jpg", { type: "image/jpeg" }));
+    await waitFor(() => expect(view.getByText("Upload nie powiódł się.")).toBeInTheDocument());
+    expect(view.getByText("moon-garden.svg")).toBeInTheDocument();
   });
 
   it("rejects a gallery selection above the twenty-image limit before uploading", async () => {

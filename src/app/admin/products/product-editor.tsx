@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { routing, type Locale } from "@/i18n/routing";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
+import { uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
 type TranslationDraft = {
@@ -42,6 +43,8 @@ type AssetDraft = {
   error?: string;
   file?: File;
   uploaded?: boolean;
+  upload?: SignedMediaUploadTarget;
+  progress?: number;
 };
 
 type AmazonDraft = {
@@ -97,11 +100,15 @@ export function ProductEditor({
   const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product));
   const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product));
+  const assetsRef = useRef(assets);
+  const uploadVersionsRef = useRef(new Map<ProductAsset["kind"], number>());
+  assetsRef.current = assets;
   const missingLocales = routing.locales.filter((code) => !translations[code].title.trim());
   const returnTo = product ? `/admin/products/${product.id}` : "/admin/products/new";
   const visibleAssets = assets.filter((asset) => !asset.removed && asset.status === "uploaded");
   const coverAsset = visibleAssets.find((asset) => asset.kind === "cover");
   const videoAsset = visibleAssets.find((asset) => asset.kind === "video");
+  const hasActiveMediaUpload = assets.some((asset) => !asset.removed && (asset.status === "queued" || asset.status === "uploading"));
 
   const updateTranslation = (field: keyof TranslationDraft, value: string) => {
     setTranslations((current) => ({ ...current, [locale]: { ...current[locale], [field]: value } }));
@@ -119,10 +126,20 @@ export function ProductEditor({
     }));
   };
 
+  const nextUploadVersion = (kind: ProductAsset["kind"]) => {
+    const version = (uploadVersionsRef.current.get(kind) ?? 0) + 1;
+    uploadVersionsRef.current.set(kind, version);
+    return version;
+  };
+
+  const isCurrentUpload = (kind: ProductAsset["kind"], version: number) =>
+    MEDIA_UPLOAD_SPECS[kind].multiple || uploadVersionsRef.current.get(kind) === version;
+
   const uploadFiles = async (kind: ProductAsset["kind"], selectedFiles: FileList | File[]) => {
     const selected = Array.from(selectedFiles);
     const spec = MEDIA_UPLOAD_SPECS[kind];
     const selectionErrors: string[] = [];
+    const validatedContentTypes = new Map<File, string>();
 
     if (!spec.multiple && selected.length > 1) {
       selectionErrors.push("W tej sekcji można dodać tylko jeden plik.");
@@ -134,6 +151,7 @@ export function ProductEditor({
         selectionErrors.push(validation.error);
         return false;
       }
+      validatedContentTypes.set(file, validation.contentType);
       return true;
     });
 
@@ -163,7 +181,7 @@ export function ProductEditor({
       path: "",
       storagePath: undefined,
       filename: file.name,
-      contentType: file.type,
+      contentType: validatedContentTypes.get(file) ?? file.type,
       sizeBytes: file.size,
       locale: "" as const,
       title: file.name,
@@ -172,70 +190,147 @@ export function ProductEditor({
       status: "queued" as const,
       file,
       uploaded: false,
+      progress: 0,
     }));
 
     if (!spec.multiple) {
-      assets.filter((asset) => !asset.removed && asset.kind === kind).forEach((asset) => {
-        if (asset.uploaded && asset.storagePath) void deleteUploadedAsset(asset);
-      });
+      const version = nextUploadVersion(kind);
       setAssets((current) => [
-        ...current
-          .filter((asset) => !(asset.kind === kind && !asset.removed && asset.uploaded))
-          .map((asset) => asset.kind === kind && !asset.removed ? { ...asset, removed: true } : asset),
+        ...current.map((asset) => asset.kind === kind && !asset.removed && (asset.status === "queued" || asset.status === "uploading")
+          ? { ...asset, removed: true }
+          : asset),
         ...newDrafts,
       ]);
+      await Promise.all(newDrafts.map((draft) => uploadAsset(draft, version)));
     } else {
       setAssets((current) => [...current, ...newDrafts]);
+      await Promise.all(newDrafts.map((draft) => uploadAsset(draft)));
     }
-
-    await Promise.all(newDrafts.map((draft) => uploadAsset(draft)));
   };
 
-  const uploadAsset = async (draft: AssetDraft) => {
+  const uploadAsset = async (draft: AssetDraft, version = uploadVersionsRef.current.get(draft.kind) ?? 0) => {
+    const currentDraft = assetsRef.current.find((asset) => asset.clientId === draft.clientId) ?? draft;
+    const file = currentDraft.file ?? draft.file;
+
+    if (!file) {
+      updateAsset(draft.clientId, "status", "failed");
+      updateAsset(draft.clientId, "error", "Nie znaleziono pliku do ponowienia uploadu.");
+      return;
+    }
+
     updateAsset(draft.clientId, "status", "uploading");
+    updateAsset(draft.clientId, "error", undefined);
 
     try {
-      const formData = new FormData();
-      formData.set("productId", draftProductId);
-      formData.set("kind", draft.kind);
-      formData.set("file", draft.file!);
+      let uploadTarget = currentDraft.upload;
+      let uploadedAsset: Partial<AssetDraft> = currentDraft;
 
-      const response = await fetch("/api/admin/assets", { method: "POST", body: formData });
-      const payload = await response.json() as { asset?: Partial<AssetDraft>; error?: string };
+      if (!uploadTarget) {
+        const response = await fetch("/api/admin/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            productId: draftProductId,
+            kind: draft.kind,
+            filename: file.name,
+            sizeBytes: file.size,
+            contentType: currentDraft.contentType,
+            locale: currentDraft.locale || undefined,
+          }),
+        });
+        const payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string };
 
-      if (!response.ok || !payload.asset) {
-        throw new Error(payload.error || "Upload nie powiódł się.");
+        if (!response.ok || !payload.asset) {
+          throw new Error(payload.error || "Upload nie powiódł się.");
+        }
+
+        uploadedAsset = payload.asset;
+        uploadTarget = payload.upload;
+        setAssets((current) => current.map((asset) => asset.clientId === draft.clientId
+          ? { ...asset, ...payload.asset, upload: payload.upload, status: "uploading", progress: 0, error: undefined }
+          : asset));
       }
 
+      if (uploadTarget) {
+        await uploadMediaWithTus(file, uploadTarget, currentDraft.contentType, (progress) => {
+          updateAsset(draft.clientId, "progress", progress);
+        });
+      }
+
+      const currentState = assetsRef.current.find((asset) => asset.clientId === draft.clientId);
+      const stale = !isCurrentUpload(draft.kind, version) || !currentState || currentState.removed;
+
+      if (stale) {
+        const storagePath = uploadedAsset.storagePath ?? uploadTarget?.path;
+        if (storagePath) {
+          await deleteUploadedStorage(draft.kind, storagePath);
+        }
+        setAssets((current) => current.filter((asset) => asset.clientId !== draft.clientId));
+        return;
+      }
+
+      setAssets((current) => current.map((asset) => {
+        if (asset.clientId === draft.clientId) {
+          return {
+            ...asset,
+            ...uploadedAsset,
+            upload: uploadTarget,
+            status: "uploaded",
+            uploaded: true,
+            file,
+            progress: 100,
+            removed: false,
+            error: undefined,
+          } as AssetDraft;
+        }
+
+        if (!MEDIA_UPLOAD_SPECS[draft.kind].multiple && asset.kind === draft.kind && !asset.removed) {
+          return { ...asset, removed: true };
+        }
+
+        return asset;
+      }));
+    } catch (error) {
       setAssets((current) => current.map((asset) => asset.clientId === draft.clientId ? {
         ...asset,
-        ...payload.asset,
-        status: "uploaded",
-        uploaded: true,
-        file: draft.file,
-        removed: false,
-      } as AssetDraft : asset));
-    } catch (error) {
-      updateAsset(draft.clientId, "status", "failed");
-      setAssets((current) => current.map((asset) => asset.clientId === draft.clientId ? { ...asset, error: error instanceof Error ? error.message : "Upload nie powiódł się." } : asset));
+        status: "failed",
+        error: error instanceof Error ? error.message : "Upload nie powiódł się.",
+      } : asset));
     }
   };
 
-  const removeAsset = (asset: AssetDraft) => {
-    if (!asset.id || asset.uploaded) {
-      if (asset.storagePath) void deleteUploadedAsset(asset);
-      setAssets((current) => current.filter((item) => item.clientId !== asset.clientId));
+  const removeAsset = async (asset: AssetDraft) => {
+    if (!asset.id || asset.uploaded || asset.upload) {
+      try {
+        if (asset.storagePath) await deleteUploadedStorage(asset.kind, asset.storagePath);
+        setAssets((current) => current.filter((item) => item.clientId !== asset.clientId));
+      } catch (error) {
+        setMediaErrors((current) => ({
+          ...current,
+          [asset.kind]: error instanceof Error ? error.message : "Nie udało się usunąć pliku.",
+        }));
+      }
       return;
     }
     updateAsset(asset.clientId, "removed", true);
   };
 
-  const deleteUploadedAsset = async (asset: AssetDraft) => {
-    await fetch("/api/admin/assets", {
+  const deleteUploadedStorage = async (kind: ProductAsset["kind"], storagePath: string) => {
+    const response = await fetch("/api/admin/assets", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId: draftProductId, kind: asset.kind, storagePath: asset.storagePath }),
-    }).catch(() => undefined);
+      body: JSON.stringify({ productId: draftProductId, kind, storagePath }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      throw new Error(payload?.error || "Nie udało się usunąć pliku.");
+    }
+  };
+
+  const retryUpload = (asset: AssetDraft) => {
+    const version = MEDIA_UPLOAD_SPECS[asset.kind].multiple ? 0 : nextUploadVersion(asset.kind);
+    return uploadAsset(asset, version);
   };
 
   const reorderGallery = (clientId: string, direction: -1 | 1) => {
@@ -308,6 +403,7 @@ export function ProductEditor({
         <input type="hidden" name="returnTo" value={returnTo} />
         <input type="hidden" name="coverAssetId" value={coverAsset?.id ?? ""} />
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
+        <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
         {routing.locales.map((code) => (
           <span key={code}>
             <input type="hidden" name={`title_${code}`} value={translations[code].title} />
@@ -324,9 +420,10 @@ export function ProductEditor({
           title={title}
           subtitle={product ? `ID: ${product.id} · URL: /products/${product.slug}` : "Slug zostanie wygenerowany z tytułu EN, jeśli nie wpiszesz go ręcznie."}
           status={product ? <Badge className={statusClass(product.status)}>{statusLabels[product.status]}</Badge> : <Badge>Szkic</Badge>}
-          actions={<ProductSubmitButton />}
+          actions={<ProductSubmitButton disabled={hasActiveMediaUpload} />}
         />
 
+        {hasActiveMediaUpload ? <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Zapis produktu będzie dostępny po zakończeniu przesyłania plików.</p> : null}
         {feedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
 
         <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
@@ -355,7 +452,7 @@ export function ProductEditor({
               </div>
             </AdminEditorSection>
 
-            <MediaSections assets={assets} errors={mediaErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void uploadAsset(asset)} onMove={reorderGallery} />
+            <MediaSections assets={assets} errors={mediaErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
 
             <AdminEditorSection title="Sprzedaż na Amazon" description="Wybierz jeden domyślny rynek. Backend normalizuje maksymalnie jeden primary link.">
               <div className="grid gap-3">
@@ -415,9 +512,9 @@ export function ProductEditor({
   );
 }
 
-function ProductSubmitButton() {
+function ProductSubmitButton({ disabled = false }: { disabled?: boolean }) {
   const { pending } = useFormStatus();
-  return <Button type="submit" disabled={pending}><Save className="size-4" aria-hidden />{pending ? "Zapisywanie…" : "Zapisz"}</Button>;
+  return <Button type="submit" disabled={pending || disabled}><Save className="size-4" aria-hidden />{pending ? "Zapisywanie…" : "Zapisz"}</Button>;
 }
 
 function MediaSections({
@@ -522,7 +619,7 @@ function UploadDropzone({
 }
 
 function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }: { asset: AssetDraft; kind: ProductAsset["kind"]; index: number; total: number; onRemove: (asset: AssetDraft) => void; onRetry: (asset: AssetDraft) => void; onMove: (clientId: string, direction: -1 | 1) => void }) {
-  const isUploading = asset.status === "uploading";
+  const isUploading = asset.status === "uploading" || asset.status === "queued";
   const isFailed = asset.status === "failed";
   const isImage = asset.contentType.startsWith("image/") || /\.(png|jpe?g|gif|svg|webp)$/i.test(asset.filename);
   const isVideo = kind === "video" && asset.contentType.startsWith("video/");
@@ -534,13 +631,13 @@ function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }:
       <p className="mt-1 text-xs text-[var(--color-muted)]">{formatBytes(asset.sizeBytes)}{asset.locale ? ` · ${asset.locale.toUpperCase()}` : ""}</p>
       <p className={`mt-2 inline-flex items-center gap-1 text-xs ${isFailed ? "text-red-800" : "text-[var(--color-muted)]"}`} role={isUploading || isFailed ? "status" : undefined} aria-live="polite">
         {isUploading ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : isFailed ? <X className="size-3.5" aria-hidden /> : asset.status === "queued" ? <LoaderCircle className="size-3.5" aria-hidden /> : <span className="size-1.5 rounded-full bg-emerald-600" aria-hidden />}
-        {isUploading ? "Przesyłanie…" : isFailed ? asset.error || "Upload nie powiódł się." : asset.status === "queued" ? "Oczekuje" : "Przesłano"}
+        {asset.status === "uploading" ? "Przesyłanie…" : isFailed ? asset.error || "Upload nie powiódł się." : asset.status === "queued" ? "Oczekuje" : "Przesłano"}
       </p>
-      {isUploading ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg)]" aria-label="Trwa przesyłanie"><div className="h-full w-1/2 animate-pulse rounded-full bg-[var(--color-terracotta)]" /></div> : null}
+      {isUploading ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg)]" role="progressbar" aria-label="Postęp przesyłania" aria-valuemin={0} aria-valuemax={100} aria-valuenow={asset.progress ?? 0}><div className="h-full rounded-full bg-[var(--color-terracotta)] transition-[width]" style={{ width: `${asset.progress ?? 0}%` }} /></div> : null}
     </div>
     <div className="flex flex-wrap items-center justify-end gap-1 sm:max-w-32">
       {kind === "gallery" && asset.status === "uploaded" ? <><Button type="button" variant="ghost" size="icon" disabled={index === 0} onClick={() => onMove(asset.clientId, -1)} aria-label={`Przenieś ${asset.filename} wyżej`}><MoveUp className="size-4" aria-hidden /></Button><Button type="button" variant="ghost" size="icon" disabled={index === total - 1} onClick={() => onMove(asset.clientId, 1)} aria-label={`Przenieś ${asset.filename} niżej`}><MoveDown className="size-4" aria-hidden /></Button></> : null}
-      <Button type="button" variant="ghost" size="sm" disabled={isUploading} onClick={() => onRemove(asset)} className="text-red-800"><Trash2 className="size-4" aria-hidden />Usuń</Button>
+      <Button type="button" variant="ghost" size="sm" disabled={asset.status === "uploading"} onClick={() => onRemove(asset)} className="text-red-800"><Trash2 className="size-4" aria-hidden />Usuń</Button>
     </div>
     {asset.status === "failed" ? <div className="sm:col-span-2"><Button type="button" variant="outline" size="sm" onClick={() => onRetry(asset)}><LoaderCircle className="size-4" aria-hidden />Ponów</Button></div> : null}
     {asset.status === "uploaded" ? hiddenAssetFields(asset) : null}
@@ -604,6 +701,7 @@ function hiddenAssetFields(asset: AssetDraft, removed = false) {
     <input type="hidden" name="assetPath" value={path} />
     <input type="hidden" name="assetFilename" value={asset.filename} />
     <input type="hidden" name="assetContentType" value={asset.contentType} />
+    <input type="hidden" name="assetSizeBytes" value={asset.sizeBytes ?? ""} />
     <input type="hidden" name="assetLocale" value={asset.locale} />
     <input type="hidden" name="assetTitle" value={asset.title || asset.filename} />
     <input type="hidden" name="assetSortOrder" value={asset.sortOrder} />
@@ -617,7 +715,7 @@ function mediaTitle(kind: ProductAsset["kind"]) {
 }
 
 function uploadHint(kind: ProductAsset["kind"]) {
-  return { cover: "1 obraz · PNG, JPG, WEBP lub SVG · maks. 20 MB", gallery: "Maks. 20 obrazów · PNG, JPG, WEBP lub SVG · maks. 20 MB każdy", video: "1 plik · MP4, WebM lub obecny format podglądu · maks. 50 MB", public_download: "Wiele plików · PDF lub bezpieczne formaty graficzne · maks. 20 MB każdy", premium_download: "Wiele plików · PDF lub bezpieczne formaty graficzne · maks. 50 MB każdy" }[kind];
+  return { cover: "1 obraz · PNG, JPG lub WEBP · maks. 20 MB", gallery: "Maks. 20 obrazów · PNG, JPG lub WEBP · maks. 20 MB każdy", video: "1 plik · MP4 lub WebM · maks. 50 MB", public_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 20 MB każdy", premium_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 50 MB każdy" }[kind];
 }
 
 function AmazonEditor({

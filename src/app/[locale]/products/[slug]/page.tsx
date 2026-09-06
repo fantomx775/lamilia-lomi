@@ -175,9 +175,15 @@ export default async function ProductPage({ params, searchParams }: Props) {
           </div>
           <div className="relative grid min-h-72 place-items-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-alt)]">
             {product.video ? (
-              <Image src={product.video.path} alt={product.video.title ?? "Video preview"} fill className="object-cover" />
+              <video
+                src={product.video.path}
+                controls
+                preload="metadata"
+                className="absolute inset-0 size-full object-cover"
+                aria-label={product.video.title ?? "Video preview"}
+              />
             ) : null}
-            <div className="relative z-10 flex items-center gap-2 rounded-md bg-white/82 px-4 py-3 text-sm font-medium">
+            <div className="pointer-events-none relative z-10 flex items-center gap-2 rounded-md bg-white/82 px-4 py-3 text-sm font-medium">
               <PlayCircle className="size-5 text-[var(--color-terracotta)]" />
               Public flipthrough video
             </div>

@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { getRequiredSupabaseEnv, getBackendMode } from "./config";
 import { createServiceRoleClient } from "./supabase/admin";
-import type { AssetKind } from "./types";
+import type { AssetKind, ProductAsset } from "./types";
 import { filenameWithCollisionSuffix, mediaBucketForKind } from "./media-upload";
 
 export type StoredMediaFile = {
@@ -14,6 +14,44 @@ export type StoredMediaFile = {
   publicPath: string;
   filename: string;
 };
+
+export type SignedMediaUpload = StoredMediaFile & {
+  uploadEndpoint: string;
+  uploadToken: string;
+};
+
+export async function createSignedMediaUpload(input: {
+  assetId: string;
+  productId: string;
+  kind: AssetKind;
+  filename: string;
+}): Promise<SignedMediaUpload> {
+  if (getBackendMode() !== "supabase") {
+    throw new Error("Signed Supabase uploads are unavailable in local mode.");
+  }
+
+  const filename = safeFilename(input.filename);
+  const bucket = mediaBucketForKind(input.kind);
+  const env = getRequiredSupabaseEnv();
+  const storagePath = `products/${input.productId}/${input.kind}/${input.assetId}-${filename}`;
+  const { data, error } = await createServiceRoleClient()
+    .storage
+    .from(bucket)
+    .createSignedUploadUrl(storagePath);
+
+  if (error || !data?.token) {
+    throw new Error(`Nie udało się przygotować uploadu w Storage: ${error?.message ?? "brak tokenu"}`);
+  }
+
+  return {
+    bucket,
+    storagePath,
+    publicPath: bucket === "premium-files" ? storagePath : `/api/media/${input.assetId}`,
+    filename,
+    uploadEndpoint: resumableUploadEndpoint(env.url),
+    uploadToken: data.token,
+  };
+}
 
 export async function storeMediaFile(input: {
   productId: string;
@@ -47,10 +85,7 @@ export async function storeMediaFile(input: {
         storagePath,
         publicPath: bucket === "premium-files"
           ? storagePath
-          : `${getRequiredSupabaseEnv().url}/storage/v1/object/public/${bucket}/${storagePath
-              .split("/")
-              .map(encodeURIComponent)
-              .join("/")}`,
+          : publicStoragePath(getRequiredSupabaseEnv().url, bucket, storagePath),
         filename: candidate,
       };
     }
@@ -113,6 +148,38 @@ export async function cleanupNewMediaFromFormData(formData: FormData) {
   await Promise.all(tasks);
 }
 
+export async function cleanupPersistedMedia(input: {
+  previous: ProductAsset[];
+  next: ProductAsset[];
+}) {
+  const nextReferences = new Set(
+    input.next
+      .map(storageReference)
+      .filter((reference): reference is StorageReference => Boolean(reference))
+      .map(referenceKey),
+  );
+  const removed = input.previous
+    .map((asset) => ({ asset, reference: storageReference(asset) }))
+    .filter((item): item is { asset: ProductAsset; reference: StorageReference } => {
+      const reference = item.reference;
+      return reference !== null && !nextReferences.has(referenceKey(reference));
+    });
+
+  await Promise.all(
+    removed.map(async ({ asset, reference }) => {
+      try {
+        await removeUploadedMedia({
+          productId: asset.productId,
+          kind: asset.kind,
+          storagePath: reference.path,
+        });
+      } catch (error) {
+        console.error("Nie udało się posprzątać usuniętego assetu w Storage.", error);
+      }
+    }),
+  );
+}
+
 function storeLocalFile(input: {
   productId: string;
   kind: AssetKind;
@@ -161,6 +228,38 @@ function removeLocalFile(input: { productId: string; kind: AssetKind; storagePat
   const target = path.resolve(root, ...segments);
   assertWithin(root, target);
   if (fs.existsSync(target)) fs.unlinkSync(target);
+}
+
+type StorageReference = { bucket: string; path: string };
+
+function storageReference(asset: ProductAsset): StorageReference | null {
+  const storagePath = asset.storagePath ?? (asset.path.startsWith("/uploads/") ? asset.path : null);
+
+  if (!storagePath) {
+    return null;
+  }
+
+  return { bucket: mediaBucketForKind(asset.kind), path: storagePath };
+}
+
+function referenceKey(reference: StorageReference) {
+  return `${reference.bucket}\u0000${reference.path}`;
+}
+
+function publicStoragePath(supabaseUrl: string, bucket: string, storagePath: string) {
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${storagePath
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+}
+
+function resumableUploadEndpoint(supabaseUrl: string) {
+  const url = new URL(supabaseUrl);
+  const hostname = url.hostname.endsWith(".supabase.co")
+    ? url.hostname.slice(0, -".supabase.co".length) + ".storage.supabase.co"
+    : url.hostname;
+
+  return `${url.protocol}//${hostname}/storage/v1/upload/resumable`;
 }
 
 function safeFilename(value: string) {

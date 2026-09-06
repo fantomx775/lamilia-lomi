@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { getBackendMode } from "@/lib/config";
+import { isMediaKind, mediaBucketForKind } from "@/lib/media-upload";
 import { getAssetByIdForRequest, getProductByIdForRequest } from "@/lib/products-request";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
@@ -51,27 +52,30 @@ export async function GET(request: Request, { params }: Props) {
     return new NextResponse(fs.readFileSync(filePath), { headers });
   }
 
+  if (!isMediaKind(asset.kind) || asset.bucket !== mediaBucketForKind(asset.kind)) {
+    return new NextResponse("Not found", { status: 404 });
+  }
+
   const storagePath = asset.storagePath;
-  if (!storagePath || !storagePath.startsWith(`products/${asset.productId}/`)) {
+  if (!storagePath || !storagePath.startsWith(`products/${asset.productId}/${asset.kind}/`)) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const { data, error } = await createServiceRoleClient().storage.from(asset.bucket).download(storagePath);
-  if (error || !data) {
+  const isDownload = new URL(request.url).searchParams.get("download") === "1";
+  const { data, error } = await createServiceRoleClient()
+    .storage
+    .from(asset.bucket)
+    .createSignedUrl(storagePath, 60, { download: isDownload ? safeFilename(asset.filename) : undefined });
+
+  if (error || !data?.signedUrl) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const headers = new Headers({
-    "Content-Type": asset.contentType,
-    "Content-Length": String(asset.sizeBytes ?? data.size),
-    "Cache-Control": "public, max-age=31536000, immutable",
-  });
+  const redirectTarget = new URL(data.signedUrl);
 
-  if (new URL(request.url).searchParams.get("download") === "1") {
-    headers.set("Content-Disposition", `attachment; filename="${safeFilename(asset.filename)}"`);
-  }
-
-  return new NextResponse(data, { headers });
+  const response = NextResponse.redirect(redirectTarget);
+  response.headers.set("Cache-Control", "private, max-age=30");
+  return response;
 }
 
 function safeFilename(value: string) {
