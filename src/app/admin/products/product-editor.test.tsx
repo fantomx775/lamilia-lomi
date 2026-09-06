@@ -217,6 +217,44 @@ describe("ProductEditor V2", () => {
     expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
   });
 
+  it("falls back to multipart upload for the local backend", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce({
+        status: 415,
+        ok: false,
+        json: async () => ({ error: "Lokalny upload wymaga przesłania pliku." }),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ asset: {
+          id: "asset-local-cover",
+          productId: "product-upload",
+          kind: "cover",
+          bucket: "public-media",
+          path: "/uploads/product-upload/cover/cover.jpg",
+          storagePath: "/uploads/product-upload/cover/cover.jpg",
+          filename: "cover.jpg",
+          contentType: "image/jpeg",
+          sizeBytes: 5,
+          title: "cover.jpg",
+          sortOrder: 1,
+          isPublic: true,
+          isActive: true,
+          uploaded: true,
+        } }),
+      });
+    vi.stubGlobal("fetch", fetch);
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />);
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
+
+    await user.upload(input!, new File(["cover"], "cover.jpg", { type: "image/jpeg" }));
+
+    await waitFor(() => expect(view.getByText("cover.jpg")).toBeInTheDocument());
+    expect(fetch).toHaveBeenNthCalledWith(2, "/api/admin/assets", expect.objectContaining({ method: "POST", body: expect.any(FormData) }));
+  });
+
   it("keeps Save disabled until a signed resumable upload completes", async () => {
     let finishUpload!: () => void;
     editorMocks.uploadMediaWithTus.mockImplementation(() => new Promise<void>((resolve) => {
@@ -274,6 +312,22 @@ describe("ProductEditor V2", () => {
     await user.upload(input!, new File(["cover"], "replacement.jpg", { type: "image/jpeg" }));
     await waitFor(() => expect(view.getByText("Upload nie powiódł się.")).toBeInTheDocument());
     expect(view.getByText("moon-garden.svg")).toBeInTheDocument();
+  });
+
+  it("uses a retry action icon for a failed upload", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "Upload nie powiódł się." }),
+    }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />);
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
+
+    await user.upload(input!, new File(["cover"], "cover.jpg", { type: "image/jpeg" }));
+    const retry = await view.findByRole("button", { name: "Ponów" });
+
+    expect(retry.querySelector("svg")?.getAttribute("class")).toContain("lucide-refresh-cw");
+    expect(retry.querySelector("svg")?.getAttribute("class")).not.toContain("lucide-loader-circle");
   });
 
   it("rejects a gallery selection above the twenty-image limit before uploading", async () => {

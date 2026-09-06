@@ -15,11 +15,25 @@ export function createServiceRoleClient() {
 
   const env = getRequiredSupabaseEnv();
   const serviceRoleKey = getServiceRoleKey();
+  const usesSecretKey = serviceRoleKey.startsWith("sb_secret_");
 
   return createSupabaseClient(env.url, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
+    ...(usesSecretKey
+      ? {
+          global: {
+            headers: { apikey: serviceRoleKey },
+            fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+              const headers = new Headers(init?.headers);
+              headers.delete("authorization");
+              headers.set("apikey", serviceRoleKey);
+              return fetch(input, { ...init, headers });
+            },
+          },
+        }
+      : {}),
   });
 }

@@ -22,6 +22,10 @@ export async function POST(request: Request) {
 }
 
 async function createLocalUpload(request: Request) {
+  if (!request.headers.get("content-type")?.toLowerCase().includes("multipart/form-data")) {
+    return NextResponse.json({ error: "Lokalny upload wymaga przesłania pliku." }, { status: 415 });
+  }
+
   const formData = await request.formData();
   const productId = stringField(formData, "productId");
   const kindValue = stringField(formData, "kind");

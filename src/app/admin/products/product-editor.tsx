@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
+import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RefreshCw, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
@@ -234,7 +234,7 @@ export function ProductEditor({
       let uploadedAsset: Partial<AssetDraft> = currentDraft;
 
       if (!uploadTarget) {
-        const response = await fetch("/api/admin/assets", {
+        let response = await fetch("/api/admin/assets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -246,7 +246,17 @@ export function ProductEditor({
             locale: currentDraft.locale || undefined,
           }),
         });
-        const payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string };
+        let payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string };
+
+        if (response.status === 415) {
+          const formData = new FormData();
+          formData.append("productId", draftProductId);
+          formData.append("kind", draft.kind);
+          formData.append("file", file);
+          if (currentDraft.locale) formData.append("locale", currentDraft.locale);
+          response = await fetch("/api/admin/assets", { method: "POST", body: formData });
+          payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string };
+        }
 
         if (!response.ok || !payload.asset) {
           throw new Error(payload.error || "Upload nie powiódł się.");
@@ -667,7 +677,7 @@ function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }:
       {kind === "gallery" && asset.status === "uploaded" ? <><Button type="button" variant="ghost" size="icon" disabled={index === 0} onClick={() => onMove(asset.clientId, -1)} aria-label={`Przenieś ${asset.filename} wyżej`}><MoveUp className="size-4" aria-hidden /></Button><Button type="button" variant="ghost" size="icon" disabled={index === total - 1} onClick={() => onMove(asset.clientId, 1)} aria-label={`Przenieś ${asset.filename} niżej`}><MoveDown className="size-4" aria-hidden /></Button></> : null}
       <Button type="button" variant="ghost" size="sm" disabled={asset.status === "uploading"} onClick={() => onRemove(asset)} className="text-red-800"><Trash2 className="size-4" aria-hidden />Usuń</Button>
     </div>
-    {asset.status === "failed" ? <div className="sm:col-span-2"><Button type="button" variant="outline" size="sm" onClick={() => onRetry(asset)}><LoaderCircle className="size-4" aria-hidden />Ponów</Button></div> : null}
+    {asset.status === "failed" ? <div className="sm:col-span-2"><Button type="button" variant="outline" size="sm" onClick={() => onRetry(asset)}><RefreshCw className="size-4" aria-hidden />Ponów</Button></div> : null}
     {asset.status === "uploaded" ? hiddenAssetFields(asset) : null}
   </div>;
 
