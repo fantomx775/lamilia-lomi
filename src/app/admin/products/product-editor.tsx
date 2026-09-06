@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RefreshCw, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
+import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RotateCcw, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
@@ -677,7 +677,7 @@ function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }:
       {kind === "gallery" && asset.status === "uploaded" ? <><Button type="button" variant="ghost" size="icon" disabled={index === 0} onClick={() => onMove(asset.clientId, -1)} aria-label={`Przenieś ${asset.filename} wyżej`}><MoveUp className="size-4" aria-hidden /></Button><Button type="button" variant="ghost" size="icon" disabled={index === total - 1} onClick={() => onMove(asset.clientId, 1)} aria-label={`Przenieś ${asset.filename} niżej`}><MoveDown className="size-4" aria-hidden /></Button></> : null}
       <Button type="button" variant="ghost" size="sm" disabled={asset.status === "uploading"} onClick={() => onRemove(asset)} className="text-red-800"><Trash2 className="size-4" aria-hidden />Usuń</Button>
     </div>
-    {asset.status === "failed" ? <div className="sm:col-span-2"><Button type="button" variant="outline" size="sm" onClick={() => onRetry(asset)}><RefreshCw className="size-4" aria-hidden />Ponów</Button></div> : null}
+    {asset.status === "failed" ? <div className="sm:col-span-2"><Button type="button" variant="outline" size="sm" onClick={() => onRetry(asset)}><RotateCcw className="size-4" aria-hidden />Ponów</Button></div> : null}
     {asset.status === "uploaded" ? hiddenAssetFields(asset) : null}
   </div>;
 

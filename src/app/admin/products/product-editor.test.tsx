@@ -326,7 +326,7 @@ describe("ProductEditor V2", () => {
     await user.upload(input!, new File(["cover"], "cover.jpg", { type: "image/jpeg" }));
     const retry = await view.findByRole("button", { name: "Ponów" });
 
-    expect(retry.querySelector("svg")?.getAttribute("class")).toContain("lucide-refresh-cw");
+    expect(retry.querySelector("svg")?.getAttribute("class")).toContain("lucide-rotate-ccw");
     expect(retry.querySelector("svg")?.getAttribute("class")).not.toContain("lucide-loader-circle");
   });
 
