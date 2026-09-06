@@ -50,11 +50,31 @@ describe("createServiceRoleClient", () => {
   });
 
   it("keeps the legacy service-role client path unchanged", () => {
-    mocks.getServiceRoleKey.mockReturnValue("legacy-service-role-jwt");
+    mocks.getServiceRoleKey.mockReturnValue("eyJlegacy-service-role-jwt");
 
     createServiceRoleClient();
 
     const [, , options] = mocks.createClient.mock.calls[0];
     expect(options.global).toBeUndefined();
+  });
+
+  it("uses apikey for any non-JWT server key format", async () => {
+    const serverKey = "server-key-from-migrated-environment";
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    mocks.getServiceRoleKey.mockReturnValue(serverKey);
+
+    createServiceRoleClient();
+
+    const [, , options] = mocks.createClient.mock.calls[0];
+    expect(options.global.headers).toEqual({ apikey: serverKey });
+
+    await options.global.fetch("https://example.supabase.co/storage/v1", {
+      headers: { Authorization: "Bearer stale-token" },
+    });
+
+    const headers = fetch.mock.calls[0][1].headers as Headers;
+    expect(headers.get("apikey")).toBe(serverKey);
+    expect(headers.get("authorization")).toBeNull();
   });
 });

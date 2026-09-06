@@ -15,14 +15,14 @@ export function createServiceRoleClient() {
 
   const env = getRequiredSupabaseEnv();
   const serviceRoleKey = getServiceRoleKey();
-  const usesSecretKey = serviceRoleKey.startsWith("sb_secret_");
+  const usesLegacyJwt = serviceRoleKey.startsWith("eyJ");
 
   return createSupabaseClient(env.url, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-    ...(usesSecretKey
+    ...(!usesLegacyJwt
       ? {
           global: {
             headers: { apikey: serviceRoleKey },
