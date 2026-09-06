@@ -93,6 +93,29 @@ describe("ProductEditor V2", () => {
     expect(view.getByLabelText("Aktywny")).toBeChecked();
   });
 
+  it("adds each available Amazon market once and then disables the add button", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+      />,
+    );
+
+    const addButton = view.getByRole("button", { name: "Dodaj rynek" });
+    await user.click(addButton);
+    await user.click(addButton);
+
+    expect(view.getAllByLabelText("Rynek")).toHaveLength(2);
+    expect(view.getAllByLabelText("Rynek").map((select) => (select as HTMLSelectElement).value)).toEqual([
+      "amazon.com",
+      "amazon.de",
+    ]);
+    expect(addButton).toBeDisabled();
+    expect(view.getByText("Dodano wszystkie dostępne rynki.")).toBeInTheDocument();
+  });
+
   it("reveals and collapses SEO details without leaving the native disclosure open", async () => {
     const user = userEvent.setup();
     const view = render(

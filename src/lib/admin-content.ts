@@ -698,6 +698,18 @@ function validateProductDraft(product: Product) {
     errors.push("Galeria może zawierać maksymalnie 20 obrazów.");
   }
 
+  const markets = new Set<AmazonLink["market"]>();
+  if (product.amazonLinks.some((link) => {
+    if (markets.has(link.market)) {
+      return true;
+    }
+
+    markets.add(link.market);
+    return false;
+  })) {
+    errors.push("Każdy rynek Amazon może wystąpić tylko raz.");
+  }
+
   return Array.from(new Set(errors));
 }
 

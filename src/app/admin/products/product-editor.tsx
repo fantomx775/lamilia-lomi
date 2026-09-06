@@ -56,6 +56,11 @@ type AmazonDraft = {
   removed: boolean;
 };
 
+const amazonMarketOptions: ReadonlyArray<{ value: AmazonLink["market"]; label: string }> = [
+  { value: "amazon.com", label: "Amazon.com" },
+  { value: "amazon.de", label: "Amazon.de" },
+];
+
 type PremiumDraft = {
   clientId: string;
   id: string;
@@ -109,6 +114,9 @@ export function ProductEditor({
   const coverAsset = visibleAssets.find((asset) => asset.kind === "cover");
   const videoAsset = visibleAssets.find((asset) => asset.kind === "video");
   const hasActiveMediaUpload = assets.some((asset) => !asset.removed && (asset.status === "queued" || asset.status === "uploading"));
+  const activeAmazonLinks = amazonLinks.filter((link) => !link.removed);
+  const usedAmazonMarkets = new Set(activeAmazonLinks.map((link) => link.market));
+  const canAddAmazonMarket = amazonMarketOptions.some(({ value }) => !usedAmazonMarkets.has(value));
 
   const updateTranslation = (field: keyof TranslationDraft, value: string) => {
     setTranslations((current) => ({ ...current, [locale]: { ...current[locale], [field]: value } }));
@@ -356,14 +364,24 @@ export function ProductEditor({
   };
 
   const addAmazon = () => {
-    setAmazonLinks((current) => [...current, {
-      clientId: `amazon-${Date.now()}-${current.length}`,
-      id: "",
-      market: "amazon.com",
-      url: "",
-      isPrimary: current.length === 0,
-      removed: false,
-    }]);
+    setAmazonLinks((current) => {
+      const nextMarket = amazonMarketOptions.find(({ value }) =>
+        !current.some((link) => !link.removed && link.market === value),
+      )?.value;
+
+      if (!nextMarket) {
+        return current;
+      }
+
+      return [...current, {
+        clientId: `amazon-${Date.now()}-${current.length}`,
+        id: "",
+        market: nextMarket,
+        url: "",
+        isPrimary: current.every((link) => link.removed),
+        removed: false,
+      }];
+    });
   };
 
   const removeAmazon = (link: AmazonDraft) => {
@@ -454,13 +472,23 @@ export function ProductEditor({
 
             <MediaSections assets={assets} errors={mediaErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
 
-            <AdminEditorSection title="Sprzedaż na Amazon" description="Wybierz jeden domyślny rynek. Backend normalizuje maksymalnie jeden primary link.">
+            <AdminEditorSection title="Sprzedaż na Amazon" description="Dodaj maksymalnie jeden link dla każdego rynku i wybierz jeden domyślny.">
               <div className="grid gap-3">
                 {amazonLinks.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze rynku.</p> : null}
                 {amazonLinks.map((link, index) => (
-                  <AmazonEditor key={link.clientId} link={link} index={index} onChange={updateAmazon} onPrimary={setPrimaryAmazon} onRemove={removeAmazon} onUndo={() => updateAmazon(link.clientId, "removed", false)} />
+                  <AmazonEditor
+                    key={link.clientId}
+                    link={link}
+                    index={index}
+                    availableMarkets={amazonMarketOptions.filter(({ value }) => value === link.market || !usedAmazonMarkets.has(value))}
+                    onChange={updateAmazon}
+                    onPrimary={setPrimaryAmazon}
+                    onRemove={removeAmazon}
+                    onUndo={() => updateAmazon(link.clientId, "removed", false)}
+                  />
                 ))}
-                <Button type="button" variant="outline" onClick={addAmazon} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj rynek</Button>
+                <Button type="button" variant="outline" onClick={addAmazon} disabled={!canAddAmazonMarket} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj rynek</Button>
+                {!canAddAmazonMarket ? <p className="text-sm text-[var(--color-muted)]">Dodano wszystkie dostępne rynki.</p> : null}
               </div>
             </AdminEditorSection>
 
@@ -721,6 +749,7 @@ function uploadHint(kind: ProductAsset["kind"]) {
 function AmazonEditor({
   link,
   index,
+  availableMarkets,
   onChange,
   onPrimary,
   onRemove,
@@ -728,6 +757,7 @@ function AmazonEditor({
 }: {
   link: AmazonDraft;
   index: number;
+  availableMarkets: ReadonlyArray<{ value: AmazonLink["market"]; label: string }>;
   onChange: <K extends keyof AmazonDraft>(clientId: string, field: K, value: AmazonDraft[K]) => void;
   onPrimary: (clientId: string) => void;
   onRemove: (link: AmazonDraft) => void;
@@ -737,7 +767,7 @@ function AmazonEditor({
     return <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900"><span>Rynek {link.market} zostanie usunięty.</span><><input type="hidden" name="amazonId" value={link.id} /><input type="hidden" name="amazonMarket" value={link.market} /><input type="hidden" name="amazonUrl" value={link.url} /><input type="hidden" name="amazonRemove" value={link.id} /><Button type="button" variant="ghost" size="sm" onClick={onUndo}><Undo2 className="size-4" aria-hidden />Cofnij</Button></></div>;
   }
   const primaryValue = link.id || `new-${index}`;
-  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[10rem_minmax(0,1fr)_auto_auto]"><input type="hidden" name="amazonId" value={link.id} /><Field label="Rynek" htmlFor={`amazon-market-${link.clientId}`}><select id={`amazon-market-${link.clientId}`} name="amazonMarket" value={link.market} onChange={(event) => onChange(link.clientId, "market", event.target.value as AmazonDraft["market"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="amazon.com">Amazon.com</option><option value="amazon.de">Amazon.de</option></select></Field><Field label="Link" htmlFor={`amazon-url-${link.clientId}`}><Input id={`amazon-url-${link.clientId}`} name="amazonUrl" value={link.url} onChange={(event) => onChange(link.clientId, "url", event.target.value)} placeholder="https://www.amazon.com/..." /></Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="radio" name="amazonPrimary" value={primaryValue} checked={link.isPrimary} onChange={() => onPrimary(link.clientId)} /><Star className="size-4" aria-hidden />Domyślny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(link)} className="self-end text-red-800">Usuń</Button></div>;
+  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[10rem_minmax(0,1fr)_auto_auto]"><input type="hidden" name="amazonId" value={link.id} /><Field label="Rynek" htmlFor={`amazon-market-${link.clientId}`}><select id={`amazon-market-${link.clientId}`} name="amazonMarket" value={link.market} onChange={(event) => onChange(link.clientId, "market", event.target.value as AmazonDraft["market"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{availableMarkets.map((market) => <option key={market.value} value={market.value}>{market.label}</option>)}</select></Field><Field label="Link" htmlFor={`amazon-url-${link.clientId}`}><Input id={`amazon-url-${link.clientId}`} name="amazonUrl" value={link.url} onChange={(event) => onChange(link.clientId, "url", event.target.value)} placeholder="https://www.amazon.com/..." /></Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="radio" name="amazonPrimary" value={primaryValue} checked={link.isPrimary} onChange={() => onPrimary(link.clientId)} /><Star className="size-4" aria-hidden />Domyślny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(link)} className="self-end text-red-800">Usuń</Button></div>;
 }
 
 function PremiumEditor({

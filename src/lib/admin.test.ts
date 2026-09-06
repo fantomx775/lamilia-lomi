@@ -178,6 +178,21 @@ describe("admin behavior", () => {
     expect(result.errors).toContain("Galeria może zawierać maksymalnie 20 obrazów.");
   });
 
+  it("rejects duplicate Amazon markets server-side", () => {
+    const form = new FormData();
+    form.set("title_en", "Duplicate market links");
+    form.append("amazonId", "amazon-com-1");
+    form.append("amazonMarket", "amazon.com");
+    form.append("amazonUrl", "https://www.amazon.com/dp/FIRST");
+    form.append("amazonId", "amazon-com-2");
+    form.append("amazonMarket", "amazon.com");
+    form.append("amazonUrl", "https://www.amazon.com/dp/SECOND");
+
+    const result = buildProductFromFormData(form, { snapshot: getSeedContentSnapshot() });
+
+    expect(result.errors).toContain("Każdy rynek Amazon może wystąpić tylko raz.");
+  });
+
   it("preserves existing product locales, taxonomy, assets, markets, and premium codes on edit", () => {
     const snapshot = getSeedContentSnapshot();
     const existing = snapshot.products[0];
