@@ -77,4 +77,28 @@ describe("createServiceRoleClient", () => {
     expect(headers.get("apikey")).toBe(serverKey);
     expect(headers.get("authorization")).toBeNull();
   });
+
+  it("keeps the signed-in admin JWT for Storage while using the server key as apikey", async () => {
+    const serverKey = "sb_secret_test";
+    const adminToken = "admin-user-jwt";
+    const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetch);
+    mocks.getServiceRoleKey.mockReturnValue(serverKey);
+
+    createServiceRoleClient({ storageAuthorizationToken: adminToken });
+
+    const [, , options] = mocks.createClient.mock.calls[0];
+    expect(options.global.headers).toEqual({
+      apikey: serverKey,
+      Authorization: `Bearer ${adminToken}`,
+    });
+
+    await options.global.fetch("https://example.supabase.co/storage/v1", {
+      headers: { Authorization: "Bearer stale-token" },
+    });
+
+    const headers = fetch.mock.calls[0][1].headers as Headers;
+    expect(headers.get("apikey")).toBe(serverKey);
+    expect(headers.get("authorization")).toBe(`Bearer ${adminToken}`);
+  });
 });

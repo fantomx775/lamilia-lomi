@@ -6,6 +6,7 @@ import { getBackendMode } from "@/lib/config";
 import { isMediaKind, validateMediaFile } from "@/lib/media-upload";
 import { createSignedMediaUpload, removeUploadedMedia, storeMediaFile } from "@/lib/media-storage";
 import { getDemoSession } from "@/lib/session.server";
+import { getCurrentAccessToken } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
   const session = await getDemoSession();
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
   }
 
   if (getBackendMode() === "supabase") {
-    return createSupabaseUpload(request);
+    return createSupabaseUpload(request, await getCurrentAccessToken());
   }
 
   return createLocalUpload(request);
@@ -75,7 +76,7 @@ async function createLocalUpload(request: Request) {
   }
 }
 
-async function createSupabaseUpload(request: Request) {
+async function createSupabaseUpload(request: Request, authorizationToken: string | null) {
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
   const productId = typeof body?.productId === "string" ? body.productId.trim() : "";
   const kindValue = typeof body?.kind === "string" ? body.kind.trim() : "";
@@ -111,6 +112,7 @@ async function createSupabaseUpload(request: Request) {
       productId,
       kind: kindValue,
       filename,
+      authorizationToken,
     });
     const locale = body?.locale === "en" || body?.locale === "pl" || body?.locale === "de" || body?.locale === "es"
       ? body.locale
@@ -163,7 +165,12 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    await removeUploadedMedia({ productId, kind, storagePath });
+    await removeUploadedMedia({
+      productId,
+      kind,
+      storagePath,
+      authorizationToken: getBackendMode() === "supabase" ? await getCurrentAccessToken() : undefined,
+    });
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Nie udało się usunąć pliku." }, { status: 500 });

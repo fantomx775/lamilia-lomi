@@ -3,7 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import { getBackendMode } from "@/lib/config";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getCurrentAccessToken } from "@/lib/supabase/server";
 
 import {
   archiveProduct,
@@ -29,10 +29,13 @@ import type { AdminMutationResult } from "./admin-content";
 import type { Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
+  const storageAuthorizationToken = getBackendMode() === "supabase"
+    ? await getCurrentAccessToken()
+    : undefined;
   const mediaErrors = validateProductMediaSubmission(formData);
 
   if (mediaErrors.length) {
-    await cleanupNewMediaFromFormData(formData);
+    await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
     return { ok: false, errors: mediaErrors };
   }
 
@@ -43,15 +46,19 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
     const assetErrors = validateProductAssetSubmission(formData, product, existing);
 
     if (errors.length || assetErrors.length) {
-      await cleanupNewMediaFromFormData(formData);
+      await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
       return { ok: false, errors: [...errors, ...assetErrors] };
     }
 
     const result = saveProductFromFormData(formData);
     if (!result.ok) {
-      await cleanupNewMediaFromFormData(formData);
+      await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
     } else {
-      await cleanupPersistedMedia({ previous: existing?.assets ?? [], next: product.assets });
+      await cleanupPersistedMedia({
+        previous: existing?.assets ?? [],
+        next: product.assets,
+        authorizationToken: storageAuthorizationToken,
+      });
     }
     return result;
   }
@@ -63,7 +70,7 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   const assetErrors = validateProductAssetSubmission(formData, product, existing);
 
   if (errors.length || assetErrors.length) {
-    await cleanupNewMediaFromFormData(formData);
+    await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
     return { ok: false, errors: [...errors, ...assetErrors] };
   }
 
@@ -80,7 +87,10 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
 
   const supabase = await createClient();
   try {
-    await assertSupabaseUploadsExist(product.assets.filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id)));
+    await assertSupabaseUploadsExist(
+      product.assets.filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id)),
+      storageAuthorizationToken,
+    );
     const { data, error } = await supabase.rpc("save_product", {
       product_state: buildProductMutationPayload(product),
     });
@@ -93,11 +103,15 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
       throw new Error("Supabase product mutation returned an unknown result.");
     }
   } catch (error) {
-    await cleanupNewMediaFromFormData(formData);
+    await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
     throw error;
   }
 
-  await cleanupPersistedMedia({ previous: existing?.assets ?? [], next: product.assets });
+  await cleanupPersistedMedia({
+    previous: existing?.assets ?? [],
+    next: product.assets,
+    authorizationToken: storageAuthorizationToken,
+  });
 
   return { ok: true, id: product.id };
 }
@@ -163,8 +177,13 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
   const snapshot = await getAdminContentSnapshot();
   const previous = snapshot.products.find((product) => product.id === productId);
   const supabase = await createClient();
+  const storageAuthorizationToken = await getCurrentAccessToken();
   await run(supabase.from("products").delete().eq("id", productId), "product deletion");
-  await cleanupPersistedMedia({ previous: previous?.assets ?? [], next: [] });
+  await cleanupPersistedMedia({
+    previous: previous?.assets ?? [],
+    next: [],
+    authorizationToken: storageAuthorizationToken,
+  });
   return { ok: true, id: productId };
 }
 
@@ -324,10 +343,15 @@ async function run(query: PromiseLike<{ error: { message: string } | null }>, la
   }
 }
 
-async function assertSupabaseUploadsExist(assets: Product["assets"]) {
+async function assertSupabaseUploadsExist(
+  assets: Product["assets"],
+  storageAuthorizationToken?: string | null,
+) {
   if (!assets.length) return;
 
-  const storage = createServiceRoleClient().storage;
+  const storage = createServiceRoleClient({
+    storageAuthorizationToken: storageAuthorizationToken ?? undefined,
+  }).storage;
 
   for (const asset of assets) {
     const storagePath = asset.storagePath ?? asset.path;

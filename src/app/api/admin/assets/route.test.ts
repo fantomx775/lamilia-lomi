@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createSignedMediaUpload: vi.fn(),
   getBackendMode: vi.fn(),
+  getCurrentAccessToken: vi.fn(),
   getDemoSession: vi.fn(),
   storeMediaFile: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock("@/lib/media-storage", () => ({
   storeMediaFile: mocks.storeMediaFile,
 }));
 vi.mock("@/lib/session.server", () => ({ getDemoSession: mocks.getDemoSession }));
+vi.mock("@/lib/supabase/server", () => ({ getCurrentAccessToken: mocks.getCurrentAccessToken }));
 
 import { POST } from "./route";
 
@@ -28,6 +30,7 @@ describe("admin media upload setup", () => {
   it("returns a scoped resumable target without parsing or buffering multipart data", async () => {
     mocks.getBackendMode.mockReturnValue("supabase");
     mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    mocks.getCurrentAccessToken.mockResolvedValue("admin-user-jwt");
     mocks.createSignedMediaUpload.mockResolvedValue({
       bucket: "public-videos",
       storagePath: `products/${productId}/video/11111111-1111-4111-8111-111111111199-preview.mp4`,
@@ -50,6 +53,7 @@ describe("admin media upload setup", () => {
     expect(formData).not.toHaveBeenCalled();
     expect(payload.upload).toMatchObject({ token: "signed-token", bucket: "public-videos" });
     expect(payload.asset.uploaded).toBe(false);
+    expect(mocks.createSignedMediaUpload).toHaveBeenCalledWith(expect.objectContaining({ authorizationToken: "admin-user-jwt" }));
   });
 
   it("rejects prototype names and SVG video metadata before issuing a target", async () => {

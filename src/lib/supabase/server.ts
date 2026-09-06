@@ -24,3 +24,10 @@ export async function createClient() {
     },
   });
 }
+
+export async function getCurrentAccessToken() {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getSession();
+
+  return data.session?.access_token ?? null;
+}

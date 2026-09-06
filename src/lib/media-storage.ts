@@ -25,6 +25,7 @@ export async function createSignedMediaUpload(input: {
   productId: string;
   kind: AssetKind;
   filename: string;
+  authorizationToken?: string | null;
 }): Promise<SignedMediaUpload> {
   if (getBackendMode() !== "supabase") {
     throw new Error("Signed Supabase uploads are unavailable in local mode.");
@@ -34,7 +35,9 @@ export async function createSignedMediaUpload(input: {
   const bucket = mediaBucketForKind(input.kind);
   const env = getRequiredSupabaseEnv();
   const storagePath = `products/${input.productId}/${input.kind}/${input.assetId}-${filename}`;
-  const { data, error } = await createServiceRoleClient()
+  const { data, error } = await createServiceRoleClient({
+    storageAuthorizationToken: input.authorizationToken ?? undefined,
+  })
     .storage
     .from(bucket)
     .createSignedUploadUrl(storagePath);
@@ -59,6 +62,7 @@ export async function storeMediaFile(input: {
   filename: string;
   contentType: string;
   bytes: Uint8Array;
+  authorizationToken?: string | null;
 }): Promise<StoredMediaFile> {
   const filename = safeFilename(input.filename);
   const bucket = mediaBucketForKind(input.kind);
@@ -67,7 +71,9 @@ export async function storeMediaFile(input: {
     return storeLocalFile({ ...input, bucket, filename });
   }
 
-  const supabase = createServiceRoleClient();
+  const supabase = createServiceRoleClient({
+    storageAuthorizationToken: input.authorizationToken ?? undefined,
+  });
   const basePath = `products/${input.productId}/${input.kind}`;
 
   for (let suffix = 0; suffix < 1000; suffix += 1) {
@@ -102,6 +108,7 @@ export async function removeUploadedMedia(input: {
   productId: string;
   kind: AssetKind;
   storagePath: string;
+  authorizationToken?: string | null;
 }) {
   const bucket = mediaBucketForKind(input.kind);
 
@@ -116,14 +123,19 @@ export async function removeUploadedMedia(input: {
     throw new Error("Nieprawidłowa ścieżka usuwanego uploadu.");
   }
 
-  const { error } = await createServiceRoleClient().storage.from(bucket).remove([input.storagePath]);
+  const { error } = await createServiceRoleClient({
+    storageAuthorizationToken: input.authorizationToken ?? undefined,
+  }).storage.from(bucket).remove([input.storagePath]);
 
   if (error) {
     throw new Error(`Nie udało się usunąć pliku ze Storage: ${error.message}`);
   }
 }
 
-export async function cleanupNewMediaFromFormData(formData: FormData) {
+export async function cleanupNewMediaFromFormData(
+  formData: FormData,
+  authorizationToken?: string | null,
+) {
   const productId = stringField(formData, "id");
   const ids = formData.getAll("assetId");
   const kinds = formData.getAll("assetKind");
@@ -141,7 +153,7 @@ export async function cleanupNewMediaFromFormData(formData: FormData) {
     const storagePath = stringAt(paths, index);
 
     if (isAssetKind(kind) && storagePath) {
-      tasks.push(removeUploadedMedia({ productId, kind, storagePath }).catch(() => undefined));
+      tasks.push(removeUploadedMedia({ productId, kind, storagePath, authorizationToken }).catch(() => undefined));
     }
   }
 
@@ -151,6 +163,7 @@ export async function cleanupNewMediaFromFormData(formData: FormData) {
 export async function cleanupPersistedMedia(input: {
   previous: ProductAsset[];
   next: ProductAsset[];
+  authorizationToken?: string | null;
 }) {
   const nextReferences = new Set(
     input.next
@@ -172,6 +185,7 @@ export async function cleanupPersistedMedia(input: {
           productId: asset.productId,
           kind: asset.kind,
           storagePath: reference.path,
+          authorizationToken: input.authorizationToken,
         });
       } catch (error) {
         console.error("Nie udało się posprzątać usuniętego assetu w Storage.", error);

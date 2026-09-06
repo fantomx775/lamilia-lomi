@@ -8,7 +8,9 @@ import {
   getServiceRoleKey,
 } from "@/lib/config";
 
-export function createServiceRoleClient() {
+export function createServiceRoleClient(options?: {
+  storageAuthorizationToken?: string;
+}) {
   if (getBackendMode() !== "supabase") {
     throw new Error("The Supabase service-role client is unavailable in local mode.");
   }
@@ -25,11 +27,20 @@ export function createServiceRoleClient() {
     ...(!usesLegacyJwt
       ? {
           global: {
-            headers: { apikey: serviceRoleKey },
+            headers: {
+              apikey: serviceRoleKey,
+              ...(options?.storageAuthorizationToken
+                ? { Authorization: `Bearer ${options.storageAuthorizationToken}` }
+                : {}),
+            },
             fetch: (input: RequestInfo | URL, init?: RequestInit) => {
               const headers = new Headers(init?.headers);
-              headers.delete("authorization");
               headers.set("apikey", serviceRoleKey);
+              if (options?.storageAuthorizationToken) {
+                headers.set("authorization", `Bearer ${options.storageAuthorizationToken}`);
+              } else {
+                headers.delete("authorization");
+              }
               return fetch(input, { ...init, headers });
             },
           },
