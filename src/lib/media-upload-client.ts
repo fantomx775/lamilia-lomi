@@ -2,8 +2,7 @@
 
 import { Upload } from "tus-js-client";
 
-import { getPublicEnv } from "./config";
-import { createClient } from "./supabase/client";
+import { createClient, getClientPublicEnv } from "./supabase/client";
 
 export type SignedMediaUploadTarget = {
   endpoint: string;
@@ -26,7 +25,7 @@ export async function uploadMediaWithTus(
     throw new Error("Sesja administratora wygasła. Zaloguj się ponownie.");
   }
 
-  const { supabasePublishableKey } = getPublicEnv();
+  const { supabasePublishableKey } = getClientPublicEnv();
 
   await new Promise<void>((resolve, reject) => {
     const upload = new Upload(file, {
