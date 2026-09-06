@@ -125,14 +125,14 @@ file_size_limit = "50MiB"
 # objects_path = "./images"
 
 [storage.buckets.public-media]
-public = true
+public = false
 file_size_limit = "20MiB"
-allowed_mime_types = ["image/png", "image/jpeg", "image/webp", "image/svg+xml", "application/pdf"]
+allowed_mime_types = ["image/png", "image/jpeg", "image/webp", "application/pdf"]
 
 [storage.buckets.public-videos]
-public = true
+public = false
 file_size_limit = "50MiB"
-allowed_mime_types = ["video/mp4", "video/webm", "image/svg+xml"]
+allowed_mime_types = ["video/mp4", "video/webm"]
 
 [storage.buckets.premium-files]
 public = false

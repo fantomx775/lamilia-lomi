@@ -1,4 +1,4 @@
-import { Download, LockKeyhole, PlayCircle } from "lucide-react";
+import { Download, FileText, LockKeyhole, PlayCircle } from "lucide-react";
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import Image from "next/image";
@@ -99,6 +99,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
     .filter((link): link is { asset: (typeof product.premiumAssets)[number]; href: string } => Boolean(link.href));
 
   const copy = await getTranslations("Funnel");
+  const productCopy = await getTranslations("Product");
   const initialCode =
     hasCurrentIntent ? unlockIntent?.code : undefined;
   const jsonLd = buildProductJsonLd(
@@ -174,15 +175,50 @@ export default async function ProductPage({ params, searchParams }: Props) {
           </div>
           <div className="relative grid min-h-72 place-items-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-alt)]">
             {product.video ? (
-              <Image src={product.video.path} alt={product.video.title ?? "Video preview"} fill className="object-cover" />
+              <video
+                src={product.video.path}
+                controls
+                preload="metadata"
+                className="absolute inset-0 size-full object-cover"
+                aria-label={product.video.title ?? "Video preview"}
+              />
             ) : null}
-            <div className="relative z-10 flex items-center gap-2 rounded-md bg-white/82 px-4 py-3 text-sm font-medium">
+            <div className="pointer-events-none relative z-10 flex items-center gap-2 rounded-md bg-white/82 px-4 py-3 text-sm font-medium">
               <PlayCircle className="size-5 text-[var(--color-terracotta)]" />
               Public flipthrough video
             </div>
           </div>
         </div>
       </section>
+
+      {product.publicDownloads.length ? (
+        <section aria-labelledby="public-downloads-title" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+          <div className="rounded-2xl border border-[var(--color-border)] bg-white/80 p-6 sm:p-8">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-terracotta)]">{productCopy("availableNow")}</p>
+                <h2 id="public-downloads-title" className="mt-2 font-serif text-3xl font-semibold">{productCopy("publicDownloads")}</h2>
+                <p className="mt-3 max-w-2xl text-[var(--color-muted)]">{productCopy("publicDownloadsDescription")}</p>
+              </div>
+              <Download className="size-7 text-[var(--color-terracotta)]" aria-hidden />
+            </div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {product.publicDownloads.map((asset) => (
+                <a key={asset.id} href={`/api/media/${asset.id}?download=1`} className="flex min-w-0 items-center justify-between gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3 transition hover:border-[var(--color-terracotta)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <FileText className="size-5 shrink-0 text-[var(--color-terracotta)]" aria-hidden />
+                    <span className="min-w-0">
+                      <span className="block break-words font-medium">{asset.title || asset.filename}</span>
+                      {asset.sizeBytes ? <span className="mt-1 block text-xs text-[var(--color-muted)]">{formatBytes(asset.sizeBytes)}</span> : null}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm font-medium text-[var(--color-terracotta)]">{productCopy("downloadPublic")}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section id="premium" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
@@ -254,4 +290,10 @@ export default async function ProductPage({ params, searchParams }: Props) {
 
 function stringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

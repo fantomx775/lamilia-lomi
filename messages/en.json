@@ -17,7 +17,11 @@
   "Product": {
     "amazon": "View on Amazon",
     "premium": "Unlock premium materials",
-    "download": "Download premium file"
+    "download": "Download premium file",
+    "publicDownloads": "Free downloads",
+    "publicDownloadsDescription": "Available now, without an account or product unlock.",
+    "downloadPublic": "Download file",
+    "availableNow": "Available now"
   },
   "Funnel": {
     "ownerEyebrow": "Already own this book?",

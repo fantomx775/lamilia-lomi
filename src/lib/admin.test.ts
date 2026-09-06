@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildStaticPagesFromFormData,
   buildProductFromFormData,
+  validateProductAssetSubmission,
   validateAssetClassification,
 } from "./admin-content";
 import { exportUsersToCsv, validateProductForPublish } from "./admin";
@@ -118,6 +119,63 @@ describe("admin behavior", () => {
       bucket: "premium-files",
       isPublic: false,
     });
+  });
+
+  it("keeps persisted media metadata canonical and rejects unconfirmed new assets", () => {
+    const product = getSeedContentSnapshot().products[0];
+    const cover = product.assets.find((asset) => asset.kind === "cover")!;
+    const form = new FormData();
+    form.set("id", product.id);
+    form.append("assetId", cover.id);
+    form.append("assetKind", "video");
+    form.append("assetBucket", "premium-files");
+    form.append("assetPath", "products/attacker/video/cover.svg");
+    form.append("assetFilename", "attacker.svg");
+    form.append("assetContentType", "text/html");
+    form.append("assetSortOrder", "1");
+    form.append("assetUploaded", "0");
+
+    const rebuilt = buildProductFromFormData(form, {
+      existing: product,
+      snapshot: getSeedContentSnapshot(),
+    }).product;
+    const rebuiltCover = rebuilt.assets.find((asset) => asset.id === cover.id)!;
+
+    expect(rebuiltCover.kind).toBe("cover");
+    expect(rebuiltCover.bucket).toBe("public-media");
+    expect(rebuiltCover.path).toBe(cover.path);
+    expect(rebuiltCover.filename).toBe(cover.filename);
+
+    const unconfirmedId = "33333333-3333-4333-8333-333333333399";
+    const unconfirmed = {
+      ...rebuilt,
+      assets: [{
+        ...rebuiltCover,
+        id: unconfirmedId,
+        kind: "gallery" as const,
+        path: `products/${product.id}/gallery/${unconfirmedId}-page.png`,
+        filename: "page.png",
+      }],
+    };
+    expect(validateProductAssetSubmission(form, unconfirmed, product)).toContain(
+      "page.png: potwierdź zakończenie przesyłania przed zapisaniem.",
+    );
+  });
+
+  it("rejects more than twenty active gallery assets server-side", () => {
+    const form = new FormData();
+    form.set("title_en", "Gallery limit");
+    for (let index = 0; index < 21; index += 1) {
+      form.append("assetId", `asset-${index}`);
+      form.append("assetKind", "gallery");
+      form.append("assetPath", `/uploads/gallery/page-${index}.png`);
+      form.append("assetFilename", `page-${index}.png`);
+      form.append("assetContentType", "image/png");
+      form.append("assetSortOrder", String(index + 1));
+    }
+
+    const result = buildProductFromFormData(form, { snapshot: getSeedContentSnapshot() });
+    expect(result.errors).toContain("Galeria może zawierać maksymalnie 20 obrazów.");
   });
 
   it("preserves existing product locales, taxonomy, assets, markets, and premium codes on edit", () => {

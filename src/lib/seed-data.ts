@@ -205,6 +205,15 @@ export const products: Product[] = [
       ),
       asset(
         productIds.moonGarden,
+        "asset-moon-public-guide",
+        "public_download",
+        "/assets/downloads/moon-garden-free-guide.pdf",
+        "moon-garden-free-guide.pdf",
+        1,
+        "Moon Garden free guide",
+      ),
+      asset(
+        productIds.moonGarden,
         "asset-moon-premium-pdf",
         "premium_download",
         "moon-garden/bonus.pdf",

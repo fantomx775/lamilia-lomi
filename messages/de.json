@@ -17,7 +17,11 @@
   "Product": {
     "amazon": "Auf Amazon ansehen",
     "premium": "Premium-Materialien freischalten",
-    "download": "Premium-Datei herunterladen"
+    "download": "Premium-Datei herunterladen",
+    "publicDownloads": "Kostenlose Downloads",
+    "publicDownloadsDescription": "Sofort verfügbar — ohne Konto und ohne Freischaltung.",
+    "downloadPublic": "Datei herunterladen",
+    "availableNow": "Sofort verfügbar"
   },
   "Funnel": {
     "ownerEyebrow": "Du besitzt dieses Buch bereits?",

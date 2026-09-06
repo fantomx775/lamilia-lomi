@@ -42,6 +42,9 @@ describe("Supabase production foundation contracts", () => {
     const verifiedDownloadsMigration = read(
       "supabase/migrations/20260904120000_require_verified_premium_downloads.sql",
     );
+    const mediaStorageMigration = read(
+      "supabase/migrations/20260906085540_secure_product_media_storage.sql",
+    );
     const tagDescriptionsMigration = read(
       "supabase/migrations/20260905100000_add_tag_translation_descriptions.sql",
     );
@@ -79,6 +82,9 @@ describe("Supabase production foundation contracts", () => {
     expect(verifiedDownloadsMigration).toContain(
       'create policy "premium objects are readable after unlock"',
     );
+    expect(mediaStorageMigration).toContain("public = false");
+    expect(mediaStorageMigration).toContain('drop policy if exists "public media objects are readable"');
+    expect(mediaStorageMigration).toContain("bucket = 'public-videos'");
     expect(tagDescriptionsMigration).toContain(
       "alter table public.tag_translations",
     );

@@ -1,7 +1,7 @@
 "use client";
 
-import { Archive, Plus, Save, Star, Trash2, Undo2 } from "lucide-react";
-import { useState } from "react";
+import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { routing, type Locale } from "@/i18n/routing";
+import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
+import { uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
 type TranslationDraft = {
@@ -29,12 +31,20 @@ type AssetDraft = {
   kind: ProductAsset["kind"];
   bucket: string;
   path: string;
+  storagePath?: string;
   filename: string;
   contentType: string;
+  sizeBytes?: number;
   locale: Locale | "";
   title: string;
   sortOrder: number;
   removed: boolean;
+  status: UploadStatus;
+  error?: string;
+  file?: File;
+  uploaded?: boolean;
+  upload?: SignedMediaUploadTarget;
+  progress?: number;
 };
 
 type AmazonDraft = {
@@ -54,8 +64,9 @@ type PremiumDraft = {
   removed: boolean;
 };
 
-const assetKinds: Array<ProductAsset["kind"]> = ["cover", "gallery", "video", "public_download", "premium_download"];
 const productTypes = ["coloring-book", "picture-book", "audiobook"];
+
+type UploadStatus = "queued" | "uploading" | "uploaded" | "failed";
 
 const statusLabels = {
   draft: "Szkic",
@@ -85,13 +96,19 @@ export function ProductEditor({
   const [locale, setLocale] = useState<Locale>("en");
   const [translations, setTranslations] = useState<Record<Locale, TranslationDraft>>(() => buildTranslations(product));
   const [assets, setAssets] = useState<AssetDraft[]>(() => buildAssets(product));
+  const [draftProductId] = useState(() => product?.id ?? createClientId());
+  const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product));
   const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product));
+  const assetsRef = useRef(assets);
+  const uploadVersionsRef = useRef(new Map<ProductAsset["kind"], number>());
+  assetsRef.current = assets;
   const missingLocales = routing.locales.filter((code) => !translations[code].title.trim());
   const returnTo = product ? `/admin/products/${product.id}` : "/admin/products/new";
-  const visibleAssets = assets.filter((asset) => !asset.removed);
-  const coverOptions = visibleAssets.filter((asset) => asset.kind === "cover" && asset.id);
-  const videoOptions = visibleAssets.filter((asset) => asset.kind === "video" && asset.id);
+  const visibleAssets = assets.filter((asset) => !asset.removed && asset.status === "uploaded");
+  const coverAsset = visibleAssets.find((asset) => asset.kind === "cover");
+  const videoAsset = visibleAssets.find((asset) => asset.kind === "video");
+  const hasActiveMediaUpload = assets.some((asset) => !asset.removed && (asset.status === "queued" || asset.status === "uploading"));
 
   const updateTranslation = (field: keyof TranslationDraft, value: string) => {
     setTranslations((current) => ({ ...current, [locale]: { ...current[locale], [field]: value } }));
@@ -105,37 +122,229 @@ export function ProductEditor({
 
       const next = { ...asset, [field]: value } as AssetDraft;
 
-      if (field === "kind") {
-        next.bucket = defaultBucketForKind(next.kind);
-      }
-
       return next;
     }));
   };
 
-  const addAsset = () => {
-    const clientId = `asset-${Date.now()}-${assets.length}`;
-    setAssets((current) => [...current, {
-      clientId,
-      id: "",
-      kind: "gallery",
-      bucket: "public-media",
-      path: "",
-      filename: "",
-      contentType: "",
-      locale: "",
-      title: "",
-      sortOrder: current.length + 1,
-      removed: false,
-    }]);
+  const nextUploadVersion = (kind: ProductAsset["kind"]) => {
+    const version = (uploadVersionsRef.current.get(kind) ?? 0) + 1;
+    uploadVersionsRef.current.set(kind, version);
+    return version;
   };
 
-  const removeAsset = (asset: AssetDraft) => {
-    if (!asset.id) {
-      setAssets((current) => current.filter((item) => item.clientId !== asset.clientId));
+  const isCurrentUpload = (kind: ProductAsset["kind"], version: number) =>
+    MEDIA_UPLOAD_SPECS[kind].multiple || uploadVersionsRef.current.get(kind) === version;
+
+  const uploadFiles = async (kind: ProductAsset["kind"], selectedFiles: FileList | File[]) => {
+    const selected = Array.from(selectedFiles);
+    const spec = MEDIA_UPLOAD_SPECS[kind];
+    const selectionErrors: string[] = [];
+    const validatedContentTypes = new Map<File, string>();
+
+    if (!spec.multiple && selected.length > 1) {
+      selectionErrors.push("W tej sekcji można dodać tylko jeden plik.");
+    }
+
+    const validFiles = selected.filter((file) => {
+      const validation = validateMediaFile(kind, file);
+      if (!validation.ok) {
+        selectionErrors.push(validation.error);
+        return false;
+      }
+      validatedContentTypes.set(file, validation.contentType);
+      return true;
+    });
+
+    if (!validFiles.length) {
+      setMediaErrors((current) => ({ ...current, [kind]: selectionErrors.join(" ") || "Nie wybrano prawidłowego pliku." }));
+      return;
+    }
+
+    const files = spec.multiple ? validFiles : validFiles.slice(0, 1);
+    const activeCount = assets.filter((asset) => !asset.removed && asset.kind === kind && asset.status !== "failed").length;
+
+    if (kind === "gallery" && activeCount + files.length > MAX_GALLERY_ASSETS) {
+      selectionErrors.push("Galeria może zawierać maksymalnie 20 obrazów. Usuń plik, aby dodać kolejny.");
+    }
+
+    if (!files.length || (kind === "gallery" && activeCount + files.length > MAX_GALLERY_ASSETS)) {
+      setMediaErrors((current) => ({ ...current, [kind]: selectionErrors.join(" ") || "Nie wybrano prawidłowego pliku." }));
+      return;
+    }
+
+    setMediaErrors((current) => ({ ...current, [kind]: selectionErrors.join(" ") || undefined }));
+    const newDrafts = files.map((file, index) => ({
+      clientId: createClientId(),
+      id: "",
+      kind,
+      bucket: spec.bucket,
+      path: "",
+      storagePath: undefined,
+      filename: file.name,
+      contentType: validatedContentTypes.get(file) ?? file.type,
+      sizeBytes: file.size,
+      locale: "" as const,
+      title: file.name,
+      sortOrder: activeCount + index + 1,
+      removed: false,
+      status: "queued" as const,
+      file,
+      uploaded: false,
+      progress: 0,
+    }));
+
+    if (!spec.multiple) {
+      const version = nextUploadVersion(kind);
+      setAssets((current) => [
+        ...current.map((asset) => asset.kind === kind && !asset.removed && (asset.status === "queued" || asset.status === "uploading")
+          ? { ...asset, removed: true }
+          : asset),
+        ...newDrafts,
+      ]);
+      await Promise.all(newDrafts.map((draft) => uploadAsset(draft, version)));
+    } else {
+      setAssets((current) => [...current, ...newDrafts]);
+      await Promise.all(newDrafts.map((draft) => uploadAsset(draft)));
+    }
+  };
+
+  const uploadAsset = async (draft: AssetDraft, version = uploadVersionsRef.current.get(draft.kind) ?? 0) => {
+    const currentDraft = assetsRef.current.find((asset) => asset.clientId === draft.clientId) ?? draft;
+    const file = currentDraft.file ?? draft.file;
+
+    if (!file) {
+      updateAsset(draft.clientId, "status", "failed");
+      updateAsset(draft.clientId, "error", "Nie znaleziono pliku do ponowienia uploadu.");
+      return;
+    }
+
+    updateAsset(draft.clientId, "status", "uploading");
+    updateAsset(draft.clientId, "error", undefined);
+
+    try {
+      let uploadTarget = currentDraft.upload;
+      let uploadedAsset: Partial<AssetDraft> = currentDraft;
+
+      if (!uploadTarget) {
+        const response = await fetch("/api/admin/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            productId: draftProductId,
+            kind: draft.kind,
+            filename: file.name,
+            sizeBytes: file.size,
+            contentType: currentDraft.contentType,
+            locale: currentDraft.locale || undefined,
+          }),
+        });
+        const payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string };
+
+        if (!response.ok || !payload.asset) {
+          throw new Error(payload.error || "Upload nie powiódł się.");
+        }
+
+        uploadedAsset = payload.asset;
+        uploadTarget = payload.upload;
+        setAssets((current) => current.map((asset) => asset.clientId === draft.clientId
+          ? { ...asset, ...payload.asset, upload: payload.upload, status: "uploading", progress: 0, error: undefined }
+          : asset));
+      }
+
+      if (uploadTarget) {
+        await uploadMediaWithTus(file, uploadTarget, currentDraft.contentType, (progress) => {
+          updateAsset(draft.clientId, "progress", progress);
+        });
+      }
+
+      const currentState = assetsRef.current.find((asset) => asset.clientId === draft.clientId);
+      const stale = !isCurrentUpload(draft.kind, version) || !currentState || currentState.removed;
+
+      if (stale) {
+        const storagePath = uploadedAsset.storagePath ?? uploadTarget?.path;
+        if (storagePath) {
+          await deleteUploadedStorage(draft.kind, storagePath);
+        }
+        setAssets((current) => current.filter((asset) => asset.clientId !== draft.clientId));
+        return;
+      }
+
+      setAssets((current) => current.map((asset) => {
+        if (asset.clientId === draft.clientId) {
+          return {
+            ...asset,
+            ...uploadedAsset,
+            upload: uploadTarget,
+            status: "uploaded",
+            uploaded: true,
+            file,
+            progress: 100,
+            removed: false,
+            error: undefined,
+          } as AssetDraft;
+        }
+
+        if (!MEDIA_UPLOAD_SPECS[draft.kind].multiple && asset.kind === draft.kind && !asset.removed) {
+          return { ...asset, removed: true };
+        }
+
+        return asset;
+      }));
+    } catch (error) {
+      setAssets((current) => current.map((asset) => asset.clientId === draft.clientId ? {
+        ...asset,
+        status: "failed",
+        error: error instanceof Error ? error.message : "Upload nie powiódł się.",
+      } : asset));
+    }
+  };
+
+  const removeAsset = async (asset: AssetDraft) => {
+    if (!asset.id || asset.uploaded || asset.upload) {
+      try {
+        if (asset.storagePath) await deleteUploadedStorage(asset.kind, asset.storagePath);
+        setAssets((current) => current.filter((item) => item.clientId !== asset.clientId));
+      } catch (error) {
+        setMediaErrors((current) => ({
+          ...current,
+          [asset.kind]: error instanceof Error ? error.message : "Nie udało się usunąć pliku.",
+        }));
+      }
       return;
     }
     updateAsset(asset.clientId, "removed", true);
+  };
+
+  const deleteUploadedStorage = async (kind: ProductAsset["kind"], storagePath: string) => {
+    const response = await fetch("/api/admin/assets", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId: draftProductId, kind, storagePath }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      throw new Error(payload?.error || "Nie udało się usunąć pliku.");
+    }
+  };
+
+  const retryUpload = (asset: AssetDraft) => {
+    const version = MEDIA_UPLOAD_SPECS[asset.kind].multiple ? 0 : nextUploadVersion(asset.kind);
+    return uploadAsset(asset, version);
+  };
+
+  const reorderGallery = (clientId: string, direction: -1 | 1) => {
+    setAssets((current) => {
+      const gallery = current.filter((asset) => !asset.removed && asset.kind === "gallery" && asset.status === "uploaded");
+      const index = gallery.findIndex((asset) => asset.clientId === clientId);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= gallery.length) return current;
+
+      const reordered = gallery.slice();
+      [reordered[index], reordered[nextIndex]] = [reordered[nextIndex], reordered[index]];
+      const sortOrders = new Map(reordered.map((asset, order) => [asset.clientId, order + 1]));
+      return current.map((asset) => sortOrders.has(asset.clientId) ? { ...asset, sortOrder: sortOrders.get(asset.clientId)! } : asset);
+    });
   };
 
   const updateAmazon = <K extends keyof AmazonDraft>(clientId: string, field: K, value: AmazonDraft[K]) => {
@@ -190,8 +399,11 @@ export function ProductEditor({
   return (
     <div className="min-w-0">
       <form id="product-editor-form" action={saveAction} className="grid gap-6">
-        <input type="hidden" name="id" value={product?.id ?? ""} />
+        <input type="hidden" name="id" value={draftProductId} />
         <input type="hidden" name="returnTo" value={returnTo} />
+        <input type="hidden" name="coverAssetId" value={coverAsset?.id ?? ""} />
+        <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
+        <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
         {routing.locales.map((code) => (
           <span key={code}>
             <input type="hidden" name={`title_${code}`} value={translations[code].title} />
@@ -208,9 +420,10 @@ export function ProductEditor({
           title={title}
           subtitle={product ? `ID: ${product.id} · URL: /products/${product.slug}` : "Slug zostanie wygenerowany z tytułu EN, jeśli nie wpiszesz go ręcznie."}
           status={product ? <Badge className={statusClass(product.status)}>{statusLabels[product.status]}</Badge> : <Badge>Szkic</Badge>}
-          actions={<ProductSubmitButton />}
+          actions={<ProductSubmitButton disabled={hasActiveMediaUpload} />}
         />
 
+        {hasActiveMediaUpload ? <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Zapis produktu będzie dostępny po zakończeniu przesyłania plików.</p> : null}
         {feedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
 
         <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
@@ -239,15 +452,7 @@ export function ProductEditor({
               </div>
             </AdminEditorSection>
 
-            <AdminEditorSection title="Okładka i media" description="Binary upload nie jest jeszcze dostępny w local-demo. Dodaj istniejącą ścieżkę lub URL assetu; techniczne metadane są schowane.">
-              <div className="grid gap-4">
-                {assets.length === 0 ? <p className="rounded-lg border border-dashed border-[var(--color-border)] p-5 text-sm text-[var(--color-muted)]">Brak assetów. Dodaj okładkę, galerię lub plik przez ścieżkę/URL.</p> : null}
-                {assets.map((asset, index) => (
-                  <AssetEditor key={asset.clientId} asset={asset} index={index} onChange={updateAsset} onRemove={removeAsset} onUndo={() => updateAsset(asset.clientId, "removed", false)} />
-                ))}
-                <Button type="button" variant="outline" onClick={addAsset} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj asset</Button>
-              </div>
-            </AdminEditorSection>
+            <MediaSections assets={assets} errors={mediaErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
 
             <AdminEditorSection title="Sprzedaż na Amazon" description="Wybierz jeden domyślny rynek. Backend normalizuje maksymalnie jeden primary link.">
               <div className="grid gap-3">
@@ -294,8 +499,6 @@ export function ProductEditor({
                 <Field label="URL produktu" htmlFor="product-slug"><Input id="product-slug" name="slug" defaultValue={product?.slug ?? ""} placeholder="moon-garden-coloring-book" /><p className="text-xs leading-5 text-[var(--color-muted)]">/products/{product?.slug || "slug-z-tytulu-en"}</p></Field>
                 <Field label="Kolejność" htmlFor="product-sort-order"><Input id="product-sort-order" name="sortOrder" type="number" defaultValue={product?.sortOrder ?? 100} /></Field>
                 <Field label="Opóźnienie opinii (dni)" htmlFor="product-review-delay"><Input id="product-review-delay" name="reviewDelayDays" type="number" min={1} defaultValue={product?.reviewDelayDays ?? 14} /></Field>
-                <Field label="Okładka" htmlFor="product-cover"><select id="product-cover" name="coverAssetId" defaultValue={product?.coverAssetId ?? ""} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="">Pierwszy asset cover</option>{coverOptions.map((asset) => <option key={asset.id} value={asset.id}>{asset.title || asset.filename}</option>)}</select></Field>
-                <Field label="Wideo" htmlFor="product-video"><select id="product-video" name="videoAssetId" defaultValue={product?.videoAssetId ?? ""} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="">Brak / pierwsze video</option>{videoOptions.map((asset) => <option key={asset.id} value={asset.id}>{asset.title || asset.filename}</option>)}</select></Field>
               </div>
             </AdminEditorSection>
           </aside>
@@ -309,53 +512,210 @@ export function ProductEditor({
   );
 }
 
-function ProductSubmitButton() {
+function ProductSubmitButton({ disabled = false }: { disabled?: boolean }) {
   const { pending } = useFormStatus();
-  return <Button type="submit" disabled={pending}><Save className="size-4" aria-hidden />{pending ? "Zapisywanie…" : "Zapisz"}</Button>;
+  return <Button type="submit" disabled={pending || disabled}><Save className="size-4" aria-hidden />{pending ? "Zapisywanie…" : "Zapisz"}</Button>;
 }
 
-function AssetEditor({
-  asset,
-  index,
-  onChange,
+function MediaSections({
+  assets,
+  errors,
+  onUpload,
   onRemove,
   onUndo,
+  onRetry,
+  onMove,
 }: {
-  asset: AssetDraft;
-  index: number;
-  onChange: <K extends keyof AssetDraft>(clientId: string, field: K, value: AssetDraft[K]) => void;
+  assets: AssetDraft[];
+  errors: Partial<Record<ProductAsset["kind"], string>>;
+  onUpload: (kind: ProductAsset["kind"], files: FileList | File[]) => void;
   onRemove: (asset: AssetDraft) => void;
-  onUndo: () => void;
+  onUndo: (asset: AssetDraft) => void;
+  onRetry: (asset: AssetDraft) => void;
+  onMove: (clientId: string, direction: -1 | 1) => void;
 }) {
-  if (asset.removed) {
-    return <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900"><span>Asset „{asset.title || asset.filename || asset.path || `#${index + 1}`}” zostanie usunięty.</span><><input type="hidden" name="assetId" value={asset.id} /><input type="hidden" name="assetKind" value={asset.kind} /><input type="hidden" name="assetPath" value={asset.path} /><input type="hidden" name="assetRemove" value={asset.id} /><Button type="button" variant="ghost" size="sm" onClick={onUndo}><Undo2 className="size-4" aria-hidden />Cofnij</Button></></div>;
-  }
+  return <div className="grid min-w-0 gap-6">
+    <MediaSection kind="cover" title="OKŁADKA" description="Jedna grafika reprezentująca produkt. Możesz ją później zastąpić lub usunąć." assets={assets} error={errors.cover} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="gallery" title="GALERIA" description="Dodaj do 20 obrazów i ustaw ich kolejność przyciskami góra/dół." assets={assets} error={errors.gallery} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="video" title="WIDEO FLIPTHROUGH" description="Jedno publiczne wideo pokazujące zawartość produktu." assets={assets} error={errors.video} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="public_download" title="PUBLICZNE PLIKI DO POBRANIA" description="Pliki dostępne dla każdego odwiedzającego — bez logowania i bez odblokowania." assets={assets} error={errors.public_download} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="premium_download" title="MATERIAŁY PREMIUM" description="Prywatne materiały dostępne dopiero po weryfikacji e-maila i odblokowaniu produktu." assets={assets} error={errors.premium_download} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+  </div>;
+}
 
-  const preview = asset.path && asset.kind !== "premium_download" && (asset.contentType.startsWith("image/") || /\.(png|jpe?g|gif|svg|webp)$/i.test(asset.path));
-  return (
-    <div className="grid min-w-0 gap-4 rounded-lg border border-[var(--color-border)] bg-white p-4">
-      <input type="hidden" name="assetId" value={asset.id} />
-      <div className="flex min-w-0 items-start gap-4">
-        {preview ? <div role="img" aria-label={`Podgląd ${asset.title || asset.filename || "assetu"}`} className="size-16 shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] bg-cover bg-center" style={{ backgroundImage: `url("${asset.path}")` }} /> : <div className="grid size-16 shrink-0 place-items-center rounded-md border border-dashed border-[var(--color-border)] text-xs text-[var(--color-muted)]">asset</div>}
-        <div className="min-w-0 flex-1"><p className="font-medium">{asset.title || asset.filename || "Nowy asset"}</p><p className="mt-1 truncate text-xs text-[var(--color-muted)]">{asset.path || "Dodaj ścieżkę lub URL"}</p><p className="mt-1 text-xs text-[var(--color-muted)]">{assetLabel(asset.kind)}</p></div>
-        <Button type="button" variant="ghost" size="sm" onClick={() => onRemove(asset)} className="shrink-0 text-red-800">Usuń</Button>
-      </div>
-      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-        <Field label="Typ" htmlFor={`asset-kind-${asset.clientId}`}><select id={`asset-kind-${asset.clientId}`} name="assetKind" value={asset.kind} onChange={(event) => onChange(asset.clientId, "kind", event.target.value as AssetDraft["kind"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{assetKinds.map((kind) => <option key={kind} value={kind}>{assetLabel(kind)}</option>)}</select></Field>
-        <Field label="Ścieżka / URL" htmlFor={`asset-path-${asset.clientId}`}><Input id={`asset-path-${asset.clientId}`} name="assetPath" value={asset.path} onChange={(event) => onChange(asset.clientId, "path", event.target.value)} placeholder="/assets/gallery/page.svg" /></Field>
-        <Field label="Tytuł" htmlFor={`asset-title-${asset.clientId}`}><Input id={`asset-title-${asset.clientId}`} name="assetTitle" value={asset.title} onChange={(event) => onChange(asset.clientId, "title", event.target.value)} /></Field>
-        <Field label="Locale" htmlFor={`asset-locale-${asset.clientId}`}><select id={`asset-locale-${asset.clientId}`} name="assetLocale" value={asset.locale} onChange={(event) => onChange(asset.clientId, "locale", event.target.value as AssetDraft["locale"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="">Wszystkie</option>{routing.locales.map((code) => <option key={code} value={code}>{code.toUpperCase()}</option>)}</select></Field>
-      </div>
-      <AdminDisclosure className="rounded-md border border-dashed border-[var(--color-border)] p-3" summary="Zaawansowane metadane">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Bucket" htmlFor={`asset-bucket-${asset.clientId}`}><Input id={`asset-bucket-${asset.clientId}`} name="assetBucket" value={asset.bucket} onChange={(event) => onChange(asset.clientId, "bucket", event.target.value)} /></Field>
-          <Field label="Filename" htmlFor={`asset-filename-${asset.clientId}`}><Input id={`asset-filename-${asset.clientId}`} name="assetFilename" value={asset.filename} onChange={(event) => onChange(asset.clientId, "filename", event.target.value)} /></Field>
-          <Field label="Content type" htmlFor={`asset-content-type-${asset.clientId}`}><Input id={`asset-content-type-${asset.clientId}`} name="assetContentType" value={asset.contentType} onChange={(event) => onChange(asset.clientId, "contentType", event.target.value)} placeholder="image/svg+xml" /></Field>
-          <Field label="Kolejność" htmlFor={`asset-sort-${asset.clientId}`}><Input id={`asset-sort-${asset.clientId}`} name="assetSortOrder" type="number" value={asset.sortOrder} onChange={(event) => onChange(asset.clientId, "sortOrder", Number(event.target.value) || 100)} /></Field>
-        </div>
-      </AdminDisclosure>
+function MediaSection({
+  kind,
+  title,
+  description,
+  assets,
+  error,
+  onUpload,
+  onRemove,
+  onUndo,
+  onRetry,
+  onMove,
+}: {
+  kind: ProductAsset["kind"];
+  title: string;
+  description: string;
+  assets: AssetDraft[];
+  error?: string;
+  onUpload: (kind: ProductAsset["kind"], files: FileList | File[]) => void;
+  onRemove: (asset: AssetDraft) => void;
+  onUndo: (asset: AssetDraft) => void;
+  onRetry: (asset: AssetDraft) => void;
+  onMove: (clientId: string, direction: -1 | 1) => void;
+}) {
+  const sectionAssets = assets.filter((asset) => asset.kind === kind);
+  const visibleAssets = sectionAssets.filter((asset) => !asset.removed);
+  const spec = MEDIA_UPLOAD_SPECS[kind];
+
+  return <AdminEditorSection title={title} description={description}>
+    <div className="grid min-w-0 gap-4">
+      <UploadDropzone kind={kind} accept={spec.accept} multiple={spec.multiple} onFiles={(files) => onUpload(kind, files)} />
+      <p className="text-xs leading-5 text-[var(--color-muted)]">{uploadHint(kind)}</p>
+      {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{error}</p> : null}
+      {visibleAssets.length ? <div className="grid min-w-0 gap-3" aria-live="polite">{visibleAssets.map((asset, index) => <MediaAssetRow key={asset.clientId} asset={asset} kind={kind} index={index} total={visibleAssets.length} onRemove={onRemove} onRetry={onRetry} onMove={onMove} />)}</div> : <p className="rounded-lg border border-dashed border-[var(--color-border)] px-4 py-5 text-sm text-[var(--color-muted)]">Nie dodano jeszcze plików.</p>}
+      {sectionAssets.filter((asset) => asset.removed).map((asset) => <RemovedAssetRow key={asset.clientId} asset={asset} onUndo={onUndo} />)}
     </div>
-  );
+  </AdminEditorSection>;
+}
+
+function UploadDropzone({
+  kind,
+  accept,
+  multiple,
+  onFiles,
+}: {
+  kind: ProductAsset["kind"];
+  accept: string;
+  multiple: boolean;
+  onFiles: (files: FileList) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const inputId = `media-upload-${kind}`;
+  const openPicker = () => inputRef.current?.click();
+
+  return <div
+    role="button"
+    tabIndex={0}
+    aria-controls={inputId}
+    aria-label={`Wybierz pliki do sekcji ${mediaTitle(kind)}`}
+    onClick={openPicker}
+    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openPicker(); } }}
+    onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+    onDragLeave={() => setDragging(false)}
+    onDrop={(event) => { event.preventDefault(); setDragging(false); if (event.dataTransfer.files.length) onFiles(event.dataTransfer.files); }}
+    className={`grid min-h-36 cursor-pointer place-items-center rounded-xl border-2 border-dashed px-5 py-6 text-center transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] ${dragging ? "border-[var(--color-terracotta)] bg-[var(--color-blush)]" : "border-[var(--color-border)] bg-[var(--color-bg)] hover:border-[var(--color-terracotta)] hover:bg-[var(--color-blush)]"}`}
+  >
+    <input ref={inputRef} id={inputId} type="file" accept={accept} multiple={multiple} className="sr-only" aria-label={`Wybierz pliki do sekcji ${mediaTitle(kind)}`} onClick={(event) => event.stopPropagation()} onChange={(event) => { if (event.target.files?.length) onFiles(event.target.files); event.currentTarget.value = ""; }} />
+    <span className="grid justify-items-center gap-2">
+      <span className="grid size-11 place-items-center rounded-full bg-white text-[var(--color-terracotta)] shadow-sm"><ImagePlus className="size-5" aria-hidden /></span>
+      <span className="font-medium">Przeciągnij pliki tutaj lub kliknij, aby wybrać</span>
+      <span className="text-xs text-[var(--color-muted)]">Wybór z klawiatury: Enter lub Spacja</span>
+    </span>
+  </div>;
+}
+
+function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }: { asset: AssetDraft; kind: ProductAsset["kind"]; index: number; total: number; onRemove: (asset: AssetDraft) => void; onRetry: (asset: AssetDraft) => void; onMove: (clientId: string, direction: -1 | 1) => void }) {
+  const isUploading = asset.status === "uploading" || asset.status === "queued";
+  const isFailed = asset.status === "failed";
+  const isImage = asset.contentType.startsWith("image/") || /\.(png|jpe?g|gif|svg|webp)$/i.test(asset.filename);
+  const isVideo = kind === "video" && asset.contentType.startsWith("video/");
+
+  return <div className="grid min-w-0 gap-3 rounded-xl border border-[var(--color-border)] bg-white p-3 sm:grid-cols-[5rem_minmax(0,1fr)_auto] sm:items-center">
+    {asset.status === "uploaded" && isImage ? <AssetPreview asset={asset} /> : asset.status === "uploaded" && isVideo ? <AssetVideoPreview asset={asset} /> : <div className="grid size-20 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-terracotta)]">{kind === "video" ? <Video className="size-6" aria-hidden /> : kind.includes("download") ? <FileText className="size-6" aria-hidden /> : <ImagePlus className="size-6" aria-hidden />}</div>}
+    <div className="min-w-0">
+      <p className="break-words font-medium">{asset.filename || "Nowy plik"}</p>
+      <p className="mt-1 text-xs text-[var(--color-muted)]">{formatBytes(asset.sizeBytes)}{asset.locale ? ` · ${asset.locale.toUpperCase()}` : ""}</p>
+      <p className={`mt-2 inline-flex items-center gap-1 text-xs ${isFailed ? "text-red-800" : "text-[var(--color-muted)]"}`} role={isUploading || isFailed ? "status" : undefined} aria-live="polite">
+        {isUploading ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : isFailed ? <X className="size-3.5" aria-hidden /> : asset.status === "queued" ? <LoaderCircle className="size-3.5" aria-hidden /> : <span className="size-1.5 rounded-full bg-emerald-600" aria-hidden />}
+        {asset.status === "uploading" ? "Przesyłanie…" : isFailed ? asset.error || "Upload nie powiódł się." : asset.status === "queued" ? "Oczekuje" : "Przesłano"}
+      </p>
+      {isUploading ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg)]" role="progressbar" aria-label="Postęp przesyłania" aria-valuemin={0} aria-valuemax={100} aria-valuenow={asset.progress ?? 0}><div className="h-full rounded-full bg-[var(--color-terracotta)] transition-[width]" style={{ width: `${asset.progress ?? 0}%` }} /></div> : null}
+    </div>
+    <div className="flex flex-wrap items-center justify-end gap-1 sm:max-w-32">
+      {kind === "gallery" && asset.status === "uploaded" ? <><Button type="button" variant="ghost" size="icon" disabled={index === 0} onClick={() => onMove(asset.clientId, -1)} aria-label={`Przenieś ${asset.filename} wyżej`}><MoveUp className="size-4" aria-hidden /></Button><Button type="button" variant="ghost" size="icon" disabled={index === total - 1} onClick={() => onMove(asset.clientId, 1)} aria-label={`Przenieś ${asset.filename} niżej`}><MoveDown className="size-4" aria-hidden /></Button></> : null}
+      <Button type="button" variant="ghost" size="sm" disabled={asset.status === "uploading"} onClick={() => onRemove(asset)} className="text-red-800"><Trash2 className="size-4" aria-hidden />Usuń</Button>
+    </div>
+    {asset.status === "failed" ? <div className="sm:col-span-2"><Button type="button" variant="outline" size="sm" onClick={() => onRetry(asset)}><LoaderCircle className="size-4" aria-hidden />Ponów</Button></div> : null}
+    {asset.status === "uploaded" ? hiddenAssetFields(asset) : null}
+  </div>;
+
+}
+
+function AssetPreview({ asset }: { asset: AssetDraft }) {
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = previewRef.current;
+    if (!element) return;
+
+    const preview = asset.file ? URL.createObjectURL(asset.file) : asset.path;
+    if (preview) element.style.backgroundImage = `url("${preview}")`;
+
+    return () => {
+      if (asset.file) URL.revokeObjectURL(preview);
+      element.style.backgroundImage = "";
+    };
+  }, [asset.file, asset.path]);
+
+  return <div ref={previewRef} role="img" aria-label={`Podgląd ${asset.filename}`} className="size-20 shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] bg-cover bg-center" />;
+}
+
+function AssetVideoPreview({ asset }: { asset: AssetDraft }) {
+  const previewRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const element = previewRef.current;
+    if (!element) return;
+
+    const preview = asset.file ? URL.createObjectURL(asset.file) : asset.path;
+    if (preview) {
+      element.src = preview;
+      element.load();
+    }
+
+    return () => {
+      if (asset.file) URL.revokeObjectURL(preview);
+      element.removeAttribute("src");
+      element.load();
+    };
+  }, [asset.file, asset.path]);
+
+  return <video ref={previewRef} className="size-20 shrink-0 rounded-lg border border-[var(--color-border)] bg-black object-cover" controls preload="metadata" aria-label={`Podgląd ${asset.filename}`} />;
+}
+
+function RemovedAssetRow({ asset, onUndo }: { asset: AssetDraft; onUndo: (asset: AssetDraft) => void }) {
+  return <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"><span className="min-w-0 break-words">„{asset.filename || asset.title}” zostanie usunięty po zapisaniu.</span><Button type="button" variant="ghost" size="sm" onClick={() => onUndo(asset)}><Undo2 className="size-4" aria-hidden />Cofnij</Button>{hiddenAssetFields(asset, true)}</div>;
+}
+
+function hiddenAssetFields(asset: AssetDraft, removed = false) {
+  const path = asset.storagePath || asset.path;
+  if (!asset.id || !path) return null;
+  return <span className="hidden" aria-hidden>
+    <input type="hidden" name="assetId" value={asset.id} />
+    <input type="hidden" name="assetKind" value={asset.kind} />
+    <input type="hidden" name="assetBucket" value={asset.bucket} />
+    <input type="hidden" name="assetPath" value={path} />
+    <input type="hidden" name="assetFilename" value={asset.filename} />
+    <input type="hidden" name="assetContentType" value={asset.contentType} />
+    <input type="hidden" name="assetSizeBytes" value={asset.sizeBytes ?? ""} />
+    <input type="hidden" name="assetLocale" value={asset.locale} />
+    <input type="hidden" name="assetTitle" value={asset.title || asset.filename} />
+    <input type="hidden" name="assetSortOrder" value={asset.sortOrder} />
+    <input type="hidden" name="assetUploaded" value={asset.uploaded ? "1" : "0"} />
+    {removed ? <input type="hidden" name="assetRemove" value={asset.id} /> : null}
+  </span>;
+}
+
+function mediaTitle(kind: ProductAsset["kind"]) {
+  return { cover: "okładki", gallery: "galerii", video: "wideo flipthrough", public_download: "publicznych plików", premium_download: "materiałów premium" }[kind];
+}
+
+function uploadHint(kind: ProductAsset["kind"]) {
+  return { cover: "1 obraz · PNG, JPG lub WEBP · maks. 20 MB", gallery: "Maks. 20 obrazów · PNG, JPG lub WEBP · maks. 20 MB każdy", video: "1 plik · MP4 lub WebM · maks. 50 MB", public_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 20 MB każdy", premium_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 50 MB każdy" }[kind];
 }
 
 function AmazonEditor({
@@ -430,7 +790,7 @@ function buildTranslations(product?: Product): Record<Locale, TranslationDraft> 
 function buildAssets(product?: Product): AssetDraft[] {
   return (product?.assets ?? [])
     .filter((asset) => asset.isActive !== false)
-    .map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, filename: asset.filename, contentType: asset.contentType, locale: asset.locale ?? "", title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false }));
+    .map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, storagePath: asset.storagePath, filename: asset.filename, contentType: asset.contentType, sizeBytes: asset.sizeBytes, locale: asset.locale ?? "", title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false, status: "uploaded" as const, uploaded: false }));
 }
 
 function buildAmazonLinks(product?: Product): AmazonDraft[] {
@@ -441,20 +801,8 @@ function buildPremiumCodes(product?: Product): PremiumDraft[] {
   return (product?.premiumCodes ?? []).map((code) => ({ clientId: `existing-code-${code.id}`, id: code.id, code: code.code, active: code.active, removed: false }));
 }
 
-function assetLabel(kind: ProductAsset["kind"]) {
-  return { cover: "Okładka", gallery: "Galeria", video: "Wideo", public_download: "Publiczny download", premium_download: "Premium download" }[kind];
-}
-
-function defaultBucketForKind(kind: ProductAsset["kind"]) {
-  if (kind === "premium_download") {
-    return "premium-files";
-  }
-
-  if (kind === "video") {
-    return "public-videos";
-  }
-
-  return "public-media";
+function createClientId() {
+  return globalThis.crypto?.randomUUID?.() ?? `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function formatProductType(value: string) {

@@ -17,7 +17,11 @@
   "Product": {
     "amazon": "Ver en Amazon",
     "premium": "Desbloquear materiales premium",
-    "download": "Descargar archivo premium"
+    "download": "Descargar archivo premium",
+    "publicDownloads": "Descargas gratuitas",
+    "publicDownloadsDescription": "Disponibles ahora, sin cuenta ni desbloqueo del producto.",
+    "downloadPublic": "Descargar archivo",
+    "availableNow": "Disponible ahora"
   },
   "Funnel": {
     "ownerEyebrow": "¿Ya tienes este libro?",
