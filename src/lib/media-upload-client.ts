@@ -2,6 +2,9 @@
 
 import { Upload } from "tus-js-client";
 
+import { getPublicEnv } from "./config";
+import { createClient } from "./supabase/client";
+
 export type SignedMediaUploadTarget = {
   endpoint: string;
   token: string;
@@ -9,16 +12,30 @@ export type SignedMediaUploadTarget = {
   path: string;
 };
 
-export function uploadMediaWithTus(
+export async function uploadMediaWithTus(
   file: File,
   target: SignedMediaUploadTarget,
   contentType: string,
   onProgress: (percentage: number) => void,
 ) {
-  return new Promise<void>((resolve, reject) => {
+  const supabase = createClient();
+  const { data, error } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token;
+
+  if (error || !accessToken) {
+    throw new Error("Sesja administratora wygasła. Zaloguj się ponownie.");
+  }
+
+  const { supabasePublishableKey } = getPublicEnv();
+
+  await new Promise<void>((resolve, reject) => {
     const upload = new Upload(file, {
       endpoint: target.endpoint,
-      headers: { "x-signature": target.token },
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        apikey: supabasePublishableKey,
+        "x-signature": target.token,
+      },
       metadata: {
         bucketName: target.bucket,
         objectName: target.path,
