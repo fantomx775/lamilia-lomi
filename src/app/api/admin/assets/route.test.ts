@@ -19,6 +19,7 @@ vi.mock("@/lib/session.server", () => ({ getDemoSession: mocks.getDemoSession })
 vi.mock("@/lib/supabase/server", () => ({ getCurrentAccessToken: mocks.getCurrentAccessToken }));
 
 import { POST } from "./route";
+import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 
@@ -112,6 +113,7 @@ describe("admin media upload setup", () => {
 
     expect(response.status).toBe(500);
     expect(payload.error).toBe("Nie udało się przygotować przesyłania pliku. Spróbuj ponownie.");
+    expect(payload.errorCode).toBe(ADMIN_ERROR_CODES.INTERNAL);
     expect(payload.error).not.toContain("Invalid key");
   });
 });

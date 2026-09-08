@@ -25,24 +25,62 @@ import { getAdminContentSnapshot } from "./content-repository";
 import { cleanupNewMediaFromFormData, cleanupPersistedMedia } from "./media-storage";
 import { mediaBucketForKind } from "./media-upload";
 import { createServiceRoleClient } from "./supabase/admin";
-import type { AdminMutationResult } from "./admin-content";
+import {
+  ADMIN_ERROR_CODES,
+  AdminApplicationError,
+  AdminDatabaseError,
+  mapAdminError,
+  type AdminMutationResult,
+  type DatabaseErrorLike,
+} from "./admin-errors";
 import type { Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
-  const storageAuthorizationToken = getBackendMode() === "supabase"
-    ? await getCurrentAccessToken()
-    : undefined;
-  const mediaErrors = validateProductMediaSubmission(formData);
+  let storageAuthorizationToken: string | null | undefined;
+  let savedProduct: Product | undefined;
+  let previousAssets: Product["assets"] = [];
 
-  if (mediaErrors.length) {
-    await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-    return { ok: false, errors: mediaErrors };
-  }
+  try {
+    const backendMode = getBackendMode();
+    storageAuthorizationToken = backendMode === "supabase"
+      ? await getCurrentAccessToken()
+      : undefined;
+    const mediaErrors = validateProductMediaSubmission(formData);
 
-  if (getBackendMode() === "local") {
-    const snapshot = getContentSnapshot();
+    if (mediaErrors.length) {
+      await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+      return { ok: false, errors: mediaErrors };
+    }
+
+    if (backendMode === "local") {
+      const snapshot = getContentSnapshot();
+      const existing = snapshot.products.find((product) => product.id === stringField(formData, "id"));
+      const { product, errors } = buildProductFromFormData(formData, { existing, snapshot });
+      const assetErrors = validateProductAssetSubmission(formData, product, existing);
+
+      if (errors.length || assetErrors.length) {
+        await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+        return { ok: false, errors: [...errors, ...assetErrors] };
+      }
+
+      const result = saveProductFromFormData(formData);
+      if (!result.ok) {
+        await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+      } else {
+        await cleanupPersistedMedia({
+          previous: existing?.assets ?? [],
+          next: product.assets,
+          authorizationToken: storageAuthorizationToken,
+        });
+      }
+      return result;
+    }
+
+    const snapshot = await getAdminContentSnapshot();
     const existing = snapshot.products.find((product) => product.id === stringField(formData, "id"));
     const { product, errors } = buildProductFromFormData(formData, { existing, snapshot });
+    savedProduct = product;
+    previousAssets = existing?.assets ?? [];
     const assetErrors = validateProductAssetSubmission(formData, product, existing);
 
     if (errors.length || assetErrors.length) {
@@ -50,43 +88,18 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
       return { ok: false, errors: [...errors, ...assetErrors] };
     }
 
-    const result = saveProductFromFormData(formData);
-    if (!result.ok) {
-      await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-    } else {
-      await cleanupPersistedMedia({
-        previous: existing?.assets ?? [],
-        next: product.assets,
-        authorizationToken: storageAuthorizationToken,
-      });
+    assertUuidSet(product.id);
+    if (product.coverAssetId) {
+      assertUuidSet(product.coverAssetId);
     }
-    return result;
-  }
+    if (product.videoAssetId) {
+      assertUuidSet(product.videoAssetId);
+    }
+    product.assets.forEach((asset) => assertUuidSet(asset.id));
+    product.amazonLinks.forEach((link) => assertUuidSet(link.id));
+    product.premiumCodes.forEach((code) => assertUuidSet(code.id));
 
-  const snapshot = await getAdminContentSnapshot();
-  const existing = snapshot.products.find((product) => product.id === stringField(formData, "id"));
-  const { product, errors } = buildProductFromFormData(formData, { existing, snapshot });
-
-  const assetErrors = validateProductAssetSubmission(formData, product, existing);
-
-  if (errors.length || assetErrors.length) {
-    await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-    return { ok: false, errors: [...errors, ...assetErrors] };
-  }
-
-  assertUuidSet(product.id, "product");
-  if (product.coverAssetId) {
-    assertUuidSet(product.coverAssetId, "cover asset");
-  }
-  if (product.videoAssetId) {
-    assertUuidSet(product.videoAssetId, "video asset");
-  }
-  product.assets.forEach((asset) => assertUuidSet(asset.id, "asset"));
-  product.amazonLinks.forEach((link) => assertUuidSet(link.id, "Amazon link"));
-  product.premiumCodes.forEach((code) => assertUuidSet(code.id, "premium code"));
-
-  const supabase = await createClient();
-  try {
+    const supabase = await createClient();
     await assertSupabaseUploadsExist(
       product.assets.filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id)),
       storageAuthorizationToken,
@@ -96,24 +109,28 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
     });
 
     if (error) {
-      throw new Error(`Supabase product mutation failed: ${error.message}`);
+      throw new AdminDatabaseError("product mutation", error);
     }
 
     if (!data || typeof data !== "object" || data.status !== "success") {
-      throw new Error("Supabase product mutation returned an unknown result.");
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.INTERNAL);
     }
   } catch (error) {
     await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-    throw error;
+    return { ok: false, errors: [mapAdminError(error, "product mutation")] };
+  }
+
+  if (!savedProduct) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.INTERNAL] };
   }
 
   await cleanupPersistedMedia({
-    previous: existing?.assets ?? [],
-    next: product.assets,
+    previous: previousAssets,
+    next: savedProduct.assets,
     authorizationToken: storageAuthorizationToken,
   });
 
-  return { ok: true, id: product.id };
+  return { ok: true, id: savedProduct.id };
 }
 
 export function buildProductMutationPayload(product: Product) {
@@ -165,181 +182,216 @@ export function buildProductMutationPayload(product: Product) {
 }
 
 export async function deleteProductForRequest(productId: string): Promise<AdminMutationResult> {
-  if (getBackendMode() === "local") {
-    const previous = getContentSnapshot().products.find((product) => product.id === productId);
-    const result = deleteProduct(productId);
-    if (result.ok) {
-      await cleanupPersistedMedia({ previous: previous?.assets ?? [], next: [] });
+  return runAdminMutation("product deletion", async () => {
+    if (getBackendMode() === "local") {
+      const previous = getContentSnapshot().products.find((product) => product.id === productId);
+      const result = deleteProduct(productId);
+      if (result.ok) {
+        await cleanupPersistedMedia({ previous: previous?.assets ?? [], next: [] });
+      }
+      return result;
     }
-    return result;
-  }
 
-  const snapshot = await getAdminContentSnapshot();
-  const previous = snapshot.products.find((product) => product.id === productId);
-  const supabase = await createClient();
-  const storageAuthorizationToken = await getCurrentAccessToken();
-  await run(supabase.from("products").delete().eq("id", productId), "product deletion");
-  await cleanupPersistedMedia({
-    previous: previous?.assets ?? [],
-    next: [],
-    authorizationToken: storageAuthorizationToken,
+    const snapshot = await getAdminContentSnapshot();
+    const previous = snapshot.products.find((product) => product.id === productId);
+    if (!previous) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
+    }
+
+    const supabase = await createClient();
+    const storageAuthorizationToken = await getCurrentAccessToken();
+    await run(supabase.from("products").delete().eq("id", productId), "product deletion");
+    await cleanupPersistedMedia({
+      previous: previous.assets,
+      next: [],
+      authorizationToken: storageAuthorizationToken,
+    });
+    return { ok: true, id: productId };
   });
-  return { ok: true, id: productId };
 }
 
 export async function archiveProductForRequest(productId: string): Promise<AdminMutationResult> {
-  if (getBackendMode() === "local") {
-    return archiveProduct(productId);
-  }
+  return runAdminMutation("product archive", async () => {
+    if (getBackendMode() === "local") {
+      return archiveProduct(productId);
+    }
 
-  const supabase = await createClient();
-  await run(
-    supabase.from("products").update({ status: "archived", updated_at: new Date().toISOString() }).eq("id", productId),
-    "product archive",
-  );
-  return { ok: true, id: productId };
+    const snapshot = await getAdminContentSnapshot();
+    if (!snapshot.products.some((product) => product.id === productId)) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
+    }
+
+    const supabase = await createClient();
+    await run(
+      supabase.from("products").update({ status: "archived", updated_at: new Date().toISOString() }).eq("id", productId),
+      "product archive",
+    );
+    return { ok: true, id: productId };
+  });
 }
 
 export async function saveCategoryForRequest(formData: FormData): Promise<AdminMutationResult> {
-  if (getBackendMode() === "local") {
-    return saveCategoryFromFormData(formData);
-  }
+  return runAdminMutation("category", async () => {
+    if (getBackendMode() === "local") {
+      return saveCategoryFromFormData(formData);
+    }
 
-  const snapshot = await getAdminContentSnapshot();
-  const existing = snapshot.categories.find((category) => category.id === stringField(formData, "id"));
-  const categoryId = stringField(formData, "id") || existing?.id || randomUUID();
-  assertUuidSet(categoryId, "category");
-  const name = stringField(formData, "name_en") || existing?.translations[0]?.name || "Category";
-  const slug = stringField(formData, "slug") || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const category = {
-    id: categoryId,
-    slug,
-    sortOrder: numberField(formData, "sortOrder", existing?.sortOrder ?? 100),
-    translations: ["en", "pl", "de", "es"].map((locale) => ({
-      locale: locale as "en" | "pl" | "de" | "es",
-      name: stringField(formData, `name_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.name || "",
-      description: stringField(formData, `description_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.description,
-    })).filter((translation) => translation.name || translation.description),
-  };
+    const snapshot = await getAdminContentSnapshot();
+    const existing = snapshot.categories.find((category) => category.id === stringField(formData, "id"));
+    const categoryId = stringField(formData, "id") || existing?.id || randomUUID();
+    assertUuidSet(categoryId);
+    const name = stringField(formData, "name_en") || existing?.translations[0]?.name || "Category";
+    const slug = stringField(formData, "slug") || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const category = {
+      id: categoryId,
+      slug,
+      sortOrder: numberField(formData, "sortOrder", existing?.sortOrder ?? 100),
+      translations: ["en", "pl", "de", "es"].map((locale) => ({
+        locale: locale as "en" | "pl" | "de" | "es",
+        name: stringField(formData, `name_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.name || "",
+        description: stringField(formData, `description_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.description,
+      })).filter((translation) => translation.name || translation.description),
+    };
 
-  if (!category.translations.some((translation) => translation.locale === "en" && translation.name)) {
-    return { ok: false, errors: ["English category name is required."] };
-  }
+    if (!category.translations.some((translation) => translation.locale === "en" && translation.name)) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.VALIDATION_CATEGORY_NAME_REQUIRED] };
+    }
 
-  const supabase = await createClient();
-  await run(supabase.from("categories").upsert({ id: category.id, slug: category.slug, sort_order: category.sortOrder }), "category");
-  await run(supabase.from("category_translations").delete().eq("category_id", category.id), "category translations cleanup");
-  await run(supabase.from("category_translations").insert(category.translations.map((translation) => ({
-    category_id: category.id,
-    locale: translation.locale,
-    name: translation.name,
-    description: translation.description ?? null,
-  }))), "category translations");
-  return { ok: true, id: category.id };
+    const supabase = await createClient();
+    await run(supabase.from("categories").upsert({ id: category.id, slug: category.slug, sort_order: category.sortOrder }), "category");
+    await run(supabase.from("category_translations").delete().eq("category_id", category.id), "category translations cleanup");
+    await run(supabase.from("category_translations").insert(category.translations.map((translation) => ({
+      category_id: category.id,
+      locale: translation.locale,
+      name: translation.name,
+      description: translation.description ?? null,
+    }))), "category translations");
+    return { ok: true, id: category.id };
+  });
 }
 
 export async function deleteCategoryForRequest(categoryId: string): Promise<AdminMutationResult> {
-  if (getBackendMode() === "local") {
-    return deleteCategory(categoryId);
-  }
+  return runAdminMutation("category deletion", async () => {
+    if (getBackendMode() === "local") {
+      return deleteCategory(categoryId);
+    }
 
-  const supabase = await createClient();
-  await run(supabase.from("categories").delete().eq("id", categoryId), "category deletion");
-  return { ok: true, id: categoryId };
+    const snapshot = await getAdminContentSnapshot();
+    if (!snapshot.categories.some((category) => category.id === categoryId)) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+    }
+
+    const supabase = await createClient();
+    await run(supabase.from("categories").delete().eq("id", categoryId), "category deletion");
+    return { ok: true, id: categoryId };
+  });
 }
 
 export async function saveTagForRequest(formData: FormData): Promise<AdminMutationResult> {
-  if (getBackendMode() === "local") {
-    return saveTagFromFormData(formData);
-  }
+  return runAdminMutation("tag", async () => {
+    if (getBackendMode() === "local") {
+      return saveTagFromFormData(formData);
+    }
 
-  const snapshot = await getAdminContentSnapshot();
-  const existing = snapshot.tags.find((tag) => tag.id === stringField(formData, "id"));
-  const tagId = stringField(formData, "id") || existing?.id || randomUUID();
-  assertUuidSet(tagId, "tag");
-  const name = stringField(formData, "name_en") || existing?.translations[0]?.name || "Tag";
-  const slug = stringField(formData, "slug") || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const translations = ["en", "pl", "de", "es"].map((locale) => ({
-    locale: locale as "en" | "pl" | "de" | "es",
-    name: stringField(formData, `name_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.name || "",
-    description: stringField(formData, `description_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.description,
-  })).filter((translation) => translation.name);
+    const snapshot = await getAdminContentSnapshot();
+    const existing = snapshot.tags.find((tag) => tag.id === stringField(formData, "id"));
+    const tagId = stringField(formData, "id") || existing?.id || randomUUID();
+    assertUuidSet(tagId);
+    const name = stringField(formData, "name_en") || existing?.translations[0]?.name || "Tag";
+    const slug = stringField(formData, "slug") || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const translations = ["en", "pl", "de", "es"].map((locale) => ({
+      locale: locale as "en" | "pl" | "de" | "es",
+      name: stringField(formData, `name_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.name || "",
+      description: stringField(formData, `description_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.description,
+    })).filter((translation) => translation.name);
 
-  if (!translations.some((translation) => translation.locale === "en")) {
-    return { ok: false, errors: ["English tag name is required."] };
-  }
+    if (!translations.some((translation) => translation.locale === "en")) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.VALIDATION_TAG_NAME_REQUIRED] };
+    }
 
-  const supabase = await createClient();
-  await run(supabase.from("tags").upsert({ id: tagId, slug }), "tag");
-  await run(supabase.from("tag_translations").delete().eq("tag_id", tagId), "tag translations cleanup");
-  await run(supabase.from("tag_translations").insert(translations.map((translation) => ({
-    tag_id: tagId,
-    locale: translation.locale,
-    name: translation.name,
-    description: translation.description ?? null,
-  }))), "tag translations");
-  return { ok: true, id: tagId };
+    const supabase = await createClient();
+    await run(supabase.from("tags").upsert({ id: tagId, slug }), "tag");
+    await run(supabase.from("tag_translations").delete().eq("tag_id", tagId), "tag translations cleanup");
+    await run(supabase.from("tag_translations").insert(translations.map((translation) => ({
+      tag_id: tagId,
+      locale: translation.locale,
+      name: translation.name,
+      description: translation.description ?? null,
+    }))), "tag translations");
+    return { ok: true, id: tagId };
+  });
 }
 
 export async function deleteTagForRequest(tagId: string): Promise<AdminMutationResult> {
-  if (getBackendMode() === "local") {
-    return deleteTag(tagId);
-  }
+  return runAdminMutation("tag deletion", async () => {
+    if (getBackendMode() === "local") {
+      return deleteTag(tagId);
+    }
 
-  const supabase = await createClient();
-  await run(supabase.from("tags").delete().eq("id", tagId), "tag deletion");
-  return { ok: true, id: tagId };
+    const snapshot = await getAdminContentSnapshot();
+    if (!snapshot.tags.some((tag) => tag.id === tagId)) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+    }
+
+    const supabase = await createClient();
+    await run(supabase.from("tags").delete().eq("id", tagId), "tag deletion");
+    return { ok: true, id: tagId };
+  });
 }
 
 export async function savePagesForRequest(
   formData: FormData,
   slug: "privacy" | "terms",
 ): Promise<AdminMutationResult> {
-  if (getBackendMode() === "local") {
-    return saveStaticPagesFromFormData(formData, slug);
-  }
+  return runAdminMutation("static page", async () => {
+    if (getBackendMode() === "local") {
+      return saveStaticPagesFromFormData(formData, slug);
+    }
 
-  const snapshot = await getAdminContentSnapshot();
-  const { pages } = buildStaticPagesFromFormData(formData, snapshot, slug);
-  const supabase = await createClient();
+    const snapshot = await getAdminContentSnapshot();
+    const { pages } = buildStaticPagesFromFormData(formData, snapshot, slug);
+    const supabase = await createClient();
 
-  for (const page of pages) {
-    const pageId = isUuid(page.id) ? page.id : randomUUID();
+    for (const page of pages) {
+      const pageId = isUuid(page.id) ? page.id : randomUUID();
 
-    await run(
-      supabase.from("static_pages").upsert({
-        id: pageId,
-        slug: page.slug,
-        locale: page.locale,
-        title: page.title,
-        body: page.body,
-        updated_at: page.updatedAt,
-      }),
-      "static page",
-    );
-  }
+      await run(
+        supabase.from("static_pages").upsert({
+          id: pageId,
+          slug: page.slug,
+          locale: page.locale,
+          title: page.title,
+          body: page.body,
+          updated_at: page.updatedAt,
+        }, { onConflict: "slug,locale" }),
+        "static page",
+      );
+    }
 
-  return { ok: true, id: slug };
+    return { ok: true, id: slug };
+  });
 }
 
 export async function savePageForRequest(formData: FormData): Promise<AdminMutationResult> {
-  if (getBackendMode() === "local") {
-    return saveStaticPageFromFormData(formData);
-  }
+  return runAdminMutation("static page", async () => {
+    if (getBackendMode() === "local") {
+      return saveStaticPageFromFormData(formData);
+    }
 
-  const slug = stringField(formData, "slug");
-  if (slug !== "privacy" && slug !== "terms") {
-    return { ok: false, errors: ["Only privacy and terms pages can be edited."] };
-  }
+    const slug = stringField(formData, "slug");
+    if (slug !== "privacy" && slug !== "terms") {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.VALIDATION_PAGE_SLUG] };
+    }
 
-  return savePagesForRequest(formData, slug);
+    return savePagesForRequest(formData, slug);
+  });
 }
 
-async function run(query: PromiseLike<{ error: { message: string } | null }>, label: string) {
+async function run(query: PromiseLike<{ error: DatabaseErrorLike | null }>, label: string) {
   const { error } = await query;
 
   if (error) {
-    throw new Error(`Supabase ${label} write failed: ${error.message}`);
+    throw new AdminDatabaseError(label, error);
   }
 }
 
@@ -362,8 +414,12 @@ async function assertSupabaseUploadsExist(
       .from(mediaBucketForKind(asset.kind))
       .list(folder, { limit: 100, search: filename });
 
-    if (error || !data?.some((entry) => entry.name === filename)) {
-      throw new Error(`Nie znaleziono przesłanego pliku „${asset.filename}” w Storage.`);
+    if (error) {
+      throw new AdminDatabaseError("asset upload lookup", error);
+    }
+
+    if (!data?.some((entry) => entry.name === filename)) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD);
     }
   }
 }
@@ -387,9 +443,20 @@ function numberField(formData: FormData, key: string, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-function assertUuidSet(value: string, label: string) {
+function assertUuidSet(value: string) {
   if (!isUuid(value)) {
-    throw new Error(`Supabase ${label} identifier must be a UUID.`);
+    throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT);
+  }
+}
+
+async function runAdminMutation(
+  operation: string,
+  mutation: () => Promise<AdminMutationResult>,
+): Promise<AdminMutationResult> {
+  try {
+    return await mutation();
+  } catch (error) {
+    return { ok: false, errors: [mapAdminError(error, operation)] };
   }
 }
 

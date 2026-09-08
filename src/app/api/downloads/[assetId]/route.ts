@@ -16,13 +16,31 @@ export async function GET(
 ) {
   const { assetId } = await context.params;
   const requestUrl = new URL(request.url);
-  const asset = await getAssetByIdForRequest(assetId);
+  let asset;
+  try {
+    asset = await getAssetByIdForRequest(assetId);
+  } catch (error) {
+    console.error("[premium-download] Asset lookup failed unexpectedly.", error);
+    return NextResponse.json(
+      { ok: false, reason: "unavailable" },
+      { status: 503 },
+    );
+  }
   const token = requestUrl.searchParams.get("token");
   const expires = requestUrl.searchParams.get("expires");
-  const signedUrl = await authorizePremiumDownloadForRequest(assetId, {
-    ...(token !== null ? { token } : {}),
-    ...(expires !== null ? { expires } : {}),
-  });
+  let signedUrl;
+  try {
+    signedUrl = await authorizePremiumDownloadForRequest(assetId, {
+      ...(token !== null ? { token } : {}),
+      ...(expires !== null ? { expires } : {}),
+    });
+  } catch (error) {
+    console.error("[premium-download] Authorization failed unexpectedly.", error);
+    return NextResponse.json(
+      { ok: false, reason: "unavailable" },
+      { status: 503 },
+    );
+  }
 
   if (!signedUrl.ok) {
     const next =

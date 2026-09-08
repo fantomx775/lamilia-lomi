@@ -7,16 +7,28 @@ import { isMediaKind, validateMediaFile } from "@/lib/media-upload";
 import { createSignedMediaUpload, removeUploadedMedia, storeMediaFile } from "@/lib/media-storage";
 import { getDemoSession } from "@/lib/session.server";
 import { getCurrentAccessToken } from "@/lib/supabase/server";
+import { ADMIN_ERROR_CODES, getAdminErrorMessage, mapAdminError, type AdminErrorCode } from "@/lib/admin-errors";
 
 export async function POST(request: Request) {
-  const session = await getDemoSession();
+  let session;
+  try {
+    session = await getDemoSession();
+  } catch (error) {
+    const errorCode = mapAdminError(error, "administrator session");
+    return adminErrorResponse(errorCode, 500);
+  }
 
   if (!hasAdminAccess(session)) {
-    return NextResponse.json({ error: "Brak uprawnień administratora." }, { status: 403 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.AUTHORIZATION_DENIED, 403);
   }
 
   if (getBackendMode() === "supabase") {
-    return createSupabaseUpload(request, await getCurrentAccessToken());
+    try {
+      return await createSupabaseUpload(request, await getCurrentAccessToken());
+    } catch (error) {
+      const errorCode = mapAdminError(error, "administrator upload authorization");
+      return adminErrorResponse(errorCode, 500);
+    }
   }
 
   return createLocalUpload(request);
@@ -24,7 +36,7 @@ export async function POST(request: Request) {
 
 async function createLocalUpload(request: Request) {
   if (!request.headers.get("content-type")?.toLowerCase().includes("multipart/form-data")) {
-    return NextResponse.json({ error: "Lokalny upload wymaga przesłania pliku." }, { status: 415 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT, 415, "Lokalny upload wymaga przesłania pliku.");
   }
 
   const formData = await request.formData();
@@ -33,12 +45,12 @@ async function createLocalUpload(request: Request) {
   const file = formData.get("file");
 
   if (!isSafeId(productId) || !isMediaKind(kindValue) || !(file instanceof File)) {
-    return NextResponse.json({ error: "Nieprawidłowe dane uploadu." }, { status: 400 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT, 400, "Nieprawidłowe dane uploadu.");
   }
 
   const validation = validateMediaFile(kindValue, file);
   if (!validation.ok) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE, 400, validation.error);
   }
 
   try {
@@ -73,7 +85,7 @@ async function createLocalUpload(request: Request) {
     });
   } catch (error) {
     console.error("[media-upload] Localny zapis pliku nie powiódł się.", error);
-    return NextResponse.json({ error: "Nie udało się zapisać pliku. Spróbuj ponownie." }, { status: 500 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.INTERNAL, 500, "Nie udało się zapisać pliku. Spróbuj ponownie.");
   }
 }
 
@@ -92,7 +104,7 @@ async function createSupabaseUpload(request: Request, authorizationToken: string
     !Number.isSafeInteger(sizeBytes) ||
     sizeBytes <= 0
   ) {
-    return NextResponse.json({ error: "Nieprawidłowe dane uploadu." }, { status: 400 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT, 400, "Nieprawidłowe dane uploadu.");
   }
 
   const validation = validateMediaFile(kindValue, {
@@ -102,7 +114,7 @@ async function createSupabaseUpload(request: Request, authorizationToken: string
   });
 
   if (!validation.ok) {
-    return NextResponse.json({ error: validation.error }, { status: 400 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE, 400, validation.error);
   }
 
   const id = randomUUID();
@@ -146,15 +158,21 @@ async function createSupabaseUpload(request: Request, authorizationToken: string
     });
   } catch (error) {
     console.error("[media-upload] Przygotowanie uploadu w Storage nie powiodło się.", error);
-    return NextResponse.json({ error: "Nie udało się przygotować przesyłania pliku. Spróbuj ponownie." }, { status: 500 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.INTERNAL, 500, "Nie udało się przygotować przesyłania pliku. Spróbuj ponownie.");
   }
 }
 
 export async function DELETE(request: Request) {
-  const session = await getDemoSession();
+  let session;
+  try {
+    session = await getDemoSession();
+  } catch (error) {
+    const errorCode = mapAdminError(error, "administrator session");
+    return adminErrorResponse(errorCode, 500);
+  }
 
   if (!hasAdminAccess(session)) {
-    return NextResponse.json({ error: "Brak uprawnień administratora." }, { status: 403 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.AUTHORIZATION_DENIED, 403);
   }
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -163,7 +181,7 @@ export async function DELETE(request: Request) {
   const storagePath = typeof body?.storagePath === "string" ? body.storagePath : "";
 
   if (!isSafeId(productId) || !isMediaKind(kind) || !storagePath) {
-    return NextResponse.json({ error: "Nieprawidłowe dane usuwania." }, { status: 400 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT, 400, "Nieprawidłowe dane usuwania.");
   }
 
   try {
@@ -176,7 +194,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[media-upload] Usunięcie pliku ze Storage nie powiodło się.", error);
-    return NextResponse.json({ error: "Nie udało się usunąć pliku. Spróbuj ponownie." }, { status: 500 });
+    return adminErrorResponse(ADMIN_ERROR_CODES.INTERNAL, 500, "Nie udało się usunąć pliku. Spróbuj ponownie.");
   }
 }
 
@@ -191,4 +209,11 @@ function isSafeId(value: string) {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function adminErrorResponse(code: AdminErrorCode, status: number, message?: string) {
+  return NextResponse.json({
+    error: message ?? getAdminErrorMessage(code, "pl"),
+    errorCode: code,
+  }, { status });
 }

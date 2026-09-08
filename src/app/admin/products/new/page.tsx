@@ -5,6 +5,7 @@ import {
   saveProductAction,
 } from "@/app/admin/actions";
 import { getAdminContentSnapshot } from "@/lib/content-repository";
+import { formatAdminErrors } from "@/lib/admin-errors";
 
 type Props = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -13,7 +14,7 @@ type Props = {
 export default async function NewProductPage({ searchParams }: Props) {
   const snapshot = await getAdminContentSnapshot();
   const query = await searchParams;
-  const error = Array.isArray(query.error) ? query.error[0] : query.error;
+  const error = query.error ? formatAdminErrors(query.error, "pl") : undefined;
 
   return (
     <ProductEditor

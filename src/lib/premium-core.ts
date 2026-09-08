@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import type { DemoSession, DownloadDecision, Product, ProductAsset } from "./types";
 import { getProductById, getProductBySlug } from "./products";
+import { normalizePremiumCode } from "./premium-code";
 
 const localDownloadLifetimeSeconds = 10 * 60;
 const localOrigin = "http://lamilialomi.local";
@@ -20,13 +21,7 @@ export type PremiumCodeResult =
       reason: "missing_code" | "invalid_code" | "inactive_code" | "product_not_found";
     };
 
-export function normalizePremiumCode(code: string | null | undefined) {
-  return (code ?? "")
-    .trim()
-    .replace(/\s+/g, "")
-    .replace(/[–—]/g, "-")
-    .toUpperCase();
-}
+export { normalizePremiumCode } from "./premium-code";
 
 export function validatePremiumCode(input: {
   productSlug: string;

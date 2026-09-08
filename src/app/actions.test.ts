@@ -77,7 +77,7 @@ vi.mock("@/lib/unlock-intent", () => ({
   setUnlockIntent: actionMocks.setUnlockIntent,
 }));
 
-import { registerDemoAction } from "./actions";
+import { registerDemoAction, unlockPremiumAction } from "./actions";
 
 beforeEach(() => {
   actionMocks.getBackendMode.mockReturnValue("local");
@@ -319,5 +319,43 @@ describe("registration auth action", () => {
     );
 
     expect(actionMocks.redirect.mock.calls.flat().join(" ")).not.toContain("LOMI-BOOK-2026");
+  });
+});
+
+describe("premium unlock action", () => {
+  it("maps an unexpected redemption failure to a safe product error", async () => {
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+      reviewDelayDays: 7,
+    });
+    actionMocks.getDemoSession.mockResolvedValue({
+      email: "reader@example.com",
+      emailVerified: true,
+      unlockedProductIds: [],
+    });
+    actionMocks.redeemPremiumCodeForRequest.mockRejectedValue(
+      new Error("Supabase premium redemption failed: raw database details"),
+    );
+
+    const formData = new FormData();
+    formData.set("locale", "en");
+    formData.set("productSlug", "moon-garden-coloring-book");
+    formData.set("code", "LOMI-BOOK-2026");
+
+    await expectRedirect(
+      unlockPremiumAction(formData),
+      "/en/products/moon-garden-coloring-book?unlock=unexpected",
+    );
+
+    expect(actionMocks.setUnlockIntent).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    });
+    expect(actionMocks.redirect.mock.calls.flat().join(" ")).not.toContain(
+      "raw database details",
+    );
   });
 });

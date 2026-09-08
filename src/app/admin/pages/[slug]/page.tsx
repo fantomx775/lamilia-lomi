@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { saveStaticPagesAction } from "@/app/admin/actions";
 import { getAdminContentSnapshot } from "@/lib/content-repository";
+import { formatAdminErrors } from "@/lib/admin-errors";
 import { PageEditor } from "../page-editor";
 
 type Props = {
@@ -16,7 +17,7 @@ export default async function EditPage({ params, searchParams }: Props) {
   }
 
   const query = await searchParams;
-  const error = Array.isArray(query.error) ? query.error[0] : query.error;
+  const error = query.error ? formatAdminErrors(query.error, "pl") : undefined;
   const feedback = error ?? (query.saved ? "Zapisano wszystkie wersje językowe." : undefined);
   const records = (await getAdminContentSnapshot()).staticPages.filter(
     (page) => page.slug === slug,
