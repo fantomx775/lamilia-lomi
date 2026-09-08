@@ -45,13 +45,19 @@ Run the full E2E/browser suite only when:
 
 ## Vercel
 
-Automatic Git deployments are intentionally disabled.
+- Automatic Git deployments are enabled only for the production branch `main`
+  by `vercel.json`; branch and Preview Git deployments are disabled.
+- A normal push or merge to `main` must use the Vercel Git integration as the
+  single Production deployment path. Do not follow it with `vercel --prod`.
 
 Vercel Preview is optional and must not be treated as a merge quality gate.
 
-Create a Preview manually only when hosted-runtime behavior actually needs verification.
+Create a Preview manually only when hosted-runtime behavior actually needs
+verification.
 
-Production deploys always require explicit approval.
+Production CLI deploys are reserved for an explicitly approved exceptional
+manual release; record the reason and resulting deployment ID. Do not use the
+CLI for the normal `main` release path.
 
 ## Release gate
 

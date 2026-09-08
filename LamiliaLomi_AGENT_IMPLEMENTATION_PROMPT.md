@@ -139,8 +139,12 @@ W szczególności:
 - używaj `vercel login`, jeśli potrzebne,
 - używaj `vercel link`,
 - używaj `vercel env`,
-- używaj `vercel deploy`,
-- używaj `vercel --prod` dla deploymentu produkcyjnego dopiero gdy produkt jest gotowy,
+- używaj `vercel deploy` tylko dla jawnie potrzebnego Preview/testu,
+- po zwykłym pushu lub merge'u do `main` nie uruchamiaj `vercel --prod` —
+  Production wdraża automatycznie integracja Vercel Git i jest to jedyna
+  rutynowa ścieżka Production,
+- używaj `vercel --prod` wyłącznie po osobnej, jawnej zgodzie właściciela na
+  wyjątkowy ręczny deployment Production i zapisz jego powód oraz ID,
 - konfiguruj cron przez repozytorium, np. `vercel.json`, jeśli pasuje do aktualnych zaleceń Vercel.
 
 Przed komendami wdrożeniowymi upewnij się, że lokalne testy przechodzą.
@@ -218,19 +222,23 @@ Format:
 Status: done / blocked
 
 Built:
+
 - ...
 
 Automated tests:
+
 - Unit: pass/fail, command
 - Integration: pass/fail, command
 - E2E: pass/fail, command
 
 Manual evidence:
+
 - Screenshot: path
 - Database check: table/row verified
 - Storage check: bucket/path verified
 
 Notes:
+
 - ...
 ```
 
