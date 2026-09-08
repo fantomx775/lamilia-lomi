@@ -75,6 +75,7 @@ describe("public media delivery", () => {
     const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
 
     expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
   });
 
@@ -108,7 +109,25 @@ describe("public media delivery", () => {
     const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
 
     expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("returns a sanitized temporary-unavailable response when media metadata cannot be read", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.getAssetByIdForRequest.mockRejectedValue(new Error("database credentials must stay server-side"));
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe("Media temporarily unavailable");
+    expect(consoleError).toHaveBeenCalledWith(
+      "[public-media] Signed media URL generation failed.",
+      expect.objectContaining({ assetId, bucket: null, kind: null }),
+    );
+    expect(consoleError.mock.calls[0]?.[1]).not.toHaveProperty("error");
     consoleError.mockRestore();
   });
 
@@ -169,6 +188,7 @@ describe("public media delivery", () => {
     const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
 
     expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
   });
 
@@ -221,7 +241,7 @@ describe("public media delivery", () => {
       bucket: "public-media",
       path: `/api/media/${assetId}`,
       storagePath: `products/${productId}/public_download/${assetId}-guide.pdf`,
-      filename: 'guide".pdf',
+      filename: '../../guide"\r\n.pdf',
       contentType: "application/pdf",
       isPublic: true,
       isActive: true,
