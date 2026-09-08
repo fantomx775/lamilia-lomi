@@ -139,7 +139,12 @@ W szczególności:
 - używaj `vercel login`, jeśli potrzebne,
 - używaj `vercel link`,
 - używaj `vercel env`,
-- używaj `vercel deploy` tylko dla jawnie potrzebnego Preview/testu,
+- Preview twórz tylko przez `npm run vercel:preview`, gdy naprawdę potrzebna
+  jest weryfikacja zachowania na hostowanym runtime; komenda najpierw wyszukuje
+  po wszystkich stronach Vercela READY Preview dla dokładnego SHA i używa jego
+  URL ponownie,
+- nie uruchamiaj bezpośrednio `vercel deploy` dla zwykłego Preview; wymuszenie
+  nowego deploymentu wymaga `npm run vercel:preview -- --force --reason "..."`,
 - po zwykłym pushu lub merge'u do `main` nie uruchamiaj `vercel --prod` —
   Production wdraża automatycznie integracja Vercel Git i jest to jedyna
   rutynowa ścieżka Production,

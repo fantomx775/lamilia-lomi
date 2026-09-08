@@ -50,10 +50,18 @@ Run the full E2E/browser suite only when:
 - A normal push or merge to `main` must use the Vercel Git integration as the
   single Production deployment path. Do not follow it with `vercel --prod`.
 
-Vercel Preview is optional and must not be treated as a merge quality gate.
+- Vercel Preview is optional and must not be treated as a merge quality gate.
+  When hosted-runtime verification needs a Preview, run
+  `npm run vercel:preview` from the repository root. It searches all Vercel
+  deployment pages and reuses a READY Preview with the exact current Git SHA.
+  Do not invoke `vercel deploy` directly during normal agent work.
 
-Create a Preview manually only when hosted-runtime behavior actually needs
-verification.
+Use `npm run vercel:preview -- --force --reason "<why reuse is insufficient>"`
+only when a rebuild is explicitly justified. A failed Vercel lookup is a
+fail-closed error; it must not fall through to a new deployment.
+
+The helper records the Git SHA/ref metadata on new Previews so future runs can
+reuse them. It handles branch names containing `/` as metadata values.
 
 Production CLI deploys are reserved for an explicitly approved exceptional
 manual release; record the reason and resulting deployment ID. Do not use the
