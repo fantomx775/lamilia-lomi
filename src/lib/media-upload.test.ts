@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { MEDIA_UPLOAD_SPECS, filenameWithCollisionSuffix, isMediaKind, mediaBucketForKind, validateMediaFile } from "./media-upload";
+import {
+  MEDIA_UPLOAD_SPECS,
+  filenameWithCollisionSuffix,
+  isMediaKind,
+  mediaBucketForKind,
+  mediaFilenameForDisplay,
+  mediaFilenameForStorage,
+  validateMediaFile,
+} from "./media-upload";
 
 describe("media upload rules", () => {
   it("keeps each asset kind in its intended storage class", () => {
@@ -29,5 +37,13 @@ describe("media upload rules", () => {
     expect(filenameWithCollisionSuffix("my-awesome-book.pdf", 0)).toBe("my-awesome-book.pdf");
     expect(filenameWithCollisionSuffix("my-awesome-book.pdf", 1)).toBe("my-awesome-book_1.pdf");
     expect(filenameWithCollisionSuffix("cover", 2)).toBe("cover_2");
+  });
+
+  it("keeps user-facing filenames while generating ASCII Storage filenames", () => {
+    const filename = "Zdjęcie cyfrowe 1.webp";
+
+    expect(mediaFilenameForDisplay(filename)).toBe(filename);
+    expect(mediaFilenameForStorage(filename)).toBe("Zdjecie-cyfrowe-1.webp");
+    expect(mediaFilenameForStorage("图像.webp")).toBe("file.webp");
   });
 });

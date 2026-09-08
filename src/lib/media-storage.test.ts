@@ -13,7 +13,7 @@ vi.mock("./config", () => ({
 }));
 vi.mock("./supabase/admin", () => ({ createServiceRoleClient: mocks.createServiceRoleClient }));
 
-import { cleanupPersistedMedia } from "./media-storage";
+import { cleanupPersistedMedia, createSignedMediaUpload } from "./media-storage";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 
@@ -62,5 +62,37 @@ describe("persisted media cleanup", () => {
 
     expect(error).toHaveBeenCalled();
     error.mockRestore();
+  });
+});
+
+describe("signed media upload targets", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getBackendMode.mockReturnValue("supabase");
+  });
+
+  it("keeps the original filename for display while generating a Storage-safe path", async () => {
+    const createSignedUploadUrl = vi.fn().mockResolvedValue({
+      data: { token: "signed-token" },
+      error: null,
+    });
+    mocks.getRequiredSupabaseEnv.mockReturnValue({ url: "https://project.supabase.co" });
+    mocks.createServiceRoleClient.mockReturnValue({
+      storage: {
+        from: vi.fn(() => ({ createSignedUploadUrl })),
+      },
+    });
+
+    const result = await createSignedMediaUpload({
+      assetId: "22222222-2222-4222-8222-222222222222",
+      productId,
+      kind: "gallery",
+      filename: "Zdjęcie cyfrowe 1.webp",
+    });
+
+    expect(createSignedUploadUrl).toHaveBeenCalledWith(
+      `products/${productId}/gallery/22222222-2222-4222-8222-222222222222-Zdjecie-cyfrowe-1.webp`,
+    );
+    expect(result.filename).toBe("Zdjęcie cyfrowe 1.webp");
   });
 });

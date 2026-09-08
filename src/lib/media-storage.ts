@@ -6,7 +6,12 @@ import path from "node:path";
 import { getRequiredSupabaseEnv, getBackendMode } from "./config";
 import { createServiceRoleClient } from "./supabase/admin";
 import type { AssetKind, ProductAsset } from "./types";
-import { filenameWithCollisionSuffix, mediaBucketForKind } from "./media-upload";
+import {
+  filenameWithCollisionSuffix,
+  mediaBucketForKind,
+  mediaFilenameForDisplay,
+  mediaFilenameForStorage,
+} from "./media-upload";
 
 export type StoredMediaFile = {
   bucket: string;
@@ -31,10 +36,11 @@ export async function createSignedMediaUpload(input: {
     throw new Error("Signed Supabase uploads are unavailable in local mode.");
   }
 
-  const filename = safeFilename(input.filename);
+  const filename = mediaFilenameForDisplay(input.filename);
+  const storageFilename = mediaFilenameForStorage(filename);
   const bucket = mediaBucketForKind(input.kind);
   const env = getRequiredSupabaseEnv();
-  const storagePath = `products/${input.productId}/${input.kind}/${input.assetId}-${filename}`;
+  const storagePath = `products/${input.productId}/${input.kind}/${input.assetId}-${storageFilename}`;
   const { data, error } = await createServiceRoleClient({
     storageAuthorizationToken: input.authorizationToken ?? undefined,
   })
@@ -64,11 +70,12 @@ export async function storeMediaFile(input: {
   bytes: Uint8Array;
   authorizationToken?: string | null;
 }): Promise<StoredMediaFile> {
-  const filename = safeFilename(input.filename);
+  const filename = mediaFilenameForDisplay(input.filename);
+  const storageFilename = mediaFilenameForStorage(filename);
   const bucket = mediaBucketForKind(input.kind);
 
   if (getBackendMode() === "local") {
-    return storeLocalFile({ ...input, bucket, filename });
+    return storeLocalFile({ ...input, bucket, filename, storageFilename });
   }
 
   const supabase = createServiceRoleClient({
@@ -77,7 +84,7 @@ export async function storeMediaFile(input: {
   const basePath = `products/${input.productId}/${input.kind}`;
 
   for (let suffix = 0; suffix < 1000; suffix += 1) {
-    const candidate = filenameWithCollisionSuffix(filename, suffix);
+    const candidate = filenameWithCollisionSuffix(storageFilename, suffix);
     const storagePath = `${basePath}/${candidate}`;
     const { error } = await supabase.storage.from(bucket).upload(storagePath, input.bytes, {
       cacheControl: "31536000",
@@ -92,7 +99,7 @@ export async function storeMediaFile(input: {
         publicPath: bucket === "premium-files"
           ? storagePath
           : publicStoragePath(getRequiredSupabaseEnv().url, bucket, storagePath),
-        filename: candidate,
+        filename,
       };
     }
 
@@ -199,6 +206,7 @@ function storeLocalFile(input: {
   kind: AssetKind;
   bucket: string;
   filename: string;
+  storageFilename: string;
   bytes: Uint8Array;
 }) {
   const root = path.resolve(process.cwd(), "public", "uploads");
@@ -207,7 +215,7 @@ function storeLocalFile(input: {
   fs.mkdirSync(directory, { recursive: true });
 
   for (let suffix = 0; suffix < 1000; suffix += 1) {
-    const candidate = filenameWithCollisionSuffix(input.filename, suffix);
+    const candidate = filenameWithCollisionSuffix(input.storageFilename, suffix);
     const target = path.resolve(directory, candidate);
     assertWithin(root, target);
 
@@ -219,7 +227,7 @@ function storeLocalFile(input: {
         bucket: input.bucket,
         storagePath: publicPath,
         publicPath,
-        filename: candidate,
+        filename: input.filename,
       };
     } catch (error) {
       if (isFileExistsError(error)) continue;
@@ -274,12 +282,6 @@ function resumableUploadEndpoint(supabaseUrl: string) {
     : url.hostname;
 
   return `${url.protocol}//${hostname}/storage/v1/upload/resumable`;
-}
-
-function safeFilename(value: string) {
-  const basename = path.basename(value).replace(/[\u0000-\u001f\u007f]/g, "").trim();
-  const cleaned = basename.replace(/[^\p{L}\p{N}._'!&$@=;:+?()\- ]/gu, "-");
-  return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : "file";
 }
 
 function isDuplicateStorageError(error: { message?: string; status?: number; statusCode?: string | number }) {

@@ -72,7 +72,8 @@ async function createLocalUpload(request: Request) {
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Upload nie powiódł się." }, { status: 500 });
+    console.error("[media-upload] Localny zapis pliku nie powiódł się.", error);
+    return NextResponse.json({ error: "Nie udało się zapisać pliku. Spróbuj ponownie." }, { status: 500 });
   }
 }
 
@@ -144,7 +145,8 @@ async function createSupabaseUpload(request: Request, authorizationToken: string
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Upload nie powiódł się." }, { status: 500 });
+    console.error("[media-upload] Przygotowanie uploadu w Storage nie powiodło się.", error);
+    return NextResponse.json({ error: "Nie udało się przygotować przesyłania pliku. Spróbuj ponownie." }, { status: 500 });
   }
 }
 
@@ -173,7 +175,8 @@ export async function DELETE(request: Request) {
     });
     return NextResponse.json({ ok: true });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Nie udało się usunąć pliku." }, { status: 500 });
+    console.error("[media-upload] Usunięcie pliku ze Storage nie powiodło się.", error);
+    return NextResponse.json({ error: "Nie udało się usunąć pliku. Spróbuj ponownie." }, { status: 500 });
   }
 }
 

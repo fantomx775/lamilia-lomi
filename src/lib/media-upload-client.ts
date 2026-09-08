@@ -11,6 +11,25 @@ export type SignedMediaUploadTarget = {
   path: string;
 };
 
+export function getMediaErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : "";
+  const status = getErrorStatus(error);
+
+  if (
+    status === 401 ||
+    status === 403 ||
+    /unauthorized|forbidden|invalid compact jws|session.*expired|\b(jwt|token)\b/i.test(message)
+  ) {
+    return "Sesja administratora wygasła. Zaloguj się ponownie.";
+  }
+
+  return fallback;
+}
+
+export function getMediaUploadErrorMessage(error: unknown) {
+  return getMediaErrorMessage(error, "Nie udało się przesłać pliku. Spróbuj ponownie.");
+}
+
 export async function uploadMediaWithTus(
   file: File,
   target: SignedMediaUploadTarget,
@@ -61,4 +80,13 @@ export async function uploadMediaWithTus(
       })
       .catch(reject);
   });
+}
+
+function getErrorStatus(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  const response = (error as { originalResponse?: { getStatus?: () => number } }).originalResponse;
+  return typeof response?.getStatus === "function" ? response.getStatus() : undefined;
 }
