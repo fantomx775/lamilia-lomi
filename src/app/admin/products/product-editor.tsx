@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { routing, type Locale } from "@/i18n/routing";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
-import { uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
+import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
 type TranslationDraft = {
@@ -312,7 +312,7 @@ export function ProductEditor({
       setAssets((current) => current.map((asset) => asset.clientId === draft.clientId ? {
         ...asset,
         status: "failed",
-        error: error instanceof Error ? error.message : "Upload nie powiódł się.",
+        error: getMediaUploadErrorMessage(error),
       } : asset));
     }
   };
@@ -325,7 +325,7 @@ export function ProductEditor({
       } catch (error) {
         setMediaErrors((current) => ({
           ...current,
-          [asset.kind]: error instanceof Error ? error.message : "Nie udało się usunąć pliku.",
+          [asset.kind]: getMediaErrorMessage(error, "Nie udało się usunąć pliku. Spróbuj ponownie."),
         }));
       }
       return;

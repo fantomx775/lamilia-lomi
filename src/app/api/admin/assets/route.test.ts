@@ -94,4 +94,24 @@ describe("admin media upload setup", () => {
     expect(payload.asset).toMatchObject({ filename: "cover.jpg", uploaded: true });
     expect(mocks.storeMediaFile).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-id", kind: "cover" }));
   });
+
+  it("does not expose Storage implementation errors from the setup endpoint", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    mocks.getCurrentAccessToken.mockResolvedValue("admin-user-jwt");
+    mocks.createSignedMediaUpload.mockRejectedValue(
+      new Error(`Invalid key: products/${productId}/gallery/Zdjęcie cyfrowe 1.webp`),
+    );
+
+    const response = await POST(new Request("https://lamilialomi.com/api/admin/assets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, kind: "gallery", filename: "Zdjęcie cyfrowe 1.webp", sizeBytes: 1024, contentType: "image/webp" }),
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toBe("Nie udało się przygotować przesyłania pliku. Spróbuj ponownie.");
+    expect(payload.error).not.toContain("Invalid key");
+  });
 });

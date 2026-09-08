@@ -8,9 +8,14 @@ const editorMocks = vi.hoisted(() => ({
   uploadMediaWithTus: vi.fn(),
 }));
 
-vi.mock("@/lib/media-upload-client", () => ({
-  uploadMediaWithTus: editorMocks.uploadMediaWithTus,
-}));
+vi.mock("@/lib/media-upload-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/media-upload-client")>();
+
+  return {
+    ...actual,
+    uploadMediaWithTus: editorMocks.uploadMediaWithTus,
+  };
+});
 
 vi.mock("@/app/admin/actions", () => ({
   archiveProductAction: vi.fn(),
@@ -303,21 +308,64 @@ describe("ProductEditor V2", () => {
   it("preserves the existing cover when a replacement upload fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,
-      json: async () => ({ error: "Upload nie powiódł się." }),
+      json: async () => ({ error: "Nie udało się przesłać pliku. Spróbuj ponownie." }),
     }));
     const user = userEvent.setup();
     const view = render(<ProductEditor title="Edycja produktu" product={product} categories={snapshot.categories} tags={snapshot.tags} />);
     const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
 
     await user.upload(input!, new File(["cover"], "replacement.jpg", { type: "image/jpeg" }));
-    await waitFor(() => expect(view.getByText("Upload nie powiódł się.")).toBeInTheDocument());
+    await waitFor(() => expect(view.getByText("Nie udało się przesłać pliku. Spróbuj ponownie.")).toBeInTheDocument());
     expect(view.getByText("moon-garden.svg")).toBeInTheDocument();
+  });
+
+  it("shows a friendly message when TUS returns a raw Storage error", async () => {
+    editorMocks.uploadMediaWithTus.mockRejectedValue(new Error(
+      "tus: unexpected response while creating upload, response code: 400, response text: Invalid key: products/example/gallery/Zdjęcie cyfrowe 1.webp",
+    ));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        asset: {
+          id: "asset-uploaded-gallery",
+          productId: "product-upload",
+          kind: "gallery",
+          bucket: "public-media",
+          path: "/api/media/asset-uploaded-gallery",
+          storagePath: "products/product-upload/gallery/asset-uploaded-gallery-Zdjecie-cyfrowe-1.webp",
+          filename: "Zdjęcie cyfrowe 1.webp",
+          contentType: "image/webp",
+          sizeBytes: 12,
+          title: "Zdjęcie cyfrowe 1.webp",
+          sortOrder: 1,
+          isPublic: true,
+          isActive: true,
+          uploaded: false,
+        },
+        upload: {
+          endpoint: "https://project.storage.supabase.co/storage/v1/upload/resumable",
+          token: "signed-token",
+          bucket: "public-media",
+          path: "products/product-upload/gallery/asset-uploaded-gallery-Zdjecie-cyfrowe-1.webp",
+        },
+      }),
+    }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />);
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-gallery");
+
+    await user.upload(input!, new File(["image"], "Zdjęcie cyfrowe 1.webp", { type: "image/webp" }));
+
+    const friendlyError = "Nie udało się przesłać pliku. Spróbuj ponownie.";
+    await waitFor(() => expect(view.getByText(friendlyError)).toBeInTheDocument());
+    expect(view.container.textContent).not.toContain("tus: unexpected response");
+    expect(view.container.textContent).not.toContain("Invalid key");
   });
 
   it("uses a retry action icon for a failed upload", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,
-      json: async () => ({ error: "Upload nie powiódł się." }),
+      json: async () => ({ error: "Nie udało się przesłać pliku. Spróbuj ponownie." }),
     }));
     const user = userEvent.setup();
     const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />);

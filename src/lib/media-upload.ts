@@ -110,6 +110,35 @@ export function filenameWithCollisionSuffix(filename: string, suffix: number) {
   return `${stem}_${suffix}${extension}`;
 }
 
+export function mediaFilenameForDisplay(value: string) {
+  const basename = value
+    .split(/[\\/]/)
+    .pop()
+    ?.replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim() ?? "";
+
+  return basename && basename !== "." && basename !== ".." ? basename : "file";
+}
+
+export function mediaFilenameForStorage(value: string) {
+  const displayFilename = mediaFilenameForDisplay(value);
+  const extensionMatch = displayFilename.match(/(\.[A-Za-z0-9]+)$/);
+  const extension = extensionMatch?.[1].toLowerCase() ?? "";
+  const stemSource = extension
+    ? displayFilename.slice(0, -extension.length)
+    : displayFilename;
+  const stem = stemSource
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "")
+    .slice(0, 120)
+    .replace(/[-_]+$/g, "");
+
+  return `${stem || "file"}${extension}`;
+}
+
 export function isMediaKind(value: string): value is AssetKind {
   return Object.prototype.hasOwnProperty.call(MEDIA_UPLOAD_SPECS, value);
 }
