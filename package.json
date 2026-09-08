@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "vercel:preview": "node scripts/vercel/deploy-preview.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
