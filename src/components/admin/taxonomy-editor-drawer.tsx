@@ -9,14 +9,14 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { routing, type Locale } from "@/i18n/routing";
+import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminMutationResult, type AdminErrorCode } from "@/lib/admin-errors";
 import type { Category, Tag } from "@/lib/types";
 
 type TaxonomyItem = Category | Tag;
 type TaxonomyKind = "category" | "tag";
 type LocaleValue = { name: string; description: string };
-type MutationResult = { ok: true; id: string } | { ok: false; errors: string[] };
-export type SaveAction = (formData: FormData) => Promise<MutationResult>;
-export type DeleteAction = (formData: FormData) => Promise<MutationResult>;
+export type SaveAction = (formData: FormData) => Promise<AdminMutationResult>;
+export type DeleteAction = (formData: FormData) => Promise<AdminMutationResult>;
 
 type TaxonomyEditorProps = {
   kind: TaxonomyKind;
@@ -74,7 +74,7 @@ function TaxonomyEditorForm({
 }: TaxonomyEditorProps) {
   const [locale, setLocale] = useState<Locale>("en");
   const [isPending, startTransition] = useTransition();
-  const [errors, setErrors] = useState<string[]>([]);
+  const [errors, setErrors] = useState<AdminErrorCode[]>([]);
   const [values, setValues] = useState<Record<Locale, LocaleValue>>(() =>
     buildLocaleValues(item),
   );
@@ -96,7 +96,7 @@ function TaxonomyEditorForm({
 
     startTransition(async () => {
       if (!saveAction) {
-        setErrors(["Ta akcja edytora nie jest dostępna."]);
+        setErrors([ADMIN_ERROR_CODES.INTERNAL]);
         return;
       }
 
@@ -120,7 +120,7 @@ function TaxonomyEditorForm({
     formData.set("id", itemId);
     startTransition(async () => {
       if (!deleteAction) {
-        setErrors(["Ta akcja edytora nie jest dostępna."]);
+        setErrors([ADMIN_ERROR_CODES.INTERNAL]);
         return;
       }
 
@@ -151,7 +151,7 @@ function TaxonomyEditorForm({
             <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
               <p className="font-medium">Nie udało się zapisać zmian.</p>
               <ul className="mt-2 list-disc space-y-1 pl-5">
-                {errors.map((error) => <li key={error}>{error}</li>)}
+                {errors.map((error) => <li key={error}>{getAdminErrorMessage(error, "pl")}</li>)}
               </ul>
             </div>
           ) : null}

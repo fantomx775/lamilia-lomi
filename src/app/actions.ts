@@ -316,7 +316,20 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
     code,
   });
 
-  const redemption = await redeemAuthResumeIntent(intent);
+  let redemption;
+  try {
+    redemption = await redeemAuthResumeIntent(intent);
+  } catch (error) {
+    console.error("[premium-unlock] Auth resume redemption failed unexpectedly.", error);
+    await clearAuthResumeIntent();
+    await setUnlockIntent({
+      locale: intent.locale,
+      productSlug: intent.productSlug ?? "",
+      returnTo: intent.returnTo,
+      code,
+    });
+    redirect(appendQueryPath(intent.returnTo, "unlock", "unexpected"));
+  }
   await clearAuthResumeIntent();
 
   if (redemption?.ok) {
@@ -427,11 +440,18 @@ export async function unlockPremiumAction(formData: FormData) {
     redirect(appendQueryPath(returnTo, "step", "verify"));
   }
 
-  const result = await redeemPremiumCodeForRequest({
-    productSlug,
-    productId: product.id,
-    code,
-  });
+  let result;
+  try {
+    result = await redeemPremiumCodeForRequest({
+      productSlug,
+      productId: product.id,
+      code,
+    });
+  } catch (error) {
+    console.error("[premium-unlock] Redemption failed unexpectedly.", error);
+    await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
+    redirect(appendQueryPath(returnTo, "unlock", "unexpected"));
+  }
 
   if (!result.ok) {
     if (result.status === "auth_required") {

@@ -121,6 +121,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
               src={product.cover.path}
               alt={product.cover.title ?? product.title}
               fill
+              loading="eager"
               priority
               className="object-cover"
               sizes="(min-width: 1024px) 38vw, 100vw"
@@ -167,9 +168,9 @@ export default async function ProductPage({ params, searchParams }: Props) {
       <section className="border-y border-[var(--color-border)] bg-white/50">
         <div className="mx-auto grid max-w-7xl gap-5 px-4 py-10 sm:px-6 lg:grid-cols-[1fr_1fr] lg:px-8">
           <div className="grid gap-4 sm:grid-cols-2">
-            {product.gallery.map((asset) => (
+            {product.gallery.map((asset, index) => (
               <div key={asset.id} className="relative aspect-[4/3] overflow-hidden rounded-lg border border-[var(--color-border)] bg-white">
-                <Image src={asset.path} alt={asset.title ?? product.title} fill className="object-cover" />
+                <Image src={asset.path} alt={asset.title ?? product.title} fill loading={index === 0 ? "eager" : undefined} className="object-cover" sizes="(min-width: 1024px) 42vw, (min-width: 640px) 50vw, 100vw" />
               </div>
             ))}
           </div>

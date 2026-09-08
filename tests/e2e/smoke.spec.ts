@@ -21,7 +21,7 @@ test("guest can see and download public product files without signing in", async
   await expect(downloadLink).toHaveAttribute("href", /download=1/);
 
   const href = await downloadLink.getAttribute("href");
-  const response = await page.request.get(new URL(href!, "http://127.0.0.1:3000").toString());
+  const response = await page.request.get(new URL(href!, page.url()).toString());
   expect(response.status()).toBe(200);
   expect(response.headers()["content-disposition"]).toContain("moon-garden-free-guide.pdf");
   expect((await response.body()).subarray(0, 4).toString()).toBe("%PDF");

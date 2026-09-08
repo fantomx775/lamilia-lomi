@@ -13,8 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { routing, type Locale } from "@/i18n/routing";
+import { getAdminErrorMessage, type AdminErrorCode } from "@/lib/admin-errors";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
+import { validatePremiumCodeEntries } from "@/lib/premium-code";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
 type TranslationDraft = {
@@ -105,6 +107,7 @@ export function ProductEditor({
   const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product));
   const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product));
+  const [premiumErrors, setPremiumErrors] = useState<Partial<Record<string, AdminErrorCode>>>({});
   const assetsRef = useRef(assets);
   const uploadVersionsRef = useRef(new Map<ProductAsset["kind"], number>());
   assetsRef.current = assets;
@@ -246,7 +249,7 @@ export function ProductEditor({
             locale: currentDraft.locale || undefined,
           }),
         });
-        let payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string };
+        let payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string; errorCode?: string };
 
         if (response.status === 415) {
           const formData = new FormData();
@@ -255,11 +258,11 @@ export function ProductEditor({
           formData.append("file", file);
           if (currentDraft.locale) formData.append("locale", currentDraft.locale);
           response = await fetch("/api/admin/assets", { method: "POST", body: formData });
-          payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string };
+          payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string; errorCode?: string };
         }
 
         if (!response.ok || !payload.asset) {
-          throw new Error(payload.error || "Upload nie powiódł się.");
+          throw new Error(payload.errorCode ? getAdminErrorMessage(payload.errorCode, "pl") : payload.error || "Upload nie powiódł się.");
         }
 
         uploadedAsset = payload.asset;
@@ -341,8 +344,8 @@ export function ProductEditor({
     });
 
     if (!response.ok) {
-      const payload = await response.json().catch(() => null) as { error?: string } | null;
-      throw new Error(payload?.error || "Nie udało się usunąć pliku.");
+      const payload = await response.json().catch(() => null) as { error?: string; errorCode?: string } | null;
+      throw new Error(payload?.errorCode ? getAdminErrorMessage(payload.errorCode, "pl") : payload?.error || "Nie udało się usunąć pliku.");
     }
   };
 
@@ -404,6 +407,12 @@ export function ProductEditor({
 
   const updatePremium = <K extends keyof PremiumDraft>(clientId: string, field: K, value: PremiumDraft[K]) => {
     setPremiumCodes((current) => current.map((code) => code.clientId === clientId ? { ...code, [field]: value } : code));
+    setPremiumErrors((current) => {
+      if (!current[clientId]) return current;
+      const next = { ...current };
+      delete next[clientId];
+      return next;
+    });
   };
 
   const addPremium = () => {
@@ -424,9 +433,33 @@ export function ProductEditor({
     updatePremium(code.clientId, "removed", true);
   };
 
+  const validatePremiumCodesBeforeSubmit = () => {
+    const activeCodes = premiumCodes.filter((code) => !code.removed);
+    const issues = validatePremiumCodeEntries(activeCodes);
+    const nextErrors: Partial<Record<string, AdminErrorCode>> = {};
+
+    for (const issue of issues) {
+      const code = activeCodes[issue.index];
+      if (code) {
+        nextErrors[code.clientId] = issue.reason === "required"
+          ? "admin.validation.premium_code_required"
+          : "admin.conflict.premium_code_duplicate";
+      }
+    }
+
+    setPremiumErrors(nextErrors);
+    return issues.length === 0;
+  };
+
+  const premiumErrorMessages = Array.from(new Set(
+    Object.values(premiumErrors)
+      .filter((code): code is AdminErrorCode => Boolean(code))
+      .map((code) => getAdminErrorMessage(code, "pl")),
+  ));
+
   return (
     <div className="min-w-0">
-      <form id="product-editor-form" action={saveAction} className="grid gap-6">
+      <form id="product-editor-form" action={saveAction} onSubmit={(event) => { if (!validatePremiumCodesBeforeSubmit()) event.preventDefault(); }} className="grid gap-6">
         <input type="hidden" name="id" value={draftProductId} />
         <input type="hidden" name="returnTo" value={returnTo} />
         <input type="hidden" name="coverAssetId" value={coverAsset?.id ?? ""} />
@@ -504,9 +537,10 @@ export function ProductEditor({
 
             <AdminEditorSection title="Dostęp premium" description="Kody są pokazywane bez technicznych identyfikatorów; ich aktywność pozostaje zapisywana w obecnym modelu.">
               <div className="grid gap-3">
+                {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}
                 {premiumCodes.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze kodów premium.</p> : null}
                 {premiumCodes.map((code, index) => (
-                  <PremiumEditor key={code.clientId} code={code} index={index} onChange={updatePremium} onRemove={removePremium} onUndo={() => updatePremium(code.clientId, "removed", false)} />
+                  <PremiumEditor key={code.clientId} code={code} index={index} error={premiumErrors[code.clientId] ? getAdminErrorMessage(premiumErrors[code.clientId]!, "pl") : undefined} onChange={updatePremium} onRemove={removePremium} onUndo={() => updatePremium(code.clientId, "removed", false)} />
                 ))}
                 <Button type="button" variant="outline" onClick={addPremium} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj kod</Button>
               </div>
@@ -783,12 +817,14 @@ function AmazonEditor({
 function PremiumEditor({
   code,
   index,
+  error,
   onChange,
   onRemove,
   onUndo,
 }: {
   code: PremiumDraft;
   index: number;
+  error?: string;
   onChange: <K extends keyof PremiumDraft>(clientId: string, field: K, value: PremiumDraft[K]) => void;
   onRemove: (code: PremiumDraft) => void;
   onUndo: () => void;
@@ -797,7 +833,9 @@ function PremiumEditor({
     return <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900"><span>Kod {code.code || "(pusty)"} zostanie usunięty.</span><><input type="hidden" name="premiumCodeId" value={code.id} /><input type="hidden" name="premiumCode" value={code.code} /><input type="hidden" name="premiumCodeRemove" value={code.id} /><Button type="button" variant="ghost" size="sm" onClick={onUndo}><Undo2 className="size-4" aria-hidden />Cofnij</Button></></div>;
   }
   const activeValue = code.id || `new-${index}`;
-  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={`premium-code-${code.clientId}`}><Input id={`premium-code-${code.clientId}`} name="premiumCode" value={code.code} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" /></Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button></div>;
+  const inputId = `premium-code-${code.clientId}`;
+  const errorId = `${inputId}-error`;
+  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={inputId}><Input id={inputId} name="premiumCode" value={code.code} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />{error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}</Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button></div>;
 }
 
 function CheckboxGroup({ label, name, values, selected }: { label: string; name: string; values: Array<{ id: string; label: string }>; selected: string[] }) {

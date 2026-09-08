@@ -18,13 +18,11 @@ import type {
   TaxonomyTranslation,
 } from "./types";
 import { mediaBucketForKind, validateMediaFile } from "./media-upload";
+import { ADMIN_ERROR_CODES, type AdminErrorCode, type AdminMutationResult } from "./admin-errors";
+import { normalizePremiumCode, validatePremiumCodeEntries } from "./premium-code";
 import { slugify } from "./utils";
 
 const locales = routing.locales;
-
-export type AdminMutationResult =
-  | { ok: true; id: string }
-  | { ok: false; errors: string[] };
 
 export function buildProductFromFormData(
   formData: FormData,
@@ -57,6 +55,7 @@ export function buildProductFromFormData(
     textField(formData, "videoAssetId") ||
     assets.find((asset) => asset.kind === "video")?.id ||
     undefined;
+  const parsedPremiumCodes = parsePremiumCodes(formData, id, existing);
 
   const product: Product = {
     id,
@@ -84,12 +83,15 @@ export function buildProductFromFormData(
     ),
     assets,
     amazonLinks: normalizePrimaryAmazonLink(parseAmazonLinks(formData, id, existing)),
-    premiumCodes: parsePremiumCodes(formData, id, existing),
+    premiumCodes: parsedPremiumCodes.codes,
   };
 
   return {
     product,
-    errors: validateProductDraft(product),
+    errors: Array.from(new Set([
+      ...validateProductDraft(product, snapshot),
+      ...parsedPremiumCodes.errors,
+    ])),
   };
 }
 
@@ -97,11 +99,11 @@ export function validateProductMediaSubmission(formData: FormData) {
   const uploadState = textField(formData, "mediaUploadState");
 
   if (uploadState === "active") {
-    return ["Zakończ przesyłanie plików przed zapisaniem produktu."];
+    return [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_ACTIVE];
   }
 
   if (uploadState && uploadState !== "idle") {
-    return ["Nie udało się potwierdzić stanu przesyłania plików."];
+    return [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_STATE];
   }
 
   return [];
@@ -129,7 +131,7 @@ export function validateProductAssetSubmission(
     }
 
     if (uploadedById.get(asset.id) !== "1") {
-      return [`${asset.filename}: potwierdź zakończenie przesyłania przed zapisaniem.`];
+      return [ADMIN_ERROR_CODES.VALIDATION_ASSET_UPLOAD_INCOMPLETE];
     }
 
     const storagePath = asset.storagePath ?? asset.path;
@@ -137,7 +139,7 @@ export function validateProductAssetSubmission(
     const expectedLocalPrefix = `/uploads/${product.id}/${asset.kind}/`;
 
     if (!storagePath.startsWith(expectedSupabasePrefix) && !storagePath.startsWith(expectedLocalPrefix)) {
-      return [`${asset.filename}: nieprawidłowa ścieżka pliku.`];
+      return [ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH];
     }
 
     const validation = validateMediaFile(asset.kind, {
@@ -147,7 +149,7 @@ export function validateProductAssetSubmission(
     });
 
     if (!validation.ok) {
-      return [validation.error];
+      return [ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE];
     }
 
     return [];
@@ -181,7 +183,7 @@ export function deleteProduct(productId: string): AdminMutationResult {
   const product = snapshot.products.find((item) => item.id === productId);
 
   if (!product) {
-    return { ok: false, errors: ["Product not found."] };
+    return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
   }
 
   saveContentSnapshot({
@@ -197,7 +199,7 @@ export function archiveProduct(productId: string): AdminMutationResult {
   const product = snapshot.products.find((item) => item.id === productId);
 
   if (!product) {
-    return { ok: false, errors: ["Product not found."] };
+    return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
   }
 
   saveContentSnapshot({
@@ -218,7 +220,12 @@ export function saveCategoryFromFormData(formData: FormData): AdminMutationResul
     (category) => category.id === textField(formData, "id"),
   );
   const category = buildCategoryFromFormData(formData, snapshot, existing);
-  const errors = validateTaxonomy(category, snapshot.categories, category.id);
+  const errors = validateTaxonomy(
+    category,
+    snapshot.categories,
+    category.id,
+    ADMIN_ERROR_CODES.VALIDATION_CATEGORY_NAME_REQUIRED,
+  );
 
   if (errors.length) {
     return { ok: false, errors };
@@ -237,6 +244,10 @@ export function saveCategoryFromFormData(formData: FormData): AdminMutationResul
 export function deleteCategory(categoryId: string): AdminMutationResult {
   const snapshot = getContentSnapshot();
 
+  if (!snapshot.categories.some((category) => category.id === categoryId)) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+  }
+
   saveContentSnapshot({
     ...snapshot,
     categories: snapshot.categories.filter((category) => category.id !== categoryId),
@@ -253,7 +264,12 @@ export function saveTagFromFormData(formData: FormData): AdminMutationResult {
   const snapshot = getContentSnapshot();
   const existing = snapshot.tags.find((tag) => tag.id === textField(formData, "id"));
   const tag = buildTagFromFormData(formData, snapshot, existing);
-  const errors = validateTaxonomy(tag, snapshot.tags, tag.id);
+  const errors = validateTaxonomy(
+    tag,
+    snapshot.tags,
+    tag.id,
+    ADMIN_ERROR_CODES.VALIDATION_TAG_NAME_REQUIRED,
+  );
 
   if (errors.length) {
     return { ok: false, errors };
@@ -269,6 +285,10 @@ export function saveTagFromFormData(formData: FormData): AdminMutationResult {
 
 export function deleteTag(tagId: string): AdminMutationResult {
   const snapshot = getContentSnapshot();
+
+  if (!snapshot.tags.some((tag) => tag.id === tagId)) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+  }
 
   saveContentSnapshot({
     ...snapshot,
@@ -616,20 +636,11 @@ function parsePremiumCodes(
   const activeIds = new Set(existingIds(formData, "premiumCodeActive"));
   const existingById = new Map(existing?.premiumCodes.map((code) => [code.id, code]));
   const rowCount = Math.max(ids.length, codes.length);
-
-  return Array.from({ length: rowCount }, (_, index) => {
+  const rows = Array.from({ length: rowCount }, (_, index) => {
     const existingId = valueAt(ids, index);
     const existingCode = existingId ? existingById.get(existingId) : undefined;
 
     if (existingId && removed.has(existingId)) {
-      return null;
-    }
-
-    const code = (valueAt(codes, index) || existingCode?.code || "")
-      .trim()
-      .toUpperCase();
-
-    if (!code) {
       return null;
     }
 
@@ -638,10 +649,19 @@ function parsePremiumCodes(
     return {
       id,
       productId,
-      code,
+      code: normalizePremiumCode(valueAt(codes, index) || existingCode?.code || ""),
       active: activeIds.has(id) || (!existingId && activeIds.has(`new-${index}`)),
     };
   }).filter((code): code is Product["premiumCodes"][number] => Boolean(code));
+
+  const validation = validatePremiumCodeEntries(rows);
+
+  return {
+    codes: rows.filter((row) => row.code),
+    errors: validation.map((issue) => issue.reason === "required"
+      ? ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED
+      : ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE),
+  };
 }
 
 function normalizePrimaryAmazonLink(links: AmazonLink[]) {
@@ -657,27 +677,29 @@ function normalizePrimaryAmazonLink(links: AmazonLink[]) {
   }));
 }
 
-function validateProductDraft(product: Product) {
-  const errors: string[] = [];
+function validateProductDraft(product: Product, snapshot: ContentSnapshot) {
+  const errors: AdminErrorCode[] = [];
   const english = product.translations.find((translation) => translation.locale === "en");
 
   if (!product.slug) {
-    errors.push("Slug is required.");
+    errors.push(ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED);
   }
 
   if (!english?.title) {
-    errors.push("English title is required.");
+    errors.push(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED);
   }
 
   if (product.status === "published") {
-    errors.push(...validateProductForPublish(product).missing);
+    if (!validateProductForPublish(product).ok) {
+      errors.push(ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS);
+    }
   }
 
   product.assets.forEach((asset) => {
     const classification = validateAssetClassification(asset);
 
     if (!classification.ok) {
-      errors.push(`${asset.filename}: ${classification.reason}`);
+      errors.push(ADMIN_ERROR_CODES.VALIDATION_ASSET_VISIBILITY);
     }
   });
 
@@ -687,15 +709,15 @@ function validateProductDraft(product: Product) {
   const galleryCount = activeAssets.filter((asset) => asset.kind === "gallery").length;
 
   if (coverCount > 1) {
-    errors.push("Może istnieć tylko jedna okładka.");
+    errors.push(ADMIN_ERROR_CODES.VALIDATION_COVER_DUPLICATE);
   }
 
   if (videoCount > 1) {
-    errors.push("Może istnieć tylko jedno wideo.");
+    errors.push(ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE);
   }
 
   if (galleryCount > 20) {
-    errors.push("Galeria może zawierać maksymalnie 20 obrazów.");
+    errors.push(ADMIN_ERROR_CODES.VALIDATION_GALLERY_LIMIT);
   }
 
   const markets = new Set<AmazonLink["market"]>();
@@ -707,7 +729,29 @@ function validateProductDraft(product: Product) {
     markets.add(link.market);
     return false;
   })) {
-    errors.push("Każdy rynek Amazon może wystąpić tylko raz.");
+    errors.push(ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE);
+  }
+
+  const premiumCodeOwners = new Set<string>();
+  for (const premiumCode of product.premiumCodes) {
+    const normalizedCode = normalizePremiumCode(premiumCode.code);
+    if (!normalizedCode) {
+      errors.push(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED);
+      continue;
+    }
+
+    if (premiumCodeOwners.has(normalizedCode)) {
+      errors.push(ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE);
+    } else {
+      premiumCodeOwners.add(normalizedCode);
+    }
+  }
+
+  if (snapshot.products.some((other) => other.id !== product.id && other.premiumCodes.some((premiumCode) => {
+    const normalizedCode = normalizePremiumCode(premiumCode.code);
+    return Boolean(normalizedCode) && premiumCodeOwners.has(normalizedCode);
+  }))) {
+    errors.push(ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING);
   }
 
   return Array.from(new Set(errors));
@@ -717,15 +761,16 @@ function validateTaxonomy<T extends { id: string; slug: string; translations: Ta
   item: T,
   collection: T[],
   currentId: string,
+  requiredNameCode: AdminErrorCode,
 ) {
-  const errors: string[] = [];
+  const errors: AdminErrorCode[] = [];
 
   if (!item.slug) {
-    errors.push("Slug is required.");
+    errors.push(ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED);
   }
 
   if (!item.translations.some((translation) => translation.locale === "en" && translation.name)) {
-    errors.push("English name is required.");
+    errors.push(requiredNameCode);
   }
 
   if (
@@ -733,7 +778,7 @@ function validateTaxonomy<T extends { id: string; slug: string; translations: Ta
       (existing) => existing.slug === item.slug && existing.id !== currentId,
     )
   ) {
-    errors.push("Slug must be unique.");
+    errors.push(ADMIN_ERROR_CODES.CONFLICT_SLUG);
   }
 
   return errors;

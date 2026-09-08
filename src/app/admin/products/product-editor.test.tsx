@@ -180,6 +180,50 @@ describe("ProductEditor V2", () => {
     expect(formData.get("title_en")).toBe("Ocean Calm");
   });
 
+  it("blocks an empty premium code row before invoking the server action", async () => {
+    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+
+    await user.click(view.getByRole("button", { name: "Dodaj kod" }));
+    await user.click(view.getByRole("button", { name: "Zapisz" }));
+
+    expect(saveAction).not.toHaveBeenCalled();
+    expect(view.getByText("Wpisz kod premium albo usuń pusty wiersz.")).toBeInTheDocument();
+  });
+
+  it("blocks duplicate premium codes after normalization and marks both fields", async () => {
+    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+
+    await user.click(view.getByRole("button", { name: "Dodaj kod" }));
+    await user.click(view.getByRole("button", { name: "Dodaj kod" }));
+    const codeInputs = view.getAllByLabelText("Kod");
+    await user.type(codeInputs[0], "lomi-book");
+    await user.type(codeInputs[1], "LOMI – BOOK");
+    await user.click(view.getByRole("button", { name: "Zapisz" }));
+
+    expect(saveAction).not.toHaveBeenCalled();
+    expect(view.getAllByText("Każdy kod premium może wystąpić w tym produkcie tylko raz.")).toHaveLength(2);
+    expect(codeInputs[0]).toHaveAttribute("aria-invalid", "true");
+    expect(codeInputs[1]).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("uploads a selected file through the admin binary endpoint and keeps its filename", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,

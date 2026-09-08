@@ -7,6 +7,7 @@ import {
   validateAssetClassification,
 } from "./admin-content";
 import { exportUsersToCsv, validateProductForPublish } from "./admin";
+import { ADMIN_ERROR_CODES } from "./admin-errors";
 import { getSeedContentSnapshot } from "./content-store";
 import { products } from "./seed-data";
 
@@ -158,7 +159,7 @@ describe("admin behavior", () => {
       }],
     };
     expect(validateProductAssetSubmission(form, unconfirmed, product)).toContain(
-      "page.png: potwierdź zakończenie przesyłania przed zapisaniem.",
+      ADMIN_ERROR_CODES.VALIDATION_ASSET_UPLOAD_INCOMPLETE,
     );
   });
 
@@ -175,7 +176,7 @@ describe("admin behavior", () => {
     }
 
     const result = buildProductFromFormData(form, { snapshot: getSeedContentSnapshot() });
-    expect(result.errors).toContain("Galeria może zawierać maksymalnie 20 obrazów.");
+    expect(result.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_GALLERY_LIMIT);
   });
 
   it("rejects duplicate Amazon markets server-side", () => {
@@ -190,7 +191,29 @@ describe("admin behavior", () => {
 
     const result = buildProductFromFormData(form, { snapshot: getSeedContentSnapshot() });
 
-    expect(result.errors).toContain("Każdy rynek Amazon może wystąpić tylko raz.");
+    expect(result.errors).toContain(ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE);
+  });
+
+  it("rejects blank premium rows instead of silently dropping them", () => {
+    const form = new FormData();
+    form.set("title_en", "Missing premium code");
+    form.append("premiumCode", "   ");
+
+    const result = buildProductFromFormData(form, { snapshot: getSeedContentSnapshot() });
+
+    expect(result.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED);
+    expect(result.product.premiumCodes).toEqual([]);
+  });
+
+  it("rejects a premium code already assigned to another product", () => {
+    const snapshot = getSeedContentSnapshot();
+    const form = new FormData();
+    form.set("title_en", "Reused premium code");
+    form.append("premiumCode", snapshot.products[0].premiumCodes[0].code);
+
+    const result = buildProductFromFormData(form, { snapshot });
+
+    expect(result.errors).toContain(ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING);
   });
 
   it("preserves existing product locales, taxonomy, assets, markets, and premium codes on edit", () => {
