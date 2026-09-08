@@ -101,7 +101,7 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
 
     const supabase = await createClient();
     await assertSupabaseUploadsExist(
-      product.assets.filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id)),
+      product.assets.filter((asset) => product.status === "published" || !existing?.assets.some((previous) => previous.id === asset.id)),
       storageAuthorizationToken,
     );
     const { data, error } = await supabase.rpc("save_product", {
@@ -395,7 +395,7 @@ async function run(query: PromiseLike<{ error: DatabaseErrorLike | null }>, labe
   }
 }
 
-async function assertSupabaseUploadsExist(
+export async function assertSupabaseUploadsExist(
   assets: Product["assets"],
   storageAuthorizationToken?: string | null,
 ) {
@@ -407,18 +407,22 @@ async function assertSupabaseUploadsExist(
 
   for (const asset of assets) {
     const storagePath = asset.storagePath ?? asset.path;
-    const slash = storagePath.lastIndexOf("/");
-    const folder = slash === -1 ? "" : storagePath.slice(0, slash);
-    const filename = slash === -1 ? storagePath : storagePath.slice(slash + 1);
+    if (!storagePath.startsWith("products/")) continue;
+
+    const expectedPrefix = `products/${asset.productId}/${asset.kind}/`;
+    if (!storagePath.startsWith(expectedPrefix)) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH);
+    }
+
     const { data, error } = await storage
       .from(mediaBucketForKind(asset.kind))
-      .list(folder, { limit: 100, search: filename });
+      .exists(storagePath);
 
     if (error) {
       throw new AdminDatabaseError("asset upload lookup", error);
     }
 
-    if (!data?.some((entry) => entry.name === filename)) {
+    if (data !== true) {
       throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD);
     }
   }

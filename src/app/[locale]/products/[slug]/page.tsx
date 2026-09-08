@@ -9,6 +9,7 @@ import { UnlockForm } from "@/components/unlock-form";
 import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
 import type { Locale } from "@/i18n/routing";
+import { isMediaProxyPath } from "@/lib/media-upload";
 import { getUnlockIntent } from "@/lib/unlock-intent";
 import { getDemoSession } from "@/lib/session.server";
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
@@ -123,6 +124,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
               fill
               loading="eager"
               priority
+              unoptimized={isMediaProxyPath(product.cover.path)}
               className="object-cover"
               sizes="(min-width: 1024px) 38vw, 100vw"
             />
@@ -170,7 +172,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
           <div className="grid gap-4 sm:grid-cols-2">
             {product.gallery.map((asset, index) => (
               <div key={asset.id} className="relative aspect-[4/3] overflow-hidden rounded-lg border border-[var(--color-border)] bg-white">
-                <Image src={asset.path} alt={asset.title ?? product.title} fill loading={index === 0 ? "eager" : undefined} className="object-cover" sizes="(min-width: 1024px) 42vw, (min-width: 640px) 50vw, 100vw" />
+                <Image src={asset.path} alt={asset.title ?? product.title} fill loading={index === 0 ? "eager" : undefined} unoptimized={isMediaProxyPath(asset.path)} className="object-cover" sizes="(min-width: 1024px) 42vw, (min-width: 640px) 50vw, 100vw" />
               </div>
             ))}
           </div>

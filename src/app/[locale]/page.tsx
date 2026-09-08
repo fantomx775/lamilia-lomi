@@ -6,6 +6,7 @@ import { ProductCard } from "@/components/product-card";
 import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
+import { isMediaProxyPath } from "@/lib/media-upload";
 import {
   getAudienceLabel,
   getAudiencePath,
@@ -68,6 +69,7 @@ export default async function HomePage({ params }: Props) {
                   alt={product!.cover.title ?? product!.title}
                   fill
                   priority
+                  unoptimized={isMediaProxyPath(product!.cover.path)}
                   className="object-cover transition duration-500 group-hover:scale-[1.02]"
                   sizes="(min-width: 1024px) 28vw, 48vw"
                 />

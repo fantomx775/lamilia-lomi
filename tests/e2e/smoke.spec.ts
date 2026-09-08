@@ -17,6 +17,15 @@ test("guest can see and download public product files without signing in", async
   await page.goto("/en/products/moon-garden-coloring-book");
 
   await expect(page.getByRole("heading", { name: "Free downloads" })).toBeVisible();
+  const imageSizes = await page.locator("img").evaluateAll((images) =>
+    images.map((image) => {
+      const element = image as HTMLImageElement;
+      return { width: element.naturalWidth, height: element.naturalHeight };
+    }),
+  );
+  expect(imageSizes.length).toBeGreaterThan(0);
+  expect(imageSizes.every(({ width, height }) => width > 0 && height > 0)).toBe(true);
+
   const downloadLink = page.locator('a[href*="/api/media/asset-moon-public-guide"]');
   await expect(downloadLink).toHaveAttribute("href", /download=1/);
 

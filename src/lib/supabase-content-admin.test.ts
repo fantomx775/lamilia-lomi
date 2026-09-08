@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getCurrentAccessToken: vi.fn(),
-  createServiceRoleClient: vi.fn(),
   getAdminContentSnapshot: vi.fn(),
   getBackendMode: vi.fn(),
   from: vi.fn(),
   rpc: vi.fn(),
   insertedTagTranslations: undefined as unknown,
+  createServiceRoleClient: vi.fn(),
+  storageFrom: vi.fn(),
+  storageExists: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -24,7 +26,14 @@ vi.mock("@/lib/supabase/admin", () => ({
   createServiceRoleClient: mocks.createServiceRoleClient,
 }));
 
-import { saveProductForRequest, saveTagForRequest } from "./supabase-content-admin";
+import {
+  assertSupabaseUploadsExist,
+  saveProductForRequest,
+  saveTagForRequest,
+} from "./supabase-content-admin";
+
+const productId = "11111111-1111-4111-8111-111111111111";
+const assetId = "11111111-1111-4111-8111-111111111199";
 
 describe("Supabase content admin mutations", () => {
   beforeEach(() => {
@@ -48,6 +57,11 @@ describe("Supabase content admin mutations", () => {
       }),
     }));
     mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
+    mocks.storageExists.mockResolvedValue({ data: true, error: null });
+    mocks.storageFrom.mockReturnValue({ exists: mocks.storageExists });
+    mocks.createServiceRoleClient.mockReturnValue({
+      storage: { from: mocks.storageFrom },
+    });
   });
 
   it("persists the last visible tag name and description when the drawer has mirrored fields", async () => {
@@ -95,5 +109,84 @@ describe("Supabase content admin mutations", () => {
       ok: false,
       errors: ["admin.conflict.premium_code_duplicate"],
     });
+  });
+
+  it("checks uploaded objects by exact path and skips static seed assets", async () => {
+    await expect(assertSupabaseUploadsExist([
+      {
+        id: assetId,
+        productId,
+        kind: "cover",
+        bucket: "public-media",
+        path: "products/11111111-1111-4111-8111-111111111111/cover/11111111-1111-4111-8111-111111111199-cover.jpg",
+        storagePath: "products/11111111-1111-4111-8111-111111111111/cover/11111111-1111-4111-8111-111111111199-cover.jpg",
+        filename: "cover.jpg",
+        contentType: "image/jpeg",
+        isPublic: true,
+        isActive: true,
+        sortOrder: 1,
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222299",
+        productId,
+        kind: "gallery",
+        bucket: "public-media",
+        path: "assets/gallery-placeholder.svg",
+        filename: "gallery-placeholder.svg",
+        contentType: "image/svg+xml",
+        isPublic: true,
+        isActive: true,
+        sortOrder: 2,
+      },
+    ])).resolves.toBeUndefined();
+
+    expect(mocks.storageFrom).toHaveBeenCalledWith("public-media");
+    expect(mocks.storageExists).toHaveBeenCalledWith(
+      "products/11111111-1111-4111-8111-111111111111/cover/11111111-1111-4111-8111-111111111199-cover.jpg",
+    );
+    expect(mocks.storageExists).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects missing uploaded objects before product metadata can be saved", async () => {
+    mocks.storageExists.mockResolvedValue({
+      data: false,
+      error: { message: "Object not found", status: 400 },
+    });
+
+    await expect(assertSupabaseUploadsExist([{
+      id: assetId,
+      productId,
+      kind: "public_download",
+      bucket: "public-media",
+      path: "products/11111111-1111-4111-8111-111111111111/public_download/11111111-1111-4111-8111-111111111199-guide.pdf",
+      filename: "guide.pdf",
+      contentType: "application/pdf",
+      isPublic: true,
+      isActive: true,
+      sortOrder: 1,
+    }])).rejects.toMatchObject({
+      name: "AdminDatabaseError",
+      operation: "asset upload lookup",
+    });
+  });
+
+  it("rejects an uploaded path that crosses the product or asset-kind boundary", async () => {
+    await expect(assertSupabaseUploadsExist([{
+      id: assetId,
+      productId,
+      kind: "video",
+      bucket: "public-videos",
+      path: "products/other-product/cover/asset.jpg",
+      filename: "asset.jpg",
+      contentType: "video/mp4",
+      isPublic: true,
+      isActive: true,
+      sortOrder: 1,
+    }])).rejects.toMatchObject({
+      name: "AdminApplicationError",
+      code: "admin.validation.asset_path",
+    });
+
+    expect(mocks.storageExists).not.toHaveBeenCalled();
   });
 });

@@ -62,13 +62,28 @@ export async function GET(request: Request, { params }: Props) {
   }
 
   const isDownload = new URL(request.url).searchParams.get("download") === "1";
-  const { data, error } = await createServiceRoleClient()
-    .storage
-    .from(asset.bucket)
-    .createSignedUrl(storagePath, 60, { download: isDownload ? safeFilename(asset.filename) : undefined });
+  let signedUrlResult: {
+    data: { signedUrl?: string } | null;
+    error: unknown;
+  };
+
+  try {
+    signedUrlResult = await createServiceRoleClient()
+      .storage
+      .from(asset.bucket)
+      .createSignedUrl(storagePath, 60, { download: isDownload ? safeFilename(asset.filename) : undefined });
+  } catch (error) {
+    return unavailableMediaResponse(assetId, asset, error);
+  }
+
+  const { data, error } = signedUrlResult;
 
   if (error || !data?.signedUrl) {
-    return new NextResponse("Not found", { status: 404 });
+    if (isMissingStorageObjectError(error)) {
+      return new NextResponse("Not found", { status: 404 });
+    }
+
+    return unavailableMediaResponse(assetId, asset, error);
   }
 
   const redirectTarget = new URL(data.signedUrl);
@@ -80,4 +95,58 @@ export async function GET(request: Request, { params }: Props) {
 
 function safeFilename(value: string) {
   return value.replace(/[\r\n"\\]/g, "_").slice(0, 180) || "download";
+}
+
+function unavailableMediaResponse(
+  assetId: string,
+  asset: { bucket: string; kind: string },
+  error: unknown,
+) {
+  console.error("[public-media] Signed media URL generation failed.", {
+    assetId,
+    bucket: asset.bucket,
+    kind: asset.kind,
+    status: storageErrorStatus(error),
+    statusCode: storageErrorStatusCode(error),
+  });
+  return new NextResponse("Media temporarily unavailable", {
+    status: 503,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
+
+function isMissingStorageObjectError(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+
+  const status = storageErrorStatus(error);
+  if (status === 404) return true;
+
+  const statusCode = storageErrorStatusCode(error)?.toLowerCase();
+  if (statusCode === "nosuchkey" || statusCode === "not_found" || statusCode === "404") {
+    return true;
+  }
+
+  const message = "message" in error && typeof error.message === "string"
+    ? error.message
+    : "";
+  return /object not found|no such key/i.test(message);
+}
+
+function storageErrorStatus(error: unknown) {
+  if (!error || typeof error !== "object" || !("status" in error)) {
+    return undefined;
+  }
+
+  const value = error.status;
+  const status = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(status) ? status : undefined;
+}
+
+function storageErrorStatusCode(error: unknown) {
+  if (!error || typeof error !== "object" || !("statusCode" in error)) {
+    return undefined;
+  }
+
+  const value = error.statusCode;
+  return value === undefined || value === null ? undefined : String(value);
 }
