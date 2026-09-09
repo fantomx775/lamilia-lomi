@@ -4,6 +4,7 @@ import { getBackendMode } from "./config";
 import { getContentSnapshot } from "./content-store";
 import { getSupabaseAuthContext, getDemoSession, setDemoSession } from "./session.server";
 import { getAssetByIdForRequest, getProductByIdForRequest } from "./products-request";
+import { mediaFilenameForDisplay } from "./media-upload";
 import type { ProductAsset } from "./types";
 import { getProductBySlug } from "./products";
 import {
@@ -205,7 +206,9 @@ export async function authorizePremiumDownloadForRequest(
 
   const { data: signedUrl, error: signedUrlError } = await supabase.storage
     .from(asset.bucket)
-    .createSignedUrl(asset.path, 10 * 60);
+    .createSignedUrl(asset.path, 10 * 60, {
+      download: mediaFilenameForDisplay(asset.filename),
+    });
 
   if (signedUrlError || !signedUrl?.signedUrl) {
     throw new Error(

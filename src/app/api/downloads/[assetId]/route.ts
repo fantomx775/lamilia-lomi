@@ -112,6 +112,10 @@ export async function GET(
 
   const redirectTarget = new URL(signedUrl.url, request.url);
   const response = NextResponse.redirect(redirectTarget);
+  response.headers.set(
+    "Content-Disposition",
+    `attachment; filename="${safeFilename(asset.filename)}"`,
+  );
 
   if (asset) {
     setDownloadEvent(response, asset);
