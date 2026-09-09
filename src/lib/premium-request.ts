@@ -3,8 +3,8 @@ import "server-only";
 import { getBackendMode } from "./config";
 import { getContentSnapshot } from "./content-store";
 import { getSupabaseAuthContext, getDemoSession, setDemoSession } from "./session.server";
+import { mediaBucketForKind, mediaFilenameForDisplay } from "./media-upload";
 import { getAssetByIdForRequest, getProductByIdForRequest } from "./products-request";
-import { mediaFilenameForDisplay } from "./media-upload";
 import type { ProductAsset } from "./types";
 import { getProductBySlug } from "./products";
 import {
@@ -182,6 +182,17 @@ export async function authorizePremiumDownloadForRequest(
   }
 
   if (!productRow) {
+    return {
+      ok: false as const,
+      decision: { allowed: false as const, reason: "wrong_asset" as const },
+    };
+  }
+
+  if (
+    assetRow.bucket !== mediaBucketForKind("premium_download") ||
+    typeof assetRow.path !== "string" ||
+    !assetRow.path.startsWith(`products/${assetRow.product_id}/premium_download/`)
+  ) {
     return {
       ok: false as const,
       decision: { allowed: false as const, reason: "wrong_asset" as const },
