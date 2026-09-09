@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MEDIA_UPLOAD_SPECS,
   filenameWithCollisionSuffix,
+  isMediaProxyPath,
   isMediaKind,
   mediaBucketForKind,
   mediaFilenameForDisplay,
@@ -45,5 +46,11 @@ describe("media upload rules", () => {
     expect(mediaFilenameForDisplay(filename)).toBe(filename);
     expect(mediaFilenameForStorage(filename)).toBe("Zdjecie-cyfrowe-1.webp");
     expect(mediaFilenameForStorage("图像.webp")).toBe("file.webp");
+  });
+
+  it("identifies media proxy paths that must bypass Next image optimization", () => {
+    expect(isMediaProxyPath("/api/media/asset-id")).toBe(true);
+    expect(isMediaProxyPath("/assets/cover.jpg")).toBe(false);
+    expect(isMediaProxyPath("https://cdn.example/cover.jpg")).toBe(false);
   });
 });

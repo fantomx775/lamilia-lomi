@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import type { Locale } from "@/i18n/routing";
+import { isMediaProxyPath } from "@/lib/media-upload";
 import type { LocalizedProductView } from "@/lib/types";
 
 import { Badge } from "./ui/badge";
@@ -23,6 +24,7 @@ export function ProductCard({
           src={product.cover.path}
           alt={product.cover.title ?? product.title}
           fill
+          unoptimized={isMediaProxyPath(product.cover.path)}
           className="object-cover"
           sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
         />

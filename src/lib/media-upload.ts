@@ -139,6 +139,10 @@ export function mediaFilenameForStorage(value: string) {
   return `${stem || "file"}${extension}`;
 }
 
+export function isMediaProxyPath(value: string) {
+  return value.startsWith("/api/media/");
+}
+
 export function isMediaKind(value: string): value is AssetKind {
   return Object.prototype.hasOwnProperty.call(MEDIA_UPLOAD_SPECS, value);
 }

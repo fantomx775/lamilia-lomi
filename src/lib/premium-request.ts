@@ -3,6 +3,7 @@ import "server-only";
 import { getBackendMode } from "./config";
 import { getContentSnapshot } from "./content-store";
 import { getSupabaseAuthContext, getDemoSession, setDemoSession } from "./session.server";
+import { mediaBucketForKind, mediaFilenameForDisplay } from "./media-upload";
 import { getAssetByIdForRequest, getProductByIdForRequest } from "./products-request";
 import type { ProductAsset } from "./types";
 import { getProductBySlug } from "./products";
@@ -187,6 +188,17 @@ export async function authorizePremiumDownloadForRequest(
     };
   }
 
+  if (
+    assetRow.bucket !== mediaBucketForKind("premium_download") ||
+    typeof assetRow.path !== "string" ||
+    !assetRow.path.startsWith(`products/${assetRow.product_id}/premium_download/`)
+  ) {
+    return {
+      ok: false as const,
+      decision: { allowed: false as const, reason: "wrong_asset" as const },
+    };
+  }
+
   const asset = {
     id: assetRow.id,
     productId: assetRow.product_id,
@@ -205,7 +217,9 @@ export async function authorizePremiumDownloadForRequest(
 
   const { data: signedUrl, error: signedUrlError } = await supabase.storage
     .from(asset.bucket)
-    .createSignedUrl(asset.path, 10 * 60);
+    .createSignedUrl(asset.path, 10 * 60, {
+      download: mediaFilenameForDisplay(asset.filename),
+    });
 
   if (signedUrlError || !signedUrl?.signedUrl) {
     throw new Error(
