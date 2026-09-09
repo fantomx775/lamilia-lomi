@@ -21,9 +21,9 @@ export async function GET(
     asset = await getAssetByIdForRequest(assetId);
   } catch (error) {
     console.error("[premium-download] Asset lookup failed unexpectedly.", error);
-    return NextResponse.json(
+    return premiumErrorResponse(
       { ok: false, reason: "unavailable" },
-      { status: 503 },
+      503,
     );
   }
   const token = requestUrl.searchParams.get("token");
@@ -36,9 +36,9 @@ export async function GET(
     });
   } catch (error) {
     console.error("[premium-download] Authorization failed unexpectedly.", error);
-    return NextResponse.json(
+    return premiumErrorResponse(
       { ok: false, reason: "unavailable" },
-      { status: 503 },
+      503,
     );
   }
 
@@ -48,23 +48,20 @@ export async function GET(
         ? getLoginTarget(request)
         : undefined;
 
-    return NextResponse.json(
+    return premiumErrorResponse(
       { ok: false, reason: signedUrl.decision.reason, ...(next ? { next } : {}) },
-      {
-        status:
-          signedUrl.decision.reason === "guest"
-            ? 401
-            : signedUrl.decision.reason === "wrong_asset"
-              ? 404
-              : 403,
-      },
+      signedUrl.decision.reason === "guest"
+        ? 401
+        : signedUrl.decision.reason === "wrong_asset"
+          ? 404
+          : 403,
     );
   }
 
   if (!asset) {
-    return NextResponse.json(
+    return premiumErrorResponse(
       { ok: false, reason: "unavailable" },
-      { status: 404 },
+      404,
     );
   }
 
@@ -72,9 +69,9 @@ export async function GET(
     const filePath = getPrivateDemoAssetPath(asset.demoPrivatePath);
 
     if (!filePath) {
-      return NextResponse.json(
+      return premiumErrorResponse(
         { ok: false, reason: "backend_contract_missing" },
-        { status: 503 },
+        503,
       );
     }
 
@@ -83,9 +80,9 @@ export async function GET(
     try {
       file = await readFile(/* turbopackIgnore: true */ filePath);
     } catch {
-      return NextResponse.json(
+      return premiumErrorResponse(
         { ok: false, reason: "unavailable" },
-        { status: 404 },
+        404,
       );
     }
 
@@ -104,14 +101,15 @@ export async function GET(
   }
 
   if (!("url" in signedUrl) || typeof signedUrl.url !== "string") {
-    return NextResponse.json(
+    return premiumErrorResponse(
       { ok: false, reason: "backend_contract_missing" },
-      { status: 503 },
+      503,
     );
   }
 
   const redirectTarget = new URL(signedUrl.url, request.url);
   const response = NextResponse.redirect(redirectTarget);
+  response.headers.set("Cache-Control", "private, no-store");
   response.headers.set(
     "Content-Disposition",
     `attachment; filename="${safeFilename(asset.filename)}"`,
@@ -134,6 +132,13 @@ function getLoginTarget(request: Request) {
   );
 
   return `/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+function premiumErrorResponse(body: Record<string, unknown>, status: number) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 function getPrivateDemoAssetPath(filename: string | undefined) {
