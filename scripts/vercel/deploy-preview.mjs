@@ -136,6 +136,9 @@ function runVercel(args, env) {
     const child = spawn(command, args, {
       cwd: process.cwd(),
       env,
+      // Windows exposes the Vercel CLI as a .cmd shim rather than a native
+      // executable. Node must use the command shell to launch that shim.
+      shell: process.platform === "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
