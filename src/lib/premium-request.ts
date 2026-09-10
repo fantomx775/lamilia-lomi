@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getBackendMode } from "./config";
+import { getBackendMode, getRequiredSupabaseEnv } from "./config";
 import { getContentSnapshot } from "./content-store";
 import { getSupabaseAuthContext, getDemoSession, setDemoSession } from "./session.server";
 import { mediaBucketForKind, mediaFilenameForDisplay } from "./media-upload";
@@ -12,6 +12,7 @@ import {
   normalizePremiumCode,
   verifySignedDownloadUrl,
 } from "./premium-core";
+import { normalizePremiumCodeForRequest } from "./premium-code";
 
 export type PremiumRedemptionResult =
   | {
@@ -37,7 +38,7 @@ export async function redeemPremiumCodeForRequest(input: {
   productId: string;
   code: string | null | undefined;
 }): Promise<PremiumRedemptionResult> {
-  const normalizedCode = normalizePremiumCode(input.code);
+  const normalizedCode = normalizePremiumCodeForRequest(input.code);
 
   if (getBackendMode() === "local") {
     const session = await getDemoSession();
@@ -99,7 +100,7 @@ export async function redeemPremiumCodeForRequest(input: {
 
   const { data, error } = await supabase.rpc("redeem_premium_code", {
     requested_product_id: input.productId,
-    requested_code: input.code ?? "",
+    requested_code: normalizedCode,
   });
 
   if (error) {
@@ -227,6 +228,16 @@ export async function authorizePremiumDownloadForRequest(
     );
   }
 
+  if (
+    !isTrustedSupabaseSignedUrl(
+      signedUrl.signedUrl,
+      getRequiredSupabaseEnv().url,
+      asset.bucket,
+    )
+  ) {
+    throw new Error("Supabase premium asset signing returned an untrusted URL.");
+  }
+
   const { data: eventId, error: eventError } = await supabase.rpc("record_download_event", {
     requested_asset_id: asset.id,
   });
@@ -278,4 +289,26 @@ function mapPremiumRedemptionResult(
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function isTrustedSupabaseSignedUrl(
+  value: string,
+  supabaseUrl: string,
+  bucket: string,
+) {
+  try {
+    const candidate = new URL(value);
+    const expectedOrigin = new URL(supabaseUrl).origin;
+
+    return (
+      candidate.origin === expectedOrigin &&
+      candidate.pathname.startsWith(`/storage/v1/object/sign/${bucket}/`) &&
+      candidate.searchParams.has("token") &&
+      !candidate.username &&
+      !candidate.password &&
+      !candidate.hash
+    );
+  } catch {
+    return false;
+  }
 }

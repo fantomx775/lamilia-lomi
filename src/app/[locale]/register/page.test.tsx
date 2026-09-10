@@ -111,4 +111,25 @@ describe("Register page", () => {
       "/en/account",
     );
   });
+
+  it("does not reuse an unlock code from another locale", async () => {
+    pageMocks.getUnlockIntent.mockResolvedValue({
+      locale: "pl",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/pl/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      createdAt: Date.now(),
+    });
+
+    const view = render(
+      await RegisterPage({
+        params: Promise.resolve({ locale: "en" }),
+        searchParams: Promise.resolve({
+          returnTo: "/en/products/moon-garden-coloring-book",
+        }),
+      }),
+    );
+
+    expect(view.container.querySelector<HTMLInputElement>('input[name="code"]')).toHaveValue("");
+  });
 });

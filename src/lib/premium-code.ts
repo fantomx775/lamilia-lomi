@@ -1,9 +1,17 @@
+export const MAX_PREMIUM_CODE_LENGTH = 128;
+
 export function normalizePremiumCode(code: string | null | undefined) {
   return (code ?? "")
     .trim()
     .replace(/\s+/g, "")
     .replace(/[–—]/g, "-")
     .toUpperCase();
+}
+
+export function normalizePremiumCodeForRequest(code: string | null | undefined) {
+  const normalized = normalizePremiumCode(code);
+
+  return normalized.length <= MAX_PREMIUM_CODE_LENGTH ? normalized : "";
 }
 
 export type PremiumCodeValidationIssue = {

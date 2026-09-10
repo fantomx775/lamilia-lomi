@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizePremiumCode, validatePremiumCodeEntries } from "./premium-code";
+import {
+  normalizePremiumCode,
+  normalizePremiumCodeForRequest,
+  validatePremiumCodeEntries,
+} from "./premium-code";
 
 describe("premium code validation", () => {
   it("uses the same normalization for spaces, case, and dash variants", () => {
     expect(normalizePremiumCode(" lomi – book 2026 ")).toBe("LOMI-BOOK2026");
+    expect(normalizePremiumCodeForRequest(" lomi – book 2026 ")).toBe("LOMI-BOOK2026");
+  });
+
+  it("rejects oversized request values instead of truncating a possible code", () => {
+    expect(normalizePremiumCodeForRequest("x".repeat(129))).toBe("");
   });
 
   it("reports empty and duplicate rows without dropping them silently", () => {

@@ -22,7 +22,19 @@ export async function GET(request: Request, { params }: Props) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const product = await getLocalizedProductViewForRequest(slug, locale);
+  let product;
+
+  try {
+    product = await getLocalizedProductViewForRequest(slug, locale);
+  } catch (error) {
+    console.error("[qr-unlock] Product lookup failed unexpectedly.", {
+      type: error instanceof Error ? error.name : typeof error,
+    });
+    return NextResponse.json(
+      { error: "unavailable" },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
 
   if (!product) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });

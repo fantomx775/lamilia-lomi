@@ -1,6 +1,9 @@
 import { cookies } from "next/headers";
 
 import { normalizeLocale } from "./locale";
+import {
+  normalizePremiumCodeForRequest,
+} from "./premium-code";
 import { productSlugFromReturnTo, sanitizeReturnTo } from "./return-to";
 import type { Locale } from "@/i18n/routing";
 
@@ -28,9 +31,10 @@ export async function getUnlockIntent(): Promise<UnlockIntent | null> {
     const locale = normalizeLocale(parsed.locale);
     const createdAt = typeof parsed.createdAt === "number" ? parsed.createdAt : 0;
 
+    const productSlug = normalizeProductSlug(parsed.productSlug);
+
     if (
-      typeof parsed.productSlug !== "string" ||
-      !parsed.productSlug.trim() ||
+      !productSlug ||
       !createdAt ||
       Date.now() - createdAt > intentMaxAge * 1000 ||
       Date.now() - createdAt < 0
@@ -41,21 +45,20 @@ export async function getUnlockIntent(): Promise<UnlockIntent | null> {
     const returnTo = sanitizeReturnTo(
       typeof parsed.returnTo === "string" ? parsed.returnTo : undefined,
       locale,
-      `/${locale}/products/${parsed.productSlug}`,
+      `/${locale}/products/${productSlug}`,
     );
 
-    if (productSlugFromReturnTo(returnTo, locale) !== parsed.productSlug) {
+    if (productSlugFromReturnTo(returnTo, locale) !== productSlug) {
       return null;
     }
 
     return {
       locale,
-      productSlug: parsed.productSlug,
+      productSlug,
       returnTo,
-      code:
-        typeof parsed.code === "string" && parsed.code.trim()
-          ? parsed.code.trim().slice(0, 128)
-          : undefined,
+      code: normalizePremiumCodeForRequest(
+        typeof parsed.code === "string" ? parsed.code : undefined,
+      ) || undefined,
       createdAt,
     };
   } catch {
@@ -70,16 +73,23 @@ export async function setUnlockIntent(input: {
   code?: string | null;
 }) {
   const locale = normalizeLocale(input.locale);
+  const productSlug = normalizeProductSlug(input.productSlug);
+
+  if (!productSlug) {
+    await clearUnlockIntent();
+    return;
+  }
+
   const returnTo = sanitizeReturnTo(
     input.returnTo,
     locale,
-    `/${locale}/products/${input.productSlug}`,
+    `/${locale}/products/${productSlug}`,
   );
   const payload: UnlockIntent = {
     locale,
-    productSlug: input.productSlug,
+    productSlug,
     returnTo,
-    code: input.code?.trim().slice(0, 128) || undefined,
+    code: normalizePremiumCodeForRequest(input.code) || undefined,
     createdAt: Date.now(),
   };
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -98,4 +108,10 @@ export async function clearUnlockIntent() {
   const cookieStore = await cookies();
 
   cookieStore.delete(unlockIntentCookie);
+}
+
+function normalizeProductSlug(value: unknown) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized) ? normalized : undefined;
 }

@@ -30,6 +30,17 @@ export function sanitizeReturnTo(
       return safeFallback;
     }
 
+    const decodedPathname = decodeURIComponent(url.pathname);
+
+    if (
+      decodedPathname.includes("\\") ||
+      decodedPathname.startsWith("//") ||
+      /[\u0000-\u001f\u007f]/.test(decodedPathname) ||
+      /%2f/i.test(url.pathname)
+    ) {
+      return safeFallback;
+    }
+
     const isLocalePath =
       url.pathname === `/${locale}` || url.pathname.startsWith(`/${locale}/`);
     const isAdminPath =
@@ -79,7 +90,9 @@ export function productSlugFromReturnTo(
   }
 
   try {
-    return decodeURIComponent(match[1]);
+    const slug = decodeURIComponent(match[1]);
+
+    return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : undefined;
   } catch {
     return undefined;
   }

@@ -27,7 +27,9 @@ export default async function RegisterPage({ params, searchParams }: Props) {
   const unlockIntent = await getUnlockIntent();
   const productSlug = productSlugFromReturnTo(redirectTo, locale);
   const code =
-    unlockIntent && unlockIntent.productSlug === productSlug
+    unlockIntent &&
+    unlockIntent.locale === locale &&
+    unlockIntent.productSlug === productSlug
       ? unlockIntent.code ?? ""
       : "";
   const error = stringParam(query.error);
