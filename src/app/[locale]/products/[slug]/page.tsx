@@ -1,10 +1,11 @@
-import { Download, FileText, LockKeyhole, PlayCircle } from "lucide-react";
+import { Download, FileText, LockKeyhole } from "lucide-react";
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 
 import { AmazonLink } from "@/components/amazon-link";
+import { ProductVideoPreview } from "@/components/product-video-preview";
 import { UnlockForm } from "@/components/unlock-form";
 import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
@@ -176,21 +177,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
               </div>
             ))}
           </div>
-          <div className="relative grid min-h-72 place-items-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-alt)]">
-            {product.video ? (
-              <video
-                src={product.video.path}
-                controls
-                preload="metadata"
-                className="absolute inset-0 size-full object-cover"
-                aria-label={product.video.title ?? "Video preview"}
-              />
-            ) : null}
-            <div className="pointer-events-none relative z-10 flex items-center gap-2 rounded-md bg-white/82 px-4 py-3 text-sm font-medium">
-              <PlayCircle className="size-5 text-[var(--color-terracotta)]" />
-              Public flipthrough video
-            </div>
-          </div>
+          <ProductVideoPreview video={product.video} />
         </div>
       </section>
 

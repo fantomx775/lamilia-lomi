@@ -34,6 +34,12 @@ test("guest can see and download public product files without signing in", async
   expect(response.status()).toBe(200);
   expect(response.headers()["content-disposition"]).toContain("moon-garden-free-guide.pdf");
   expect((await response.body()).subarray(0, 4).toString()).toBe("%PDF");
+
+  const downloadPromise = page.waitForEvent("download");
+  await downloadLink.click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("moon-garden-free-guide.pdf");
+  await expect(page).toHaveURL(/\/en\/products\/moon-garden-coloring-book$/);
 });
 
 test("demo user can log in and see unlocked library", async ({ page }) => {
