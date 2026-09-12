@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { findReusablePreview, parseArgs } from "./deploy-preview.mjs";
+import {
+  buildDeployArgs,
+  buildVercelInvocation,
+  buildVercelSpawnOptions,
+  findReusablePreview,
+  parseArgs,
+} from "./deploy-preview.mjs";
 
 const commitSha = "c".repeat(40);
 
@@ -112,6 +118,30 @@ describe("Lamilia Preview deployment reuse", () => {
     ).toMatchObject({
       force: true,
       reason: "debug cache invalidation",
+    });
+  });
+
+  it("passes an untrusted branch name as one argument without a Windows shell", () => {
+    const commitRef = "feature/$(whoami); & echo hacked";
+    const deployArgs = buildDeployArgs({
+      commitSha,
+      commitRef,
+      scope: "fantomxs-projects",
+    });
+    const invocation = buildVercelInvocation(deployArgs, {
+      platform: "win32",
+      nodePath: "C:\\Program Files\\nodejs\\node.exe",
+      cliEntrypoint: "C:\\Program Files\\nodejs\\node_modules\\vercel\\dist\\vc.js",
+    });
+
+    expect(invocation.command).toBe("C:\\Program Files\\nodejs\\node.exe");
+    expect(invocation.args).toEqual([
+      "C:\\Program Files\\nodejs\\node_modules\\vercel\\dist\\vc.js",
+      ...deployArgs,
+    ]);
+    expect(invocation.args).toContain(`githubCommitRef=${commitRef}`);
+    expect(buildVercelSpawnOptions({ cwd: "C:\\repo", env: {} })).toMatchObject({
+      shell: false,
     });
   });
 

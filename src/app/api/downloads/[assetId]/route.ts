@@ -20,7 +20,7 @@ export async function GET(
   try {
     asset = await getAssetByIdForRequest(assetId);
   } catch (error) {
-    console.error("[premium-download] Asset lookup failed unexpectedly.", error);
+    logUnexpectedFailure("[premium-download] Asset lookup failed unexpectedly.", error);
     return premiumErrorResponse(
       { ok: false, reason: "unavailable" },
       503,
@@ -35,7 +35,7 @@ export async function GET(
       ...(expires !== null ? { expires } : {}),
     });
   } catch (error) {
-    console.error("[premium-download] Authorization failed unexpectedly.", error);
+    logUnexpectedFailure("[premium-download] Authorization failed unexpectedly.", error);
     return premiumErrorResponse(
       { ok: false, reason: "unavailable" },
       503,
@@ -173,4 +173,10 @@ function setDownloadEvent(
       }),
     ),
   );
+}
+
+function logUnexpectedFailure(message: string, error: unknown) {
+  console.error(message, {
+    type: error instanceof Error ? error.name : typeof error,
+  });
 }

@@ -658,9 +658,17 @@ function parsePremiumCodes(
 
   return {
     codes: rows.filter((row) => row.code),
-    errors: validation.map((issue) => issue.reason === "required"
-      ? ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED
-      : ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE),
+    errors: validation.map((issue) => {
+      if (issue.reason === "required") {
+        return ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED;
+      }
+
+      if (issue.reason === "too_long") {
+        return ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG;
+      }
+
+      return ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE;
+    }),
   };
 }
 

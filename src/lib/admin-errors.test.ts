@@ -20,6 +20,10 @@ describe("admin error contract", () => {
     expect(classifyAdminDatabaseError({ code: "23503" })).toBe(ADMIN_ERROR_CODES.CONFLICT_DATA);
     expect(classifyAdminDatabaseError({ code: "42501" })).toBe(ADMIN_ERROR_CODES.AUTHORIZATION_DENIED);
     expect(classifyAdminDatabaseError({ code: "22P02" })).toBe(ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT);
+    expect(classifyAdminDatabaseError({
+      code: "23514",
+      constraint: "premium_codes_normalized_code_length_check",
+    })).toBe(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG);
   });
 
   it("never renders an unrecognized query value as raw UI feedback", () => {

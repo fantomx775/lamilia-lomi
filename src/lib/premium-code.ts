@@ -1,3 +1,5 @@
+export const MAX_PREMIUM_CODE_LENGTH = 128;
+
 export function normalizePremiumCode(code: string | null | undefined) {
   return (code ?? "")
     .trim()
@@ -6,9 +8,15 @@ export function normalizePremiumCode(code: string | null | undefined) {
     .toUpperCase();
 }
 
+export function normalizePremiumCodeForRequest(code: string | null | undefined) {
+  const normalized = normalizePremiumCode(code);
+
+  return normalized.length <= MAX_PREMIUM_CODE_LENGTH ? normalized : "";
+}
+
 export type PremiumCodeValidationIssue = {
   index: number;
-  reason: "required" | "duplicate";
+  reason: "required" | "too_long" | "duplicate";
 };
 
 export function validatePremiumCodeEntries(
@@ -25,6 +33,11 @@ export function validatePremiumCodeEntries(
     const normalized = normalizePremiumCode(entry.code);
     if (!normalized) {
       issues.push({ index, reason: "required" });
+      return;
+    }
+
+    if (normalized.length > MAX_PREMIUM_CODE_LENGTH) {
+      issues.push({ index, reason: "too_long" });
       return;
     }
 

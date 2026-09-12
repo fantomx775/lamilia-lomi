@@ -27,7 +27,9 @@ export default async function LoginPage({ params, searchParams }: Props) {
   );
   const unlockIntent = await getUnlockIntent();
   const code =
-    unlockIntent && unlockIntent.productSlug === productSlugFromReturnTo(redirectTo, locale)
+    unlockIntent &&
+    unlockIntent.locale === locale &&
+    unlockIntent.productSlug === productSlugFromReturnTo(redirectTo, locale)
       ? unlockIntent.code ?? ""
       : "";
   const error = stringParam(query.error);

@@ -6,6 +6,7 @@ import { normalizeLocale } from "./locale";
 import { getCanonicalAppUrl } from "./config";
 import { redeemPremiumCodeForRequest } from "./premium-request";
 import { getProductBySlugForRequest } from "./products-request";
+import { normalizePremiumCodeForRequest } from "./premium-code";
 import { productSlugFromReturnTo, sanitizeReturnTo } from "./return-to";
 import type { Locale } from "@/i18n/routing";
 
@@ -50,7 +51,7 @@ export function createAuthResumeIntent(input: {
     locale,
     productSlug,
     returnTo,
-    code: normalizeCode(input.code),
+    code: normalizePremiumCodeForRequest(input.code) || undefined,
     createdAt: input.now ?? Date.now(),
   };
 }
@@ -157,10 +158,4 @@ function normalizeProductSlug(value: string | null | undefined) {
   const normalized = value?.trim().toLowerCase();
 
   return normalized && productSlugPattern.test(normalized) ? normalized : undefined;
-}
-
-function normalizeCode(value: string | null | undefined) {
-  const normalized = value?.trim();
-
-  return normalized ? normalized.slice(0, 256) : undefined;
 }

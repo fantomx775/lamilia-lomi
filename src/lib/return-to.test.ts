@@ -31,6 +31,8 @@ describe("return target safety", () => {
     "%2F%2Fevil.example%2Fphish",
     "/en/products/moon-garden",
     "\\\\evil.example\\phish",
+    "/pl/products/%5C%5Cevil.example",
+    "/pl/products/foo%2Fbar",
     "/pl/products/moon-garden?returnTo=https%3A%2F%2Fevil.example%2Fphish",
   ])("rejects unsafe return target %s", (value) => {
     expect(sanitizeReturnTo(value, "pl")).toBe("/pl/library");
@@ -44,6 +46,14 @@ describe("return target safety", () => {
       "/pl/products/moon-garden?next=%2F%2Fevil.example",
     );
     expect(sanitizeReturnTo("/en/products/moon-garden", "pl")).toBe("/pl/library");
+  });
+
+  it("only extracts canonical product slugs from a safe product path", () => {
+    expect(productSlugFromReturnTo("/pl/products/moon-garden", "pl")).toBe(
+      "moon-garden",
+    );
+    expect(productSlugFromReturnTo("/pl/products/Moon-Garden", "pl")).toBeUndefined();
+    expect(productSlugFromReturnTo("/pl/products/moon%2Fgarden", "pl")).toBeUndefined();
   });
 
   it("switches only an allowlisted locale prefix", () => {

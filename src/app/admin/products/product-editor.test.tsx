@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -222,6 +222,30 @@ describe("ProductEditor V2", () => {
     expect(view.getAllByText("Każdy kod premium może wystąpić w tym produkcie tylko raz.")).toHaveLength(2);
     expect(codeInputs[0]).toHaveAttribute("aria-invalid", "true");
     expect(codeInputs[1]).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("limits premium code inputs and reports an oversized value", async () => {
+    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+
+    await user.click(view.getByRole("button", { name: "Dodaj kod" }));
+    const codeInput = view.getByLabelText("Kod");
+    expect(codeInput).toHaveAttribute("maxLength", "128");
+
+    fireEvent.change(codeInput, { target: { value: "x".repeat(129) } });
+    await user.click(view.getByRole("button", { name: "Zapisz" }));
+
+    expect(saveAction).not.toHaveBeenCalled();
+    expect(view.getByText("Kod premium może mieć maksymalnie 128 znaków.")).toBeInTheDocument();
+    expect(codeInput).toHaveAttribute("aria-invalid", "true");
   });
 
   it("uploads a selected file through the admin binary endpoint and keeps its filename", async () => {

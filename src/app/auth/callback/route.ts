@@ -26,7 +26,16 @@ export async function GET(request: Request) {
   const callbackCode = requestUrl.searchParams.get("code");
 
   if (callbackCode) {
-    const { error } = await supabase.auth.exchangeCodeForSession(callbackCode);
+    let error;
+
+    try {
+      ({ error } = await supabase.auth.exchangeCodeForSession(callbackCode));
+    } catch (exchangeError) {
+      console.error("[auth-callback] Code exchange failed unexpectedly.", {
+        type: exchangeError instanceof Error ? exchangeError.name : typeof exchangeError,
+      });
+      return failureResponse(locale, intent);
+    }
 
     if (error) {
       // A user who already completed the flow may revisit a one-time callback
@@ -34,7 +43,7 @@ export async function GET(request: Request) {
       const { data } = await supabase.auth.getUser();
 
       if (!data.user?.email_confirmed_at) {
-        return failureResponse(locale);
+        return failureResponse(locale, intent);
       }
     }
   }
@@ -42,10 +51,19 @@ export async function GET(request: Request) {
   const { data } = await supabase.auth.getUser();
 
   if (!data.user?.email_confirmed_at) {
-    return failureResponse(locale);
+    return failureResponse(locale, intent);
   }
 
-  const redemption = await redeemAuthResumeIntent(intent ?? {});
+  let redemption;
+
+  try {
+    redemption = await redeemAuthResumeIntent(intent ?? {});
+  } catch (error) {
+    console.error("[auth-callback] Auth resume redemption failed unexpectedly.", {
+      type: error instanceof Error ? error.name : typeof error,
+    });
+    return failureResponse(locale, intent);
+  }
   await clearAuthResumeIntent();
 
   if (redemption?.ok) {
@@ -82,10 +100,17 @@ function successResponse(path: string) {
   return response;
 }
 
-function failureResponse(locale: string) {
-  const response = NextResponse.redirect(
-    new URL(`/${locale}/login?error=verification_failed`, getCanonicalAppUrl()),
-  );
+function failureResponse(locale: string, intent?: Parameters<typeof getAuthResumeRedirect>[0]) {
+  const target = new URL(`/${locale}/login`, getCanonicalAppUrl());
+  target.searchParams.set("error", "verification_failed");
+
+  const returnTo = getAuthResumeRedirect(intent, locale);
+
+  if (returnTo !== `/${locale}/account`) {
+    target.searchParams.set("returnTo", returnTo);
+  }
+
+  const response = NextResponse.redirect(target);
   response.headers.set("Cache-Control", "private, no-store");
 
   return response;

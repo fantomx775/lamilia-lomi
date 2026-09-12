@@ -141,7 +141,10 @@ export async function switchLocaleAction(formData: FormData) {
       returnTo: productSlug ? targetPath : translatedNestedReturnTo,
       code:
         code ||
-        (existingIntent?.productSlug === product.slug ? existingIntent.code : undefined),
+        (existingIntent?.locale === sourceLocale &&
+        existingIntent.productSlug === product.slug
+          ? existingIntent.code
+          : undefined),
     });
   }
 
@@ -175,10 +178,18 @@ export async function loginDemoAction(formData: FormData) {
       code,
     });
     const supabase = await createClient();
-    const { error } = await supabase.auth.signInWithPassword({
-      email: text(formData, "email"),
-      password: text(formData, "password"),
-    });
+    let error;
+
+    try {
+      ({ error } = await supabase.auth.signInWithPassword({
+        email: text(formData, "email"),
+        password: text(formData, "password"),
+      }));
+    } catch (authError) {
+      logUnexpectedFailure("[auth] Sign-in failed unexpectedly.", authError);
+      await setAuthResumeIntent({ locale, returnTo, code });
+      redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
+    }
 
     if (error) {
       await setAuthResumeIntent({ locale, returnTo, code });
@@ -223,11 +234,24 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
   });
 
   const supabase = await createClient();
-  await supabase.auth.resend({
-    type: "signup",
-    email: text(formData, "email"),
-    options: { emailRedirectTo: buildSupabaseAuthCallbackUrl(locale) },
-  });
+  let resendError;
+
+  try {
+    ({ error: resendError } = await supabase.auth.resend({
+      type: "signup",
+      email: text(formData, "email"),
+      options: { emailRedirectTo: buildSupabaseAuthCallbackUrl(locale) },
+    }));
+  } catch (error) {
+    logUnexpectedFailure("[auth] Verification email resend failed unexpectedly.", error);
+    resendError = true;
+  }
+
+  if (resendError) {
+    redirect(
+      `/${locale}/login?error=verification_unavailable&returnTo=${encodeURIComponent(returnTo)}`,
+    );
+  }
 
   redirect(
     `/${locale}/login?error=verification_sent&returnTo=${encodeURIComponent(returnTo)}`,
@@ -267,18 +291,26 @@ export async function registerDemoAction(formData: FormData) {
     const safeRedirectTo = intent.returnTo;
     await setAuthResumeIntent({ locale, returnTo, code });
     const supabase = await createClient();
-    const { data, error } = await supabase.auth.signUp({
-      email: result.value.email,
-      password: result.value.password,
-      options: {
-        data: {
-          marketing_consent: result.value.marketingConsent,
-          preferred_locale: result.value.preferredLocale,
-          terms_accepted: true,
+    let data;
+    let error;
+
+    try {
+      ({ data, error } = await supabase.auth.signUp({
+        email: result.value.email,
+        password: result.value.password,
+        options: {
+          data: {
+            marketing_consent: result.value.marketingConsent,
+            preferred_locale: result.value.preferredLocale,
+            terms_accepted: true,
+          },
+          emailRedirectTo: buildSupabaseAuthCallbackUrl(locale),
         },
-        emailRedirectTo: buildSupabaseAuthCallbackUrl(locale),
-      },
-    });
+      }));
+    } catch (authError) {
+      logUnexpectedFailure("[auth] Registration failed unexpectedly.", authError);
+      redirect(`/${locale}/register?error=auth&returnTo=${encodeURIComponent(safeRedirectTo)}`);
+    }
 
     if (error) {
       redirect(`/${locale}/register?error=auth&returnTo=${encodeURIComponent(safeRedirectTo)}`);
@@ -320,7 +352,7 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
   try {
     redemption = await redeemAuthResumeIntent(intent);
   } catch (error) {
-    console.error("[premium-unlock] Auth resume redemption failed unexpectedly.", error);
+    logUnexpectedFailure("[premium-unlock] Auth resume redemption failed unexpectedly.", error);
     await clearAuthResumeIntent();
     await setUnlockIntent({
       locale: intent.locale,
@@ -448,7 +480,7 @@ export async function unlockPremiumAction(formData: FormData) {
       code,
     });
   } catch (error) {
-    console.error("[premium-unlock] Redemption failed unexpectedly.", error);
+    logUnexpectedFailure("[premium-unlock] Redemption failed unexpectedly.", error);
     await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
     redirect(appendQueryPath(returnTo, "unlock", "unexpected"));
   }
@@ -508,7 +540,9 @@ async function preserveUnlockIntent(input: {
     returnTo: input.returnTo,
     code:
       input.code ||
-      (existing?.productSlug === product.slug ? existing.code : undefined),
+      (existing?.locale === input.locale && existing.productSlug === product.slug
+        ? existing.code
+        : undefined),
   });
 }
 
@@ -531,4 +565,10 @@ function appendQueryPath(path: string, key: string, value: string) {
   url.searchParams.set(key, value);
 
   return `${url.pathname}${url.search}`;
+}
+
+function logUnexpectedFailure(message: string, error: unknown) {
+  console.error(message, {
+    type: error instanceof Error ? error.name : typeof error,
+  });
 }

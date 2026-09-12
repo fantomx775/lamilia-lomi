@@ -5,13 +5,30 @@
 
 delete from storage.objects
 where bucket_id = 'premium-files'
-  and name in ('moon-garden/bonus.pdf', 'mindful-mandalas/bonus.pdf');
+  and name in (
+    'moon-garden/bonus.pdf',
+    'mindful-mandalas/bonus.pdf',
+    'secret-draft/bonus.pdf'
+  );
 delete from public.product_assets
-where id = '22222222-2222-4222-8222-222222222205';
+where id in (
+  '22222222-2222-4222-8222-222222222205',
+  '44444444-4444-4444-8444-444444444405'
+);
 delete from public.premium_codes
 where id in ('99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999995');
 delete from public.user_product_unlocks
-where user_id = 'cccccccc-3333-4333-8333-cccccccccccc';
+where user_id in (
+  'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+  'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+  'cccccccc-3333-4333-8333-cccccccccccc'
+);
+delete from public.download_events
+where user_id in (
+  'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+  'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+  'cccccccc-3333-4333-8333-cccccccccccc'
+);
 delete from auth.users
 where id in (
   'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
@@ -53,12 +70,23 @@ values (
   'application/pdf',
   false,
   2
+), (
+  '44444444-4444-4444-8444-444444444405',
+  '44444444-4444-4444-8444-444444444444',
+  'premium_download',
+  'premium-files',
+  'secret-draft/bonus.pdf',
+  'secret-draft-bonus.pdf',
+  'application/pdf',
+  false,
+  2
 );
 
 insert into storage.objects (bucket_id, name)
 values
   ('premium-files', 'moon-garden/bonus.pdf'),
-  ('premium-files', 'mindful-mandalas/bonus.pdf');
+  ('premium-files', 'mindful-mandalas/bonus.pdf'),
+  ('premium-files', 'secret-draft/bonus.pdf');
 
 update public.profiles
 set role = 'user'
@@ -99,7 +127,8 @@ where product_id = '11111111-1111-4111-8111-111111111111' and kind = 'premium_do
 select case when count(*) = 0 then 'PASS unverified user cannot read premium storage after unlock' else 'FAIL unverified premium storage count=' || count(*) end
 from storage.objects
 where bucket_id = 'premium-files';
-select case when private.record_download_event('11111111-1111-4111-8111-111111111105') is null then 'PASS unverified download event is denied' else 'FAIL unverified download event was recorded' end;
+select case when (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-BOOK-2026') ->> 'status') = 'email_unverified' then 'PASS unverified redemption is denied' else 'FAIL unverified redemption' end;
+select case when public.record_download_event('11111111-1111-4111-8111-111111111105') is null then 'PASS unverified download event is denied' else 'FAIL unverified download event was recorded' end;
 rollback;
 
 \echo 'RLS matrix: atomic redemption and authorization contracts'
@@ -125,6 +154,34 @@ from storage.objects where bucket_id = 'premium-files' and name = 'mindful-manda
 select case when public.record_download_event('11111111-1111-4111-8111-111111111105') is not null then 'PASS unlocked download event recorded' else 'FAIL unlocked download event missing' end;
 select case when public.record_download_event('22222222-2222-4222-8222-222222222205') is null then 'PASS locked download event rejected' else 'FAIL locked download event recorded' end;
 select case when (public.redeem_premium_code('44444444-4444-4444-8444-444444444444', 'LOMI-DRAFT-2026') ->> 'status') = 'product_not_found' then 'PASS draft product cannot be unlocked' else 'FAIL draft product redemption=' || (public.redeem_premium_code('44444444-4444-4444-8444-444444444444', 'LOMI-DRAFT-2026'))::text end;
+set local role postgres;
+insert into public.user_product_unlocks (user_id, product_id, premium_code_id)
+values (
+  'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+  '44444444-4444-4444-8444-444444444444',
+  '99999999-9999-4999-8999-999999999995'
+);
+set local role authenticated;
+select case when count(*) = 0 then 'PASS unlocked draft premium metadata is hidden' else 'FAIL unlocked draft premium metadata count=' || count(*) end
+from public.product_assets
+where id = '44444444-4444-4444-8444-444444444405';
+select case when count(*) = 0 then 'PASS unlocked draft premium storage is hidden' else 'FAIL unlocked draft premium storage count=' || count(*) end
+from storage.objects
+where bucket_id = 'premium-files' and name = 'secret-draft/bonus.pdf';
+select case when public.record_download_event('44444444-4444-4444-8444-444444444405') is null then 'PASS draft download event rejected' else 'FAIL draft download event recorded' end;
+set local role postgres;
+update public.product_assets
+set is_active = false
+where id = '11111111-1111-4111-8111-111111111105';
+set local role authenticated;
+select case when count(*) = 0 then 'PASS inactive premium storage is hidden' else 'FAIL inactive premium storage count=' || count(*) end
+from storage.objects
+where bucket_id = 'premium-files' and name = 'moon-garden/bonus.pdf';
+select case when public.record_download_event('11111111-1111-4111-8111-111111111105') is null then 'PASS inactive download event rejected' else 'FAIL inactive download event recorded' end;
+set local role postgres;
+update public.product_assets
+set is_active = true
+where id = '11111111-1111-4111-8111-111111111105';
 -- The fixture status transition is performed by the disposable harness owner;
 -- the storage/download assertions below still execute as authenticated user A.
 set local role postgres;
@@ -312,9 +369,59 @@ exception when others then
 end;
 $$;
 
+create function pg_temp.premium_code_insert_should_fail(
+  requested_product_id uuid,
+  requested_code text
+)
+returns boolean
+language plpgsql
+as $$
+begin
+  insert into public.premium_codes (product_id, code, active)
+  values (requested_product_id, requested_code, true);
+  return false;
+exception when check_violation then
+  return position('premium_codes_normalized_code_length_check' in sqlerrm) > 0;
+when others then
+  return false;
+end;
+$$;
+
 update public.profiles
 set role = 'admin'
 where id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+
+\echo 'RLS matrix: premium-code length at request, RPC, and database boundaries'
+begin;
+set local role postgres;
+select case when not pg_temp.premium_code_insert_should_fail(
+  '22222222-2222-4222-8222-222222222222', repeat('D', 128)
+) then 'PASS database accepts a 128-character normalized code' else 'FAIL database rejected the 128-character code' end;
+select case when pg_temp.premium_code_insert_should_fail(
+  '22222222-2222-4222-8222-222222222222', repeat('D', 129)
+) then 'PASS database rejects a 129-character normalized code' else 'FAIL database accepted the 129-character code' end;
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+select case when (public.save_product(jsonb_set(
+  pg_temp.product_state(requested_product_id => '22222222-2222-4222-8222-222222222222'),
+  '{premiumCodes,0,code}',
+  to_jsonb(repeat('R', 128))
+)) ->> 'status') = 'success' then 'PASS RPC accepts a 128-character premium code' else 'FAIL RPC rejected the 128-character premium code' end;
+select case when (select char_length(normalized_code) from public.premium_codes where id = '99999999-9999-4999-8999-999999999992') = 128 then 'PASS RPC stores the normalized boundary length' else 'FAIL RPC stored the wrong normalized boundary length' end;
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+select case when pg_temp.product_save_should_fail(jsonb_set(
+  pg_temp.product_state(requested_product_id => '22222222-2222-4222-8222-222222222222'),
+  '{premiumCodes,0,code}',
+  to_jsonb(repeat('R', 129))
+)) then 'PASS RPC rejects a 129-character premium code' else 'FAIL RPC accepted the 129-character premium code' end;
+rollback;
 
 \echo 'RLS matrix: atomic product mutation and history safety'
 begin;
@@ -479,9 +586,16 @@ where user_id in (
 );
 delete from storage.objects
 where bucket_id = 'premium-files'
-  and name in ('moon-garden/bonus.pdf', 'mindful-mandalas/bonus.pdf');
+  and name in (
+    'moon-garden/bonus.pdf',
+    'mindful-mandalas/bonus.pdf',
+    'secret-draft/bonus.pdf'
+  );
 delete from public.product_assets
-where id = '22222222-2222-4222-8222-222222222205';
+where id in (
+  '22222222-2222-4222-8222-222222222205',
+  '44444444-4444-4444-8444-444444444405'
+);
 delete from public.premium_codes
 where id in ('99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999995');
 delete from auth.users
@@ -491,4 +605,4 @@ where id in (
   'cccccccc-3333-4333-8333-cccccccccccc'
 );
 
-\echo 'RLS matrix complete: 56 positive scenarios passed'
+\echo 'RLS matrix complete: 67 positive scenarios passed'

@@ -205,6 +205,25 @@ describe("admin behavior", () => {
     expect(result.product.premiumCodes).toEqual([]);
   });
 
+  it("accepts a 128-character premium code and rejects the 129th character", () => {
+    const atLimit = new FormData();
+    atLimit.set("title_en", "Boundary premium code");
+    atLimit.append("premiumCode", "x".repeat(128));
+
+    const accepted = buildProductFromFormData(atLimit, { snapshot: getSeedContentSnapshot() });
+
+    expect(accepted.errors).not.toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG);
+    expect(accepted.product.premiumCodes[0]?.code).toHaveLength(128);
+
+    const overLimit = new FormData();
+    overLimit.set("title_en", "Oversized premium code");
+    overLimit.append("premiumCode", "x".repeat(129));
+
+    const rejected = buildProductFromFormData(overLimit, { snapshot: getSeedContentSnapshot() });
+
+    expect(rejected.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG);
+  });
+
   it("rejects a premium code already assigned to another product", () => {
     const snapshot = getSeedContentSnapshot();
     const form = new FormData();

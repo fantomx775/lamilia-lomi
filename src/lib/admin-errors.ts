@@ -23,6 +23,7 @@ export const ADMIN_ERROR_CODES = {
   VALIDATION_VIDEO_DUPLICATE: "admin.validation.video_duplicate",
   VALIDATION_GALLERY_LIMIT: "admin.validation.gallery_limit",
   VALIDATION_PREMIUM_CODE_REQUIRED: "admin.validation.premium_code_required",
+  VALIDATION_PREMIUM_CODE_TOO_LONG: "admin.validation.premium_code_too_long",
   CONFLICT_PREMIUM_CODE_DUPLICATE: "admin.conflict.premium_code_duplicate",
   CONFLICT_PREMIUM_CODE_EXISTING: "admin.conflict.premium_code_existing",
   CONFLICT_AMAZON_MARKET_DUPLICATE: "admin.conflict.amazon_market_duplicate",
@@ -92,6 +93,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE]: "Only one video is allowed.",
     [ADMIN_ERROR_CODES.VALIDATION_GALLERY_LIMIT]: "The gallery can contain at most 20 images.",
     [ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED]: "Enter a premium code or remove the empty row.",
+    [ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG]: "A premium code can contain at most 128 characters.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE]: "Each premium code can be used only once in this product.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING]: "This premium code is already assigned to another product.",
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Each Amazon market can be listed only once.",
@@ -121,6 +123,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE]: "Może istnieć tylko jedno wideo.",
     [ADMIN_ERROR_CODES.VALIDATION_GALLERY_LIMIT]: "Galeria może zawierać maksymalnie 20 obrazów.",
     [ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED]: "Wpisz kod premium albo usuń pusty wiersz.",
+    [ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG]: "Kod premium może mieć maksymalnie 128 znaków.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE]: "Każdy kod premium może wystąpić w tym produkcie tylko raz.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING]: "Ten kod premium jest już przypisany do innego produktu.",
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Każdy rynek Amazon może wystąpić tylko raz.",
@@ -150,6 +153,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE]: "Es ist nur ein Video erlaubt.",
     [ADMIN_ERROR_CODES.VALIDATION_GALLERY_LIMIT]: "Die Galerie darf höchstens 20 Bilder enthalten.",
     [ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED]: "Gib einen Premium-Code ein oder entferne die leere Zeile.",
+    [ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG]: "Ein Premium-Code darf höchstens 128 Zeichen enthalten.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE]: "Jeder Premium-Code darf in diesem Produkt nur einmal verwendet werden.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING]: "Dieser Premium-Code ist bereits einem anderen Produkt zugewiesen.",
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Jeder Amazon-Markt darf nur einmal aufgeführt werden.",
@@ -179,6 +183,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE]: "Solo se permite un vídeo.",
     [ADMIN_ERROR_CODES.VALIDATION_GALLERY_LIMIT]: "La galería puede contener como máximo 20 imágenes.",
     [ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED]: "Introduce un código premium o elimina la fila vacía.",
+    [ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG]: "Un código premium puede tener como máximo 128 caracteres.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE]: "Cada código premium solo puede usarse una vez en este producto.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING]: "Este código premium ya está asignado a otro producto.",
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Cada mercado de Amazon solo puede aparecer una vez.",
@@ -242,6 +247,13 @@ export function classifyAdminDatabaseError(
     }
 
     return ADMIN_ERROR_CODES.CONFLICT_DATA;
+  }
+
+  if (
+    code === "23514" &&
+    diagnosticText.includes("premium_codes_normalized_code_length_check")
+  ) {
+    return ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG;
   }
 
   if (code === "23503") {

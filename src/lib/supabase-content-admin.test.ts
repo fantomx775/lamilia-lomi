@@ -111,6 +111,25 @@ describe("Supabase content admin mutations", () => {
     });
   });
 
+  it("rejects an oversized premium code before calling the save RPC", async () => {
+    const form = new FormData();
+    form.set("id", productId);
+    form.set("slug", "oversized-code-product");
+    form.set("status", "draft");
+    form.set("audience", "kids");
+    form.set("productType", "coloring-book");
+    form.set("title_en", "Oversized code product");
+    form.set("premiumCodeId", "22222222-2222-4222-8222-222222222222");
+    form.set("premiumCode", "x".repeat(129));
+    form.set("premiumCodeActive", "22222222-2222-4222-8222-222222222222");
+
+    await expect(saveProductForRequest(form)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.validation.premium_code_too_long"],
+    });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it("checks uploaded objects by exact path and skips static seed assets", async () => {
     await expect(assertSupabaseUploadsExist([
       {
