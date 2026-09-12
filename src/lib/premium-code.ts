@@ -16,7 +16,7 @@ export function normalizePremiumCodeForRequest(code: string | null | undefined) 
 
 export type PremiumCodeValidationIssue = {
   index: number;
-  reason: "required" | "duplicate";
+  reason: "required" | "too_long" | "duplicate";
 };
 
 export function validatePremiumCodeEntries(
@@ -33,6 +33,11 @@ export function validatePremiumCodeEntries(
     const normalized = normalizePremiumCode(entry.code);
     if (!normalized) {
       issues.push({ index, reason: "required" });
+      return;
+    }
+
+    if (normalized.length > MAX_PREMIUM_CODE_LENGTH) {
+      issues.push({ index, reason: "too_long" });
       return;
     }
 

@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const API_ORIGIN = "https://api.vercel.com";
@@ -129,18 +130,87 @@ function gitValue(args) {
   }
 }
 
-function runVercel(args, env) {
-  const command = process.platform === "win32" ? "vercel.cmd" : "vercel";
+export function resolveVercelCliEntrypoint({
+  env = process.env,
+  cwd = process.cwd(),
+  nodePath = process.execPath,
+} = {}) {
+  const configured = env.VERCEL_CLI_ENTRYPOINT?.trim();
+  const candidates = [
+    configured ? resolve(cwd, configured) : null,
+    resolve(cwd, "node_modules", "vercel", "dist", "vc.js"),
+    join(dirname(nodePath), "node_modules", "vercel", "dist", "vc.js"),
+  ].filter((candidate) => candidate !== null);
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+export function buildVercelInvocation(
+  args,
+  {
+    platform = process.platform,
+    nodePath = process.execPath,
+    cliEntrypoint = resolveVercelCliEntrypoint({ nodePath }),
+  } = {},
+) {
+  if (platform === "win32") {
+    if (!cliEntrypoint) {
+      throw new Error(
+        "Vercel CLI entrypoint not found. Set VERCEL_CLI_ENTRYPOINT or install the Vercel CLI.",
+      );
+    }
+
+    return { command: nodePath, args: [cliEntrypoint, ...args] };
+  }
+
+  return { command: "vercel", args };
+}
+
+export function buildVercelSpawnOptions({ cwd = process.cwd(), env } = {}) {
+  return {
+    cwd,
+    env,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+}
+
+export function buildDeployArgs({ commitSha, commitRef, scope, force = false }) {
+  const deployArgs = [
+    "deploy",
+    "--target",
+    "preview",
+    "--scope",
+    scope,
+    "--yes",
+    "--meta",
+    `githubCommitSha=${commitSha}`,
+    "--meta",
+    `githubCommitRef=${commitRef}`,
+  ];
+
+  if (force) deployArgs.push("--force");
+  return deployArgs;
+}
+
+function runVercel(args, env, runtime = {}) {
+  const invocation = buildVercelInvocation(args, {
+    platform: runtime.platform,
+    nodePath: runtime.nodePath,
+    cliEntrypoint: runtime.cliEntrypoint ?? resolveVercelCliEntrypoint({
+      env,
+      cwd: process.cwd(),
+      nodePath: runtime.nodePath ?? process.execPath,
+    }),
+  });
+  const spawnImpl = runtime.spawnImpl ?? spawn;
 
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, {
-      cwd: process.cwd(),
-      env,
-      // Windows exposes the Vercel CLI as a .cmd shim rather than a native
-      // executable. Node must use the command shell to launch that shim.
-      shell: process.platform === "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnImpl(
+      invocation.command,
+      invocation.args,
+      buildVercelSpawnOptions({ cwd: process.cwd(), env }),
+    );
     let stdout = "";
 
     child.stdout.setEncoding("utf8");
@@ -227,19 +297,12 @@ export async function main(env = process.env) {
     childEnv,
   );
 
-  const deployArgs = [
-    "deploy",
-    "--target",
-    "preview",
-    "--scope",
+  const deployArgs = buildDeployArgs({
+    commitSha,
+    commitRef,
     scope,
-    "--yes",
-    "--meta",
-    `githubCommitSha=${commitSha}`,
-    "--meta",
-    `githubCommitRef=${commitRef}`,
-  ];
-  if (options.force) deployArgs.push("--force");
+    force: options.force,
+  });
 
   const output = await runVercel(deployArgs, childEnv);
   const url = extractDeploymentUrl(output);

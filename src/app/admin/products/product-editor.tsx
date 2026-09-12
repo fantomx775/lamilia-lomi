@@ -16,7 +16,7 @@ import { routing, type Locale } from "@/i18n/routing";
 import { getAdminErrorMessage, type AdminErrorCode } from "@/lib/admin-errors";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
-import { validatePremiumCodeEntries } from "@/lib/premium-code";
+import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
 type TranslationDraft = {
@@ -443,7 +443,9 @@ export function ProductEditor({
       if (code) {
         nextErrors[code.clientId] = issue.reason === "required"
           ? "admin.validation.premium_code_required"
-          : "admin.conflict.premium_code_duplicate";
+          : issue.reason === "too_long"
+            ? "admin.validation.premium_code_too_long"
+            : "admin.conflict.premium_code_duplicate";
       }
     }
 
@@ -835,7 +837,7 @@ function PremiumEditor({
   const activeValue = code.id || `new-${index}`;
   const inputId = `premium-code-${code.clientId}`;
   const errorId = `${inputId}-error`;
-  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={inputId}><Input id={inputId} name="premiumCode" value={code.code} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />{error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}</Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button></div>;
+  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={inputId}><Input id={inputId} name="premiumCode" value={code.code} maxLength={MAX_PREMIUM_CODE_LENGTH} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />{error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}</Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button></div>;
 }
 
 function CheckboxGroup({ label, name, values, selected }: { label: string; name: string; values: Array<{ id: string; label: string }>; selected: string[] }) {

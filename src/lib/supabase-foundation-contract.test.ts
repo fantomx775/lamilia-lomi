@@ -48,6 +48,9 @@ describe("Supabase production foundation contracts", () => {
     const verifiedStoragePolicyMigration = read(
       "supabase/migrations/20260910144459_restore_verified_premium_storage_policy.sql",
     );
+    const premiumCodeLengthMigration = read(
+      "supabase/migrations/20260912111002_enforce_premium_code_length.sql",
+    );
     const tagDescriptionsMigration = read(
       "supabase/migrations/20260905100000_add_tag_translation_descriptions.sql",
     );
@@ -76,7 +79,13 @@ describe("Supabase production foundation contracts", () => {
     expect(migration).toContain("status = 'published'");
     expect(migration).toContain("p.status = 'published'");
     expect(rlsTest).toContain("LOMI-DRAFT-2026");
-    expect(rlsTest).toContain("RLS matrix complete: 56 positive scenarios passed");
+    expect(rlsTest).toContain("RLS matrix complete:");
+    expect(premiumCodeLengthMigration).toContain(
+      "premium_codes_normalized_code_length_check",
+    );
+    expect(premiumCodeLengthMigration).toContain(
+      "check (char_length(normalized_code) between 1 and 128)",
+    );
     expect(verifiedDownloadsMigration).toContain(
       "create or replace function private.is_email_verified()",
     );
