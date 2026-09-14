@@ -255,7 +255,11 @@ function removeLocalFile(input: { productId: string; kind: AssetKind; storagePat
 type StorageReference = { bucket: string; path: string };
 
 function storageReference(asset: ProductAsset): StorageReference | null {
-  const storagePath = asset.storagePath ?? (asset.path.startsWith("/uploads/") ? asset.path : null);
+  const storagePath =
+    asset.storagePath ??
+    (asset.path.startsWith("/uploads/") || asset.path.startsWith("products/")
+      ? asset.path
+      : null);
 
   if (!storagePath) {
     return null;
