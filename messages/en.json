@@ -24,7 +24,13 @@
     "availableNow": "Available now",
     "insideBookTitle": "Inside the book",
     "insideBookDescription": "A closer look at the pages, details, and quiet moments inside.",
-    "flipthroughLabel": "Flip-through · 8 sec"
+    "flipthroughLabel": "Flip-through · 8 sec",
+    "openImage": "Open image {index}",
+    "imagePreview": "Image preview",
+    "closeImagePreview": "Close image preview",
+    "previousImage": "Previous image",
+    "nextImage": "Next image",
+    "imageCounter": "{current} of {total}"
   },
   "Funnel": {
     "ownerEyebrow": "Already own this book?",

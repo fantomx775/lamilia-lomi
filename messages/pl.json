@@ -24,7 +24,13 @@
     "availableNow": "Dostępne od razu",
     "insideBookTitle": "W środku książki",
     "insideBookDescription": "Zajrzyj bliżej do stron, detali i spokojnych chwil ukrytych w środku.",
-    "flipthroughLabel": "Przekartkowanie · 8 sek."
+    "flipthroughLabel": "Przekartkowanie · 8 sek.",
+    "openImage": "Otwórz zdjęcie {index}",
+    "imagePreview": "Podgląd zdjęcia",
+    "closeImagePreview": "Zamknij podgląd zdjęcia",
+    "previousImage": "Poprzednie zdjęcie",
+    "nextImage": "Następne zdjęcie",
+    "imageCounter": "{current} z {total}"
   },
   "Funnel": {
     "ownerEyebrow": "Masz już tę książkę?",

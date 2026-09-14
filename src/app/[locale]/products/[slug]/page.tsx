@@ -5,6 +5,7 @@ import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 
 import { AmazonLink } from "@/components/amazon-link";
+import { ProductImageGallery } from "@/components/product-image-gallery";
 import { ProductVideoPreview } from "@/components/product-video-preview";
 import { UnlockForm } from "@/components/unlock-form";
 import { Badge } from "@/components/ui/badge";
@@ -102,6 +103,28 @@ export default async function ProductPage({ params, searchParams }: Props) {
 
   const copy = await getTranslations("Funnel");
   const productCopy = await getTranslations("Product");
+  const galleryImages = product.gallery.map((asset) => ({
+    id: asset.id,
+    path: asset.path,
+    alt: asset.title ?? product.title,
+    caption: getGalleryCaption(asset.title, asset.filename, product.title),
+    unoptimized: isMediaProxyPath(asset.path),
+  }));
+  const galleryLabels = {
+    previewTitle: productCopy("imagePreview"),
+    closePreview: productCopy("closeImagePreview"),
+    previousImage: productCopy("previousImage"),
+    nextImage: productCopy("nextImage"),
+    openImages: product.gallery.map((_, index) =>
+      productCopy("openImage", { index: index + 1 }),
+    ),
+    imagePositions: product.gallery.map((_, index) =>
+      productCopy("imageCounter", {
+        current: index + 1,
+        total: product.gallery.length,
+      }),
+    ),
+  };
   const initialCode =
     hasCurrentIntent ? unlockIntent?.code : undefined;
   const jsonLd = buildProductJsonLd(
@@ -186,32 +209,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
           </div>
 
           <div className="mt-10 grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
-            <div className="grid gap-5 sm:grid-cols-2">
-              {product.gallery.map((asset, index) => {
-                const caption = getGalleryCaption(asset.title, asset.filename, product.title);
-
-                return (
-                  <figure key={asset.id} className="group">
-                    <div className="relative aspect-[4/3] overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
-                      <Image
-                        src={asset.path}
-                        alt={asset.title ?? product.title}
-                        fill
-                        loading={index === 0 ? "eager" : undefined}
-                        unoptimized={isMediaProxyPath(asset.path)}
-                        className="object-cover transition duration-500 ease-out group-hover:scale-[1.02]"
-                        sizes="(min-width: 1024px) 32vw, (min-width: 640px) 50vw, 100vw"
-                      />
-                    </div>
-                    {caption ? (
-                      <figcaption className="mt-3 px-1 text-sm leading-6 text-[var(--color-muted)]">
-                        {caption}
-                      </figcaption>
-                    ) : null}
-                  </figure>
-                );
-              })}
-            </div>
+            <ProductImageGallery images={galleryImages} labels={galleryLabels} />
             <ProductVideoPreview
               video={product.video}
               label={productCopy("flipthroughLabel")}

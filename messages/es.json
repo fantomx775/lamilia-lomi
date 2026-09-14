@@ -24,7 +24,13 @@
     "availableNow": "Disponible ahora",
     "insideBookTitle": "Dentro del libro",
     "insideBookDescription": "Una mirada más cercana a las páginas, los detalles y los momentos tranquilos del interior.",
-    "flipthroughLabel": "Pasar páginas · 8 seg."
+    "flipthroughLabel": "Pasar páginas · 8 seg.",
+    "openImage": "Ampliar imagen {index}",
+    "imagePreview": "Vista previa de la imagen",
+    "closeImagePreview": "Cerrar vista previa de la imagen",
+    "previousImage": "Imagen anterior",
+    "nextImage": "Imagen siguiente",
+    "imageCounter": "{current} de {total}"
   },
   "Funnel": {
     "ownerEyebrow": "¿Ya tienes este libro?",
