@@ -6,30 +6,45 @@ type VideoPreviewAsset = Pick<ProductAsset, "contentType" | "path" | "title">;
 
 type ProductVideoPreviewProps = {
   video?: VideoPreviewAsset | null;
+  label?: string;
 };
 
-export function ProductVideoPreview({ video }: ProductVideoPreviewProps) {
+export function ProductVideoPreview({
+  video,
+  label = "Flip-through · 8 sec",
+}: ProductVideoPreviewProps) {
   const playableVideo = video?.contentType.toLowerCase().startsWith("video/")
     ? video
     : null;
 
   return (
-    <div className="relative grid min-h-72 place-items-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-alt)]">
-      {playableVideo ? (
-        <video
-          src={playableVideo.path}
-          controls
-          preload="metadata"
-          className="absolute inset-0 size-full object-cover"
-          aria-label={playableVideo.title ?? "Video preview"}
-        />
-      ) : null}
-      {!playableVideo ? (
-        <div className="pointer-events-none relative z-10 flex items-center gap-2 rounded-md bg-white/82 px-4 py-3 text-sm font-medium">
-          <PlayCircle className="size-5 text-[var(--color-terracotta)]" />
-          Public flipthrough video
-        </div>
-      ) : null}
-    </div>
+    <figure className="group">
+      <div className="relative aspect-video overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
+        {playableVideo ? (
+          <video
+            src={playableVideo.path}
+            controls
+            preload="metadata"
+            playsInline
+            className="absolute inset-0 size-full object-cover"
+            aria-label={playableVideo.title ?? "Video preview"}
+          >
+            Your browser does not support the video tag.
+          </video>
+        ) : null}
+        {!playableVideo ? (
+          <div className="absolute inset-0 grid place-items-center">
+            <PlayCircle
+              className="size-12 text-[var(--color-terracotta)]"
+              strokeWidth={1.4}
+              aria-hidden
+            />
+          </div>
+        ) : null}
+        <span className="absolute left-4 top-4 rounded-full border border-white/70 bg-white/82 px-3 py-1.5 text-xs font-medium tracking-[0.08em] text-[var(--color-ink-soft)] shadow-sm backdrop-blur-sm">
+          {label}
+        </span>
+      </div>
+    </figure>
   );
 }

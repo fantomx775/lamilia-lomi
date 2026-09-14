@@ -21,7 +21,10 @@
     "publicDownloads": "Free downloads",
     "publicDownloadsDescription": "Available now, without an account or product unlock.",
     "downloadPublic": "Download file",
-    "availableNow": "Available now"
+    "availableNow": "Available now",
+    "insideBookTitle": "Inside the book",
+    "insideBookDescription": "A closer look at the pages, details, and quiet moments inside.",
+    "flipthroughLabel": "Flip-through · 8 sec"
   },
   "Funnel": {
     "ownerEyebrow": "Already own this book?",

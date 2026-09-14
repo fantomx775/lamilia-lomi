@@ -21,7 +21,10 @@
     "publicDownloads": "Darmowe pliki do pobrania",
     "publicDownloadsDescription": "Dostępne od razu — bez konta i bez odblokowywania produktu.",
     "downloadPublic": "Pobierz plik",
-    "availableNow": "Dostępne od razu"
+    "availableNow": "Dostępne od razu",
+    "insideBookTitle": "W środku książki",
+    "insideBookDescription": "Zajrzyj bliżej do stron, detali i spokojnych chwil ukrytych w środku.",
+    "flipthroughLabel": "Przekartkowanie · 8 sek."
   },
   "Funnel": {
     "ownerEyebrow": "Masz już tę książkę?",

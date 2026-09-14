@@ -21,7 +21,10 @@
     "publicDownloads": "Kostenlose Downloads",
     "publicDownloadsDescription": "Sofort verfügbar — ohne Konto und ohne Freischaltung.",
     "downloadPublic": "Datei herunterladen",
-    "availableNow": "Sofort verfügbar"
+    "availableNow": "Sofort verfügbar",
+    "insideBookTitle": "Ein Blick ins Buch",
+    "insideBookDescription": "Ein ruhiger Blick auf die Seiten, Details und kleinen Momente im Inneren.",
+    "flipthroughLabel": "Durchblättern · 8 Sek."
   },
   "Funnel": {
     "ownerEyebrow": "Du besitzt dieses Buch bereits?",

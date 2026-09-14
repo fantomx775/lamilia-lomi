@@ -17,6 +17,7 @@ describe("ProductVideoPreview", () => {
 
     expect(markup).toContain("<video");
     expect(markup).toContain('aria-label="Flipthrough preview"');
+    expect(markup).toContain("Flip-through · 8 sec");
     expect(markup).not.toContain("Public flipthrough video");
   });
 
@@ -32,6 +33,7 @@ describe("ProductVideoPreview", () => {
     );
 
     expect(markup).not.toContain("<video");
-    expect(markup).toContain("Public flipthrough video");
+    expect(markup).toContain("Flip-through · 8 sec");
+    expect(markup).not.toContain("Public flipthrough video");
   });
 });

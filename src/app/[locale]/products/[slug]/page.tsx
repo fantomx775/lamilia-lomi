@@ -168,16 +168,55 @@ export default async function ProductPage({ params, searchParams }: Props) {
         </div>
       </section>
 
-      <section className="border-y border-[var(--color-border)] bg-white/50">
-        <div className="mx-auto grid max-w-7xl gap-5 px-4 py-10 sm:px-6 lg:grid-cols-[1fr_1fr] lg:px-8">
-          <div className="grid gap-4 sm:grid-cols-2">
-            {product.gallery.map((asset, index) => (
-              <div key={asset.id} className="relative aspect-[4/3] overflow-hidden rounded-lg border border-[var(--color-border)] bg-white">
-                <Image src={asset.path} alt={asset.title ?? product.title} fill loading={index === 0 ? "eager" : undefined} unoptimized={isMediaProxyPath(asset.path)} className="object-cover" sizes="(min-width: 1024px) 42vw, (min-width: 640px) 50vw, 100vw" />
-              </div>
-            ))}
+      <section
+        aria-labelledby="inside-book-title"
+        className="border-y border-[var(--color-border)] bg-white/50"
+      >
+        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
+          <div className="mx-auto max-w-2xl text-center">
+            <h2
+              id="inside-book-title"
+              className="font-serif text-3xl font-semibold tracking-tight sm:text-4xl"
+            >
+              {productCopy("insideBookTitle")}
+            </h2>
+            <p className="mx-auto mt-4 max-w-xl text-base leading-7 text-[var(--color-muted)] sm:text-lg">
+              {productCopy("insideBookDescription")}
+            </p>
           </div>
-          <ProductVideoPreview video={product.video} />
+
+          <div className="mt-10 grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
+            <div className="grid gap-5 sm:grid-cols-2">
+              {product.gallery.map((asset, index) => {
+                const caption = getGalleryCaption(asset.title, asset.filename, product.title);
+
+                return (
+                  <figure key={asset.id} className="group">
+                    <div className="relative aspect-[4/3] overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
+                      <Image
+                        src={asset.path}
+                        alt={asset.title ?? product.title}
+                        fill
+                        loading={index === 0 ? "eager" : undefined}
+                        unoptimized={isMediaProxyPath(asset.path)}
+                        className="object-cover transition duration-500 ease-out group-hover:scale-[1.02]"
+                        sizes="(min-width: 1024px) 32vw, (min-width: 640px) 50vw, 100vw"
+                      />
+                    </div>
+                    {caption ? (
+                      <figcaption className="mt-3 px-1 text-sm leading-6 text-[var(--color-muted)]">
+                        {caption}
+                      </figcaption>
+                    ) : null}
+                  </figure>
+                );
+              })}
+            </div>
+            <ProductVideoPreview
+              video={product.video}
+              label={productCopy("flipthroughLabel")}
+            />
+          </div>
         </div>
       </section>
 
@@ -286,4 +325,24 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getGalleryCaption(
+  title: string | undefined,
+  filename: string,
+  productTitle: string,
+) {
+  const value = title?.trim();
+
+  if (!value) return null;
+
+  const normalizedValue = value.toLocaleLowerCase();
+  if (
+    normalizedValue === filename.trim().toLocaleLowerCase() ||
+    normalizedValue === productTitle.trim().toLocaleLowerCase()
+  ) {
+    return null;
+  }
+
+  return value;
 }
