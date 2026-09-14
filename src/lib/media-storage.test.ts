@@ -50,6 +50,29 @@ describe("persisted media cleanup", () => {
     expect(remove).toHaveBeenCalledWith([`products/${productId}/cover/old.jpg`]);
   });
 
+  it("keeps unchanged Supabase objects referenced by parsed product assets", async () => {
+    const remove = vi.fn().mockResolvedValue({ error: null });
+    mocks.createServiceRoleClient.mockReturnValue({ storage: { from: vi.fn(() => ({ remove })) } });
+    const storagePath = "products/" + productId + "/cover/existing.jpg";
+
+    await cleanupPersistedMedia({
+      previous: [asset("existing", storagePath)],
+      next: [{
+        id: "existing",
+        productId,
+        kind: "cover",
+        bucket: "public-media",
+        path: storagePath,
+        filename: "existing.jpg",
+        contentType: "image/jpeg",
+        sortOrder: 1,
+        isPublic: true,
+      }],
+    });
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+
   it("keeps metadata cleanup non-fatal when Storage deletion fails", async () => {
     const remove = vi.fn().mockResolvedValue({ error: { message: "temporary failure" } });
     mocks.createServiceRoleClient.mockReturnValue({ storage: { from: vi.fn(() => ({ remove })) } });
