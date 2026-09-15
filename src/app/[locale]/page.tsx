@@ -61,7 +61,7 @@ export default async function HomePage({ params }: Props) {
             <Link
               href={getAudiencePath(product!.audience, locale)}
               key={product!.id}
-              className="group overflow-hidden rounded-lg border border-[var(--color-border)] bg-white/80 p-3 shadow-[0_18px_46px_rgba(62,52,47,0.1)]"
+              className="group overflow-hidden rounded-lg border border-[var(--color-border)] bg-white/80 p-3 shadow-[0_18px_46px_rgba(62,52,47,0.1)] transition-[transform,box-shadow] duration-150 motion-reduce:transition-none hover:-translate-y-0.5 motion-reduce:hover:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
             >
               <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-[var(--color-blush)]">
                 <Image
@@ -70,7 +70,7 @@ export default async function HomePage({ params }: Props) {
                   fill
                   priority
                   unoptimized={isMediaProxyPath(product!.cover.path)}
-                  className="object-cover transition duration-500 group-hover:scale-[1.02]"
+                  className="object-cover transition duration-500 motion-reduce:transition-none group-hover:scale-[1.02] motion-reduce:group-hover:scale-100"
                   sizes="(min-width: 1024px) 28vw, 48vw"
                 />
               </div>
@@ -139,7 +139,7 @@ export default async function HomePage({ params }: Props) {
             </h2>
           </div>
           <Link
-            className="hidden text-sm font-medium text-[var(--color-ink)] hover:text-[var(--color-terracotta)] sm:inline"
+            className="hidden rounded-sm text-sm font-medium text-[var(--color-ink)] transition-colors duration-100 motion-reduce:transition-none hover:text-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)] active:opacity-70 sm:inline"
             href={`/${locale}/products`}
           >
             View all

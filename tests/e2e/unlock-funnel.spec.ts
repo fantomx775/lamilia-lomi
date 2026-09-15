@@ -205,10 +205,13 @@ test("mobile locale switcher exposes every locale and preserves code intent thro
   await expect(page.getByLabel("Premium-Code")).toHaveValue("LOMI-BOOK-2026");
 });
 
-test("mobile locale switching keeps no-code state and prevents cross-product intent leakage", async ({ page }) => {
+test("mobile locale switching keeps no-code state and prevents cross-product intent leakage", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/en/products/${productSlug}?code=LOMI-BOOK-2026`);
-  await switchLocaleThroughMobileMenu(page, "pl");
+  await page.locator("header a[aria-label]").first().waitFor({ state: "visible" });
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
+  await switchLocaleThroughMobileMenu(page, "pl", testInfo.project.name === "mobile");
   await expect(page.getByLabel("Kod premium")).toHaveValue("LOMI-BOOK-2026");
 
   await page.goto(`/en/products/${secondProductSlug}?step=verify`);
@@ -226,10 +229,16 @@ test("mobile locale switching keeps no-code state and prevents cross-product int
 async function switchLocaleThroughMobileMenu(
   page: Page,
   locale: keyof typeof localeOptionNames,
+  useTouch = false,
 ) {
   const currentLocale = (new URL(page.url()).pathname.match(/^\/(en|pl|de|es)/)?.[1] ?? "en").toUpperCase();
   await page.getByRole("button", { name: `Language: ${currentLocale}` }).click();
   const option = page.getByRole("button", { name: localeOptionNames[locale] });
   await expect(option).toBeVisible();
-  await option.click();
+
+  if (useTouch) {
+    await option.tap();
+  } else {
+    await option.click();
+  }
 }

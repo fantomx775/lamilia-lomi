@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
@@ -21,14 +23,16 @@ export default defineConfig({
       use: { ...devices["Pixel 7"] },
     },
   ],
-  webServer: {
-    command: "npm run dev",
-    env: {
-      LAMILIA_BACKEND: "local",
-      NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000",
-    },
-    url: "http://127.0.0.1:3000/en",
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  webServer: externalBaseUrl
+    ? undefined
+    : {
+        command: "npm run dev",
+        env: {
+          LAMILIA_BACKEND: "local",
+          NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000",
+        },
+        url: "http://127.0.0.1:3000/en",
+        reuseExistingServer: true,
+        timeout: 120_000,
+      },
 });

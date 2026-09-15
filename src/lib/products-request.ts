@@ -1,6 +1,12 @@
 import "server-only";
 
-import { getAdminContentSnapshot, getPublicContentSnapshot } from "./content-repository";
+import { cache } from "react";
+
+import {
+  getAdminContentSnapshot,
+  getPublicContentSnapshot,
+  getPublicProductDetailSnapshotForRequest,
+} from "./content-repository";
 import {
   getAllProductTypesFromSnapshot,
   getCatalogProductsFromSnapshot,
@@ -52,6 +58,23 @@ export async function getLocalizedProductViewForRequest(
     : await getPublicContentSnapshot();
 
   return getLocalizedProductViewFromSnapshot(snapshot, slug, requestedLocale, options);
+}
+
+const getLocalizedProductDetailViewForRequestCached = cache(
+  async (slug: string, requestedLocale: string | undefined) => {
+    const snapshot = await getPublicProductDetailSnapshotForRequest(slug);
+
+    return snapshot
+      ? getLocalizedProductViewFromSnapshot(snapshot, slug, requestedLocale)
+      : null;
+  },
+);
+
+export function getLocalizedProductDetailViewForRequest(
+  slug: string,
+  requestedLocale: string | undefined,
+) {
+  return getLocalizedProductDetailViewForRequestCached(slug, requestedLocale);
 }
 
 export async function getPublishedProductViewsForRequest(locale: Locale) {
