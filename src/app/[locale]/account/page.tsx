@@ -4,7 +4,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
-import { getDemoSession } from "@/lib/session.server";
+import { getAccountSessionForRequest } from "@/lib/session.server";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -12,7 +12,7 @@ type Props = {
 
 export default async function AccountPage({ params }: Props) {
   const { locale } = await params;
-  const session = await getDemoSession();
+  const session = await getAccountSessionForRequest();
   const nav: DashboardNavItem[] = [
     { href: `/${locale}/account`, label: locale === "pl" ? "Moje konto" : "Account", icon: "account" },
     { href: `/${locale}/library`, label: locale === "pl" ? "Moja biblioteka" : "My Library", icon: "library" },

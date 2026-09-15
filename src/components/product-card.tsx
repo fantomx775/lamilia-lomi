@@ -11,9 +11,11 @@ import { Badge } from "./ui/badge";
 export function ProductCard({
   product,
   locale,
+  imageLoading = "lazy",
 }: {
   product: LocalizedProductView;
   locale: Locale;
+  imageLoading?: "eager" | "lazy";
 }) {
   return (
     <Link
@@ -36,6 +38,7 @@ export function ProductCard({
           src={product.cover.path}
           alt={product.cover.title ?? product.title}
           fill
+          loading={imageLoading}
           unoptimized={isMediaProxyPath(product.cover.path)}
           className="object-cover"
           sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"

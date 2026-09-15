@@ -266,7 +266,6 @@ export default async function ProductPage({ params, searchParams }: Props) {
               alt={product.cover.title ?? product.title}
               fill
               loading="eager"
-              priority
               unoptimized={isMediaProxyPath(product.cover.path)}
               className="object-cover"
               sizes="(min-width: 1024px) 38vw, 100vw"

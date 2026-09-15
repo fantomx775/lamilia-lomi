@@ -62,6 +62,7 @@ export async function getLocalizedProductViewForRequest(
 
 const getLocalizedProductDetailViewForRequestCached = cache(
   async (slug: string, requestedLocale: string | undefined) => {
+    await delayProductDetailForE2E();
     const snapshot = await getPublicProductDetailSnapshotForRequest(slug);
 
     return snapshot
@@ -69,6 +70,23 @@ const getLocalizedProductDetailViewForRequestCached = cache(
       : null;
   },
 );
+
+async function delayProductDetailForE2E() {
+  if (
+    process.env.NODE_ENV === "production" ||
+    process.env.LAMILIA_BACKEND?.trim().toLowerCase() !== "local"
+  ) {
+    return;
+  }
+
+  const delayMs = Number(process.env.LAMILIA_TEST_PRODUCT_DETAIL_DELAY_MS);
+
+  if (!Number.isSafeInteger(delayMs) || delayMs < 1 || delayMs > 5_000) {
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
 
 export function getLocalizedProductDetailViewForRequest(
   slug: string,

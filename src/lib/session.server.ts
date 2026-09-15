@@ -89,6 +89,35 @@ export const getDemoSession = cache(async () => {
   return parseDemoSession(cookieStore.get(demoSessionCookie)?.value);
 });
 
+export type AccountSession = Pick<
+  DemoSession,
+  "email" | "role" | "emailVerified" | "marketingConsent" | "isDemo"
+>;
+
+export const getAccountSessionForRequest = cache(
+  async (): Promise<AccountSession | null> => {
+    if (getBackendMode() === "local") {
+      return getDemoSession();
+    }
+
+    const context = await getSupabaseUserContextForRequest();
+
+    if (!context?.user) {
+      return null;
+    }
+
+    const profile = await getSupabaseProfileForRequest();
+
+    return {
+      email: context.user.email ?? "",
+      role: profile?.role === "admin" ? "admin" : "user",
+      emailVerified: Boolean(context.user.email_confirmed_at),
+      marketingConsent: Boolean(profile?.marketing_consent),
+      isDemo: false,
+    };
+  },
+);
+
 export const getHeaderAccountStateForRequest = cache(async () => {
   if (getBackendMode() === "local") {
     const session = await getDemoSession();

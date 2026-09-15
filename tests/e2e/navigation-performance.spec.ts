@@ -51,8 +51,13 @@ test("desktop primary navigation journey reaches Catalog, Product Detail, Librar
   timings.push({ transition: "Product Detail → Catalog", clickToContentMs: Date.now() - started });
 
   started = Date.now();
-  await primaryNav.getByRole("link", { name: "My Library" }).click();
-  await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
+  await Promise.all([
+    page.waitForURL(/\/en\/library$/, { timeout: 15_000 }),
+    primaryNav.getByRole("link", { name: "My Library" }).click(),
+  ]);
+  await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible({
+    timeout: 15_000,
+  });
   timings.push({ transition: "Header → Library", clickToContentMs: Date.now() - started });
   await page.screenshot({ path: testInfo.outputPath("library-desktop.png"), fullPage: true });
 
@@ -79,6 +84,7 @@ test("tablet header navigation is visible and fits the viewport", async ({ page 
 
 test("admin sidebar navigation reaches the main resource pages with immediate active feedback", async ({ page }, testInfo) => {
   test.skip(!process.env.PLAYWRIGHT_LOCAL_DEMO, "Uses the local demo admin session only");
+  test.skip(testInfo.project.name !== "chromium", "Admin sidebar navigation is verified at desktop width");
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/pl/login?redirectTo=/admin");
@@ -97,18 +103,28 @@ test("admin sidebar navigation reaches the main resource pages with immediate ac
     { label: "Strony", path: "/admin/pages" },
     { label: "Ustawienia", path: "/admin/settings" },
   ];
+  const timings: Array<{ transition: string; clickToDestinationMs: number }> = [];
 
   for (const { label, path } of routes) {
-    await page.getByRole("link", { name: label, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`${path.replaceAll("/", "\\/")}$`));
+    const started = Date.now();
+    await Promise.all([
+      page.waitForURL(new RegExp(`${path.replaceAll("/", "\\/")}$`)),
+      page.getByRole("link", { name: label, exact: true }).click(),
+    ]);
     await expect(page.getByRole("link", { name: label, exact: true })).toHaveAttribute(
       "aria-current",
       "page",
     );
+    timings.push({ transition: `Admin sidebar → ${label}`, clickToDestinationMs: Date.now() - started });
     if (label === "Produkty") {
       await page.screenshot({ path: testInfo.outputPath("admin-products.png"), fullPage: true });
     }
   }
+
+  await testInfo.attach("admin-navigation-timings.json", {
+    body: JSON.stringify(timings, null, 2),
+    contentType: "application/json",
+  });
 });
 
 test("product navigation keeps semantic keyboard behavior and reaches the full destination", async ({ page }, testInfo) => {
@@ -156,7 +172,11 @@ test("a slow Product Detail request shows inline pending feedback and then the f
   await expect(productCard).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("catalog.png"), fullPage: true });
   try {
-    await productCard.click();
+    if (testInfo.project.name === "mobile") {
+      await productCard.tap();
+    } else {
+      await productCard.click();
+    }
     await requestStarted;
 
     const pendingIndicator = productCard.getByTestId("product-card-pending");
@@ -175,7 +195,45 @@ test("a slow Product Detail request shows inline pending feedback and then the f
   }
 });
 
+test("a delayed Product Detail read shows its route skeleton before the final page", async ({ page }, testInfo) => {
+  test.skip(
+    !process.env.LAMILIA_TEST_PRODUCT_DETAIL_DELAY_MS,
+    "Requires the opt-in local Product Detail read delay",
+  );
+
+  const serverRequests: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === `/en/products/${productSlug}` && request.headers().rsc === "1") {
+      serverRequests.push(request.url());
+    }
+  });
+
+  await page.goto("/en/products");
+  const productCard = page.getByRole("link", { name: /Moon Garden Coloring Book/i });
+  await expect(productCard).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("catalog-before-slow-product-read.png"), fullPage: true });
+
+  if (testInfo.project.name === "mobile") {
+    await productCard.tap();
+  } else {
+    await productCard.click();
+  }
+
+  await expect(productCard.getByTestId("product-card-pending")).toHaveAttribute("data-pending", "true");
+  await expect(page.getByTestId("product-detail-loading")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("product-detail-loading-skeleton.png"), fullPage: true });
+
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
+  await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
+  await expect(page.getByTestId("product-detail-loading")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("product-detail-after-slow-read.png"), fullPage: true });
+  expect(serverRequests.length).toBeGreaterThan(0);
+});
+
 test("mobile primary navigation exposes Catalog and Library without horizontal overflow", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "Touch interactions require the mobile project");
+
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const sameOriginFailures: string[] = [];
@@ -208,6 +266,24 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   await expect(nav.getByRole("link", { name: "My Library" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
+  await page.screenshot({ path: testInfo.outputPath("mobile-home-navigation.png"), fullPage: true });
+  await nav.getByRole("link", { name: "My Library" }).tap();
+  await expect(page).toHaveURL(/\/en\/library$/);
+  await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
+
+  await nav.getByRole("link", { name: "Catalog", exact: true }).tap();
+  await expect(page).toHaveURL(/\/en\/products$/);
+  await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.getByRole("link", { name: /Moon Garden Coloring Book/i }).tap();
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
+  await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/en\/products$/);
+  await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+  expect(sameOriginFailures).toEqual([]);
   await testInfo.attach("mobile-navigation-browser-errors.log", {
     body: [
       "Console errors:",
@@ -219,10 +295,4 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
     ].join("\n"),
     contentType: "text/plain",
   });
-  await page.screenshot({ path: testInfo.outputPath("mobile-home-navigation.png"), fullPage: true });
-  await nav.getByRole("link", { name: "My Library" }).click();
-  await expect(page).toHaveURL(/\/en\/library$/);
-  await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
-  expect(pageErrors).toEqual([]);
-  expect(sameOriginFailures).toEqual([]);
 });

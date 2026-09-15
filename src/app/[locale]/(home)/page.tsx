@@ -68,7 +68,7 @@ export default async function HomePage({ params }: Props) {
                   src={product!.cover.path}
                   alt={product!.cover.title ?? product!.title}
                   fill
-                  priority
+                  loading="eager"
                   unoptimized={isMediaProxyPath(product!.cover.path)}
                   className="object-cover transition duration-500 motion-reduce:transition-none group-hover:scale-[1.02] motion-reduce:group-hover:scale-100"
                   sizes="(min-width: 1024px) 28vw, 48vw"
