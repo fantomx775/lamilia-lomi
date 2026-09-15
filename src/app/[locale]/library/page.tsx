@@ -29,7 +29,7 @@ export default async function LibraryPage({ params }: Props) {
           <CardContent>
             <p className="text-[var(--color-muted)]">{t("guest")}</p>
             <Link
-              className="mt-4 inline-flex text-[var(--color-terracotta)]"
+              className="mt-4 inline-flex rounded-sm text-[var(--color-terracotta)] transition-colors duration-100 motion-reduce:transition-none hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-[var(--color-terracotta)] active:opacity-70"
               href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/library`)}`}
             >
               {t("login")}
@@ -57,8 +57,13 @@ export default async function LibraryPage({ params }: Props) {
       <p className="mt-3 text-[var(--color-muted)]">{t("description")}</p>
       {unlockedProducts.length ? (
         <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {unlockedProducts.map((product) => (
-            <ProductCard key={product.id} product={product} locale={locale} />
+          {unlockedProducts.map((product, index) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              locale={locale}
+              imageLoading={index === 0 ? "eager" : "lazy"}
+            />
           ))}
         </div>
       ) : (
@@ -68,7 +73,7 @@ export default async function LibraryPage({ params }: Props) {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-[var(--color-muted)]">{t("emptyDescription")}</p>
-            <Link className="mt-5 inline-flex text-sm font-medium text-[var(--color-terracotta)]" href={`/${locale}/products`}>
+            <Link className="mt-5 inline-flex rounded-sm text-sm font-medium text-[var(--color-terracotta)] transition-colors duration-100 motion-reduce:transition-none hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-[var(--color-terracotta)] active:opacity-70" href={`/${locale}/products`}>
               {t("browse")}
             </Link>
           </CardContent>

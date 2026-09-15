@@ -86,8 +86,13 @@ export default async function ProductsPage({ params, searchParams }: Props) {
 
       {products.length ? (
         <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {products.map((product) => (
-            <ProductCard key={product.id} product={product} locale={locale} />
+          {products.map((product, index) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              locale={locale}
+              imageLoading={index === 0 ? "eager" : "lazy"}
+            />
           ))}
         </div>
       ) : (

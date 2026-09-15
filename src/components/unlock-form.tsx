@@ -32,9 +32,9 @@ export type UnlockCopy = {
 type Props = {
   locale: Locale;
   productSlug: string;
-  productId: string;
   initialCode?: string;
-  session: DemoSession | null;
+  session: Pick<DemoSession, "emailVerified" | "isDemo"> | null;
+  isUnlocked: boolean;
   error?: string;
   alreadyUnlocked?: boolean;
   copy: UnlockCopy;
@@ -43,9 +43,9 @@ type Props = {
 export function UnlockForm({
   locale,
   productSlug,
-  productId,
   initialCode,
   session,
+  isUnlocked,
   error,
   alreadyUnlocked = false,
   copy,
@@ -108,7 +108,7 @@ export function UnlockForm({
     return null;
   }
 
-  if (session.unlockedProductIds.includes(productId) || alreadyUnlocked) {
+  if (isUnlocked || alreadyUnlocked) {
     return (
       <div className="grid gap-4" data-testid="unlock-success-state">
         <div className="flex gap-3 rounded-lg bg-[var(--color-sage)]/80 p-4" role="status" aria-live="polite">

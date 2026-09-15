@@ -24,6 +24,89 @@ export const getPublicContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: false }),
 );
 
+export const getPublicProductDetailSnapshotForRequest = cache(
+  async (slug: string): Promise<ContentSnapshot | null> => {
+    if (getBackendMode() === "local") {
+      const snapshot = await getPublicContentSnapshot();
+      return snapshot.products.some(
+        (product) => product.slug === slug && product.status === "published",
+      )
+        ? snapshot
+        : null;
+    }
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        `
+          id,
+          slug,
+          status,
+          audience,
+          product_type,
+          cover_asset_id,
+          video_asset_id,
+          review_delay_days,
+          sort_order,
+          created_at,
+          updated_at,
+          product_translations (
+            locale,
+            title,
+            short_description,
+            long_description,
+            seo_title,
+            seo_description
+          ),
+          product_categories (
+            category_id,
+            category:categories (
+              id,
+              slug,
+              sort_order,
+              category_translations ( locale, name, description )
+            )
+          ),
+          product_tags (
+            tag_id,
+            tag:tags (
+              id,
+              slug,
+              tag_translations ( locale, name )
+            )
+          ),
+          product_assets!product_assets_product_id_fkey (
+            id,
+            product_id,
+            kind,
+            bucket,
+            path,
+            filename,
+            content_type,
+            size_bytes,
+            locale,
+            title,
+            sort_order,
+            is_public,
+            is_active
+          ),
+          amazon_links ( id, product_id, market, url, is_primary )
+        `,
+      )
+      .eq("slug", slug)
+      .eq("status", "published")
+      .eq("product_assets.is_active", true)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Supabase product detail read failed: ${error.message}`);
+    }
+
+    return data ? mapPublicProductDetailRow(data as DbRow) : null;
+  },
+);
+
 export const getAdminContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: true }),
 );
@@ -145,6 +228,54 @@ function mapProduct(
     amazonLinks: amazonRows.map(mapAmazonLink),
     premiumCodes: premiumCodeRows.map(mapPremiumCode),
   };
+}
+
+function mapPublicProductDetailRow(row: DbRow): ContentSnapshot {
+  const productCategoryRows = rowsValue(row.product_categories);
+  const productTagRows = rowsValue(row.product_tags);
+  const categories = productCategoryRows
+    .map((item) => {
+      const category = recordValue(item.category);
+      return category
+        ? mapCategory(category, rowsValue(category.category_translations))
+        : null;
+    })
+    .filter((category): category is Category => Boolean(category));
+  const tags = productTagRows
+    .map((item) => {
+      const tag = recordValue(item.tag);
+      return tag ? mapTag(tag, rowsValue(tag.tag_translations)) : null;
+    })
+    .filter((tag): tag is Tag => Boolean(tag));
+
+  return {
+    products: [
+      mapProduct(
+        row,
+        rowsValue(row.product_translations),
+        productCategoryRows,
+        productTagRows,
+        rowsValue(row.product_assets),
+        rowsValue(row.amazon_links),
+        [],
+      ),
+    ],
+    categories,
+    tags,
+    staticPages: [],
+  };
+}
+
+function rowsValue(value: unknown): DbRow[] {
+  return Array.isArray(value) ? value.filter(isDbRow) : [];
+}
+
+function recordValue(value: unknown): DbRow | null {
+  return isDbRow(value) ? value : null;
+}
+
+function isDbRow(value: unknown): value is DbRow {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function mapProductTranslation(row: DbRow): ProductTranslation {
