@@ -2,6 +2,7 @@ import createMiddleware from "next-intl/middleware";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { routing } from "./i18n/routing";
+import { isHtmlDocumentRequest } from "./lib/is-html-document-request";
 import { hasSupabaseAuthCookie } from "./lib/supabase/auth-cookie";
 import { updateSession } from "./lib/supabase/proxy";
 import { getBackendMode } from "./lib/config";
@@ -40,7 +41,11 @@ export default async function proxy(request: NextRequest) {
 
   const match = request.nextUrl.pathname.match(productPath);
 
-  if (request.method === "GET" && match && !isAppRouterRequest(request)) {
+  if (
+    request.method === "GET" &&
+    match &&
+    isHtmlDocumentRequest(request.headers)
+  ) {
     const locale = match[1] as keyof typeof notFoundCopy;
     let slug: string;
 
@@ -69,14 +74,6 @@ export default async function proxy(request: NextRequest) {
 export const config = {
   matcher: "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
 };
-
-function isAppRouterRequest(request: NextRequest) {
-  return (
-    request.headers.get("rsc") === "1" ||
-    request.headers.has("next-router-prefetch") ||
-    request.headers.get("purpose") === "prefetch"
-  );
-}
 
 function updateSessionIfNeeded(request: NextRequest, response: NextResponse) {
   const isApiRequest = request.nextUrl.pathname.startsWith("/api");
