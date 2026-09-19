@@ -51,7 +51,15 @@ On the candidate, the Product Detail route skeleton was visible 87 ms after the 
 
 Authenticated Preview Admin navigation could not be measured because no Preview admin session was available. Local demo Admin navigation reached Products, Categories, Tags, Users, Pages, and Settings in one sample each (186–273 ms); the active route was reflected in `aria-current`. Those local figures are interaction checks, not hosted performance claims.
 
-The unknown localized product slug rendered the localized “Product not found” page with `noindex,nofollow`; a Preview request log recorded the 404. The browser console had no errors or warnings during the checked candidate routes. Vercel Preview logs contained 12 media 503 events on the same two fixture assets seen in the baseline observation window; they were pre-existing Preview fixture behavior and were not changed. A guest `/admin` request returned the fail-closed access page; no authenticated Preview Admin flow was available.
+The earlier candidate's unknown localized product slug rendered the localized “Product not found” page with `noindex,nofollow`; a Preview request log recorded the 404. The browser console had no errors or warnings during the checked candidate routes. Vercel Preview logs contained 12 media 503 events on the same two fixture assets seen in the baseline observation window; they were pre-existing Preview fixture behavior and were not changed. A guest `/admin` request returned the fail-closed access page; no authenticated Preview Admin flow was available.
+
+## PR #22 follow-up (2026-09-19)
+
+The Proxy no longer performs a product existence query. Catalog and Product Detail now use separate route groups, so `/[locale]/products/loading.tsx` cannot become the fallback for `/[locale]/products/[slug]`; the Product Detail route owns its destination-shaped skeleton. A deterministic local delayed-read Playwright check confirms that the Product Detail skeleton is visible while the Catalog skeleton is absent.
+
+Next.js 16 streams the Product Detail loading boundary before the page-level `notFound()` can complete. Without restoring a database lookup in Proxy, an unknown direct Product Detail request therefore remains a framework-native soft 404 (`200`) with localized not-found UI and `noindex,nofollow` metadata. This is the documented route-layer limitation; no Proxy database workaround was reintroduced.
+
+The follow-up also adds focused coverage for guest, unverified, locked, unlocked, product-scoped, and database-error entitlement states. No new Preview or Production deployment was performed for this follow-up. The timing samples above remain single uncontrolled observations and do not establish the repeatable cold/warm desktop/mobile benchmark needed to claim that issues #16/#21 are fully satisfied.
 
 ## Validation
 

@@ -208,7 +208,7 @@ export const getProductDetailAccessForRequest = cache(
       .maybeSingle();
 
     if (error) {
-      throw new Error(`Could not check this product unlock: ${error.message}`);
+      throw new Error("Could not check this product unlock.");
     }
 
     return { session, isUnlocked: Boolean(data) };

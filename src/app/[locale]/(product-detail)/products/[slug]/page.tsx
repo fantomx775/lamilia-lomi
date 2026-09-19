@@ -34,7 +34,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const product = await getLocalizedProductDetailViewForRequest(slug, locale);
 
   if (!product) {
-    notFound();
+    return {
+      robots: {
+        index: false,
+        follow: false,
+      },
+    };
   }
 
   return buildProductMetadata(

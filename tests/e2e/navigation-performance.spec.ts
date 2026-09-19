@@ -11,16 +11,21 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("direct unknown Product Detail keeps the localized HTTP 404 and noindex response", async ({ page }) => {
+test("direct unknown Product Detail renders a localized route-layer soft 404", async ({ page }) => {
   const response = await page.goto("/pl/products/not-a-real-product");
 
-  expect(response?.status()).toBe(404);
+  // App Router streams the route loading boundary before the page-level notFound()
+  // can run. Keep the DB lookup out of Proxy and assert the framework-native soft 404.
+  expect(response?.status()).toBe(200);
   await expect(page.getByRole("heading", { name: "Nie znaleziono produktu" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Przeglądaj katalog" })).toHaveAttribute(
     "href",
     "/pl/products",
   );
-  expect(await response?.headerValue("x-robots-tag")).toContain("noindex");
+  const robotsContent = await page.locator('meta[name="robots"]').evaluateAll((elements) =>
+    elements.map((element) => element.getAttribute("content")),
+  );
+  expect(robotsContent).toContain("noindex, nofollow");
 });
 
 test("desktop primary navigation journey reaches Catalog, Product Detail, Library, and Login", async ({ page }, testInfo) => {
@@ -222,6 +227,7 @@ test("a delayed Product Detail read shows its route skeleton before the final pa
 
   await expect(productCard.getByTestId("product-card-pending")).toHaveAttribute("data-pending", "true");
   await expect(page.getByTestId("product-detail-loading")).toBeVisible();
+  await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("product-detail-loading-skeleton.png"), fullPage: true });
 
   await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
