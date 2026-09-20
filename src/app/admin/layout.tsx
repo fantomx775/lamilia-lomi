@@ -1,11 +1,11 @@
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
 import { SiteHeader } from "@/components/site-header";
 import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { hasAdminAccess } from "@/lib/auth";
-import { getDemoSession } from "@/lib/session.server";
+import { getAdminLayoutAccessForRequest } from "@/lib/session.server";
 
 const nav: DashboardNavItem[] = [
   { href: "/admin", label: "Dashboard", icon: "dashboard" },
@@ -25,10 +25,18 @@ export const metadata = {
   },
 };
 
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const session = await getDemoSession();
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<AdminRouteLoading />}>
+      <AdminAccessLayout>{children}</AdminAccessLayout>
+    </Suspense>
+  );
+}
 
-  if (!session || !hasAdminAccess(session)) {
+async function AdminAccessLayout({ children }: { children: React.ReactNode }) {
+  const access = await getAdminLayoutAccessForRequest();
+
+  if (!access) {
     return (
       <>
         <SiteHeader locale="pl" showLanguageSwitcher={false} />
@@ -54,10 +62,26 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <>
-      <SiteHeader locale={session.preferredLocale} showLanguageSwitcher={false} />
+      <SiteHeader locale={access.preferredLocale} showLanguageSwitcher={false} />
       <DashboardShell nav={nav} title="LamiliaLomi" subtitle="Panel administracyjny">
         {children}
       </DashboardShell>
     </>
+  );
+}
+
+function AdminRouteLoading() {
+  return (
+    <main data-testid="admin-route-loading" aria-busy="true" className="min-h-screen bg-[var(--color-bg)]">
+      <p className="sr-only" role="status" aria-live="polite">Loading admin page</p>
+      <div className="h-16 border-b border-[var(--color-border)] bg-white/80" />
+      <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[15rem_1fr] lg:px-8">
+        <div className="h-96 animate-pulse rounded-xl bg-white/80 motion-reduce:animate-none" />
+        <div className="space-y-5">
+          <div className="h-10 w-1/2 animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none" />
+          <div className="h-60 animate-pulse rounded-xl bg-white/80 motion-reduce:animate-none" />
+        </div>
+      </div>
+    </main>
   );
 }

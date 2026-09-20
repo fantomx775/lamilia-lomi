@@ -27,7 +27,10 @@ export function DashboardShell({
       )}
     >
       <aside className="min-w-0 border-b border-[var(--color-border)] bg-white/72 px-4 py-4 lg:fixed lg:inset-y-16 lg:left-0 lg:w-64 lg:border-b-0 lg:border-r lg:px-5">
-        <Link href={nav[0]?.href ?? "/"} className="block">
+        <Link
+          href={nav[0]?.href ?? "/"}
+          className="block rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)] active:opacity-70"
+        >
           <span className="block font-serif text-2xl font-semibold text-[var(--color-ink)]">
             {title}
           </span>
