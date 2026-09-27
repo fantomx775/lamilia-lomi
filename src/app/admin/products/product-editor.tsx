@@ -49,6 +49,10 @@ type AssetDraft = {
   progress?: number;
 };
 
+function sortGalleryAssets(assets: AssetDraft[]) {
+  return assets.slice().sort((left, right) => left.sortOrder - right.sortOrder);
+}
+
 type AmazonDraft = {
   clientId: string;
   id: string;
@@ -184,6 +188,11 @@ export function ProductEditor({
     }
 
     setMediaErrors((current) => ({ ...current, [kind]: selectionErrors.join(" ") || undefined }));
+    const galleryOrderEnd = kind === "gallery"
+      ? assets
+        .filter((asset) => !asset.removed && asset.kind === "gallery")
+        .reduce((max, asset) => Math.max(max, asset.sortOrder), 0)
+      : activeCount;
     const newDrafts = files.map((file, index) => ({
       clientId: createClientId(),
       id: "",
@@ -196,7 +205,7 @@ export function ProductEditor({
       sizeBytes: file.size,
       locale: "" as const,
       title: file.name,
-      sortOrder: activeCount + index + 1,
+      sortOrder: galleryOrderEnd + index + 1,
       removed: false,
       status: "queued" as const,
       file,
@@ -268,7 +277,15 @@ export function ProductEditor({
         uploadedAsset = payload.asset;
         uploadTarget = payload.upload;
         setAssets((current) => current.map((asset) => asset.clientId === draft.clientId
-          ? { ...asset, ...payload.asset, upload: payload.upload, status: "uploading", progress: 0, error: undefined }
+          ? {
+            ...asset,
+            ...payload.asset,
+            sortOrder: asset.kind === "gallery" ? asset.sortOrder : payload.asset?.sortOrder ?? asset.sortOrder,
+            upload: payload.upload,
+            status: "uploading",
+            progress: 0,
+            error: undefined,
+          }
           : asset));
       }
 
@@ -295,6 +312,7 @@ export function ProductEditor({
           return {
             ...asset,
             ...uploadedAsset,
+            sortOrder: asset.kind === "gallery" ? asset.sortOrder : uploadedAsset.sortOrder ?? asset.sortOrder,
             upload: uploadTarget,
             status: "uploaded",
             uploaded: true,
@@ -356,7 +374,7 @@ export function ProductEditor({
 
   const reorderGallery = (clientId: string, direction: -1 | 1) => {
     setAssets((current) => {
-      const gallery = current.filter((asset) => !asset.removed && asset.kind === "gallery" && asset.status === "uploaded");
+      const gallery = sortGalleryAssets(current.filter((asset) => !asset.removed && asset.kind === "gallery"));
       const index = gallery.findIndex((asset) => asset.clientId === clientId);
       const nextIndex = index + direction;
       if (index < 0 || nextIndex < 0 || nextIndex >= gallery.length) return current;
@@ -641,7 +659,8 @@ function MediaSection({
   onMove: (clientId: string, direction: -1 | 1) => void;
 }) {
   const sectionAssets = assets.filter((asset) => asset.kind === kind);
-  const visibleAssets = sectionAssets.filter((asset) => !asset.removed);
+  const activeAssets = sectionAssets.filter((asset) => !asset.removed);
+  const visibleAssets = kind === "gallery" ? sortGalleryAssets(activeAssets) : activeAssets;
   const spec = MEDIA_UPLOAD_SPECS[kind];
 
   return <AdminEditorSection title={title} description={description}>
@@ -710,7 +729,7 @@ function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }:
       {isUploading ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg)]" role="progressbar" aria-label="Postęp przesyłania" aria-valuemin={0} aria-valuemax={100} aria-valuenow={asset.progress ?? 0}><div className="h-full rounded-full bg-[var(--color-terracotta)] transition-[width]" style={{ width: `${asset.progress ?? 0}%` }} /></div> : null}
     </div>
     <div className="flex flex-wrap items-center justify-end gap-1 sm:max-w-32">
-      {kind === "gallery" && asset.status === "uploaded" ? <><Button type="button" variant="ghost" size="icon" disabled={index === 0} onClick={() => onMove(asset.clientId, -1)} aria-label={`Przenieś ${asset.filename} wyżej`}><MoveUp className="size-4" aria-hidden /></Button><Button type="button" variant="ghost" size="icon" disabled={index === total - 1} onClick={() => onMove(asset.clientId, 1)} aria-label={`Przenieś ${asset.filename} niżej`}><MoveDown className="size-4" aria-hidden /></Button></> : null}
+      {kind === "gallery" ? <><Button type="button" variant="ghost" size="icon" disabled={index === 0} onClick={() => onMove(asset.clientId, -1)} aria-label={`Przenieś ${asset.filename} wyżej`}><MoveUp className="size-4" aria-hidden /></Button><Button type="button" variant="ghost" size="icon" disabled={index === total - 1} onClick={() => onMove(asset.clientId, 1)} aria-label={`Przenieś ${asset.filename} niżej`}><MoveDown className="size-4" aria-hidden /></Button></> : null}
       <Button type="button" variant="ghost" size="sm" disabled={asset.status === "uploading"} onClick={() => onRemove(asset)} className="text-red-800"><Trash2 className="size-4" aria-hidden />Usuń</Button>
     </div>
     {asset.status === "failed" ? <div className="sm:col-span-2"><Button type="button" variant="outline" size="sm" onClick={() => onRetry(asset)}><RotateCcw className="size-4" aria-hidden />Ponów</Button></div> : null}

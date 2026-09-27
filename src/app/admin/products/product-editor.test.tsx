@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within, type RenderResult } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,7 +24,65 @@ vi.mock("@/app/admin/actions", () => ({
 }));
 
 import { ProductEditor } from "./product-editor";
+import { buildProductFromFormData } from "@/lib/admin-content";
 import { getSeedContentSnapshot } from "@/lib/content-store";
+import type { Product, ProductAsset } from "@/lib/types";
+
+function productWithGalleryAssets(product: Product, filenames: string[], reverseStateOrder = false): Product {
+  const template = product.assets.find((asset) => asset.kind === "gallery");
+  if (!template) throw new Error("The seed product needs a gallery asset for the editor fixture.");
+
+  const gallery: ProductAsset[] = filenames.map((filename, index) => ({
+    ...template,
+    id: `gallery-fixture-${index + 1}`,
+    productId: product.id,
+    path: `/uploads/${product.id}/gallery/${filename}`,
+    storagePath: undefined,
+    filename,
+    contentType: "image/png",
+    sizeBytes: 100 + index,
+    title: `Gallery title ${index + 1}`,
+    sortOrder: index + 1,
+  }));
+
+  return {
+    ...product,
+    assets: [
+      ...product.assets.filter((asset) => asset.kind !== "gallery"),
+      ...(reverseStateOrder ? gallery.slice().reverse() : gallery),
+    ],
+  };
+}
+
+function galleryPreviewOrder(view: RenderResult) {
+  return view.getAllByRole("img").flatMap((image) => {
+    const label = image.getAttribute("aria-label");
+    return label?.startsWith("Podgląd image-") ? [label.slice("Podgląd ".length)] : [];
+  });
+}
+
+function galleryActionOrder(view: RenderResult) {
+  return Array.from(view.container.querySelectorAll<HTMLButtonElement>(
+    'button[aria-label^="Przenieś image-"][aria-label$=" wyżej"]',
+  )).map((button) => button.getAttribute("aria-label")!.slice("Przenieś ".length, -" wyżej".length));
+}
+
+function galleryRow(view: RenderResult, filename: string) {
+  const row = view.getByRole("img", { name: `Podgląd ${filename}` }).closest<HTMLDivElement>("div.rounded-xl");
+  if (!row) throw new Error(`Missing gallery row for ${filename}.`);
+  return within(row);
+}
+
+function galleryAssetsFromFormData(formData: FormData) {
+  const kinds = formData.getAll("assetKind").map(String);
+  const ids = formData.getAll("assetId").map(String);
+  const filenames = formData.getAll("assetFilename").map(String);
+  const sortOrders = formData.getAll("assetSortOrder").map(String);
+
+  return kinds.flatMap((kind, index) => kind === "gallery"
+    ? [{ id: ids[index], filename: filenames[index], sortOrder: sortOrders[index] }]
+    : []);
+}
 
 afterEach(() => {
   cleanup();
@@ -178,6 +236,225 @@ describe("ProductEditor V2", () => {
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
     const formData = saveAction.mock.calls[0][0] as FormData;
     expect(formData.get("title_en")).toBe("Ocean Calm");
+  });
+
+  it("moves the selected gallery thumbnail exactly one position and enforces both boundaries", async () => {
+    const names = ["image-a.png", "image-b.png", "image-c.png", "image-d.png"];
+    const editorProduct = productWithGalleryAssets(product, names);
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor title="Edycja produktu" product={editorProduct} categories={snapshot.categories} tags={snapshot.tags} />,
+    );
+    const move = async (filename: string, direction: "wyżej" | "niżej") => {
+      await user.click(galleryRow(view, filename).getByRole("button", { name: `Przenieś ${filename} ${direction}` }));
+    };
+
+    expect(galleryPreviewOrder(view)).toEqual(names);
+    expect(galleryRow(view, names[0]).getByRole("button", { name: `Przenieś ${names[0]} wyżej` })).toBeDisabled();
+    expect(galleryRow(view, names[3]).getByRole("button", { name: `Przenieś ${names[3]} niżej` })).toBeDisabled();
+
+    await move(names[0], "niżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[1], names[0], names[2], names[3]]);
+    await move(names[0], "niżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[1], names[2], names[0], names[3]]);
+    await move(names[0], "wyżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[1], names[0], names[2], names[3]]);
+
+    await move(names[3], "wyżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[1], names[0], names[3], names[2]]);
+    await move(names[3], "wyżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[1], names[3], names[0], names[2]]);
+    await move(names[3], "wyżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[3], names[1], names[0], names[2]]);
+    expect(galleryRow(view, names[3]).getByRole("button", { name: `Przenieś ${names[3]} wyżej` })).toBeDisabled();
+
+    await move(names[3], "niżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[1], names[3], names[0], names[2]]);
+    await move(names[3], "niżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[1], names[0], names[3], names[2]]);
+    await move(names[3], "niżej");
+    expect(galleryPreviewOrder(view)).toEqual([names[1], names[0], names[2], names[3]]);
+    expect(galleryRow(view, names[3]).getByRole("button", { name: `Przenieś ${names[3]} niżej` })).toBeDisabled();
+  }, 15_000);
+
+  it("loads existing images by sort order and preserves reordered IDs and metadata through save and reload", async () => {
+    const names = ["image-a.png", "image-b.png", "image-c.png", "image-d.png"];
+    const editorProduct = productWithGalleryAssets(product, names, true);
+    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor title="Edycja produktu" product={editorProduct} categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />,
+    );
+    const moveUp = async (filename: string) => {
+      await user.click(galleryRow(view, filename).getByRole("button", { name: `Przenieś ${filename} wyżej` }));
+    };
+
+    expect(galleryPreviewOrder(view)).toEqual(names);
+    await moveUp(names[3]);
+    expect(galleryPreviewOrder(view)).toEqual([names[0], names[1], names[3], names[2]]);
+    await moveUp(names[3]);
+    expect(galleryPreviewOrder(view)).toEqual([names[0], names[3], names[1], names[2]]);
+    await moveUp(names[3]);
+    expect(galleryPreviewOrder(view)).toEqual([names[3], names[0], names[1], names[2]]);
+
+    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalled());
+    const formData = saveAction.mock.calls[0][0] as FormData;
+    const submittedGallery = galleryAssetsFromFormData(formData);
+    expect(submittedGallery.map(({ filename }) => filename)).toEqual([names[3], names[0], names[1], names[2]]);
+    expect(submittedGallery.map(({ sortOrder }) => sortOrder)).toEqual(["1", "2", "3", "4"]);
+
+    const savedProduct = buildProductFromFormData(formData, {
+      existing: editorProduct,
+      snapshot,
+      now: new Date("2026-09-27T12:00:00.000Z"),
+    }).product;
+    const savedGallery = savedProduct.assets.filter((asset) => asset.kind === "gallery");
+    expect(savedGallery.map(({ filename }) => filename)).toEqual([names[3], names[0], names[1], names[2]]);
+    expect(savedGallery.map(({ id }) => id)).toEqual([
+      "gallery-fixture-4",
+      "gallery-fixture-1",
+      "gallery-fixture-2",
+      "gallery-fixture-3",
+    ]);
+    expect(savedGallery.map(({ title }) => title)).toEqual([
+      "Gallery title 4",
+      "Gallery title 1",
+      "Gallery title 2",
+      "Gallery title 3",
+    ]);
+
+    view.unmount();
+    const reloaded = render(
+      <ProductEditor title="Edycja produktu" product={savedProduct} categories={snapshot.categories} tags={snapshot.tags} />,
+    );
+    expect(galleryPreviewOrder(reloaded)).toEqual([names[3], names[0], names[1], names[2]]);
+  });
+
+  it("keeps order after adding an image and moving images after a removal", async () => {
+    const names = ["image-a.png", "image-b.png"];
+    const editorProduct = productWithGalleryAssets(product, names);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        status: 415,
+        ok: false,
+        json: async () => ({ error: "Lokalny upload wymaga przesłania pliku." }),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ asset: {
+          id: "gallery-uploaded-c",
+          productId: editorProduct.id,
+          kind: "gallery",
+          bucket: "public-media",
+          path: `/uploads/${editorProduct.id}/gallery/image-c.png`,
+          filename: "image-c.png",
+          contentType: "image/png",
+          sizeBytes: 5,
+          title: "Uploaded gallery title",
+          sortOrder: 100,
+          isPublic: true,
+          isActive: true,
+          uploaded: true,
+        } }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor title="Edycja produktu" product={editorProduct} categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />,
+    );
+
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-gallery");
+    expect(input).not.toBeNull();
+    await user.upload(input!, new File(["new image"], "image-c.png", { type: "image/png" }));
+    await waitFor(() => expect(galleryPreviewOrder(view)).toContain("image-c.png"));
+    expect(galleryPreviewOrder(view)).toEqual([...names, "image-c.png"]);
+
+    await user.click(galleryRow(view, "image-c.png").getByRole("button", { name: "Przenieś image-c.png wyżej" }));
+    expect(galleryPreviewOrder(view)).toEqual([names[0], "image-c.png", names[1]]);
+    await user.click(galleryRow(view, names[0]).getByRole("button", { name: "Usuń" }));
+    expect(galleryPreviewOrder(view)).toEqual(["image-c.png", names[1]]);
+
+    await user.click(galleryRow(view, names[1]).getByRole("button", { name: `Przenieś ${names[1]} wyżej` }));
+    expect(galleryPreviewOrder(view)).toEqual([names[1], "image-c.png"]);
+    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalled());
+
+    const savedProduct = buildProductFromFormData(saveAction.mock.calls[0][0] as FormData, {
+      existing: editorProduct,
+      snapshot,
+      now: new Date("2026-09-27T12:00:00.000Z"),
+    }).product;
+    const savedGallery = savedProduct.assets.filter((asset) => asset.kind === "gallery");
+    expect(savedGallery.map(({ filename }) => filename)).toEqual([names[1], "image-c.png"]);
+    expect(savedGallery[0].id).toBe("gallery-fixture-2");
+    expect(savedGallery[1].id).toBe("gallery-uploaded-c");
+  });
+
+  it("preserves an intentional order when multiple uploads finish in reverse order", async () => {
+    const filenames = ["image-a.png", "image-b.png", "image-c.png"];
+    const finishers = new Map<string, () => void>();
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(init.body as string) as { productId: string; filename: string; sizeBytes: number; contentType: string };
+      const storagePath = `products/${body.productId}/gallery/${body.filename}`;
+      const id = `asset-${body.filename}`;
+
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({
+          asset: {
+            id,
+            productId: body.productId,
+            kind: "gallery",
+            bucket: "public-media",
+            path: `/api/media/${id}`,
+            storagePath,
+            filename: body.filename,
+            contentType: body.contentType,
+            sizeBytes: body.sizeBytes,
+            title: body.filename,
+            sortOrder: 100,
+            isPublic: true,
+            isActive: true,
+            uploaded: false,
+          },
+          upload: {
+            endpoint: "https://project.storage.supabase.co/storage/v1/upload/resumable",
+            token: `signed-${body.filename}`,
+            bucket: "public-media",
+            path: storagePath,
+          },
+        }),
+      };
+    }));
+    editorMocks.uploadMediaWithTus.mockImplementation((file: File) => new Promise<void>((resolve) => {
+      finishers.set(file.name, () => resolve());
+    }));
+
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />);
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-gallery");
+    expect(input).not.toBeNull();
+
+    await user.upload(input!, filenames.map((filename) => new File([filename], filename, { type: "image/png" })));
+    await waitFor(() => expect(editorMocks.uploadMediaWithTus).toHaveBeenCalledTimes(3));
+    expect(galleryActionOrder(view)).toEqual(filenames);
+
+    await user.click(view.getByRole("button", { name: "Przenieś image-c.png wyżej" }));
+    expect(galleryActionOrder(view)).toEqual(["image-a.png", "image-c.png", "image-b.png"]);
+
+    const uploaded = new Set<string>();
+    const expectedOrder = ["image-a.png", "image-c.png", "image-b.png"];
+    for (const filename of filenames.slice().reverse()) {
+      finishers.get(filename)?.();
+      await waitFor(() => expect(view.getByRole("img", { name: `Podgląd ${filename}` })).toBeInTheDocument());
+      uploaded.add(filename);
+      expect(galleryActionOrder(view)).toEqual(expectedOrder);
+      expect(galleryPreviewOrder(view)).toEqual(expectedOrder.filter((name) => uploaded.has(name)));
+    }
   });
 
   it("blocks an empty premium code row before invoking the server action", async () => {
