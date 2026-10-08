@@ -107,14 +107,60 @@ result or limitation. An absent GitHub check is `NOT RUN`; never describe
 missing checks as passing. Include focused local checks and relevant remote
 check status separately.
 
-Every implementation PR needs a concise independent review summary in a
-submitted GitHub pull request review body. Include the actual reviewer,
-findings by Critical/High/Medium/Low severity, fixes applied, unresolved
-findings, and the full 40-character SHA reviewed. The GitHub review author
-must differ from the PR author, and the review's commit must equal the current
-PR head SHA. A PR description or issue comment written by the implementer is
-not independent-review evidence. New commits require review evidence for the
-new head.
+Run `node scripts/agent-harness.mjs verify-pr <pull-request>` before reporting
+merge readiness. The command is read-only: it does not merge or deploy.
+It exits successfully only for `READY_FOR_MERGE`; review-ready and blocked
+results retain structured JSON output but return a nonzero exit code.
+`READY_FOR_REVIEW` means current-SHA local checks and an internal independent
+AI review are complete, so external review can proceed. `READY_FOR_MERGE`
+requires every mandatory check, formal GitHub review, browser requirement, and
+release obligation to pass. `BLOCKED` means the PR or implementation evidence
+is incomplete or a review finding requires a fix. The output reports
+implementation completion, internal review, external-review readiness, and
+merge readiness separately.
+
+Keep exact-SHA local verification and AI review records in PR comments using
+the v1 JSON markers documented in `docs/agent-harness.md`. A new commit makes
+older records stale. An AI sub-agent review must receive the task goal and
+actual diff, be tasked independently, examine correctness, regressions,
+testing, and scope, and report Critical/High/Medium/Low findings, required
+fixes, unresolved findings, and the full SHA reviewed. Label and persist it as
+an AI/sub-agent review; it is not a GitHub review and does not satisfy the
+formal GitHub-review requirement.
+
+Every implementation PR also needs a submitted GitHub review from a user
+different from the PR author on the current head SHA. Use the review body
+summary format in `docs/agent-harness.md`. An author self-review does not
+count. If no independent GitHub identity is available, record formal review as
+`NOT RUN` or `BLOCKED` and keep the PR ready for external review; do not
+impersonate another account. New commits require fresh AI and GitHub review
+evidence for the new SHA.
+
+The gate reads required checks from branch protection and effective branch
+rules. If none are configured, it reports that no CI checks are required and
+uses current-SHA local verification plus the formal external GitHub review as
+the manual fallback. Missing checks remain `NOT RUN`, never CI success.
+
+## UI browser verification
+
+For changes that alter visible UI behavior, run the application and exercise
+the affected user flow in a real browser with Playwright or browser-use.
+Capture screenshots under `docs/verification/issue-<number>/` (or
+`docs/verification/pr-<number>/` when no issue exists) and include them in the
+PR. Check meaningful interactions, important responsive layouts, browser
+console errors, failed network requests, and persistence after navigation or
+reload when relevant. Review screenshots against the implementation, add or
+update regression tests for discovered bugs, and repeat the focused browser
+check after fixes.
+
+Use focused E2E for the changed flow; do not run the full application browser
+suite for every small UI change. Broaden coverage for shared components,
+authentication/security boundaries, plausible cross-cutting regressions, or a
+substantial release. If browser execution is unavailable, record it as
+`NOT RUN` or `BLOCKED` and continue other checks. Do not claim full
+verification. A UI PR cannot be merge-ready without valid current-SHA browser
+evidence and screenshots. Moving its Issue to `Review` still only requires an
+open, non-draft linked PR.
 
 ## Release gate
 

@@ -112,27 +112,103 @@ to `Ready`.
    changes in dependencies (not only devDependencies), verify runtime/framework
    compatibility and lockfile alignment, and run focused checks/build as
    needed. Do not add unrelated full-release checks to an ordinary PR.
-7. Every implementation PR needs an actual submitted GitHub review by a
-   reviewer different from the PR author. Use the review body for a concise
-   durable summary containing:
-   - Reviewer: @login
-   - Reviewed SHA: the full current 40-character head SHA
-   - Critical: none or findings
-   - High: none or findings
-   - Medium: none or findings
-   - Low: none or findings
-   - Fixes applied: none or findings
-   - Unresolved findings: none or findings
-   A PR description or issue comment by the implementer is not independent
-   evidence. New commits require review evidence for the new head; fix
-   meaningful findings before merge.
-8. Open one PR referencing the issue. Include acceptance-criteria coverage,
-   exact candidate SHA, standardized verification results, and migration/
+7. Ask an independently tasked AI sub-agent to read the actual diff and task
+   goal, review correctness, regressions, tests, and scope, and report findings
+   by severity, required fixes, and the exact 40-character SHA. Persist it as
+   an explicitly labeled AI review comment using the v1 record below. Re-review
+   meaningful fixes on the new SHA. AI review is internal evidence, not a
+   GitHub review.
+8. Request a submitted GitHub review from a different account than the PR
+   author when an independent identity is available. Its body must include:
+   `Reviewer`, `Reviewed SHA`, `Critical`, `High`, `Medium`, `Low`, `Fixes
+   applied`, and `Unresolved findings`. Use `none` for an empty category and
+   identify findings by severity. The submitted review commit and stated SHA
+   must both match the current head. An author self-review does not count. If
+   another GitHub identity is unavailable, report formal review as `NOT RUN`
+   and continue preparing the PR for external review; never impersonate a
+   reviewer. A High or Critical unresolved finding, a `CHANGES_REQUESTED`
+   review, or incomplete current-SHA evidence blocks merge readiness.
+9. Open or update one PR referencing the issue. Include acceptance-criteria
+   coverage, exact candidate SHA, verification results, and migration/
    production-dependency release order and remaining work when applicable.
-   Move the issue to Review.
-9. Keep progress and blockers in issue comments. If a new agent resumes, rerun
+   Run `node scripts/agent-harness.mjs verify-pr <pr-number>` and use its
+   structured decision. `READY_FOR_REVIEW` requires complete current-SHA local
+   checks and AI review; `READY_FOR_MERGE` additionally requires the formal
+   GitHub review, configured branch checks/rules, and applicable release
+   obligations. The verifier only assesses state; it never merges or deploys.
+   Set the issue to `Review` once a legitimate open, non-draft PR is linked;
+   merge readiness is not required for that Project transition.
+10. Keep progress and blockers in issue comments. If a new agent resumes, rerun
    inspect, read the latest comments and PR state, and continue from the
    existing branch and exact candidate.
+
+## Durable review and verification records
+
+The harness reads records from PR issue comments, while formal GitHub reviews
+remain in the PR Reviews API. Keep one JSON object immediately after each
+marker, inside a fenced `json` block. A new commit requires new records with
+the new exact head SHA. The harness ignores author-written review summaries
+when checking formal reviewer identity.
+
+An AI review record has this shape; each finding object needs a `summary` and
+`requiredFix`. Empty arrays mean no findings at that severity.
+
+````text
+<!-- agent-harness-ai-review:v1 -->
+```json
+{
+  "schemaVersion": 1,
+  "reviewType": "ai-subagent",
+  "reviewerAgent": "correctness-reviewer",
+  "independentlyTasked": true,
+  "taskGoalProvided": true,
+  "actualDiffRead": true,
+  "reviewedSha": "<full-current-40-character-sha>",
+  "reviewScope": ["correctness", "regressions", "testing", "scope"],
+  "findings": {"Critical": [], "High": [], "Medium": [], "Low": []},
+  "unresolvedFindings": {"Critical": [], "High": [], "Medium": [], "Low": []},
+  "fixesApplied": []
+}
+```
+````
+
+A verification record captures actual commands and outcomes. `diff`, `lint`,
+and `tests` are required. Add `browser` for UI behavior and `release` when a
+migration or dependency manifest changes.
+
+````text
+<!-- agent-harness-verification:v1 -->
+```json
+{
+  "schemaVersion": 1,
+  "headSha": "<full-current-40-character-sha>",
+  "uiBehavior": false,
+  "checks": [
+    {"kind": "diff", "status": "PASS", "command": "git diff --check", "result": "clean"},
+    {"kind": "lint", "status": "PASS", "command": "npm run lint -- <changed-files>", "result": "clean"},
+    {"kind": "tests", "status": "PASS", "command": "npm test -- <focused-test>", "result": "<count> passed"}
+  ]
+}
+```
+````
+
+For UI changes, the verification record's `browser` object must include
+`status: "PASS"`, the tool and affected flows, committed screenshot paths,
+responsive layouts or a reason they do not apply, persistence results or a
+reason they do not apply, `screenshotReview` with `status: "PASS"`,
+`retestedAfterFixes: true`, and inspected `consoleErrors` and
+`failedNetworkRequests` arrays. Each known unrelated error/request must have
+`disposition: "unrelated"` and a reason. Screenshots must be under
+`docs/verification/issue-<number>/` or `docs/verification/pr-<number>/` and
+listed among the changed PR files. Do not reuse screenshots from another
+commit or unrelated flow.
+
+For changed migrations, `release` must record `migrationCompatibility` and an
+explicit `preMergeMigration` decision. If pre-merge application is required,
+it must be `PASS` with the command and result; if not required, record
+`required: false` and the reason. For changed dependency manifests, record a
+`dependencyAudit` command and result. Missing or stale release evidence keeps
+merge readiness blocked.
 
 Post a concise issue update from a file when durable progress is useful:
 
@@ -150,8 +226,9 @@ npm test -- scripts/agent-harness.test.mjs --maxWorkers=1
 
 They cover GitHub authentication fallback, exact repository-to-card matching,
 acceptance criteria, issue references, readiness and recovery, migration-aware
-release ordering, independent-review evidence, and verification states. Do
-not use a requested live issue as a temporary test fixture. Prefer unit tests;
+release ordering, AI and GitHub review identity/SHA semantics, required and
+missing checks, UI browser evidence, migration obligations, and the PR gate.
+Do not use a requested live issue as a temporary test fixture. Prefer unit tests;
 when live transition coverage is essential, use a dedicated test issue and
 restore every changed Project field before finishing.
 
@@ -162,3 +239,14 @@ Missing CI checks are NOT RUN, never PASS. Report local checks separately
 from GitHub checks. If a tool is unavailable, retry through a reasonable
 alternative and report any remaining limitation rather than silently omitting
 the check.
+
+`verify-pr <pr-number>` checks that the PR is open, non-draft, targets `main`,
+and has a stable current head SHA. It reads changed files, exact-SHA GitHub
+reviews, issue comments, check runs/statuses, classic branch protection, and
+effective branch rules. Unsupported or unreadable active rules block the
+merge decision. If no required status checks are configured, the output says
+so and uses current-SHA local evidence plus an external formal GitHub review
+as the manual fallback. This absence is never reported as green CI. It prints
+structured JSON and exits successfully only for `READY_FOR_MERGE`; both
+`READY_FOR_REVIEW` and `BLOCKED` return a nonzero exit code so a shell gate
+cannot mistake them for merge approval.
