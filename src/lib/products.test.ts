@@ -80,6 +80,7 @@ describe("product catalog behavior", () => {
       categories: [],
       tags: [],
       staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
     };
 
     const product = getLocalizedProductViewFromSnapshot(

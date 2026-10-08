@@ -20,7 +20,7 @@ import {
   saveStaticPagesFromFormData,
   saveTagFromFormData,
 } from "./admin-content";
-import { getContentSnapshot } from "./content-store";
+import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
 import { cleanupNewMediaFromFormData, cleanupPersistedMedia } from "./media-storage";
 import { mediaBucketForKind } from "./media-upload";
@@ -33,7 +33,7 @@ import {
   type AdminMutationResult,
   type DatabaseErrorLike,
 } from "./admin-errors";
-import type { Product } from "./types";
+import type { CatalogDesktopColumns, Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
   let storageAuthorizationToken: string | null | undefined;
@@ -369,6 +369,38 @@ export async function savePagesForRequest(
     }
 
     return { ok: true, id: slug };
+  });
+}
+
+export async function saveCatalogSettingsForRequest(
+  desktopColumns: CatalogDesktopColumns,
+): Promise<AdminMutationResult> {
+  return runAdminMutation("catalog settings", async () => {
+    if (getBackendMode() === "local") {
+      const snapshot = getContentSnapshot();
+      saveContentSnapshot({
+        ...snapshot,
+        catalogSettings: { desktopColumns },
+      });
+
+      return { ok: true, id: "global" };
+    }
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("catalog_settings")
+      .update({ desktop_columns: desktopColumns })
+      .eq("id", "global")
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      throw new AdminDatabaseError("catalog settings", error);
+    }
+
+    return data
+      ? { ok: true, id: "global" }
+      : { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
   });
 }
 
