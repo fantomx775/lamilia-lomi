@@ -164,8 +164,9 @@ test("unknown QR product, guest download, and external return targets are contro
 
 test("mobile locale switcher exposes every locale and preserves code intent through auth", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto(`/en/products/${productSlug}?code=LOMI-BOOK-2026&step=verify`);
+  await page.goto(`/en/products/${productSlug}?code=LOMI-BOOK-2026&step=verify#premium`);
   await expect(page.getByLabel("Premium code")).toBeVisible();
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
   await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
@@ -175,13 +176,15 @@ test("mobile locale switcher exposes every locale and preserves code intent thro
   const polishOption = page.getByRole("button", { name: localeOptionNames.pl });
   await expect(polishOption).toBeVisible();
   await polishOption.click();
-  await expect(page).toHaveURL(new RegExp(`/pl/products/${productSlug}\\?step=verify(?:#premium)?$`));
+  await expect(page).toHaveURL(new RegExp(`/pl/products/${productSlug}\\?step=verify#premium$`));
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
   expect(page.url()).not.toContain("code=");
   await expect(page.getByLabel("Kod premium")).toHaveValue("LOMI-BOOK-2026");
 
   for (const locale of ["de", "es"] as const) {
     await switchLocaleThroughMobileMenu(page, locale);
-    await expect(page).toHaveURL(new RegExp(`/${locale}/products/${productSlug}\\?step=verify(?:#premium)?$`));
+    await expect(page).toHaveURL(new RegExp(`/${locale}/products/${productSlug}\\?step=verify#premium$`));
+    await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
     expect(page.url()).not.toContain("code=");
     await expect(page.getByRole("button", { name: new RegExp(`^Language: ${locale.toUpperCase()}$`) })).toBeVisible();
     await expect(page.getByLabel(locale === "de" ? "Premium-Code" : "Código premium")).toHaveValue("LOMI-BOOK-2026");
@@ -189,7 +192,8 @@ test("mobile locale switcher exposes every locale and preserves code intent thro
   }
 
   await switchLocaleThroughMobileMenu(page, "en");
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}\\?step=verify(?:#premium)?$`));
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}\\?step=verify#premium$`));
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
   await page.reload();
   await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
 

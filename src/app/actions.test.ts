@@ -125,6 +125,7 @@ beforeEach(() => {
     throw error;
   });
   vi.clearAllMocks();
+  actionMocks.redeemAuthResumeIntent.mockReset();
 });
 
 function registrationForm(returnTo?: string, code?: string) {
@@ -186,6 +187,24 @@ describe("registration auth action", () => {
       email: "reader@example.com",
       password: " password ",
     });
+  });
+
+  it("returns a successful password-auth product resume to the premium section", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.createClient.mockResolvedValue({
+      auth: { signInWithPassword: vi.fn().mockResolvedValue({ error: null }) },
+    });
+
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "reader@example.com",
+          "password123",
+          "/en/products/moon-garden-coloring-book",
+        ),
+      ),
+      "/en/products/moon-garden-coloring-book#premium",
+    );
   });
 
   it("rejects an incomplete login on the server before calling the auth provider", async () => {
@@ -353,7 +372,7 @@ describe("registration auth action", () => {
       registerDemoAction(
         registrationForm("/en/products/moon-garden-coloring-book", "LOMI-BOOK-2026"),
       ),
-      "/en/products/moon-garden-coloring-book?unlocked=1",
+      "/en/products/moon-garden-coloring-book?unlocked=1#premium",
     );
 
     expect(actionMocks.redeemAuthResumeIntent).toHaveBeenCalledWith(
@@ -367,9 +386,9 @@ describe("registration auth action", () => {
   });
 
   it.each([
-    ["already_unlocked", "/en/products/moon-garden-coloring-book?unlocked=already"],
-    ["email_unverified", "/en/products/moon-garden-coloring-book?step=verify"],
-    ["invalid_code", "/en/products/moon-garden-coloring-book?unlock=invalid_code"],
+    ["already_unlocked", "/en/products/moon-garden-coloring-book?unlocked=already#premium"],
+    ["email_unverified", "/en/products/moon-garden-coloring-book?step=verify#premium"],
+    ["invalid_code", "/en/products/moon-garden-coloring-book?unlock=invalid_code#premium"],
   ] as const)("maps active-session unlock signup result %s safely", async (status, location) => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     actionMocks.getProductBySlugForRequest.mockResolvedValue({

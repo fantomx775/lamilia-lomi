@@ -68,6 +68,7 @@ export async function switchLocaleAction(formData: FormData) {
 
   const sourceLocale = sourceLocaleInput;
   const targetLocale = targetLocaleInput;
+  const requestedHash = text(formData, "hash");
   let currentUrl: URL;
 
   try {
@@ -119,7 +120,9 @@ export async function switchLocaleAction(formData: FormData) {
     }
   }
 
-  const targetPath = `${translatedPath}${targetSearchParams.toString() ? `?${targetSearchParams}` : ""}`;
+  const targetSearch = targetSearchParams.toString();
+  const premiumFragment = productSlug && requestedHash === "#premium" ? "#premium" : "";
+  const targetPath = `${translatedPath}${targetSearch ? `?${targetSearch}` : ""}${premiumFragment}`;
 
   if (contextProductSlug) {
     const product = await getProductBySlugForRequest(contextProductSlug);
@@ -392,9 +395,12 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
       returnTo: intent.returnTo,
       code,
     });
-    redirect(appendQueryPath(intent.returnTo, "unlock", "unexpected"));
+    redirect(
+      appendQueryPath(getAuthResumeRedirect(intent, intent.locale), "unlock", "unexpected"),
+    );
   }
   await clearAuthResumeIntent();
+  const resumeRedirect = getAuthResumeRedirect(intent, intent.locale);
 
   if (redemption?.ok) {
     await clearUnlockIntent();
@@ -409,7 +415,7 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
     }
     redirect(
       appendQueryPath(
-        intent.returnTo,
+        resumeRedirect,
         "unlocked",
         redemption.status === "already_unlocked" ? "already" : "1",
       ),
@@ -418,7 +424,7 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
 
   if (redemption && !redemption.ok) {
     if (redemption.status === "email_unverified") {
-      redirect(appendQueryPath(intent.returnTo, "step", "verify"));
+      redirect(appendQueryPath(resumeRedirect, "step", "verify"));
     }
 
     await setUnlockIntent({
@@ -427,10 +433,10 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
       returnTo: intent.returnTo,
       code,
     });
-    redirect(appendQueryPath(intent.returnTo, "unlock", redemption.status));
+    redirect(appendQueryPath(resumeRedirect, "unlock", redemption.status));
   }
 
-  redirect(buildAuthRedirect({ locale: intent.locale, redirectTo: intent.returnTo }));
+  redirect(resumeRedirect);
 }
 
 export async function verifyDemoEmailAction(formData: FormData) {

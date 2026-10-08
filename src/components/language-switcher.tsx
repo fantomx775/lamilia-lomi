@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Languages } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 
@@ -24,6 +25,15 @@ export function LanguageSwitcher({ locale }: { locale: Locale }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const search = searchParams.toString();
+  const [hash, setHash] = useState("");
+
+  useEffect(() => {
+    const syncHash = () => setHash(window.location.hash);
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, []);
 
   return (
     <div className="inline-flex min-w-0 shrink-0 items-center gap-1 rounded-md border border-[var(--color-border)] bg-white/75 p-1 text-sm">
@@ -33,6 +43,7 @@ export function LanguageSwitcher({ locale }: { locale: Locale }) {
           <LocaleForm
             key={targetLocale}
             currentLocale={locale}
+            hash={hash}
             pathname={pathname}
             search={search}
             targetLocale={targetLocale}
@@ -52,6 +63,7 @@ export function LanguageSwitcher({ locale }: { locale: Locale }) {
             <LocaleForm
               key={targetLocale}
               currentLocale={locale}
+              hash={hash}
               pathname={pathname}
               search={search}
               targetLocale={targetLocale}
@@ -66,12 +78,14 @@ export function LanguageSwitcher({ locale }: { locale: Locale }) {
 
 function LocaleForm({
   currentLocale,
+  hash,
   pathname,
   search,
   targetLocale,
   mobile = false,
 }: {
   currentLocale: Locale;
+  hash: string;
   pathname: string;
   search: string;
   targetLocale: Locale;
@@ -85,6 +99,7 @@ function LocaleForm({
       <input type="hidden" name="targetLocale" value={targetLocale} />
       <input type="hidden" name="pathname" value={pathname} />
       <input type="hidden" name="search" value={search} />
+      <input type="hidden" name="hash" value={hash} />
       <button
         type="submit"
         className={`rounded px-2 py-1 text-[var(--color-ink)] transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] ${isActive ? "bg-[var(--color-sage)] font-semibold shadow-sm" : "font-medium hover:bg-[var(--color-blush)]"} ${mobile ? "flex w-full items-center justify-between gap-3" : "inline-flex"}`}
