@@ -397,6 +397,33 @@ test("resumes a matching branch without regressing Project progress", () => {
   assert.deepEqual(statusTransitionBlockers("In Progress", { ready: true, reasons: [] }, [], readyPlan), []);
 });
 
+test("preserves Project progress while an ambiguous PR or branch match is resolved", () => {
+  const pullRequestPlan = planIssueRecovery({
+    issueState: "open",
+    projectStatus: "Review",
+    pullRequests: [
+      { number: 34, state: "open", url: "https://github.com/example/repo/pull/34" },
+      { number: 35, state: "open", url: "https://github.com/example/repo/pull/35" },
+    ],
+  });
+  assert.equal(pullRequestPlan.action, "resolve-existing-pull-requests");
+  assert.match(
+    statusTransitionBlockers("Ready", { ready: true, reasons: [] }, [], pullRequestPlan).join(" "),
+    /multiple open PRs.*preserve Project Status "Review"/,
+  );
+
+  const branchPlan = planIssueRecovery({
+    issueState: "open",
+    projectStatus: "In Progress",
+    candidateBranches: ["codex/issue-29-layout", "codex/catalog-layout"],
+  });
+  assert.equal(branchPlan.action, "resolve-existing-branches");
+  assert.match(
+    statusTransitionBlockers("Ready", { ready: true, reasons: [] }, [], branchPlan).join(" "),
+    /multiple matching branches.*preserve Project Status "In Progress"/,
+  );
+});
+
 test("inspect surfaces Issue 29 PR, migration, independent-review, and CI state together", async () => {
   const issue = {
     number: 29,

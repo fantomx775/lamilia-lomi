@@ -651,6 +651,10 @@ export function statusTransitionBlockers(status, readiness, pullRequests = [], r
       ? "open PR #" + recoveryPlan.pullRequest.number
       : recoveryPlan?.action === "resume-existing-branch"
         ? "branch " + recoveryPlan.branch
+        : recoveryPlan?.action === "resolve-existing-pull-requests"
+          ? "multiple open PRs"
+          : recoveryPlan?.action === "resolve-existing-branches"
+            ? "multiple matching branches"
         : null;
   if (
     existingWork &&
