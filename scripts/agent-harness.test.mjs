@@ -901,6 +901,32 @@ test("reports configured required checks as missing, pending, failed, or green o
     ...base,
     requiredChecks: [],
   }).status, "NOT RUN");
+  assert.equal(summarizeRequiredGitHubChecks({
+    ...base,
+    requiredChecks: [{ context: "build", integration_id: 73 }],
+    checkRuns: [{
+      name: "build",
+      head_sha: CURRENT_SHA,
+      app: { id: 42 },
+      status: "completed",
+      conclusion: "success",
+    }],
+  }).status, "BLOCKED");
+  assert.equal(summarizeRequiredGitHubChecks({
+    ...base,
+    requiredChecks: [{ context: "build", integration_id: 73 }],
+    checkRuns: [{
+      name: "build",
+      head_sha: CURRENT_SHA,
+      app: { id: 73 },
+      status: "completed",
+      conclusion: "success",
+    }],
+  }).status, "PASS");
+  assert.equal(summarizeRequiredGitHubChecks({
+    ...base,
+    requiredChecks: [{ context: "build", integration_id: "unknown" }],
+  }).status, "BLOCKED");
 });
 
 test("separates review readiness from merge readiness and applies the manual no-CI fallback", () => {
@@ -1089,4 +1115,80 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   assert.equal(strictPolicy.decision, "READY_FOR_REVIEW");
   assert.equal(strictPolicy.mergeReadiness.status, "BLOCKED");
   assert.ok(strictPolicy.checks.branchReviewPolicy.unassessedRules.some((rule) => /up to date/.test(rule)));
+
+  const appBoundPolicyClient = {
+    ...client,
+    request: async (path) => {
+      if (path.endsWith("/branches/main/protection")) {
+        return { required_status_checks: { contexts: ["build"], checks: [{ context: "build", app_id: 73 }] } };
+      }
+      if (path.endsWith("/check-runs?per_page=100&page=1")) {
+        return {
+          total_count: 1,
+          check_runs: [{
+            name: "build",
+            head_sha: CURRENT_SHA,
+            app: { id: 42 },
+            status: "completed",
+            conclusion: "success",
+          }],
+        };
+      }
+      return client.request(path);
+    },
+  };
+  const wrongProvider = await verifyPullRequest(appBoundPolicyClient, 52);
+  assert.equal(wrongProvider.checks.required.status, "BLOCKED");
+  assert.match(wrongProvider.checks.required.details, /required provider/);
+
+  const matchingProviderClient = {
+    ...appBoundPolicyClient,
+    request: async (path) => path.endsWith("/check-runs?per_page=100&page=1")
+      ? {
+          total_count: 1,
+          check_runs: [{
+            name: "build",
+            head_sha: CURRENT_SHA,
+            app: { id: 73 },
+            status: "completed",
+            conclusion: "success",
+          }],
+        }
+      : appBoundPolicyClient.request(path),
+  };
+  const matchingProvider = await verifyPullRequest(matchingProviderClient, 52);
+  assert.equal(matchingProvider.checks.required.status, "PASS");
+
+  const rulesetProviderClient = {
+    ...client,
+    request: async (path) => {
+      if (path.endsWith("/branches/main/protection")) {
+        throw new Error("GitHub API (404): Branch not protected");
+      }
+      if (path.endsWith("/rules/branches/main")) {
+        return [{
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "build", integration_id: 73 }],
+          },
+        }];
+      }
+      if (path.endsWith("/check-runs?per_page=100&page=1")) {
+        return {
+          total_count: 1,
+          check_runs: [{
+            name: "build",
+            head_sha: CURRENT_SHA,
+            app: { id: 42 },
+            status: "completed",
+            conclusion: "success",
+          }],
+        };
+      }
+      return client.request(path);
+    },
+  };
+  const rulesetWrongProvider = await verifyPullRequest(rulesetProviderClient, 52);
+  assert.equal(rulesetWrongProvider.checks.required.status, "BLOCKED");
+  assert.match(rulesetWrongProvider.checks.required.details, /required provider/);
 });

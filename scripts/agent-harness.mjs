@@ -521,9 +521,36 @@ export function summarizeRequiredGitHubChecks({
       details: "Required-check policy could not be read; merge requirements are unknown.",
     });
   }
-  const required = [...new Set(requiredChecks.map((check) =>
-    typeof check === "string" ? check : check?.context,
-  ).filter(Boolean))];
+  const normalized = [];
+  let malformedPolicy = false;
+  for (const check of requiredChecks) {
+    if (typeof check === "string" && check.trim()) {
+      normalized.push({ context: check.trim(), integrationId: null });
+      continue;
+    }
+    if (!check || typeof check !== "object" || typeof check.context !== "string" || !check.context.trim()) {
+      malformedPolicy = true;
+      continue;
+    }
+    const rawIntegrationId = check.integration_id ?? check.app_id ?? null;
+    const integrationId = rawIntegrationId === null ? null : Number(rawIntegrationId);
+    if (integrationId !== null && (!Number.isSafeInteger(integrationId) || integrationId < 0)) {
+      malformedPolicy = true;
+      continue;
+    }
+    normalized.push({ context: check.context.trim(), integrationId });
+  }
+  const required = [...new Map(normalized.map((check) => [
+    check.context + "\u0000" + (check.integrationId ?? "*"),
+    check,
+  ])).values()];
+  if (malformedPolicy) {
+    return verificationEvidence({
+      status: "BLOCKED",
+      command,
+      details: "Required-check policy contains malformed names or provider identities.",
+    });
+  }
   if (!required.length) {
     return verificationEvidence({
       status: "NOT RUN",
@@ -535,14 +562,27 @@ export function summarizeRequiredGitHubChecks({
   const pending = [];
   const failures = [];
   const accepted = [];
-  for (const name of required) {
+  for (const requiredCheck of required) {
+    const { context: name, integrationId } = requiredCheck;
+    const label = integrationId === null ? name : name + " (GitHub App " + integrationId + ")";
     const matchingRuns = checkRuns.filter((check) =>
-      check.name === name && (!headSha || !check.head_sha || check.head_sha.toLowerCase() === headSha.toLowerCase()),
+      check.name === name &&
+      (!headSha || !check.head_sha || (
+        typeof check.head_sha === "string" && check.head_sha.toLowerCase() === headSha.toLowerCase()
+      )) &&
+      (integrationId === null || Number(check.app?.id) === integrationId),
     );
     const wrongShaRuns = checkRuns.filter((check) =>
-      check.name === name && headSha && check.head_sha && check.head_sha.toLowerCase() !== headSha.toLowerCase(),
+      check.name === name && headSha && typeof check.head_sha === "string" &&
+      check.head_sha.toLowerCase() !== headSha.toLowerCase(),
     );
-    const matchingStatuses = statuses.filter((check) => check.context === name);
+    const matchingStatuses = integrationId === null
+      ? statuses.filter((check) => check.context === name)
+      : [];
+    const wrongProviderRuns = integrationId !== null && checkRuns.some((check) =>
+      check.name === name && check.head_sha?.toLowerCase?.() === headSha?.toLowerCase?.() &&
+      Number(check.app?.id) !== integrationId,
+    );
     const candidates = [
       ...matchingRuns.map((check) => ({
         state: check.status === "completed" ? check.conclusion : check.status,
@@ -553,15 +593,17 @@ export function summarizeRequiredGitHubChecks({
     const latest = candidates.at(-1);
     if (!latest) {
       if (wrongShaRuns.length) missing.push(name + " (only a different SHA has a result)");
-      else missing.push(name);
+      else if (wrongProviderRuns || (integrationId !== null && statuses.some((check) => check.context === name))) {
+        missing.push(label + " (no result from the required provider)");
+      } else missing.push(label);
       continue;
     }
     const state = String(latest.state || "").toLowerCase();
-    if (["success", "neutral", "skipped"].includes(state)) accepted.push(name);
+    if (["success", "neutral", "skipped"].includes(state)) accepted.push(label);
     else if (["failure", "error", "cancelled", "timed_out", "action_required"].includes(state)) {
-      failures.push(name + " (" + state + ")");
+      failures.push(label + " (" + state + ")");
     } else {
-      pending.push(name + " (" + (state || "unknown") + ")");
+      pending.push(label + " (" + (state || "unknown") + ")");
     }
   }
   if (failures.length) {
@@ -1291,12 +1333,11 @@ async function readGitHubMergePolicy(client, baseRef) {
   const classicChecks = Array.isArray(requiredStatusChecks?.checks)
     ? requiredStatusChecks.checks
     : [];
-  const contexts = [
-    ...classicContexts,
-    ...classicChecks.map((check) =>
-      typeof check === "string" ? check : check?.context,
-    ),
-  ].filter(Boolean);
+  const requiredChecks = classicChecks.length
+    ? classicChecks.map((check) => typeof check === "string"
+      ? check
+      : { context: check?.context, app_id: check?.app_id ?? null })
+    : [...classicContexts];
   const rawRequiredApprovals = protection.required_pull_request_reviews?.required_approving_review_count ?? 0;
   let requiredApprovals = Number(rawRequiredApprovals);
   const unassessedRules = [];
@@ -1319,7 +1360,7 @@ async function readGitHubMergePolicy(client, baseRef) {
   ) {
     unassessedRules.push("classic required-status-check entries are malformed");
   }
-  if (requiredStatusChecks?.strict && contexts.length) {
+  if (requiredStatusChecks?.strict && requiredChecks.length) {
     unassessedRules.push("classic branch protection requires the PR branch to be up to date with the base");
   }
   if (protection.required_signatures?.enabled) {
@@ -1360,7 +1401,10 @@ async function readGitHubMergePolicy(client, baseRef) {
         if (validChecks.length !== parameters.required_status_checks.length) {
           unassessedRules.push("ruleset required-status-check entries are malformed");
         }
-        contexts.push(...validChecks.map((check) => check.context));
+        requiredChecks.push(...validChecks.map((check) => ({
+          context: check.context,
+          integration_id: check.integration_id ?? null,
+        })));
         if (parameters.strict_required_status_checks_policy && validChecks.length) {
           unassessedRules.push("ruleset requires the PR branch to be up to date with the base");
         }
@@ -1388,9 +1432,15 @@ async function readGitHubMergePolicy(client, baseRef) {
       unassessedRules.push("active branch rule needs manual assessment: " + rule.type);
     }
   }
+  const uniqueRequiredChecks = [...new Map(requiredChecks.map((check) => [
+    typeof check === "string"
+      ? check + "\u0000*"
+      : check.context + "\u0000" + (check.integration_id ?? check.app_id ?? "*"),
+    check,
+  ])).values()];
   return {
     available: true,
-    requiredChecks: [...new Set(contexts)],
+    requiredChecks: uniqueRequiredChecks,
     requiredApprovals,
     unassessedRules: [...new Set(unassessedRules)],
     sources: [
