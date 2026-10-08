@@ -88,6 +88,13 @@ export type ContentSnapshot = {
   categories: Category[];
   tags: Tag[];
   staticPages: StaticPageRecord[];
+  catalogSettings: CatalogSettings;
+};
+
+export type CatalogDesktopColumns = 3 | 4 | 5;
+
+export type CatalogSettings = {
+  desktopColumns: CatalogDesktopColumns;
 };
 
 export type Product = {
