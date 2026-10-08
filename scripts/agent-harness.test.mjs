@@ -679,6 +679,65 @@ test("separates formal GitHub review identity from AI evidence and validates cur
     headSha,
     reviews: [cleanGitHubReview({ headSha, user: "independent", state: "CHANGES_REQUESTED" })],
   }).status, "FAIL");
+
+  const outstandingRequest = cleanGitHubReview({
+    headSha,
+    user: "reviewer-a",
+    state: "CHANGES_REQUESTED",
+  });
+  outstandingRequest.submitted_at = "2026-10-08T12:00:00Z";
+  const laterReviewer = cleanGitHubReview({ headSha, user: "reviewer-b" });
+  laterReviewer.submitted_at = "2026-10-08T13:00:00Z";
+  const aggregateRequest = validateGitHubReview({
+    pullRequestAuthor: "author",
+    headSha,
+    reviews: [outstandingRequest, laterReviewer],
+  });
+  assert.equal(aggregateRequest.status, "FAIL");
+  assert.equal(aggregateRequest.requestedChanges, true);
+  assert.ok(aggregateRequest.reviewers.some(({ reviewer, requestedChanges }) =>
+    reviewer === "reviewer-a" && requestedChanges,
+  ));
+
+  const outstandingHigh = cleanGitHubReview({
+    headSha,
+    user: "reviewer-a",
+    unresolved: "High finding remains",
+  });
+  outstandingHigh.submitted_at = "2026-10-08T12:00:00Z";
+  const laterCleanReview = cleanGitHubReview({ headSha, user: "reviewer-b" });
+  laterCleanReview.submitted_at = "2026-10-08T13:00:00Z";
+  const aggregateFinding = validateGitHubReview({
+    pullRequestAuthor: "author",
+    headSha,
+    reviews: [outstandingHigh, laterCleanReview],
+  });
+  assert.equal(aggregateFinding.status, "FAIL");
+  assert.ok(aggregateFinding.unresolvedSeverity.includes("High"));
+
+  const sameReviewerResolved = validateGitHubReview({
+    pullRequestAuthor: "author",
+    headSha,
+    reviews: [
+      outstandingRequest,
+      cleanGitHubReview({ headSha, user: "reviewer-a", state: "APPROVED" }),
+      laterCleanReview,
+    ],
+  });
+  assert.equal(sameReviewerResolved.status, "FAIL");
+  assert.equal(sameReviewerResolved.requestedChanges, true);
+
+  const dismissedRequest = { ...outstandingRequest, state: "DISMISSED" };
+  const dismissedAndResolved = validateGitHubReview({
+    pullRequestAuthor: "author",
+    headSha,
+    reviews: [
+      dismissedRequest,
+      cleanGitHubReview({ headSha, user: "reviewer-a", state: "APPROVED" }),
+      laterCleanReview,
+    ],
+  });
+  assert.equal(dismissedAndResolved.status, "PASS");
 });
 
 test("reports missing CI as NOT RUN and never as PASS", () => {
@@ -807,6 +866,12 @@ test("requires committed browser evidence for UI changes and keeps non-UI change
     uiRequired: true,
     localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: differentRunScreenshot }) },
     files: uiFiles,
+  }).status, "BLOCKED");
+
+  assert.equal(validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser }) },
+    files: [{ filename: screenshot, status: "removed" }],
   }).status, "BLOCKED");
 
   const missingScreenshot = validateBrowserVerification({
@@ -1078,18 +1143,20 @@ test("blocks UI PR review readiness until the exact-SHA browser record is comple
   assert.equal(verified.browserVerification.status, "PASS");
   assert.equal(verified.decision, "READY_FOR_REVIEW");
 
-  const helperOnly = assessPullRequestVerification({
-    pullRequest: cleanPullRequest(),
-    files: ["src/lib/catalog-settings.ts"],
-    comments: [
-      structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ uiBehavior: false })),
-      ai,
-    ],
-    mergePolicy: cleanMergePolicy(),
-  });
-  assert.equal(helperOnly.fileScope.uiBehaviorRequired, true);
-  assert.equal(helperOnly.browserVerification.required, true);
-  assert.equal(helperOnly.decision, "BLOCKED");
+  for (const filename of ["src/lib/catalog-settings.ts", "tailwind.config.ts", "postcss.config.js"]) {
+    const helperOnly = assessPullRequestVerification({
+      pullRequest: cleanPullRequest(),
+      files: [filename],
+      comments: [
+        structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ uiBehavior: false })),
+        ai,
+      ],
+      mergePolicy: cleanMergePolicy(),
+    });
+    assert.equal(helperOnly.fileScope.uiBehaviorRequired, true, filename);
+    assert.equal(helperOnly.browserVerification.required, true, filename);
+    assert.equal(helperOnly.decision, "BLOCKED", filename);
+  }
 });
 
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {

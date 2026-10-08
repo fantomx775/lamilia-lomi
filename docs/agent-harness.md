@@ -126,8 +126,10 @@ to `Ready`.
    must both match the current head. An author self-review does not count. If
    another GitHub identity is unavailable, report formal review as `NOT RUN`
    and continue preparing the PR for external review; never impersonate a
-   reviewer. A High or Critical unresolved finding, a `CHANGES_REQUESTED`
-   review, or incomplete current-SHA evidence blocks merge readiness.
+   reviewer. A High or Critical unresolved finding, any non-dismissed
+   current-SHA `CHANGES_REQUESTED` review, or incomplete current-SHA evidence
+   blocks merge readiness. A later review by another reviewer does not clear
+   an outstanding change request; dismiss that review before merge readiness.
 9. Open or update one PR referencing the issue. Include acceptance-criteria
    coverage, exact candidate SHA, verification results, and migration/
    production-dependency release order and remaining work when applicable.
@@ -206,7 +208,8 @@ listed among the changed PR files. Every screenshot record contains `path`,
 record, and `testedSha` must match the current PR head SHA. Do not reuse
 screenshots from another commit or unrelated flow. The detector conservatively
 treats application source under `src/`, plus root `app/`, `components/`,
-`pages/`, `lib/`, `public/`, `messages/`, `middleware.*`, and `proxy.*` as
+`pages/`, `lib/`, `public/`, `messages/`, `middleware.*`, `proxy.*`, and
+`tailwind.config.*`, `postcss.config.*`, and `next.config.*` files as
 potentially UI-affecting. Test and spec files are excluded.
 
 Example browser evidence fields:

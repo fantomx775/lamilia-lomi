@@ -768,47 +768,85 @@ export function validateGitHubReview({
       details: "Independent review exists only for a different commit; review the exact current PR head SHA.",
     };
   }
+  const latestByReviewer = new Map();
+  for (const review of currentShaReviews) {
+    const reviewerKey = review.user.login.toLowerCase();
+    if (!latestByReviewer.has(reviewerKey)) latestByReviewer.set(reviewerKey, review);
+  }
+  const reviewerAssessments = [...latestByReviewer.values()].map((review) => {
+    const { fields, duplicates } = reviewFields(review.body || "");
+    const reviewer = fields.reviewer || null;
+    const reviewedSha = fields["reviewed sha"] || null;
+    const findingsBySeverity = Object.fromEntries(
+      REVIEW_SEVERITIES.map((severity) => [severity, fields[severity.toLowerCase()] || null]),
+    );
+    const unresolvedFindings = fields["unresolved findings"] || null;
+    const unresolved = parseUnresolvedReviewFindings(unresolvedFindings);
+    const complete =
+      reviewer?.replace(/^@/, "").toLowerCase() === review.user.login.toLowerCase() &&
+      reviewedSha?.toLowerCase() === headSha.toLowerCase() &&
+      Object.values(findingsBySeverity).every(Boolean) &&
+      Boolean(fields["fixes applied"]) &&
+      Boolean(unresolvedFindings) &&
+      unresolved.known &&
+      duplicates.length === 0;
+    return {
+      review,
+      fields,
+      findingsBySeverity,
+      fixesApplied: fields["fixes applied"] || null,
+      unresolvedFindings,
+      unresolved,
+      complete,
+      requestedChanges: review.state === "CHANGES_REQUESTED",
+    };
+  });
   const latest = currentShaReviews[0];
-  const { fields, duplicates } = reviewFields(latest.body || "");
-  const reviewer = fields.reviewer || null;
-  const reviewedSha = fields["reviewed sha"] || null;
-  const findingsBySeverity = Object.fromEntries(
-    REVIEW_SEVERITIES.map((severity) => [severity, fields[severity.toLowerCase()] || null]),
-  );
-  const fixesApplied = fields["fixes applied"] || null;
-  const unresolvedFindings = fields["unresolved findings"] || null;
-  const unresolved = parseUnresolvedReviewFindings(unresolvedFindings);
-  const reviewerMatches = reviewer?.replace(/^@/, "").toLowerCase() === latest.user.login.toLowerCase();
-  const shaMatches = reviewedSha?.toLowerCase() === headSha.toLowerCase();
-  const complete =
-    reviewerMatches &&
-    shaMatches &&
-    Object.values(findingsBySeverity).every(Boolean) &&
-    Boolean(fixesApplied) &&
-    Boolean(unresolvedFindings) &&
-    unresolved.known &&
-    duplicates.length === 0;
-  const requestedChanges = latest.state === "CHANGES_REQUESTED";
-  const unresolvedHighOrCritical = unresolved.severities.some((severity) =>
+  const latestAssessment = reviewerAssessments.find(({ review }) => review === latest);
+  const findingsBySeverity = latestAssessment.findingsBySeverity;
+  const reviewedSha = latestAssessment.fields["reviewed sha"] || null;
+  const fixesApplied = latestAssessment.fixesApplied;
+  const outstandingChangeRequests = currentShaReviews
+    .filter((review) => review.state === "CHANGES_REQUESTED")
+    .map((review) => ({ reviewer: review.user.login, reviewedSha: review.commit_id }));
+  const requestedChanges = outstandingChangeRequests.length > 0;
+  const unresolvedSeverity = [...new Set(reviewerAssessments.flatMap((assessment) =>
+    assessment.unresolved.severities,
+  ))];
+  const unresolvedHighOrCritical = unresolvedSeverity.some((severity) =>
     ["Critical", "High"].includes(severity),
   );
-  const passed = complete && !requestedChanges && !unresolvedHighOrCritical &&
+  const unresolvedFindings = reviewerAssessments.length === 1
+    ? latestAssessment.unresolvedFindings
+    : reviewerAssessments
+        .filter((assessment) => assessment.unresolvedFindings)
+        .map((assessment) => "@" + assessment.review.user.login + ": " + assessment.unresolvedFindings)
+        .join("\n") || "none";
+  const passed = latestAssessment.complete && !requestedChanges && !unresolvedHighOrCritical &&
     ["APPROVED", "COMMENTED"].includes(latest.state);
   return {
     status: passed ? "PASS" : "FAIL",
     reviewer: latest.user.login,
+    reviewers: reviewerAssessments.map((assessment) => ({
+      reviewer: assessment.review.user.login,
+      state: assessment.review.state,
+      reviewedSha: assessment.fields["reviewed sha"] || null,
+      requestedChanges: assessment.requestedChanges,
+      unresolvedSeverity: assessment.unresolved.severities,
+    })),
+    outstandingChangeRequests,
     reviewedSha: reviewedSha || null,
     findingsBySeverity,
     fixesApplied,
     unresolvedFindings,
-    unresolvedSeverity: unresolved.severities,
+    unresolvedSeverity,
     requestedChanges,
     details: passed
       ? "Formal GitHub review by @" + latest.user.login + " covers the current head SHA."
       : unresolvedHighOrCritical
-        ? "The current GitHub review reports unresolved Critical or High findings."
+        ? "One or more current-SHA GitHub reviews report unresolved Critical or High findings."
         : requestedChanges
-          ? "The latest formal GitHub review requests changes."
+          ? "A non-dismissed current-SHA GitHub review requests changes; dismiss that review before merge readiness."
           : "The current GitHub review is incomplete, ambiguous, or uses an unsupported review state.",
   };
 }
@@ -1094,6 +1132,7 @@ function isUiBehaviorFile(filename) {
   const appSourceExtension = /\.(?:[cm]?[jt]sx?|json|mdx?|svg|css|scss|sass|less)$/i;
   return (appSource.test(filename) && appSourceExtension.test(filename)) ||
     /^public\/.+$/i.test(filename) ||
+    /^(?:tailwind|postcss|next)\.config\.[cm]?[jt]sx?$/i.test(filename) ||
     /\.(?:css|scss|sass|less)$/i.test(filename);
 }
 
@@ -1136,7 +1175,9 @@ export function validateBrowserVerification({
       details: "UI behavior changed, but no current-SHA browser evidence was recorded.",
     };
   }
-  const changedFiles = new Set(files.map((file) => typeof file === "string" ? file : file.filename));
+  const changedFiles = new Map(files.map((file) => typeof file === "string"
+    ? [file, null]
+    : [file.filename, file.status]));
   const screenshots = Array.isArray(record.screenshots) ? record.screenshots : [];
   const testedSha = typeof record.testedSha === "string" ? record.testedSha : "";
   const runId = typeof record.runId === "string" ? record.runId.trim() : "";
@@ -1146,6 +1187,7 @@ export function validateBrowserVerification({
       screenshot && typeof screenshot === "object" &&
       typeof screenshot.path === "string" &&
       isVerificationScreenshot(screenshot.path) && changedFiles.has(screenshot.path) &&
+      changedFiles.get(screenshot.path) !== "removed" &&
       screenshot.testedSha?.toLowerCase?.() === testedSha.toLowerCase() &&
       screenshot.runId === runId,
     );

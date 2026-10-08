@@ -136,8 +136,10 @@ different from the PR author on the current head SHA. Use the review body
 summary format in `docs/agent-harness.md`. An author self-review does not
 count. If no independent GitHub identity is available, record formal review as
 `NOT RUN` or `BLOCKED` and keep the PR ready for external review; do not
-impersonate another account. New commits require fresh AI and GitHub review
-evidence for the new SHA.
+impersonate another account. Any non-dismissed `CHANGES_REQUESTED` review on
+the current SHA blocks merge readiness, even if another reviewer later submits
+a clean review; dismiss the change request to clear it. New commits require
+fresh AI and GitHub review evidence for the new SHA.
 
 The gate reads required checks from branch protection and effective branch
 rules. If none are configured, it reports that no CI checks are required and
@@ -154,8 +156,9 @@ PR. Record the tested full SHA, a browser run ID, and for each screenshot its
 path, tested SHA, and matching run ID. The screenshot SHA must match the
 current PR head. The detector treats application source under `src/` and the
 root `app/`, `components/`, `pages/`, `lib/`, `public/`, `messages/`,
-`middleware.*`, and `proxy.*` paths as potentially UI-affecting; test/spec
-files are excluded. Check meaningful interactions, important responsive layouts, browser
+`middleware.*`, `proxy.*`, `tailwind.config.*`, `postcss.config.*`, and
+`next.config.*` paths as potentially UI-affecting; test/spec files are
+excluded. Check meaningful interactions, important responsive layouts, browser
 console errors, failed network requests, and persistence after navigation or
 reload when relevant. Review screenshots against the implementation, add or
 update regression tests for discovered bugs, and repeat the focused browser
