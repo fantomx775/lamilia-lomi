@@ -545,7 +545,7 @@ export function buildReleaseRequirements(files, { available = true } = {}) {
 }
 
 function reviewField(body, label) {
-  const match = body.match(new RegExp("^\\s*" + label + "\\s*:\\s*(.+?)\\s*$", "im"));
+  const match = body.match(new RegExp("^\\s*(?:[-*]\\s*)?" + label + "\\s*:\\s*(.+?)\\s*$", "im"));
   return match?.[1]?.trim() || null;
 }
 
@@ -643,15 +643,24 @@ export function statusTransitionBlockers(status, readiness, pullRequests = [], r
   if (["Ready", "In Progress"].includes(status) && !readiness.ready) {
     blockers.push(...readiness.reasons);
   }
+  const statusOrder = ["Backlog", "Ready", "In Progress", "Review", "Done"];
+  const previousOrder = statusOrder.indexOf(recoveryPlan?.statusToPreserve);
+  const requestedOrder = statusOrder.indexOf(status);
+  const existingWork =
+    recoveryPlan?.action === "resume-open-pull-request"
+      ? "open PR #" + recoveryPlan.pullRequest.number
+      : recoveryPlan?.action === "resume-existing-branch"
+        ? "branch " + recoveryPlan.branch
+        : null;
   if (
-    ["Ready", "In Progress"].includes(status) &&
-    recoveryPlan?.action === "resume-open-pull-request" &&
-    recoveryPlan.statusToPreserve &&
-    recoveryPlan.statusToPreserve !== status
+    existingWork &&
+    previousOrder >= 0 &&
+    requestedOrder >= 0 &&
+    requestedOrder < previousOrder
   ) {
     blockers.push(
-      "open PR #" + recoveryPlan.pullRequest.number + " already tracks this issue; preserve Project Status \"" +
-      recoveryPlan.statusToPreserve + "\" and resume its branch",
+      existingWork + " already tracks this issue; preserve Project Status \"" +
+      recoveryPlan.statusToPreserve + "\" and resume the existing work",
     );
   }
   if (

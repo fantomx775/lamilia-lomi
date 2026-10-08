@@ -372,6 +372,31 @@ test("resumes Issue 29 from its existing PR and preserves Review without creatin
   );
 });
 
+test("resumes a matching branch without regressing Project progress", () => {
+  const plan = planIssueRecovery({
+    issueState: "open",
+    projectStatus: "In Progress",
+    candidateBranches: ["codex/issue-29-configurable-catalog-layout"],
+  });
+
+  assert.equal(plan.action, "resume-existing-branch");
+  assert.equal(plan.branch, "codex/issue-29-configurable-catalog-layout");
+  assert.equal(plan.createBranch, false);
+  assert.equal(plan.resetExistingWork, false);
+  assert.match(
+    statusTransitionBlockers("Ready", { ready: true, reasons: [] }, [], plan).join(" "),
+    /preserve Project Status "In Progress"/,
+  );
+  assert.deepEqual(statusTransitionBlockers("In Progress", { ready: true, reasons: [] }, [], plan), []);
+
+  const readyPlan = planIssueRecovery({
+    issueState: "open",
+    projectStatus: "Ready",
+    candidateBranches: ["codex/issue-29-configurable-catalog-layout"],
+  });
+  assert.deepEqual(statusTransitionBlockers("In Progress", { ready: true, reasons: [] }, [], readyPlan), []);
+});
+
 test("inspect surfaces Issue 29 PR, migration, independent-review, and CI state together", async () => {
   const issue = {
     number: 29,
@@ -484,7 +509,7 @@ test("requires an actual independent GitHub review for the exact current SHA", (
     "Low: none",
     "Fixes applied: normalized the migration order",
     "Unresolved findings: none",
-  ].join("\n");
+  ].map((line) => "- " + line).join("\n");
 
   assert.equal(
     validateIndependentReview({
