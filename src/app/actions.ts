@@ -222,7 +222,12 @@ export async function loginDemoAction(formData: FormData) {
     }),
   );
 
-  redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
+  redirect(
+    getAuthResumeRedirect(
+      { locale, productSlug: returnProductSlug, returnTo },
+      locale,
+    ),
+  );
 }
 
 export async function resendSupabaseVerificationEmailAction(formData: FormData) {

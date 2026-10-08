@@ -207,6 +207,19 @@ describe("registration auth action", () => {
     );
   });
 
+  it("keeps a local-mode product password-login return anchored to premium", async () => {
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "reader@example.com",
+          "password123",
+          "/en/products/moon-garden-coloring-book",
+        ),
+      ),
+      "/en/products/moon-garden-coloring-book#premium",
+    );
+  });
+
   it("rejects an incomplete login on the server before calling the auth provider", async () => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     const signInWithPassword = vi.fn();

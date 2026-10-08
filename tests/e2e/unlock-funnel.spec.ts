@@ -40,7 +40,8 @@ test("guest login preserves code intent without putting code in the auth return 
   await page.getByLabel("E-mail").fill("locked@example.com");
   await page.getByRole("button", { name: "Kontynuuj" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/pl/products/${productSlug}`));
+  await expect(page).toHaveURL(new RegExp(`/pl/products/${productSlug}#premium$`));
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
   expect(page.url()).not.toContain("code=");
   await expect(page.getByLabel("Kod premium")).toHaveValue("LOMI-BOOK-2026");
   await page.reload();
