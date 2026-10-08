@@ -54,11 +54,13 @@ async function ProductUnlockSection({
   locale,
   error,
   alreadyUnlocked,
+  verificationPending,
 }: {
   product: LocalizedProductView;
   locale: Locale;
   error?: string;
   alreadyUnlocked: boolean;
+  verificationPending: boolean;
 }) {
   const [accessResult, unlockIntent, copy] = await Promise.all([
     getProductDetailAccessForRequest(product.id)
@@ -126,11 +128,15 @@ async function ProductUnlockSection({
                 isUnlocked={access.isUnlocked}
                 error={error}
                 alreadyUnlocked={alreadyUnlocked}
+                verificationPending={verificationPending}
                 copy={{
                   loginRequired: copy("loginRequired"),
                   loginRequiredDescription: copy("loginRequiredDescription"),
                   verificationRequired: copy("verificationRequired"),
                   verificationRequiredDescription: copy("verificationRequiredDescription"),
+                  verificationPending: copy("verificationPending"),
+                  verificationPendingDescription: copy("verificationPendingDescription"),
+                  resendVerification: copy("resendVerification"),
                   verifyDemo: copy("verifyDemo"),
                   codeLabel: copy("codeLabel"),
                   codePlaceholder: copy("codePlaceholder"),
@@ -376,6 +382,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
           locale={locale}
           error={error}
           alreadyUnlocked={stringParam(query.unlocked) === "already"}
+          verificationPending={stringParam(query.step) === "verify"}
         />
       </Suspense>
     </div>

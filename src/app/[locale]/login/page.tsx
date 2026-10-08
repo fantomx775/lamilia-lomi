@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Locale } from "@/i18n/routing";
-import { isUnlockRegistrationContext } from "@/lib/auth";
+import { getBackendMode } from "@/lib/config";
 import { productSlugFromReturnTo, sanitizeReturnTo } from "@/lib/return-to";
 import { getUnlockIntent } from "@/lib/unlock-intent";
 
@@ -21,10 +21,11 @@ export default async function LoginPage({ params, searchParams }: Props) {
   const { locale } = await params;
   const query = await searchParams;
   const t = await getTranslations("Auth");
-  const redirectTo = sanitizeReturnTo(
-    stringParam(query.returnTo) ?? stringParam(query.redirectTo),
-    locale,
-  );
+  const requestedReturnTo = stringParam(query.returnTo) ?? stringParam(query.redirectTo);
+  const safeRequestedReturnTo = requestedReturnTo
+    ? sanitizeReturnTo(requestedReturnTo, locale, "")
+    : undefined;
+  const redirectTo = safeRequestedReturnTo || sanitizeReturnTo(undefined, locale);
   const unlockIntent = await getUnlockIntent();
   const code =
     unlockIntent &&
@@ -33,19 +34,15 @@ export default async function LoginPage({ params, searchParams }: Props) {
       ? unlockIntent.code ?? ""
       : "";
   const error = stringParam(query.error);
-  const canCreateAccount = isUnlockRegistrationContext({ locale, redirectTo });
-  const verificationMessage =
-    error === "email_unverified"
-      ? t("emailNotConfirmed")
-      : error === "verification_sent" || error === "verification_unavailable"
-        ? t("verificationSent")
-        : error
-          ? t("invalid")
-          : null;
+  const verificationMessage = getLoginErrorMessage(error, t);
+  const canCreateAccount = Boolean(safeRequestedReturnTo);
+  const isDemo = getBackendMode() === "local";
   const canResendVerification =
     error === "email_unverified" ||
     error === "verification_sent" ||
-    error === "verification_unavailable";
+    error === "verification_unavailable" ||
+    error === "verification_failed" ||
+    error === "verification_mismatch";
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">
@@ -59,7 +56,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
             {t("loginDescription")}
           </p>
           {verificationMessage ? (
-            <p className="rounded-md bg-[var(--color-blush)] p-3 text-sm" role="alert">
+            <p id="login-error" className="rounded-md bg-[var(--color-blush)] p-3 text-sm" role="alert">
               {verificationMessage}
             </p>
           ) : null}
@@ -71,11 +68,29 @@ export default async function LoginPage({ params, searchParams }: Props) {
             <input type="hidden" name="code" value={code} />
             <div className="grid gap-2">
               <Label htmlFor="email">{t("email")}</Label>
-              <Input id="email" name="email" type="email" defaultValue="demo@lamilialomi.test" autoComplete="email" />
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                defaultValue={isDemo ? "demo@lamilialomi.test" : undefined}
+                autoComplete="email"
+                required
+                aria-invalid={error === "invalid_input" || error === "invalid_credentials"}
+                aria-describedby={verificationMessage ? "login-error" : undefined}
+              />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">{t("password")}</Label>
-              <Input id="password" name="password" type="password" defaultValue="demo-password" autoComplete="current-password" />
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                defaultValue={isDemo ? "demo-password" : undefined}
+                autoComplete="current-password"
+                required
+                aria-invalid={error === "invalid_input" || error === "invalid_credentials"}
+                aria-describedby={verificationMessage ? "login-error" : undefined}
+              />
             </div>
             <SubmitButton pendingLabel={t("pending")}>{t("continue")}</SubmitButton>
           </form>
@@ -86,7 +101,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
               <input type="hidden" name="code" value={code} />
               <Label htmlFor="verification-email">{t("email")}</Label>
               <Input id="verification-email" name="email" type="email" autoComplete="email" required />
-              <SubmitButton pendingLabel={t("pending")}>{t("resendVerification")}</SubmitButton>
+              <SubmitButton pendingLabel={t("resendPending")}>{t("resendVerification")}</SubmitButton>
             </form>
           ) : null}
           <div className="mt-5 flex items-center justify-between gap-3 text-sm">
@@ -111,6 +126,34 @@ export default async function LoginPage({ params, searchParams }: Props) {
       </Card>
     </div>
   );
+}
+
+function getLoginErrorMessage(
+  error: string | undefined,
+  t: Awaited<ReturnType<typeof getTranslations>>,
+) {
+  if (!error) {
+    return null;
+  }
+
+  switch (error) {
+    case "email_unverified":
+      return t("emailNotConfirmed");
+    case "verification_sent":
+      return t("verificationSent");
+    case "verification_unavailable":
+      return t("verificationUnavailable");
+    case "verification_mismatch":
+      return t("verificationMismatch");
+    case "verification_failed":
+      return t("verificationFailed");
+    case "invalid_input":
+      return t("invalidInput");
+    case "invalid_credentials":
+      return t("invalidCredentials");
+    default:
+      return t("invalidCredentials");
+  }
 }
 
 function stringParam(value: string | string[] | undefined) {

@@ -153,6 +153,8 @@ export async function switchLocaleAction(formData: FormData) {
 
 export async function loginDemoAction(formData: FormData) {
   const locale = normalizeLocale(text(formData, "locale"));
+  const email = text(formData, "email");
+  const password = rawText(formData, "password");
   const returnTo = sanitizeReturnTo(
     text(formData, "returnTo") || text(formData, "redirectTo"),
     locale,
@@ -170,29 +172,34 @@ export async function loginDemoAction(formData: FormData) {
 
   const code = text(formData, "code") || currentIntent?.code || "";
 
+  if (!email || !isValidEmail(email) || !password) {
+    redirect(`/${locale}/login?error=invalid_input&returnTo=${encodeURIComponent(returnTo)}`);
+  }
+
   if (getBackendMode() === "supabase") {
     const intent = createAuthResumeIntent({
       locale,
       productSlug: returnProductSlug,
       returnTo,
       code,
+      email,
     });
     const supabase = await createClient();
     let error;
 
     try {
       ({ error } = await supabase.auth.signInWithPassword({
-        email: text(formData, "email"),
-        password: text(formData, "password"),
+        email,
+        password,
       }));
     } catch (authError) {
       logUnexpectedFailure("[auth] Sign-in failed unexpectedly.", authError);
-      await setAuthResumeIntent({ locale, returnTo, code });
+      await setAuthResumeIntent({ locale, returnTo, code, email });
       redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
     if (error) {
-      await setAuthResumeIntent({ locale, returnTo, code });
+      await setAuthResumeIntent({ locale, returnTo, code, email });
       const errorCode = isSupabaseEmailNotConfirmedError(error)
         ? "email_unverified"
         : "invalid_credentials";
@@ -205,8 +212,8 @@ export async function loginDemoAction(formData: FormData) {
   await preserveUnlockIntent({ locale, returnTo, code });
   await setDemoSession(
     createDemoSession({
-      email: text(formData, "email") || "demo@lamilialomi.test",
-      emailVerified: !text(formData, "email").toLowerCase().includes("unverified"),
+      email,
+      emailVerified: !email.toLowerCase().includes("unverified"),
       preferredLocale: locale,
     }),
   );
@@ -221,6 +228,11 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     locale,
   );
   const code = text(formData, "code");
+  const email = text(formData, "email");
+
+  if (!email || !isValidEmail(email)) {
+    redirect(`/${locale}/login?error=invalid_input&returnTo=${encodeURIComponent(returnTo)}`);
+  }
 
   if (getBackendMode() !== "supabase") {
     redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
@@ -231,6 +243,7 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     productSlug: productSlugFromReturnTo(returnTo, locale),
     returnTo,
     code,
+    email: text(formData, "email"),
   });
 
   const supabase = await createClient();
@@ -239,8 +252,8 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
   try {
     ({ error: resendError } = await supabase.auth.resend({
       type: "signup",
-      email: text(formData, "email"),
-      options: { emailRedirectTo: buildSupabaseAuthCallbackUrl(locale) },
+      email,
+      options: { emailRedirectTo: buildSupabaseAuthCallbackUrl(locale, returnTo) },
     }));
   } catch (error) {
     logUnexpectedFailure("[auth] Verification email resend failed unexpectedly.", error);
@@ -272,7 +285,7 @@ export async function registerDemoAction(formData: FormData) {
 
   const result = validateRegistrationInput({
     email: text(formData, "email"),
-    password: text(formData, "password"),
+    password: rawText(formData, "password"),
     termsAccepted: formData.get("termsAccepted") === "on",
     marketingConsent: formData.get("marketingConsent") === "on",
     preferredLocale: locale,
@@ -283,13 +296,14 @@ export async function registerDemoAction(formData: FormData) {
   }
 
   if (getBackendMode() === "supabase") {
-    const intent = createAuthResumeIntent({
+    let intent = createAuthResumeIntent({
       locale,
       returnTo,
       code,
+      email: result.value.email,
     });
     const safeRedirectTo = intent.returnTo;
-    await setAuthResumeIntent({ locale, returnTo, code });
+    await setAuthResumeIntent({ locale, returnTo, code, email: result.value.email });
     const supabase = await createClient();
     let data;
     let error;
@@ -304,7 +318,7 @@ export async function registerDemoAction(formData: FormData) {
             preferred_locale: result.value.preferredLocale,
             terms_accepted: true,
           },
-          emailRedirectTo: buildSupabaseAuthCallbackUrl(locale),
+          emailRedirectTo: buildSupabaseAuthCallbackUrl(locale, safeRedirectTo),
         },
       }));
     } catch (authError) {
@@ -315,6 +329,21 @@ export async function registerDemoAction(formData: FormData) {
     if (error) {
       redirect(`/${locale}/register?error=auth&returnTo=${encodeURIComponent(safeRedirectTo)}`);
     }
+
+    intent = createAuthResumeIntent({
+      locale,
+      returnTo: safeRedirectTo,
+      code,
+      email: result.value.email,
+      userId: data.user?.id,
+    });
+    await setAuthResumeIntent({
+      locale,
+      returnTo: safeRedirectTo,
+      code,
+      email: result.value.email,
+      userId: data.user?.id,
+    });
 
     if (data.session) {
       await completeSupabaseAuthResume(intent, code);
@@ -346,6 +375,8 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
     productSlug: intent.productSlug,
     returnTo: intent.returnTo,
     code,
+    userId: intent.userId,
+    emailHash: intent.emailHash,
   });
 
   let redemption;
@@ -550,6 +581,16 @@ function text(formData: FormData, key: string) {
   const value = formData.get(key);
 
   return typeof value === "string" ? value.trim() : "";
+}
+
+function rawText(formData: FormData, key: string) {
+  const value = formData.get(key);
+
+  return typeof value === "string" ? value : "";
+}
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function withSearchPrefix(value: string) {

@@ -77,7 +77,7 @@ vi.mock("@/lib/unlock-intent", () => ({
   setUnlockIntent: actionMocks.setUnlockIntent,
 }));
 
-import { registerDemoAction, unlockPremiumAction } from "./actions";
+import { loginDemoAction, registerDemoAction, unlockPremiumAction } from "./actions";
 
 beforeEach(() => {
   actionMocks.getBackendMode.mockReturnValue("local");
@@ -133,6 +133,17 @@ function registrationForm(returnTo?: string, code?: string) {
   return formData;
 }
 
+function loginForm(email: string, password: string, returnTo?: string) {
+  const formData = new FormData();
+  formData.set("locale", "en");
+  formData.set("email", email);
+  formData.set("password", password);
+  if (returnTo) {
+    formData.set("returnTo", returnTo);
+  }
+  return formData;
+}
+
 async function expectRedirect(action: Promise<void>, location: string) {
   try {
     await action;
@@ -150,6 +161,48 @@ describe("registration auth action", () => {
     expect(actionMocks.setDemoSession).toHaveBeenCalledWith(
       expect.objectContaining({ email: "reader@example.com" }),
     );
+  });
+
+  it("keeps leading and trailing spaces in a password sent to Supabase", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
+    actionMocks.createClient.mockResolvedValue({ auth: { signInWithPassword } });
+
+    await expectRedirect(loginDemoAction(loginForm("reader@example.com", " password ")), "/en/library");
+
+    expect(signInWithPassword).toHaveBeenCalledWith({
+      email: "reader@example.com",
+      password: " password ",
+    });
+  });
+
+  it("rejects an incomplete login on the server before calling the auth provider", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    const signInWithPassword = vi.fn();
+    actionMocks.createClient.mockResolvedValue({ auth: { signInWithPassword } });
+
+    await expectRedirect(loginDemoAction(loginForm("", "")), "/en/login?error=invalid_input&returnTo=%2Fen%2Flibrary");
+
+    expect(signInWithPassword).not.toHaveBeenCalled();
+  });
+
+  it("returns a specific login error and binds its resume intent to the submitted email", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.isSupabaseEmailNotConfirmedError.mockReturnValue(false);
+    const signInWithPassword = vi.fn().mockResolvedValue({ error: new Error("invalid login") });
+    actionMocks.createClient.mockResolvedValue({ auth: { signInWithPassword } });
+
+    await expectRedirect(
+      loginDemoAction(loginForm("reader@example.com", "wrong-password", "/en/products/moon-garden-coloring-book")),
+      "/en/login?error=invalid_credentials&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith({
+      locale: "en",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "",
+      email: "reader@example.com",
+    });
   });
 
   it("keeps an unlock registration on the product resume path", async () => {
@@ -193,10 +246,18 @@ describe("registration auth action", () => {
 
     await expectRedirect(registerDemoAction(registrationForm()), "/en/login?error=verification_sent&returnTo=%2Fen%2Faccount");
 
-    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith({
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenNthCalledWith(1, {
       locale: "en",
       returnTo: "/en/account",
       code: "",
+      email: "reader@example.com",
+    });
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenNthCalledWith(2, {
+      locale: "en",
+      returnTo: "/en/account",
+      code: "",
+      email: "reader@example.com",
+      userId: "user-id",
     });
     expect(actionMocks.redirect.mock.calls[0]?.[0]).not.toContain("LOMI-BOOK-2026");
   });

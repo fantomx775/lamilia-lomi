@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import {
+  authResumeIntentMatchesUser,
   clearAuthResumeIntent,
   getAuthResumeRedirect,
   redeemAuthResumeIntent,
   readAuthResumeIntent,
+  sanitizeInternalReturnTo,
 } from "@/lib/auth-resume";
 import { normalizeLocale } from "@/lib/locale";
 import { createClient } from "@/lib/supabase/server";
@@ -16,6 +18,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const locale = normalizeLocale(requestUrl.searchParams.get("locale") ?? undefined);
+  const callbackReturnTo = sanitizeInternalReturnTo(
+    requestUrl.searchParams.get("returnTo"),
+    locale,
+  );
   const intent = await readAuthResumeIntent();
 
   if (getBackendMode() !== "supabase") {
@@ -25,33 +31,53 @@ export async function GET(request: Request) {
   const supabase = await createClient();
   const callbackCode = requestUrl.searchParams.get("code");
 
-  if (callbackCode) {
-    let error;
-
-    try {
-      ({ error } = await supabase.auth.exchangeCodeForSession(callbackCode));
-    } catch (exchangeError) {
-      console.error("[auth-callback] Code exchange failed unexpectedly.", {
-        type: exchangeError instanceof Error ? exchangeError.name : typeof exchangeError,
-      });
-      return failureResponse(locale, intent);
+  if (!callbackCode) {
+    if (intent) {
+      return failureResponse(locale, intent, callbackReturnTo);
     }
 
-    if (error) {
-      // A user who already completed the flow may revisit a one-time callback
-      // URL. Do not trap that confirmed session in a verification error page.
-      const { data } = await supabase.auth.getUser();
-
-      if (!data.user?.email_confirmed_at) {
-        return failureResponse(locale, intent);
-      }
+    const user = await getCallbackUser(supabase);
+    if (user?.email_confirmed_at) {
+      return successResponse(callbackReturnTo);
     }
+
+    return failureResponse(locale, undefined, callbackReturnTo);
   }
 
-  const { data } = await supabase.auth.getUser();
+  let exchangeError;
+  try {
+    ({ error: exchangeError } = await supabase.auth.exchangeCodeForSession(callbackCode));
+  } catch (error) {
+    console.error("[auth-callback] Code exchange failed unexpectedly.", {
+      type: error instanceof Error ? error.name : typeof error,
+    });
+    return failureResponse(locale, intent, callbackReturnTo);
+  }
 
-  if (!data.user?.email_confirmed_at) {
-    return failureResponse(locale, intent);
+  if (exchangeError) {
+    // A reused callback may still return a confirmed user, but it cannot
+    // redeem a pending intent because this request did not establish a session.
+    if (intent) {
+      return failureResponse(locale, intent, callbackReturnTo);
+    }
+
+    const user = await getCallbackUser(supabase);
+    if (user?.email_confirmed_at) {
+      return successResponse(callbackReturnTo);
+    }
+
+    return failureResponse(locale, undefined, callbackReturnTo);
+  }
+
+  const user = await getCallbackUser(supabase);
+
+  if (!user?.email_confirmed_at) {
+    return failureResponse(locale, intent, callbackReturnTo);
+  }
+
+  if (intent && !authResumeIntentMatchesUser(intent, user)) {
+    await clearAuthResumeIntent();
+    return failureResponse(locale, intent, callbackReturnTo, "verification_mismatch");
   }
 
   let redemption;
@@ -62,7 +88,7 @@ export async function GET(request: Request) {
     console.error("[auth-callback] Auth resume redemption failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,
     });
-    return failureResponse(locale, intent);
+    return failureResponse(locale, intent, callbackReturnTo);
   }
   await clearAuthResumeIntent();
 
@@ -83,7 +109,19 @@ export async function GET(request: Request) {
     );
   }
 
-  return successResponse(getAuthResumeRedirect(intent, locale));
+  return successResponse(intent ? getAuthResumeRedirect(intent, locale) : callbackReturnTo);
+}
+
+async function getCallbackUser(supabase: Awaited<ReturnType<typeof createClient>>) {
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    return error ? null : data.user;
+  } catch (error) {
+    console.error("[auth-callback] Current user lookup failed unexpectedly.", {
+      type: error instanceof Error ? error.name : typeof error,
+    });
+    return null;
+  }
 }
 
 function appendQuery(path: string, key: string, value: string) {
@@ -100,11 +138,18 @@ function successResponse(path: string) {
   return response;
 }
 
-function failureResponse(locale: string, intent?: Parameters<typeof getAuthResumeRedirect>[0]) {
+function failureResponse(
+  locale: string,
+  intent?: Parameters<typeof getAuthResumeRedirect>[0],
+  callbackReturnTo?: string,
+  error = "verification_failed",
+) {
   const target = new URL(`/${locale}/login`, getCanonicalAppUrl());
-  target.searchParams.set("error", "verification_failed");
+  target.searchParams.set("error", error);
 
-  const returnTo = getAuthResumeRedirect(intent, locale);
+  const returnTo = intent
+    ? getAuthResumeRedirect(intent, locale)
+    : sanitizeInternalReturnTo(callbackReturnTo, normalizeLocale(locale));
 
   if (returnTo !== `/${locale}/account`) {
     target.searchParams.set("returnTo", returnTo);

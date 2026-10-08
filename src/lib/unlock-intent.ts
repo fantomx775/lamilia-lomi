@@ -8,7 +8,7 @@ import { productSlugFromReturnTo, sanitizeReturnTo } from "./return-to";
 import type { Locale } from "@/i18n/routing";
 
 export const unlockIntentCookie = "ll_unlock_intent";
-const intentMaxAge = 60 * 10;
+const intentMaxAge = 60 * 60;
 
 export type UnlockIntent = {
   locale: Locale;

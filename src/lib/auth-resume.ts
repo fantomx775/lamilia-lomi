@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 
 import { normalizeLocale } from "./locale";
@@ -11,7 +12,7 @@ import { productSlugFromReturnTo, sanitizeReturnTo } from "./return-to";
 import type { Locale } from "@/i18n/routing";
 
 export const authResumeCookieName = "ll_auth_resume";
-export const authResumeMaxAgeSeconds = 15 * 60;
+export const authResumeMaxAgeSeconds = 60 * 60;
 
 const productSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -20,12 +21,20 @@ export type AuthResumeIntent = {
   productSlug?: string;
   returnTo: string;
   code?: string;
+  userId?: string;
+  emailHash?: string;
   createdAt: number;
 };
 
-export function buildSupabaseAuthCallbackUrl(locale: string) {
+export function buildSupabaseAuthCallbackUrl(locale: string, returnTo?: string | null) {
   const url = new URL("/auth/callback", getCanonicalAppUrl());
-  url.searchParams.set("locale", normalizeLocale(locale));
+  const normalizedLocale = normalizeLocale(locale);
+  const safeReturnTo = sanitizeInternalReturnTo(returnTo, normalizedLocale);
+
+  url.searchParams.set("locale", normalizedLocale);
+  if (safeReturnTo !== `/${normalizedLocale}/account`) {
+    url.searchParams.set("returnTo", safeReturnTo);
+  }
 
   return url.toString();
 }
@@ -35,6 +44,9 @@ export function createAuthResumeIntent(input: {
   productSlug?: string;
   returnTo?: string | null;
   code?: string | null;
+  userId?: string | null;
+  email?: string | null;
+  emailHash?: string | null;
   now?: number;
 }): AuthResumeIntent {
   const locale = normalizeLocale(input.locale);
@@ -52,8 +64,32 @@ export function createAuthResumeIntent(input: {
     productSlug,
     returnTo,
     code: normalizePremiumCodeForRequest(input.code) || undefined,
+    userId: normalizeUserId(input.userId),
+    emailHash: normalizeEmailHash(input.emailHash) ?? hashEmail(input.email),
     createdAt: input.now ?? Date.now(),
   };
+}
+
+export function authResumeIntentMatchesUser(
+  intent: Pick<AuthResumeIntent, "userId" | "emailHash">,
+  user: { id?: string | null; email?: string | null },
+) {
+  if (!intent.userId && !intent.emailHash) {
+    return false;
+  }
+
+  if (intent.userId && intent.userId !== user.id) {
+    return false;
+  }
+
+  if (intent.emailHash) {
+    const currentEmailHash = hashEmail(user.email);
+    if (!currentEmailHash || !safeEqual(intent.emailHash, currentEmailHash)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export function sanitizeInternalReturnTo(
@@ -79,6 +115,9 @@ export async function setAuthResumeIntent(input: {
   productSlug?: string;
   returnTo?: string | null;
   code?: string | null;
+  userId?: string | null;
+  email?: string | null;
+  emailHash?: string | null;
 }) {
   const intent = createAuthResumeIntent(input);
   const cookieStore = await cookies();
@@ -122,7 +161,8 @@ export async function redeemAuthResumeIntent(intent: Pick<AuthResumeIntent, "pro
 }
 
 function encodeIntent(intent: AuthResumeIntent) {
-  return Buffer.from(JSON.stringify(intent), "utf8").toString("base64url");
+  const payload = Buffer.from(JSON.stringify(intent), "utf8").toString("base64url");
+  return `${payload}.${signIntent(payload)}`;
 }
 
 function decodeIntent(value: string | undefined): AuthResumeIntent | null {
@@ -131,7 +171,13 @@ function decodeIntent(value: string | undefined): AuthResumeIntent | null {
   }
 
   try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<AuthResumeIntent>;
+    const [payload, signature, extra] = value.split(".");
+
+    if (!payload || !signature || extra !== undefined || !hasValidSignature(payload, signature)) {
+      return null;
+    }
+
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<AuthResumeIntent>;
     const locale = normalizeLocale(parsed.locale);
     const returnTo = typeof parsed.returnTo === "string" ? parsed.returnTo : undefined;
     const createdAt = typeof parsed.createdAt === "number" ? parsed.createdAt : 0;
@@ -145,6 +191,8 @@ function decodeIntent(value: string | undefined): AuthResumeIntent | null {
       productSlug: typeof parsed.productSlug === "string" ? parsed.productSlug : undefined,
       returnTo,
       code: typeof parsed.code === "string" ? parsed.code : undefined,
+      userId: typeof parsed.userId === "string" ? parsed.userId : undefined,
+      emailHash: typeof parsed.emailHash === "string" ? parsed.emailHash : undefined,
       now: createdAt,
     });
 
@@ -152,6 +200,60 @@ function decodeIntent(value: string | undefined): AuthResumeIntent | null {
   } catch {
     return null;
   }
+}
+
+function signIntent(payload: string) {
+  return createHmac("sha256", getIntentSigningSecret()).update(payload).digest("base64url");
+}
+
+function hasValidSignature(payload: string, signature: string) {
+  const expected = Buffer.from(signIntent(payload));
+  const actual = Buffer.from(signature);
+
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+function getIntentSigningSecret() {
+  const configuredSecret =
+    process.env.AUTH_RESUME_SECRET?.trim() ||
+    process.env.DEMO_SESSION_SECRET?.trim() ||
+    process.env.SUPABASE_SECRET_KEY?.trim() ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+  if (configuredSecret) {
+    return configuredSecret;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("AUTH_RESUME_SECRET or a server-only signing secret is required in production.");
+  }
+
+  return "local-auth-resume-secret-change-before-production";
+}
+
+function hashEmail(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+
+  return normalized
+    ? createHash("sha256").update(normalized).digest("hex")
+    : undefined;
+}
+
+function normalizeEmailHash(value: string | null | undefined) {
+  return value && /^[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : undefined;
+}
+
+function normalizeUserId(value: string | null | undefined) {
+  const normalized = value?.trim();
+
+  return normalized && normalized.length <= 200 ? normalized : undefined;
+}
+
+function safeEqual(first: string, second: string) {
+  const firstBuffer = Buffer.from(first);
+  const secondBuffer = Buffer.from(second);
+
+  return firstBuffer.length === secondBuffer.length && timingSafeEqual(firstBuffer, secondBuffer);
 }
 
 function normalizeProductSlug(value: string | null | undefined) {

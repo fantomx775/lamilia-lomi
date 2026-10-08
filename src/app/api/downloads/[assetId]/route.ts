@@ -48,6 +48,12 @@ export async function GET(
         ? getLoginTarget(request)
         : undefined;
 
+    if (next && request.headers.get("accept")?.includes("text/html")) {
+      const response = NextResponse.redirect(new URL(next, request.url));
+      response.headers.set("Cache-Control", "no-store");
+      return response;
+    }
+
     return premiumErrorResponse(
       { ok: false, reason: signedUrl.decision.reason, ...(next ? { next } : {}) },
       signedUrl.decision.reason === "guest"

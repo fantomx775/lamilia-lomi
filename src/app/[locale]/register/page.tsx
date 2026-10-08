@@ -33,6 +33,15 @@ export default async function RegisterPage({ params, searchParams }: Props) {
       ? unlockIntent.code ?? ""
       : "";
   const error = stringParam(query.error);
+  const errorMessage = error
+    ? error === "invalid"
+      ? t("invalidRegistration")
+      : t("registrationFailed")
+    : null;
+  const loginHref =
+    redirectTo === `/${locale}/account`
+      ? `/${locale}/login`
+      : `/${locale}/login?returnTo=${encodeURIComponent(redirectTo)}`;
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">
@@ -42,9 +51,9 @@ export default async function RegisterPage({ params, searchParams }: Props) {
           <p className="text-sm leading-6 text-[var(--color-muted)]">
             {t("registerDescription")}
           </p>
-          {error ? (
+          {errorMessage ? (
             <p className="rounded-md bg-[var(--color-blush)] p-3 text-sm" role="alert">
-              {t("invalid")}
+              {errorMessage}
             </p>
           ) : null}
         </CardHeader>
@@ -59,7 +68,7 @@ export default async function RegisterPage({ params, searchParams }: Props) {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">{t("password")}</Label>
-              <Input id="password" name="password" type="password" placeholder="At least 8 characters" autoComplete="new-password" required />
+              <Input id="password" name="password" type="password" placeholder="At least 8 characters" autoComplete="new-password" required minLength={8} />
             </div>
             <label className="flex gap-3 text-sm leading-6">
               <input className="mt-1 size-4" type="checkbox" name="termsAccepted" required />
@@ -81,6 +90,12 @@ export default async function RegisterPage({ params, searchParams }: Props) {
               {t("createAccountButton")}
             </SubmitButton>
           </form>
+          <p className="mt-5 text-sm text-[var(--color-muted)]">
+            {t("haveAccount")} {" "}
+            <Link className="text-[var(--color-terracotta)]" href={loginHref}>
+              {t("logIn")}
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>
