@@ -51,7 +51,11 @@ export function buildAuthRedirect(input: {
   code?: string | null;
 }) {
   const locale = normalizeLocale(input.locale);
-  return sanitizeReturnTo(input.redirectTo, locale);
+  const returnTo = sanitizeReturnTo(input.redirectTo, locale);
+
+  return productSlugFromReturnTo(returnTo, locale)
+    ? `${returnTo}#premium`
+    : returnTo;
 }
 
 export function isUnlockRegistrationContext(input: {

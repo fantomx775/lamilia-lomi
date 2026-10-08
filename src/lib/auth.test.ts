@@ -40,7 +40,7 @@ describe("auth behavior", () => {
         redirectTo: "/en/products/moon-garden-coloring-book",
         code: "LOMI-BOOK-2026",
       }),
-    ).toBe("/en/products/moon-garden-coloring-book");
+    ).toBe("/en/products/moon-garden-coloring-book#premium");
 
     expect(
       buildAuthRedirect({

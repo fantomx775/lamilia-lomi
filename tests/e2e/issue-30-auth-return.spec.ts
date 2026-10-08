@@ -84,6 +84,26 @@ test("local verification pending state offers the demo login path", async ({ pag
   await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
 });
 
+test("local product registration returns to the visible demo verification action", async ({ page }, testInfo) => {
+  await page.context().clearCookies();
+  await page.goto(`/en/register?returnTo=%2Fen%2Fproducts%2F${productSlug}`);
+
+  await page.getByLabel("Email").fill("issue-30-registration@example.com");
+  await page.getByLabel("Password").fill("password123");
+  await page.getByRole("checkbox", { name: /Terms/ }).check();
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
+  const verifyButton = page.getByRole("button", { name: "Mark demo email as verified" });
+  await expect(verifyButton).toBeInViewport();
+  await saveEvidenceScreenshot(page, testInfo, "local-registration-return");
+
+  await verifyButton.click();
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page.getByLabel("Premium code")).toBeInViewport();
+});
+
 test("auth route reports client and network errors without exposing form values", async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];

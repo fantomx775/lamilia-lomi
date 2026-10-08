@@ -104,9 +104,12 @@ beforeEach(() => {
     },
   }));
   actionMocks.createDemoSession.mockImplementation((input) => input);
-  actionMocks.buildAuthRedirect.mockImplementation(({ locale, redirectTo }) =>
-    redirectTo ?? `/${locale}/account`,
-  );
+  actionMocks.buildAuthRedirect.mockImplementation(({ locale, redirectTo }) => {
+    const returnTo = redirectTo ?? `/${locale}/account`;
+    return /^\/(?:en|pl)\/products\/[^/?]+(?:\?.*)?$/.test(returnTo)
+      ? `${returnTo}#premium`
+      : returnTo;
+  });
   actionMocks.getAuthResumeRedirect.mockImplementation((intent, locale = "en") => {
     const returnTo = intent?.returnTo ?? `/${locale}/account`;
     return returnTo.startsWith(`/${locale}/products/`)
@@ -278,7 +281,7 @@ describe("registration auth action", () => {
       registerDemoAction(
         registrationForm("/en/products/moon-garden-coloring-book"),
       ),
-      "/en/products/moon-garden-coloring-book",
+      "/en/products/moon-garden-coloring-book#premium",
     );
 
     expect(actionMocks.setUnlockIntent).toHaveBeenCalledWith(
