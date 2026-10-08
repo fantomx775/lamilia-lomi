@@ -27,6 +27,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
     : undefined;
   const redirectTo = safeRequestedReturnTo || sanitizeReturnTo(undefined, locale);
   const unlockIntent = await getUnlockIntent();
+  const isDemo = getBackendMode() === "local";
   const code =
     unlockIntent &&
     unlockIntent.locale === locale &&
@@ -34,16 +35,16 @@ export default async function LoginPage({ params, searchParams }: Props) {
       ? unlockIntent.code ?? ""
       : "";
   const error = stringParam(query.error);
-  const verificationMessage = getLoginErrorMessage(error, t);
+  const verificationMessage = getLoginErrorMessage(error, t, isDemo);
   const canCreateAccount = Boolean(safeRequestedReturnTo);
-  const isDemo = getBackendMode() === "local";
   const canResendVerification =
-    error === "email_unverified" ||
-    error === "verification_required" ||
-    error === "verification_sent" ||
-    error === "verification_unavailable" ||
-    error === "verification_failed" ||
-    error === "verification_mismatch";
+    !isDemo &&
+    (error === "email_unverified" ||
+      error === "verification_required" ||
+      error === "verification_sent" ||
+      error === "verification_unavailable" ||
+      error === "verification_failed" ||
+      error === "verification_mismatch");
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">
@@ -132,6 +133,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
 function getLoginErrorMessage(
   error: string | undefined,
   t: Awaited<ReturnType<typeof getTranslations>>,
+  isDemo: boolean,
 ) {
   if (!error) {
     return null;
@@ -143,7 +145,7 @@ function getLoginErrorMessage(
     case "verification_sent":
       return t("verificationSent");
     case "verification_required":
-      return t("verificationRequired");
+      return isDemo ? t("demoVerification") : t("verificationRequired");
     case "verification_unavailable":
       return t("verificationUnavailable");
     case "verification_mismatch":

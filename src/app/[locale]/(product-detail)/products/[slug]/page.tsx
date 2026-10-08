@@ -128,6 +128,7 @@ async function ProductUnlockSection({
                 initialCode={hasCurrentIntent ? unlockIntent?.code : undefined}
                 session={access.session}
                 isUnlocked={access.isUnlocked}
+                isDemo={backendMode === "local"}
                 error={error}
                 alreadyUnlocked={alreadyUnlocked}
                 verificationPending={verificationPending}
@@ -138,7 +139,10 @@ async function ProductUnlockSection({
                   verificationRequiredDescription: copy("verificationRequiredDescription"),
                   verificationPending: copy("verificationPending"),
                   verificationPendingDescription: copy("verificationPendingDescription"),
+                  verificationPendingDemo: copy("verificationPendingDemo"),
+                  verificationPendingDemoDescription: copy("verificationPendingDemoDescription"),
                   resendVerification: copy("resendVerification"),
+                  continueDemoVerification: copy("continueDemoVerification"),
                   verifyDemo: copy("verifyDemo"),
                   codeLabel: copy("codeLabel"),
                   codePlaceholder: copy("codePlaceholder"),

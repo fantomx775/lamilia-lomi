@@ -17,7 +17,10 @@ export type UnlockCopy = {
   verificationRequiredDescription: string;
   verificationPending: string;
   verificationPendingDescription: string;
+  verificationPendingDemo: string;
+  verificationPendingDemoDescription: string;
   resendVerification: string;
+  continueDemoVerification: string;
   verifyDemo: string;
   codeLabel: string;
   codePlaceholder: string;
@@ -41,6 +44,7 @@ type Props = {
   error?: string;
   alreadyUnlocked?: boolean;
   verificationPending?: boolean;
+  isDemo?: boolean;
   copy: UnlockCopy;
 };
 
@@ -53,6 +57,7 @@ export function UnlockForm({
   error,
   alreadyUnlocked = false,
   verificationPending = false,
+  isDemo = false,
   copy,
 }: Props) {
   const redirectTo = `/${locale}/products/${productSlug}`;
@@ -69,11 +74,17 @@ export function UnlockForm({
           )}
           <div>
             <p className="font-medium">
-              {verificationPending ? copy.verificationPending : copy.loginRequired}
+              {verificationPending
+                ? isDemo
+                  ? copy.verificationPendingDemo
+                  : copy.verificationPending
+                : copy.loginRequired}
             </p>
             <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
               {verificationPending
-                ? copy.verificationPendingDescription
+                ? isDemo
+                  ? copy.verificationPendingDemoDescription
+                  : copy.verificationPendingDescription
                 : copy.loginRequiredDescription}
             </p>
             {verificationPending ? (
@@ -81,7 +92,7 @@ export function UnlockForm({
                 className="mt-3 inline-flex text-sm font-medium text-[var(--color-terracotta)] underline underline-offset-4"
                 href={`/${locale}/login?error=verification_required&returnTo=${encodeURIComponent(redirectTo)}`}
               >
-                {copy.resendVerification}
+                {isDemo ? copy.continueDemoVerification : copy.resendVerification}
               </Link>
             ) : null}
           </div>

@@ -207,7 +207,13 @@ test("mobile locale switcher exposes every locale and preserves code intent thro
   await page.getByLabel("E-Mail").fill("locked@example.com");
   await page.getByRole("button", { name: "Weiter" }).click();
   expect(page.url()).not.toContain("code=");
+  await expect(page).toHaveURL(new RegExp(`/de/products/${productSlug}#premium$`));
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
   await expect(page.getByLabel("Premium-Code")).toHaveValue("LOMI-BOOK-2026");
+  await switchLocaleThroughMobileMenu(page, "es");
+  await expect(page).toHaveURL(new RegExp(`/es/products/${productSlug}#premium$`));
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
+  await expect(page.getByLabel("Código premium")).toHaveValue("LOMI-BOOK-2026");
 });
 
 test("mobile locale switching keeps no-code state and prevents cross-product intent leakage", async ({ page }, testInfo) => {

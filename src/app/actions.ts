@@ -244,7 +244,9 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
   }
 
   if (getBackendMode() !== "supabase") {
-    redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
+    redirect(
+      `/${locale}/login?error=verification_required&returnTo=${encodeURIComponent(returnTo)}`,
+    );
   }
 
   const intent = await setAuthResumeIntent({

@@ -80,7 +80,12 @@ vi.mock("@/lib/unlock-intent", () => ({
   setUnlockIntent: actionMocks.setUnlockIntent,
 }));
 
-import { loginDemoAction, registerDemoAction, unlockPremiumAction } from "./actions";
+import {
+  loginDemoAction,
+  registerDemoAction,
+  resendSupabaseVerificationEmailAction,
+  unlockPremiumAction,
+} from "./actions";
 
 beforeEach(() => {
   actionMocks.getBackendMode.mockReturnValue("local");
@@ -247,6 +252,20 @@ describe("registration auth action", () => {
       code: "",
       email: "reader@example.com",
     });
+  });
+
+  it("keeps local verification resend requests on the demo guidance path", async () => {
+    const formData = new FormData();
+    formData.set("locale", "en");
+    formData.set("email", "reader@example.com");
+    formData.set("returnTo", "/en/products/moon-garden-coloring-book");
+
+    await expectRedirect(
+      resendSupabaseVerificationEmailAction(formData),
+      "/en/login?error=verification_required&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.createClient).not.toHaveBeenCalled();
   });
 
   it("keeps an unlock registration on the product resume path", async () => {

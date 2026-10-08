@@ -56,28 +56,32 @@ test("registration required fields stop an empty submission in the browser", asy
   ).toBe(true);
 });
 
-test("verification pending state explains the next step and offers a safe resend link", async ({ page }, testInfo) => {
+test("local verification pending state offers the demo login path", async ({ page }, testInfo) => {
   await page.context().clearCookies();
   await page.goto(`/en/products/${productSlug}?step=verify#premium`);
 
   await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
-  await expect(page.getByText("Check your inbox to verify your email")).toBeVisible();
-  const resendLink = page.getByRole("link", { name: "Need a new verification link?" });
-  await expect(resendLink).toHaveAttribute(
+  await expect(page.getByText("Demo mode does not send verification emails")).toBeVisible();
+  const demoLoginLink = page.getByRole("link", { name: "Continue with demo login" });
+  await expect(demoLoginLink).toHaveAttribute(
     "href",
     `/en/login?error=verification_required&returnTo=%2Fen%2Fproducts%2F${productSlug}`,
   );
   await expect(page.getByLabel("Premium code")).toHaveValue("");
   await saveEvidenceScreenshot(page, testInfo, "verification-pending");
 
-  await resendLink.click();
+  await demoLoginLink.click();
   await expect(page).toHaveURL(
     new RegExp(`/en/login\\?error=verification_required&returnTo=%2Fen%2Fproducts%2F${productSlug}$`),
   );
   await expect(page.locator("#login-error")).toHaveText(
-    "Enter the email address that received the verification link, then request a new one.",
+    "Demo mode does not send verification emails. Use the demo login above to continue; it verifies the demo session locally.",
   );
-  await expect(page.locator("#verification-email")).toBeVisible();
+  await expect(page.locator("#verification-email")).toHaveCount(0);
+  await expect(page.getByLabel("Email")).toHaveValue("demo@lamilialomi.test");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
 });
 
 test("auth route reports client and network errors without exposing form values", async ({ page }, testInfo) => {
