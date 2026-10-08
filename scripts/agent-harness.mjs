@@ -533,7 +533,8 @@ export function summarizeRequiredGitHubChecks({
       continue;
     }
     const rawIntegrationId = check.integration_id ?? check.app_id ?? null;
-    const integrationId = rawIntegrationId === null ? null : Number(rawIntegrationId);
+    const parsedIntegrationId = rawIntegrationId === null ? null : Number(rawIntegrationId);
+    const integrationId = parsedIntegrationId === -1 ? null : parsedIntegrationId;
     if (integrationId !== null && (!Number.isSafeInteger(integrationId) || integrationId < 0)) {
       malformedPolicy = true;
       continue;
@@ -1088,7 +1089,11 @@ export function validateLocalVerification({
 }
 
 function isUiBehaviorFile(filename) {
-  return /^(?:src\/(?:app|components|ui|styles|messages)\/|(?:app|components|pages|public|messages)\/)/i.test(filename) ||
+  if (/(?:^|\/)__tests__\/|(?:^|\/)[^/]+\.(?:test|spec)\.[^.]+$/i.test(filename)) return false;
+  const appSource = /^(?:src\/.*|app\/.*|components\/.*|pages\/.*|lib\/.*|messages\/.*|middleware\.[cm]?[jt]sx?|proxy\.[cm]?[jt]sx?)$/i;
+  const appSourceExtension = /\.(?:[cm]?[jt]sx?|json|mdx?|svg|css|scss|sass|less)$/i;
+  return (appSource.test(filename) && appSourceExtension.test(filename)) ||
+    /^public\/.+$/i.test(filename) ||
     /\.(?:css|scss|sass|less)$/i.test(filename);
 }
 
@@ -1133,9 +1138,17 @@ export function validateBrowserVerification({
   }
   const changedFiles = new Set(files.map((file) => typeof file === "string" ? file : file.filename));
   const screenshots = Array.isArray(record.screenshots) ? record.screenshots : [];
-  const screenshotsValid = screenshots.length > 0 && screenshots.every((path) =>
-    typeof path === "string" && isVerificationScreenshot(path) && changedFiles.has(path),
-  );
+  const testedSha = typeof record.testedSha === "string" ? record.testedSha : "";
+  const runId = typeof record.runId === "string" ? record.runId.trim() : "";
+  const screenshotsValid = validSha(testedSha) &&
+    testedSha.toLowerCase() === localVerification.reviewedSha?.toLowerCase() &&
+    Boolean(runId) && screenshots.length > 0 && screenshots.every((screenshot) =>
+      screenshot && typeof screenshot === "object" &&
+      typeof screenshot.path === "string" &&
+      isVerificationScreenshot(screenshot.path) && changedFiles.has(screenshot.path) &&
+      screenshot.testedSha?.toLowerCase?.() === testedSha.toLowerCase() &&
+      screenshot.runId === runId,
+    );
   const console = inspectBrowserProblems(record.consoleErrors);
   const network = inspectBrowserProblems(record.failedNetworkRequests);
   const responsiveValid =
@@ -1157,7 +1170,7 @@ export function validateBrowserVerification({
     console.status === "PASS" &&
     network.status === "PASS";
   const failures = [];
-  if (!screenshotsValid) failures.push("screenshots must be committed under docs/verification and listed in the PR files");
+  if (!screenshotsValid) failures.push("screenshots must be listed in the PR files and bound to the current-SHA browser run ID");
   if (!responsiveValid) failures.push("responsive layouts or a not-applicable reason must be recorded");
   if (!persistenceValid) failures.push("persistence behavior or a not-applicable reason must be recorded");
   if (!screenshotReviewValid) failures.push("post-implementation screenshot review is missing");
@@ -1176,7 +1189,7 @@ export function validateBrowserVerification({
           ? "NOT RUN"
           : "BLOCKED",
     required: true,
-    screenshots,
+    screenshots: screenshots.map((screenshot) => screenshot?.path).filter(Boolean),
     details: valid
       ? "Browser flow, screenshots, responsive checks, console/network inspection, and final retest are recorded."
       : failures.join("; "),
@@ -1309,7 +1322,7 @@ async function readGitHubMergePolicy(client, baseRef) {
     client.request(root + "/branches/" + encodedBase + "/protection")
       .then((value) => ({ value }))
       .catch((error) => ({ error })),
-    client.request(root + "/rules/branches/" + encodedBase)
+    pagedRest(client, root + "/rules/branches/" + encodedBase)
       .then((value) => ({ value }))
       .catch((error) => ({ error })),
   ]);
@@ -1530,7 +1543,7 @@ export function assessPullRequestVerification({
   statuses = [],
   mergePolicy = { available: false, requiredChecks: null, requiredApprovals: null, unassessedRules: [] },
   available = {},
-  headStable = true,
+  snapshotStable = true,
 }) {
   const number = pullRequest?.number || null;
   const headSha = pullRequest?.head?.sha || null;
@@ -1658,7 +1671,9 @@ export function assessPullRequestVerification({
     prBlockers.push("Pull request targets " + (baseRef || "an unknown branch") + "; expected " + expectedBase + ".");
   }
   if (!validSha(headSha)) prBlockers.push("Current PR head SHA is missing or invalid.");
-  if (!headStable) prBlockers.push("PR head changed during verification; rerun against the new exact SHA.");
+  if (!snapshotStable) {
+    prBlockers.push("PR state, draft status, base, or head changed during verification; rerun against the current snapshot.");
+  }
   const reviewBlockers = [];
   if (implementationStatus !== "PASS") {
     reviewBlockers.push("Implementation verification is " + implementationStatus + ": " +
@@ -1690,7 +1705,20 @@ export function assessPullRequestVerification({
   if (releaseRequirements.status !== "PASS") {
     mergeBlockers.push("Migration/dependency release obligations are " + releaseRequirements.status + ": " + releaseRequirements.details);
   }
+  const mergeability = pullRequest?.mergeable === true
+    ? { status: "PASS", details: "GitHub reports that the PR can merge without conflicts." }
+    : pullRequest?.mergeable === false
+      ? {
+          status: "FAIL",
+          details: "GitHub reports the PR is not mergeable" +
+            (pullRequest.mergeable_state ? " (" + pullRequest.mergeable_state + ")" : "") + ".",
+        }
+      : { status: "BLOCKED", details: "GitHub mergeability is unknown; rerun after GitHub computes the merge result." };
+  if (mergeability.status !== "PASS") {
+    mergeBlockers.push("GitHub mergeability is " + mergeability.status + ": " + mergeability.details);
+  }
   const readyForMerge = readyForExternalReview &&
+    mergeability.status === "PASS" &&
     githubReview.status === "PASS" &&
     branchReviewPolicy.status === "PASS" &&
     ciPolicy.status === "PASS" &&
@@ -1718,6 +1746,8 @@ export function assessPullRequestVerification({
           baseSha: pullRequest.base?.sha || null,
           headRef: pullRequest.head?.ref || null,
           headSha,
+          mergeable: typeof pullRequest.mergeable === "boolean" ? pullRequest.mergeable : null,
+          mergeableState: pullRequest.mergeable_state || null,
         }
       : { number, state: "unknown", baseRef: null, headSha: null },
     stages: {
@@ -1737,6 +1767,7 @@ export function assessPullRequestVerification({
     browserVerification,
     aiReview,
     githubReview,
+    mergeability,
     checks: {
       observed: observedChecks,
       required: requiredChecks,
@@ -1771,7 +1802,7 @@ export async function verifyPullRequest(client, pullRequestNumber, { expectedBas
         checkRuns: false,
         statuses: false,
       },
-      headStable: false,
+      snapshotStable: false,
     });
   }
   const headSha = pullRequest?.head?.sha;
@@ -1802,10 +1833,17 @@ export async function verifyPullRequest(client, pullRequestNumber, { expectedBas
       : Promise.resolve({ error: new Error("PR base branch is unavailable.") }),
   ]);
   const latestPullRequestResult = await result(client.request(pullRequestPath));
-  const headStable = Boolean(
-    latestPullRequestResult.value?.head?.sha &&
-    latestPullRequestResult.value.head.sha.toLowerCase() === (headSha || "").toLowerCase(),
+  const latestPullRequest = latestPullRequestResult.value;
+  const snapshotStable = Boolean(
+    latestPullRequest &&
+    latestPullRequest.head?.sha === pullRequest.head?.sha &&
+    latestPullRequest.state === pullRequest.state &&
+    Boolean(latestPullRequest.merged) === Boolean(pullRequest.merged) &&
+    Boolean(latestPullRequest.draft) === Boolean(pullRequest.draft) &&
+    latestPullRequest.base?.ref === pullRequest.base?.ref &&
+    latestPullRequest.base?.sha === pullRequest.base?.sha,
   );
+  const assessmentPullRequest = latestPullRequest || pullRequest;
   const mergePolicy = mergePolicyResult.value || {
     available: false,
     requiredChecks: null,
@@ -1815,7 +1853,7 @@ export async function verifyPullRequest(client, pullRequestNumber, { expectedBas
     error: mergePolicyResult.error?.message || latestPullRequestResult.error?.message || null,
   };
   return assessPullRequestVerification({
-    pullRequest,
+    pullRequest: assessmentPullRequest,
     expectedBase,
     files: filesResult.value || [],
     reviews: reviewsResult.value || [],
@@ -1830,7 +1868,7 @@ export async function verifyPullRequest(client, pullRequestNumber, { expectedBas
       checkRuns: !checkRunsResult.error,
       statuses: !statusesResult.error,
     },
-    headStable,
+    snapshotStable,
   });
 }
 

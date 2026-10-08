@@ -193,15 +193,37 @@ migration or dependency manifest changes.
 ````
 
 For UI changes, the verification record's `browser` object must include
-`status: "PASS"`, the tool and affected flows, committed screenshot paths,
+`status: "PASS"`, the tool and affected flows, the exact `testedSha`, a
+non-empty `runId`, and committed screenshot records,
 responsive layouts or a reason they do not apply, persistence results or a
 reason they do not apply, `screenshotReview` with `status: "PASS"`,
 `retestedAfterFixes: true`, and inspected `consoleErrors` and
 `failedNetworkRequests` arrays. Each known unrelated error/request must have
 `disposition: "unrelated"` and a reason. Screenshots must be under
 `docs/verification/issue-<number>/` or `docs/verification/pr-<number>/` and
-listed among the changed PR files. Do not reuse screenshots from another
-commit or unrelated flow.
+listed among the changed PR files. Every screenshot record contains `path`,
+`testedSha`, and `runId`; both provenance fields must match the parent browser
+record, and `testedSha` must match the current PR head SHA. Do not reuse
+screenshots from another commit or unrelated flow. The detector conservatively
+treats application source under `src/`, plus root `app/`, `components/`,
+`pages/`, `lib/`, `public/`, `messages/`, `middleware.*`, and `proxy.*` as
+potentially UI-affecting. Test and spec files are excluded.
+
+Example browser evidence fields:
+
+```json
+{
+  "status": "PASS",
+  "tool": "Playwright",
+  "testedSha": "<same full SHA as the verification record>",
+  "runId": "pr-52-catalog-run-1",
+  "screenshots": [{
+    "path": "docs/verification/pr-52/catalog-mobile.png",
+    "testedSha": "<same full SHA as testedSha>",
+    "runId": "pr-52-catalog-run-1"
+  }]
+}
+```
 
 For changed migrations, `release` must record `migrationCompatibility` and an
 explicit `preMergeMigration` decision. If pre-merge application is required,
@@ -241,12 +263,17 @@ alternative and report any remaining limitation rather than silently omitting
 the check.
 
 `verify-pr <pr-number>` checks that the PR is open, non-draft, targets `main`,
-and has a stable current head SHA. It reads changed files, exact-SHA GitHub
-reviews, issue comments, check runs/statuses, classic branch protection, and
-effective branch rules. Unsupported or unreadable active rules block the
-merge decision. If no required status checks are configured, the output says
-so and uses current-SHA local evidence plus an external formal GitHub review
-as the manual fallback. This absence is never reported as green CI. It prints
-structured JSON and exits successfully only for `READY_FOR_MERGE`; both
+and has a stable current head, base, and PR state across the assessment. It
+requires GitHub to report `mergeable: true` before `READY_FOR_MERGE`; a
+conflict or unknown mergeability blocks merge readiness. It reads changed
+files, exact-SHA GitHub reviews, issue comments, check runs/statuses, classic
+branch protection, and every page of effective branch rules. Required checks
+retain any configured GitHub App or integration identity; an explicit
+"any app" setting remains provider-agnostic. Unsupported, incomplete, or
+unreadable active rules block the merge decision. If no
+required status checks are configured, the output says so and uses
+current-SHA local evidence plus an external formal GitHub review as the manual
+fallback. This absence is never reported as green CI. It prints structured
+JSON and exits successfully only for `READY_FOR_MERGE`; both
 `READY_FOR_REVIEW` and `BLOCKED` return a nonzero exit code so a shell gate
 cannot mistake them for merge approval.

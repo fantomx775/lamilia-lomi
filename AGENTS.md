@@ -114,8 +114,11 @@ results retain structured JSON output but return a nonzero exit code.
 `READY_FOR_REVIEW` means current-SHA local checks and an internal independent
 AI review are complete, so external review can proceed. `READY_FOR_MERGE`
 requires every mandatory check, formal GitHub review, browser requirement, and
-release obligation to pass. `BLOCKED` means the PR or implementation evidence
-is incomplete or a review finding requires a fix. The output reports
+release obligation to pass, and GitHub must report the PR as mergeable. The
+verifier rereads the PR and blocks if its state, draft status, base, or head
+changed during assessment. It reads every page of effective branch rules.
+`BLOCKED` means the PR or implementation evidence is incomplete or a review
+finding requires a fix. The output reports
 implementation completion, internal review, external-review readiness, and
 merge readiness separately.
 
@@ -147,7 +150,12 @@ For changes that alter visible UI behavior, run the application and exercise
 the affected user flow in a real browser with Playwright or browser-use.
 Capture screenshots under `docs/verification/issue-<number>/` (or
 `docs/verification/pr-<number>/` when no issue exists) and include them in the
-PR. Check meaningful interactions, important responsive layouts, browser
+PR. Record the tested full SHA, a browser run ID, and for each screenshot its
+path, tested SHA, and matching run ID. The screenshot SHA must match the
+current PR head. The detector treats application source under `src/` and the
+root `app/`, `components/`, `pages/`, `lib/`, `public/`, `messages/`,
+`middleware.*`, and `proxy.*` paths as potentially UI-affecting; test/spec
+files are excluded. Check meaningful interactions, important responsive layouts, browser
 console errors, failed network requests, and persistence after navigation or
 reload when relevant. Review screenshots against the implementation, add or
 update regression tests for discovered bugs, and repeat the focused browser

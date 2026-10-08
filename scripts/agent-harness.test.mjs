@@ -98,6 +98,8 @@ function cleanPullRequest(overrides = {}) {
     title: "Harness quality gate",
     state: "open",
     merged: false,
+    mergeable: true,
+    mergeable_state: "clean",
     html_url: "https://github.com/example/repo/pull/52",
     draft: false,
     user: { login: "author" },
@@ -763,8 +765,10 @@ test("requires committed browser evidence for UI changes and keeps non-UI change
   const browser = {
     status: "PASS",
     tool: "Playwright",
+    testedSha: CURRENT_SHA,
+    runId: "pr-52-catalog-run-1",
     flows: ["open catalog and save layout"],
-    screenshots: [screenshot],
+    screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId: "pr-52-catalog-run-1" }],
     responsiveLayouts: ["desktop 1440px", "mobile 390px"],
     persistence: { status: "PASS", details: "Selection remains after reload." },
     screenshotReview: { status: "PASS", details: "Screenshot matches the updated layout." },
@@ -783,15 +787,31 @@ test("requires committed browser evidence for UI changes and keeps non-UI change
 
   const verified = validateBrowserVerification({
     uiRequired: true,
-    localVerification: { record: cleanVerificationRecord({ uiBehavior: true, browser }) },
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser }) },
     files: uiFiles,
   });
   assert.equal(verified.status, "PASS");
   assert.deepEqual(verified.screenshots, [screenshot]);
 
+  const staleScreenshot = structuredClone(browser);
+  staleScreenshot.screenshots[0].testedSha = "b".repeat(40);
+  assert.equal(validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: staleScreenshot }) },
+    files: uiFiles,
+  }).status, "BLOCKED");
+
+  const differentRunScreenshot = structuredClone(browser);
+  differentRunScreenshot.screenshots[0].runId = "older-run";
+  assert.equal(validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: differentRunScreenshot }) },
+    files: uiFiles,
+  }).status, "BLOCKED");
+
   const missingScreenshot = validateBrowserVerification({
     uiRequired: true,
-    localVerification: { record: cleanVerificationRecord({ uiBehavior: true, browser }) },
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser }) },
     files: ["src/app/catalog/page.tsx"],
   });
   assert.equal(missingScreenshot.status, "BLOCKED");
@@ -800,7 +820,7 @@ test("requires committed browser evidence for UI changes and keeps non-UI change
   consoleFailure.consoleErrors = [{ message: "uncaught error" }];
   assert.equal(validateBrowserVerification({
     uiRequired: true,
-    localVerification: { record: cleanVerificationRecord({ uiBehavior: true, browser: consoleFailure }) },
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: consoleFailure }) },
     files: uiFiles,
   }).status, "FAIL");
 
@@ -808,7 +828,7 @@ test("requires committed browser evidence for UI changes and keeps non-UI change
   browserFailure.status = "FAIL";
   assert.equal(validateBrowserVerification({
     uiRequired: true,
-    localVerification: { record: cleanVerificationRecord({ uiBehavior: true, browser: browserFailure }) },
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: browserFailure }) },
     files: uiFiles,
   }).status, "FAIL");
 
@@ -816,7 +836,7 @@ test("requires committed browser evidence for UI changes and keeps non-UI change
   notRun.status = "NOT RUN";
   assert.equal(validateBrowserVerification({
     uiRequired: true,
-    localVerification: { record: cleanVerificationRecord({ uiBehavior: true, browser: notRun }) },
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: notRun }) },
     files: uiFiles,
   }).status, "NOT RUN");
 
@@ -927,6 +947,17 @@ test("reports configured required checks as missing, pending, failed, or green o
     ...base,
     requiredChecks: [{ context: "build", integration_id: "unknown" }],
   }).status, "BLOCKED");
+  assert.equal(summarizeRequiredGitHubChecks({
+    ...base,
+    requiredChecks: [{ context: "build", app_id: -1 }],
+    checkRuns: [{
+      name: "build",
+      head_sha: CURRENT_SHA,
+      app: { id: 42 },
+      status: "completed",
+      conclusion: "success",
+    }],
+  }).status, "PASS");
 });
 
 test("separates review readiness from merge readiness and applies the manual no-CI fallback", () => {
@@ -991,6 +1022,17 @@ test("separates review readiness from merge readiness and applies the manual no-
   assert.equal(requiredCheckSuccess.checks.required.status, "PASS");
   assert.equal(requiredCheckSuccess.checks.policy.status, "PASS");
   assert.equal(requiredCheckSuccess.decision, "READY_FOR_MERGE");
+
+  for (const mergeable of [false, null]) {
+    const mergeabilityBlocked = assessPullRequestVerification({
+      ...input,
+      pullRequest: cleanPullRequest({ mergeable }),
+      reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "independent" })],
+    });
+    assert.equal(mergeabilityBlocked.decision, "READY_FOR_REVIEW");
+    assert.equal(mergeabilityBlocked.mergeReadiness.status, "BLOCKED");
+    assert.notEqual(mergeabilityBlocked.mergeability.status, "PASS");
+  }
 });
 
 test("blocks UI PR review readiness until the exact-SHA browser record is complete", () => {
@@ -999,8 +1041,10 @@ test("blocks UI PR review readiness until the exact-SHA browser record is comple
   const browser = {
     status: "PASS",
     tool: "Playwright",
+    testedSha: CURRENT_SHA,
+    runId: "pr-52-catalog-run-1",
     flows: ["change catalog layout"],
-    screenshots: [screenshot],
+    screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId: "pr-52-catalog-run-1" }],
     responsiveLayouts: ["desktop", "mobile"],
     persistence: { status: "NOT APPLICABLE", details: "This layout does not save user state." },
     screenshotReview: { status: "PASS", details: "Captured layout matches code." },
@@ -1033,6 +1077,19 @@ test("blocks UI PR review readiness until the exact-SHA browser record is comple
   });
   assert.equal(verified.browserVerification.status, "PASS");
   assert.equal(verified.decision, "READY_FOR_REVIEW");
+
+  const helperOnly = assessPullRequestVerification({
+    pullRequest: cleanPullRequest(),
+    files: ["src/lib/catalog-settings.ts"],
+    comments: [
+      structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ uiBehavior: false })),
+      ai,
+    ],
+    mergePolicy: cleanMergePolicy(),
+  });
+  assert.equal(helperOnly.fileScope.uiBehaviorRequired, true);
+  assert.equal(helperOnly.browserVerification.required, true);
+  assert.equal(helperOnly.decision, "BLOCKED");
 });
 
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
@@ -1054,7 +1111,7 @@ test("marks the PR blocked when its state, base, or HEAD changes during assessme
     ...base,
     pullRequest: cleanPullRequest({ base: { ref: "develop", sha: "b".repeat(40) } }),
   }).decision, "BLOCKED");
-  assert.equal(assessPullRequestVerification({ ...base, headStable: false }).decision, "BLOCKED");
+  assert.equal(assessPullRequestVerification({ ...base, snapshotStable: false }).decision, "BLOCKED");
 });
 
 test("verify-pr reads exact-SHA evidence and branch policy without write or merge calls", async () => {
@@ -1078,7 +1135,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
       if (path.endsWith("/branches/main/protection")) {
         throw new Error("GitHub API (404): Branch not protected");
       }
-      if (path.endsWith("/rules/branches/main")) return [];
+      if (path.endsWith("/rules/branches/main?per_page=100&page=1")) return [];
       throw new Error("Unexpected read request: " + path);
     },
   };
@@ -1103,7 +1160,28 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   };
   const unstable = await verifyPullRequest(unstableClient, 52);
   assert.equal(unstable.decision, "BLOCKED");
-  assert.ok(unstable.reasons.some((reason) => /head changed during verification/.test(reason)));
+  assert.ok(unstable.reasons.some((reason) => /changed during verification/.test(reason)));
+
+  for (const changedState of [
+    { state: "closed" },
+    { draft: true },
+    { base: { ref: "develop", sha: "d".repeat(40) } },
+  ]) {
+    let stateReads = 0;
+    const changedStateClient = {
+      ...client,
+      request: async (path) => {
+        if (path === "/repos/example/repo/pulls/52") {
+          stateReads += 1;
+          return stateReads === 1 ? pullRequest : cleanPullRequest(changedState);
+        }
+        return client.request(path);
+      },
+    };
+    const changedSnapshot = await verifyPullRequest(changedStateClient, 52);
+    assert.equal(changedSnapshot.decision, "BLOCKED");
+    assert.ok(changedSnapshot.reasons.some((reason) => /changed during verification/.test(reason)));
+  }
 
   const strictPolicyClient = {
     ...client,
@@ -1165,7 +1243,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
       if (path.endsWith("/branches/main/protection")) {
         throw new Error("GitHub API (404): Branch not protected");
       }
-      if (path.endsWith("/rules/branches/main")) {
+      if (path.endsWith("/rules/branches/main?per_page=100&page=1")) {
         return [{
           type: "required_status_checks",
           parameters: {
@@ -1191,4 +1269,42 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   const rulesetWrongProvider = await verifyPullRequest(rulesetProviderClient, 52);
   assert.equal(rulesetWrongProvider.checks.required.status, "BLOCKED");
   assert.match(rulesetWrongProvider.checks.required.details, /required provider/);
+
+  const paginatedRulesClient = {
+    ...client,
+    request: async (path) => {
+      if (path.endsWith("/branches/main/protection")) {
+        throw new Error("GitHub API (404): Branch not protected");
+      }
+      if (path.endsWith("/rules/branches/main?per_page=100&page=1")) {
+        return Array.from({ length: 100 }, () => ({
+          type: "required_status_checks",
+          parameters: { required_status_checks: [] },
+        }));
+      }
+      if (path.endsWith("/rules/branches/main?per_page=100&page=2")) {
+        return [{
+          type: "required_status_checks",
+          parameters: {
+            required_status_checks: [{ context: "late-build", integration_id: 73 }],
+          },
+        }];
+      }
+      if (path.endsWith("/check-runs?per_page=100&page=1")) {
+        return {
+          total_count: 1,
+          check_runs: [{
+            name: "late-build",
+            head_sha: CURRENT_SHA,
+            app: { id: 73 },
+            status: "completed",
+            conclusion: "success",
+          }],
+        };
+      }
+      return client.request(path);
+    },
+  };
+  const paginatedRules = await verifyPullRequest(paginatedRulesClient, 52);
+  assert.equal(paginatedRules.checks.required.status, "PASS");
 });
