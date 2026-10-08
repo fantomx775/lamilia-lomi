@@ -1,16 +1,23 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import {
+  buildReleaseRequirements,
   buildReadiness,
   extractAcceptanceCriteria,
   findBranchCandidates,
+  githubToken,
   hydratePullRequestDraftState,
+  inspectIssue,
   pagedRest,
+  planIssueRecovery,
   projectItemMatchesIssue,
   parseWorktreeBranches,
   referencesIssue,
   repositoryFromRemote,
+  summarizeGitHubChecks,
   statusTransitionBlockers,
+  validateIndependentReview,
+  verificationEvidence,
 } from "./agent-harness.mjs";
 
 test("reads GitHub HTTPS and SSH repository remotes", () => {
@@ -155,7 +162,7 @@ test("readiness requires an open issue, a project card, and readable clear depen
   assert.match(archived.reasons.join(" "), /archived/);
 });
 
-test("fails closed when dependencies are unreadable or the issue is closed", () => {
+test("blocks essential dependency gaps while reporting noncritical history gaps as warnings", () => {
   const unreadable = buildReadiness({
     issue: { state: "open", body: "" },
     item: { fieldValues: { nodes: [] } },
@@ -183,9 +190,9 @@ test("fails closed when dependencies are unreadable or the issue is closed", () 
     commentsReadAvailable: false,
     resumeContextAvailable: false,
   });
-  assert.equal(incompleteHistory.ready, false);
-  assert.match(incompleteHistory.reasons.join(" "), /comments could not be read/);
-  assert.match(incompleteHistory.reasons.join(" "), /branch history could not be read/);
+  assert.equal(incompleteHistory.ready, true);
+  assert.match(incompleteHistory.warnings.join(" "), /comments could not be read/);
+  assert.match(incompleteHistory.warnings.join(" "), /branch history is incomplete/);
 
   const closed = buildReadiness({
     issue: { state: "closed", body: "" },
@@ -257,4 +264,309 @@ test("hydrates draft state for timeline-linked open PRs before the Review gate",
   assert.deepEqual(statusTransitionBlockers("Review", { ready: true, reasons: [] }, crossRepository), [
     "an open non-draft PR linked to this issue is required",
   ]);
+});
+
+test("uses gh auth login sessions naturally and keeps authentication output private", () => {
+  const calls = [];
+  const token = githubToken({
+    env: {},
+    execute: (command, args, options) => {
+      calls.push({ command, args, options });
+      return "gh-test-token\n";
+    },
+  });
+  assert.equal(token, "gh-test-token");
+  assert.deepEqual(calls.map(({ command, args }) => [command, args]), [["gh", ["auth", "token"]]]);
+  assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "ignore"]);
+
+  assert.equal(
+    githubToken({
+      env: { GH_TOKEN: "configured-test-token" },
+      execute: () => assert.fail("configured token should avoid subprocesses"),
+    }),
+    "configured-test-token",
+  );
+});
+
+test("falls back quietly to Git credentials without relaying helper errors", () => {
+  const calls = [];
+  const token = githubToken({
+    env: {},
+    execute: (command, args, options) => {
+      calls.push(command);
+      if (command === "gh") throw new Error("sensitive-test-secret from auth helper");
+      assert.equal(args.join(" "), "credential fill");
+      assert.match(options.input, /host=github\.com/);
+      assert.equal(options.stdio[2], "ignore");
+      return "username=test-user\npassword=git-test-token\n";
+    },
+  });
+  assert.deepEqual(calls, ["gh", "git"]);
+  assert.equal(token, "git-test-token");
+
+  assert.throws(
+    () => githubToken({
+      env: {},
+      execute: () => { throw new Error("sensitive-test-secret"); },
+    }),
+    (error) => {
+      assert.match(error.message, /gh auth login/);
+      assert.doesNotMatch(error.message, /sensitive-test-secret/);
+      return true;
+    },
+  );
+});
+
+test("classifies migration and production dependency changes with a pre-merge deployment order", () => {
+  const release = buildReleaseRequirements([
+    { filename: "supabase/migrations/20261008170639_configurable_catalog_layout.sql" },
+    { filename: "package.json" },
+    { filename: "src/app/catalog/page.tsx" },
+  ]);
+
+  assert.equal(release.status, "NOT RUN");
+  assert.deepEqual(release.migrationFiles, [
+    "supabase/migrations/20261008170639_configurable_catalog_layout.sql",
+  ]);
+  assert.deepEqual(release.dependencyManifests, ["package.json"]);
+  assert.match(release.deploymentOrder[0], /migration compatibility/);
+  assert.match(release.deploymentOrder[1], /before merging/);
+  assert.match(release.deploymentOrder[2], /Vercel Git integration/);
+  assert.match(release.deploymentOrder[4], /production dependencies/);
+
+  assert.equal(buildReleaseRequirements([]).status, "PASS");
+  assert.equal(buildReleaseRequirements([], { available: false }).status, "BLOCKED");
+});
+
+test("resumes Issue 29 from its existing PR and preserves Review without creating or resetting work", () => {
+  const readiness = buildReadiness({
+    issue: { state: "open", body: "## Acceptance Criteria\n- [ ] Save" },
+    item: { fieldValues: { nodes: [{ field: { name: "Status" }, name: "Review" }] } },
+    blockedBy: [],
+    dependencyReadAvailable: true,
+  });
+  assert.equal(readiness.recommendedStatus, "Review");
+
+  const plan = planIssueRecovery({
+    issueState: "open",
+    projectStatus: "Review",
+    pullRequests: [{
+      number: 34,
+      state: "open",
+      url: "https://github.com/fantomx775/lamilia-lomi/pull/34",
+      branch: "codex/issue-29-configurable-catalog-layout",
+      draft: false,
+    }],
+    candidateBranches: ["codex/issue-29-configurable-catalog-layout"],
+  });
+
+  assert.equal(plan.action, "resume-open-pull-request");
+  assert.equal(plan.pullRequest.number, 34);
+  assert.equal(plan.pullRequest.branch, "codex/issue-29-configurable-catalog-layout");
+  assert.equal(plan.statusToPreserve, "Review");
+  assert.equal(plan.createBranch, false);
+  assert.equal(plan.resetExistingWork, false);
+  assert.match(
+    statusTransitionBlockers("In Progress", { ready: true, reasons: [] }, [], plan).join(" "),
+    /preserve Project Status "Review"/,
+  );
+});
+
+test("inspect surfaces Issue 29 PR, migration, independent-review, and CI state together", async () => {
+  const issue = {
+    number: 29,
+    node_id: "I_repo_29",
+    title: "Configurable catalog layout",
+    state: "open",
+    html_url: "https://github.com/fantomx775/lamilia-lomi/issues/29",
+    body: "## Acceptance Criteria\n- [ ] Save the setting",
+  };
+  const pullRequest = {
+    number: 34,
+    title: "Configurable catalog layout",
+    state: "open",
+    html_url: "https://github.com/fantomx775/lamilia-lomi/pull/34",
+    body: "Closes #29",
+    draft: false,
+    updated_at: "2026-10-08T18:19:49Z",
+    user: { login: "author" },
+    head: {
+      ref: "codex/issue-29-configurable-catalog-layout",
+      sha: "a".repeat(40),
+    },
+  };
+  const client = {
+    owner: "fantomx775",
+    repo: "lamilia-lomi",
+    projectOwner: "fantomx775",
+    projectNumber: 1,
+    request: async (path) => {
+      if (path === "/repos/fantomx775/lamilia-lomi/issues/29") return issue;
+      if (path.includes("/dependencies/")) return [];
+      if (path.includes("/timeline?")) return [];
+      if (path.includes("/pulls?state=open")) return [pullRequest];
+      if (path.includes("/branches?")) return [{ name: pullRequest.head.ref }];
+      if (path.includes("/comments?")) return [];
+      if (path.endsWith("/pulls/34/reviews?per_page=100&page=1")) return [];
+      if (path.endsWith("/pulls/34/files?per_page=100&page=1")) {
+        return [{ filename: "supabase/migrations/20261008170639_configurable_catalog_layout.sql" }];
+      }
+      if (path.endsWith("/check-runs?per_page=100")) return { total_count: 0, check_runs: [] };
+      if (path.endsWith("/status?per_page=100")) return { total_count: 0, statuses: [] };
+      throw new Error("Unexpected mock request: " + path);
+    },
+    graphql: async () => ({
+      user: {
+        projectV2: {
+          id: "project-1",
+          title: "Development",
+          url: "https://github.com/users/fantomx775/projects/1",
+          fields: {
+            nodes: [{
+              __typename: "ProjectV2SingleSelectField",
+              name: "Status",
+              options: [{ name: "Review" }],
+            }],
+          },
+          items: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{
+              id: "item-29",
+              isArchived: false,
+              content: { id: issue.node_id },
+              fieldValues: {
+                nodes: [{ field: { name: "Status" }, name: "Review" }],
+              },
+            }],
+          },
+        },
+      },
+    }),
+  };
+
+  const discovery = await inspectIssue(client, 29);
+  assert.equal(discovery.readiness.recommendedStatus, "Review");
+  assert.equal(discovery.resume.recoveryPlan.action, "resume-open-pull-request");
+  assert.equal(discovery.resume.recoveryPlan.pullRequest.number, 34);
+  assert.equal(discovery.resume.recoveryPlan.createBranch, false);
+  assert.equal(discovery.resume.pullRequestDetails[0].independentReview.status, "NOT RUN");
+  assert.equal(discovery.resume.pullRequestDetails[0].verification.status, "NOT RUN");
+  assert.deepEqual(
+    discovery.resume.pullRequestDetails[0].releaseRequirements.migrationFiles,
+    ["supabase/migrations/20261008170639_configurable_catalog_layout.sql"],
+  );
+});
+
+test("blocks only new branch creation when recovery history is unavailable", () => {
+  const plan = planIssueRecovery({
+    issueState: "open",
+    projectStatus: "Ready",
+    pullRequestHistoryAvailable: false,
+    branchHistoryAvailable: false,
+  });
+  assert.equal(plan.action, "blocked");
+  assert.equal(plan.createBranch, false);
+  assert.equal(plan.resetExistingWork, false);
+  assert.deepEqual(
+    statusTransitionBlockers("In Progress", { ready: true, reasons: [] }, [], plan),
+    [plan.reason],
+  );
+});
+
+test("requires an actual independent GitHub review for the exact current SHA", () => {
+  const headSha = "a".repeat(40);
+  const summary = [
+    "Reviewer: @independent",
+    "Reviewed SHA: " + headSha,
+    "Critical: none",
+    "High: none",
+    "Medium: one finding, fixed below",
+    "Low: none",
+    "Fixes applied: normalized the migration order",
+    "Unresolved findings: none",
+  ].join("\n");
+
+  assert.equal(
+    validateIndependentReview({
+      pullRequestAuthor: "author",
+      headSha,
+      reviews: [],
+    }).status,
+    "NOT RUN",
+  );
+  assert.equal(
+    validateIndependentReview({
+      pullRequestAuthor: "author",
+      headSha,
+      reviews: [{
+        user: { login: "author" },
+        state: "COMMENTED",
+        commit_id: headSha,
+        body: summary.replace("@independent", "@author"),
+      }],
+    }).status,
+    "FAIL",
+  );
+  assert.equal(
+    validateIndependentReview({
+      pullRequestAuthor: "author",
+      headSha,
+      reviews: [{
+        user: { login: "independent" },
+        state: "COMMENTED",
+        commit_id: "b".repeat(40),
+        body: summary,
+      }],
+    }).status,
+    "FAIL",
+  );
+  const verified = validateIndependentReview({
+    pullRequestAuthor: "author",
+    headSha,
+    reviews: [{
+      user: { login: "independent" },
+      state: "COMMENTED",
+      commit_id: headSha,
+      body: summary,
+    }],
+  });
+  assert.equal(verified.status, "PASS");
+  assert.equal(verified.reviewer, "independent");
+  assert.equal(verified.reviewedSha, headSha);
+  assert.deepEqual(verified.findingsBySeverity, {
+    Critical: "none",
+    High: "none",
+    Medium: "one finding, fixed below",
+    Low: "none",
+  });
+});
+
+test("reports missing CI as NOT RUN and never as PASS", () => {
+  const missing = summarizeGitHubChecks({ checkRuns: [], statuses: [] });
+  assert.equal(missing.status, "NOT RUN");
+  assert.match(missing.details, /not passing CI evidence/);
+
+  assert.equal(
+    summarizeGitHubChecks({
+      checkRuns: [{ name: "test", status: "completed", conclusion: "success" }],
+    }).status,
+    "PASS",
+  );
+  assert.equal(
+    summarizeGitHubChecks({
+      checkRuns: [{ name: "test", status: "completed", conclusion: "failure" }],
+    }).status,
+    "FAIL",
+  );
+  assert.equal(
+    summarizeGitHubChecks({
+      statuses: [{ context: "build", state: "pending" }],
+    }).status,
+    "BLOCKED",
+  );
+  assert.equal(summarizeGitHubChecks({ available: false }).status, "BLOCKED");
+  assert.throws(
+    () => verificationEvidence({ status: "SKIPPED", command: "npm test", details: "not run" }),
+    /Invalid verification status/,
+  );
 });

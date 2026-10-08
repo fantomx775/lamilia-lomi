@@ -120,28 +120,40 @@ function currentRepository() {
   return repositoryFromRemote(remoteUrl);
 }
 
-function githubToken() {
+export function githubToken({ env = process.env, execute = execFileSync } = {}) {
   const configured =
-    process.env.GITHUB_PAT_CLASSIC_CODEX ||
-    process.env.GH_TOKEN ||
-    process.env.GITHUB_TOKEN;
+    env.GITHUB_PAT_CLASSIC_CODEX ||
+    env.GH_TOKEN ||
+    env.GITHUB_TOKEN;
   if (configured) return configured;
 
-  try {
-    const credentials = execFileSync("git", ["credential", "fill"], {
+  const runQuietly = (command, args, options) => {
+    try {
+      return execute(command, args, options).trim();
+    } catch {
+      // Authentication helper errors can contain sensitive values. Never relay them.
+      return "";
+    }
+  };
+
+  const ghToken = runQuietly("gh", ["auth", "token"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    env,
+  });
+  if (ghToken) return ghToken;
+
+  const credentials = runQuietly("git", ["credential", "fill"], {
       encoding: "utf8",
       input: "protocol=https\nhost=github.com\n\n",
       stdio: ["pipe", "pipe", "ignore"],
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-    });
-    const password = credentials.match(/^password=(.+)$/m)?.[1];
-    if (password) return password;
-  } catch {
-    // A missing credential helper is reported by the actionable error below.
-  }
+      env: { ...env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  const password = credentials.match(/^password=(.+)$/m)?.[1];
+  if (password) return password;
 
   throw new Error(
-    "No GitHub token found. Set GITHUB_PAT_CLASSIC_CODEX/GH_TOKEN or configure git credential fill.",
+    "No GitHub token found. Run gh auth login, set a supported token environment variable, or configure Git credential fill.",
   );
 }
 
@@ -319,30 +331,335 @@ export function buildReadiness({
   const projectStatus = projectItemFields(item)[STATUS_FIELD] || null;
   const acceptanceCriteriaPresent = Boolean(extractAcceptanceCriteria(issue.body || ""));
   const reasons = [];
+  const warnings = [];
   if (issue.state !== "open") reasons.push("issue is closed");
-  if (!item) reasons.push(`issue is not on Project #${projectNumber}`);
-  if (item?.isArchived) reasons.push(`issue is archived on Project #${projectNumber}; restore the card before starting`);
+  if (!item) reasons.push("issue is not on Project #" + projectNumber);
+  if (item?.isArchived) reasons.push("issue is archived on Project #" + projectNumber + "; restore the card before starting");
   if (!dependencyReadAvailable) reasons.push("blocked-by relationships could not be read");
-  if (!commentsReadAvailable) reasons.push("issue comments could not be read");
-  if (!resumeContextAvailable) reasons.push("linked PR or branch history could not be read");
   if (!acceptanceCriteriaPresent) reasons.push("acceptance criteria are missing");
+  if (!commentsReadAvailable) {
+    warnings.push("issue comments could not be read; retry or inspect the issue before relying on missing context");
+  }
+  if (!resumeContextAvailable) {
+    warnings.push("PR or branch history is incomplete; do not create a new branch until recovery checks succeed");
+  }
   if (openBlockers.length) {
-    reasons.push(`blocked by open issue(s): ${openBlockers.map((dependency) => `#${dependency.number}`).join(", ")}`);
+    reasons.push("blocked by open issue(s): " + openBlockers.map((dependency) => "#" + dependency.number).join(", "));
   }
   return {
     ready: reasons.length === 0,
     reasons,
+    warnings,
     openBlockers: openBlockers.map(({ number, title, html_url }) => ({ number, title, url: html_url })),
     acceptanceCriteriaPresent,
     projectStatus,
-    recommendedStatus: reasons.length ? "Blocked" : "Ready",
+    recommendedStatus: reasons.length
+      ? "Blocked"
+      : ["In Progress", "Review"].includes(projectStatus)
+        ? projectStatus
+        : "Ready",
   };
 }
 
-export function statusTransitionBlockers(status, readiness, pullRequests = []) {
+export function planIssueRecovery({
+  issueState,
+  projectStatus = null,
+  pullRequests = [],
+  candidateBranches = [],
+  pullRequestHistoryAvailable = true,
+  branchHistoryAvailable = true,
+}) {
+  const statusToPreserve = projectStatus || null;
+  const openPullRequests = [...new Map(
+    pullRequests
+      .filter((pullRequest) => pullRequest.state === "open")
+      .map((pullRequest) => [pullRequest.number, pullRequest]),
+  ).values()];
+  const branches = [...new Set(candidateBranches || [])];
+  const base = {
+    statusToPreserve,
+    pullRequestHistoryAvailable,
+    branchHistoryAvailable,
+    createBranch: false,
+    resetExistingWork: false,
+  };
+
+  if (issueState !== "open") {
+    return { ...base, action: "do-not-start", reason: "issue is closed" };
+  }
+  if (openPullRequests.length === 1) {
+    const pullRequest = openPullRequests[0];
+    return {
+      ...base,
+      action: "resume-open-pull-request",
+      pullRequest: {
+        number: pullRequest.number,
+        url: pullRequest.url,
+        branch: pullRequest.branch || null,
+        draft: pullRequest.draft ?? null,
+      },
+      reason: "open PR #" + pullRequest.number + " already tracks this issue",
+    };
+  }
+  if (openPullRequests.length > 1) {
+    return {
+      ...base,
+      action: "resolve-existing-pull-requests",
+      pullRequests: openPullRequests.map(({ number, url, branch }) => ({ number, url, branch: branch || null })),
+      reason: "multiple open PRs already reference this issue; inspect and resume the correct one",
+    };
+  }
+  if (branches.length === 1) {
+    return {
+      ...base,
+      action: "resume-existing-branch",
+      branch: branches[0],
+      reason: "an existing branch matches this issue",
+    };
+  }
+  if (branches.length > 1) {
+    return {
+      ...base,
+      action: "resolve-existing-branches",
+      branches,
+      reason: "multiple branches match this issue; inspect them before choosing one",
+    };
+  }
+  if (!pullRequestHistoryAvailable || !branchHistoryAvailable) {
+    return {
+      ...base,
+      action: "blocked",
+      reason: "existing PR or branch history is incomplete; retry discovery before creating a branch",
+    };
+  }
+  return {
+    ...base,
+    action: "start-new-work",
+    createBranch: true,
+    reason: "no existing PR or matching branch was found",
+  };
+}
+
+export const VERIFICATION_STATES = Object.freeze(["PASS", "FAIL", "NOT RUN", "BLOCKED"]);
+
+export function verificationEvidence({ status, command, details }) {
+  if (!VERIFICATION_STATES.includes(status)) {
+    throw new Error("Invalid verification status: " + status);
+  }
+  if (!command?.trim()) throw new Error("Verification evidence requires the exact command or check source.");
+  if (!details?.trim()) throw new Error("Verification evidence requires a result or limitation.");
+  return { status, command: command.trim(), details: details.trim() };
+}
+
+export function summarizeGitHubChecks({
+  checkRuns = [],
+  statuses = [],
+  available = true,
+  command = "GitHub commit check-runs and commit status",
+}) {
+  if (!available) {
+    return verificationEvidence({
+      status: "BLOCKED",
+      command,
+      details: "GitHub check results could not be read; CI state is unknown.",
+    });
+  }
+  const outcomes = [
+    ...checkRuns.map((check) => ({
+      name: check.name || "unnamed check",
+      state: check.status === "completed" ? check.conclusion : check.status,
+    })),
+    ...statuses.map((check) => ({
+      name: check.context || "unnamed status",
+      state: check.state,
+    })),
+  ];
+  if (!outcomes.length) {
+    return verificationEvidence({
+      status: "NOT RUN",
+      command,
+      details: "No GitHub check runs or commit statuses were published; this is not passing CI evidence.",
+    });
+  }
+  const failures = outcomes.filter(({ state }) =>
+    ["failure", "error", "cancelled", "timed_out", "action_required"].includes(state),
+  );
+  if (failures.length) {
+    return verificationEvidence({
+      status: "FAIL",
+      command,
+      details: "Failed checks: " + failures.map(({ name, state }) => name + " (" + state + ")").join(", ") + ".",
+    });
+  }
+  const pending = outcomes.filter(({ state }) => state !== "success");
+  if (pending.length) {
+    return verificationEvidence({
+      status: "BLOCKED",
+      command,
+      details: "Checks are pending or need interpretation: " + pending.map(({ name, state }) => name + " (" + (state || "unknown") + ")").join(", ") + ".",
+    });
+  }
+  return verificationEvidence({
+    status: "PASS",
+    command,
+    details: outcomes.length + " published check result(s) completed successfully.",
+  });
+}
+
+export function buildReleaseRequirements(files, { available = true } = {}) {
+  if (!available) {
+    return {
+      status: "BLOCKED",
+      migrationFiles: null,
+      dependencyManifests: null,
+      details: "Changed files could not be read; migration and production-dependency scope is unknown.",
+      deploymentOrder: [],
+    };
+  }
+  const names = files.map((file) => typeof file === "string" ? file : file.filename).filter(Boolean);
+  const migrationFiles = names.filter((name) => /(^|\/)supabase\/migrations\/[^/]+\.sql$/i.test(name));
+  const dependencyManifests = names.filter((name) => /(^|\/)(package\.json|package-lock\.json)$/i.test(name));
+  const deploymentOrder = [];
+  if (migrationFiles.length) {
+    deploymentOrder.push(
+      "Verify migration compatibility with the deployed application, existing data, and database access policies.",
+      "If the new application requires this schema, apply and verify a backward-compatible migration before merging; use an expand/contract sequence for breaking changes.",
+      "Merge to main only after the remaining database steps are explicit; the Vercel Git integration then performs the Production deployment.",
+      "After the automatic deployment, verify the migration history and affected runtime flow.",
+    );
+  }
+  if (dependencyManifests.length) {
+    deploymentOrder.push(
+      "Compare production dependencies in dependencies (not only devDependencies), verify runtime/framework compatibility and lockfile alignment, and report any unresolved risk before merge.",
+    );
+  }
+  return {
+    status: migrationFiles.length || dependencyManifests.length ? "NOT RUN" : "PASS",
+    migrationFiles,
+    dependencyManifests,
+    details: migrationFiles.length || dependencyManifests.length
+      ? "Release compatibility and ordering require an explicit PR assessment."
+      : "No database migration or dependency manifest changes were found.",
+    deploymentOrder,
+  };
+}
+
+function reviewField(body, label) {
+  const match = body.match(new RegExp("^\\s*" + label + "\\s*:\\s*(.+?)\\s*$", "im"));
+  return match?.[1]?.trim() || null;
+}
+
+export function validateIndependentReview({
+  pullRequestAuthor,
+  headSha,
+  reviews = [],
+  available = true,
+}) {
+  if (!available || !pullRequestAuthor || !/^[a-f0-9]{40}$/i.test(headSha || "")) {
+    return {
+      status: "BLOCKED",
+      reviewer: null,
+      reviewedSha: null,
+      findingsBySeverity: null,
+      fixesApplied: null,
+      unresolvedFindings: null,
+      details: "Review records or the current PR head SHA could not be verified.",
+    };
+  }
+  const submitted = reviews.filter(
+    (review) => review.user?.login && !["PENDING", "DISMISSED"].includes(review.state),
+  );
+  if (!submitted.length) {
+    return {
+      status: "NOT RUN",
+      reviewer: null,
+      reviewedSha: null,
+      findingsBySeverity: null,
+      fixesApplied: null,
+      unresolvedFindings: null,
+      details: "No submitted GitHub pull request review is available; text in the PR body is not independent-review evidence.",
+    };
+  }
+  const independent = submitted.filter(
+    (review) => review.user.login.toLowerCase() !== (pullRequestAuthor || "").toLowerCase(),
+  );
+  if (!independent.length) {
+    return {
+      status: "FAIL",
+      reviewer: null,
+      reviewedSha: null,
+      findingsBySeverity: null,
+      fixesApplied: null,
+      unresolvedFindings: null,
+      details: "Only the PR author has submitted a review; self-review does not satisfy independent review.",
+    };
+  }
+  const currentShaReviews = independent
+    .filter((review) => review.commit_id === headSha)
+    .sort((left, right) => (right.submitted_at || "").localeCompare(left.submitted_at || ""));
+  if (!currentShaReviews.length) {
+    return {
+      status: "FAIL",
+      reviewer: null,
+      reviewedSha: null,
+      findingsBySeverity: null,
+      fixesApplied: null,
+      unresolvedFindings: null,
+      details: "Independent review exists only for a different commit; review the exact current PR head SHA.",
+    };
+  }
+  const latest = currentShaReviews[0];
+  const body = latest.body || "";
+  const reviewer = reviewField(body, "Reviewer");
+  const reviewedSha = reviewField(body, "Reviewed SHA");
+  const findingsBySeverity = Object.fromEntries(
+    ["Critical", "High", "Medium", "Low"].map((severity) => [severity, reviewField(body, severity)]),
+  );
+  const fixesApplied = reviewField(body, "Fixes applied");
+  const unresolvedFindings = reviewField(body, "Unresolved findings");
+  const reviewerMatches = reviewer?.replace(/^@/, "").toLowerCase() === latest.user.login.toLowerCase();
+  const shaMatches = reviewedSha?.toLowerCase() === headSha.toLowerCase();
+  const complete =
+    reviewerMatches &&
+    shaMatches &&
+    Object.values(findingsBySeverity).every(Boolean) &&
+    Boolean(fixesApplied) &&
+    Boolean(unresolvedFindings);
+  return {
+    status: complete ? "PASS" : "FAIL",
+    reviewer: latest.user.login,
+    reviewedSha: reviewedSha || null,
+    findingsBySeverity,
+    fixesApplied,
+    unresolvedFindings,
+    details: complete
+      ? "Independent review by @" + latest.user.login + " covers the current head SHA."
+      : "The latest independent review on the current SHA is missing or mismatches required summary fields.",
+  };
+}
+
+export function statusTransitionBlockers(status, readiness, pullRequests = [], recoveryPlan = null) {
   const blockers = [];
   if (["Ready", "In Progress"].includes(status) && !readiness.ready) {
     blockers.push(...readiness.reasons);
+  }
+  if (
+    ["Ready", "In Progress"].includes(status) &&
+    recoveryPlan?.action === "resume-open-pull-request" &&
+    recoveryPlan.statusToPreserve &&
+    recoveryPlan.statusToPreserve !== status
+  ) {
+    blockers.push(
+      "open PR #" + recoveryPlan.pullRequest.number + " already tracks this issue; preserve Project Status \"" +
+      recoveryPlan.statusToPreserve + "\" and resume its branch",
+    );
+  }
+  if (
+    status === "In Progress" &&
+    ["blocked", "resolve-existing-pull-requests", "resolve-existing-branches"].includes(recoveryPlan?.action) &&
+    recoveryPlan.statusToPreserve !== "In Progress"
+  ) {
+    blockers.push(recoveryPlan.reason);
   }
   if (status === "Review" && !pullRequests.some((pr) => pr.state === "open" && pr.draft === false)) {
     blockers.push("an open non-draft PR linked to this issue is required");
@@ -465,11 +782,31 @@ export async function inspectIssue(client, issueNumber) {
       body: pr.body || "",
       draft: pr.draft,
       branch: pr.head?.ref,
+      author: pr.user?.login || null,
+      headSha: pr.head?.sha || null,
       updatedAt: pr.updated_at,
     }));
-  const candidateBranches = findBranchCandidates(branches.map((branch) => branch.name), issue);
-  const localContext = localGitContext(issue);
-  const resumeContextAvailable = !timelineResult.error && !prsResult.error && !branchesResult.error;
+  const remoteCandidateBranches = branchesResult.error
+    ? []
+    : findBranchCandidates(branches.map((branch) => branch.name), issue);
+  let localContext;
+  let localGitContextError = null;
+  try {
+    localContext = localGitContext(issue);
+  } catch (error) {
+    localGitContextError = error.message;
+    localContext = {
+      currentBranch: null,
+      localBranchCandidates: [],
+      checkedOutBranchCandidates: [],
+    };
+  }
+  const candidateBranches = [...new Set([
+    ...remoteCandidateBranches,
+    ...localContext.localBranchCandidates,
+  ])];
+  const branchHistoryAvailable = !branchesResult.error && !localGitContextError;
+  const resumeContextAvailable = !timelineResult.error && !prsResult.error && branchHistoryAvailable;
   const readiness = buildReadiness({
     issue,
     item,
@@ -479,6 +816,59 @@ export async function inspectIssue(client, issueNumber) {
     resumeContextAvailable,
     projectNumber: client.projectNumber,
   });
+  const recoveryPlan = planIssueRecovery({
+    issueState: issue.state,
+    projectStatus: readiness.projectStatus,
+    pullRequests: relatedOpenPRs,
+    candidateBranches,
+    pullRequestHistoryAvailable: !prsResult.error,
+    branchHistoryAvailable,
+  });
+  const pullRequestDetails = await Promise.all(relatedOpenPRs.map(async (pullRequest) => {
+    const pullRequestPath = "/repos/" + client.owner + "/" + client.repo + "/pulls/" + pullRequest.number;
+    const checksPath = pullRequest.headSha
+      ? "/repos/" + client.owner + "/" + client.repo + "/commits/" + pullRequest.headSha
+      : null;
+    const [reviewsResult, filesResult, checkRunsResult, statusesResult] = await Promise.all([
+      pagedRest(client, pullRequestPath + "/reviews").then((value) => ({ value })).catch((error) => ({ error })),
+      pagedRest(client, pullRequestPath + "/files").then((value) => ({ value })).catch((error) => ({ error })),
+      checksPath
+        ? client.request(checksPath + "/check-runs?per_page=100").then((value) => ({ value })).catch((error) => ({ error }))
+        : Promise.resolve({ error: new Error("PR head SHA is unavailable") }),
+      checksPath
+        ? client.request(checksPath + "/status?per_page=100").then((value) => ({ value })).catch((error) => ({ error }))
+        : Promise.resolve({ error: new Error("PR head SHA is unavailable") }),
+    ]);
+    const checkRuns = checkRunsResult.value?.check_runs || [];
+    const commitStatuses = statusesResult.value?.statuses || [];
+    const checksComplete =
+      !checkRunsResult.error &&
+      !statusesResult.error &&
+      (checkRunsResult.value?.total_count || 0) <= checkRuns.length &&
+      (statusesResult.value?.total_count || 0) <= commitStatuses.length;
+    return {
+      ...pullRequest,
+      independentReview: validateIndependentReview({
+        pullRequestAuthor: pullRequest.author,
+        headSha: pullRequest.headSha,
+        reviews: reviewsResult.value || [],
+        available: !reviewsResult.error,
+      }),
+      verification: summarizeGitHubChecks({
+        checkRuns,
+        statuses: commitStatuses,
+        available: checksComplete,
+        command: checksPath
+          ? "GET " + checksPath + "/check-runs and GET " + checksPath + "/status"
+          : "GitHub commit check-runs and commit status",
+      }),
+      releaseRequirements: buildReleaseRequirements(filesResult.value || [], {
+        available: !filesResult.error,
+      }),
+      reviewReadError: reviewsResult.error?.message || null,
+      filesReadError: filesResult.error?.message || null,
+    };
+  }));
 
   return {
     repository: `${client.owner}/${client.repo}`,
@@ -526,6 +916,9 @@ export async function inspectIssue(client, issueNumber) {
       linkedPullRequests: timelineResult.error ? null : timelinePRs,
       relatedOpenPullRequests: prsResult.error ? null : relatedOpenPRs,
       candidateBranches: branchesResult.error ? null : candidateBranches,
+      localGitContextError,
+      recoveryPlan,
+      pullRequestDetails: prsResult.error ? null : pullRequestDetails,
       ...localContext,
       checksComplete: resumeContextAvailable,
     },
@@ -538,11 +931,13 @@ async function setSingleSelectField(client, issueNumber, fieldName, optionName) 
   }
   if (fieldName === STATUS_FIELD && ["Ready", "In Progress", "Review"].includes(optionName)) {
     const discovery = await inspectIssue(client, issueNumber);
-    const linkedPullRequests = [
-      ...(discovery.resume.linkedPullRequests || []),
-      ...(discovery.resume.relatedOpenPullRequests || []),
-    ];
-    const blockers = statusTransitionBlockers(optionName, discovery.readiness, linkedPullRequests);
+    const linkedPullRequests = discovery.resume.relatedOpenPullRequests || [];
+    const blockers = statusTransitionBlockers(
+      optionName,
+      discovery.readiness,
+      linkedPullRequests,
+      discovery.resume.recoveryPlan,
+    );
     if (blockers.length) {
       throw new Error(`Cannot set ${optionName}: issue #${issueNumber} is not ready (${blockers.join("; ")}).`);
     }

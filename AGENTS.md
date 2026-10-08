@@ -72,6 +72,50 @@ Production CLI deploys are reserved for an explicitly approved exceptional
 manual release; record the reason and resulting deployment ID. Do not use the
 CLI for the normal `main` release path.
 
+## Migrations and production dependencies
+
+Before merging a PR that changes database migrations or production dependency
+manifests, identify the exact files and assess only the release risks they
+introduce. For migrations, check that the SQL is compatible with the deployed
+application and existing data, review relevant access policies, and run the
+focused local migration/database tests when the tooling is available. For
+dependency changes, compare `dependencies` with `devDependencies`, confirm the
+lockfile and runtime/framework compatibility, and run the focused tests plus
+the build when the change affects the runtime or build.
+
+State the release order and remaining work in the PR before merge. If the new
+application requires a new schema, the compatible migration must be applied
+and verified before the merge can trigger the `main` Production deployment.
+Use an expand/contract sequence for a breaking schema change. After merge,
+Vercel's Git integration performs the normal Production deployment; do not
+follow it with `vercel --prod`. Report the exact migration IDs, compatibility
+evidence, deployment order, and any unapplied or unverified step. If a required
+Production database action is not authorized or cannot be verified, mark it
+`BLOCKED` and state what remains. Do not turn unrelated full release checks
+into a gate for an ordinary PR.
+
+Use the linked Supabase migration history and dry run to identify pending work
+when access is available: `supabase migration list --linked` and
+`supabase db push --dry-run --linked`. Do not infer that a migration is applied
+from a successful build or an empty local test result.
+
+## Verification and independent-review evidence
+
+Report every relevant check with one of `PASS`, `FAIL`, `NOT RUN`, or
+`BLOCKED`, its exact command (or named GitHub check source), and a concise
+result or limitation. An absent GitHub check is `NOT RUN`; never describe
+missing checks as passing. Include focused local checks and relevant remote
+check status separately.
+
+Every implementation PR needs a concise independent review summary in a
+submitted GitHub pull request review body. Include the actual reviewer,
+findings by Critical/High/Medium/Low severity, fixes applied, unresolved
+findings, and the full 40-character SHA reviewed. The GitHub review author
+must differ from the PR author, and the review's commit must equal the current
+PR head SHA. A PR description or issue comment written by the implementer is
+not independent-review evidence. New commits require review evidence for the
+new head.
+
 ## Release gate
 
 Before a real Production release run:
@@ -105,15 +149,22 @@ archived card.
 Decide readiness from the acceptance criteria, open dependencies, project
 membership, and any missing access or product decisions. If a dependency is
 open or a required decision is missing, explain the blocker on the issue and
-set Project Status to `Blocked`. Otherwise move the issue to `Ready`, then to
-`In Progress` when implementation begins. Use `node scripts/agent-harness.mjs
-status <issue-number> <status>` for status changes and `field <issue-number>
+set Project Status to `Blocked`. Missing comments are a warning to retry or
+inspect alternate context; they do not by themselves make the issue
+unimplementable. If PR or branch history is unavailable, retry discovery and
+do not create a new branch until it is readable. Otherwise move the issue to
+`Ready`, then to `In Progress` when implementation begins. Use
+`node scripts/agent-harness.mjs status <issue-number> <status>` for status
+changes and `field <issue-number>
 <field> <value>` for single-select metadata. Project #1 uses `Assignees` as
 Owner; avoid a duplicate owner field. The CLI reruns readiness checks and
-refuses `Ready` or `In Progress` when criteria, dependencies, comments, or PR/
-branch context is incomplete. It requires an open, non-draft PR tied to the
-issue before setting `Review`; after resolving a blocker, inspect again before
-moving the issue out of `Blocked`.
+refuses `Ready` or `In Progress` when essential criteria or dependency
+information is missing, and refuses to start new work when recovery history
+is incomplete. Follow its recovery plan: resume a matching open PR or branch,
+preserve valid Project status and progress, and never reset existing work to
+make a clean start. It requires an open, non-draft PR tied to the issue before
+setting `Review`; after resolving a blocker, inspect again before moving the
+issue out of `Blocked`.
 
 Use an existing branch or pull request when it belongs to the issue. Do not
 create parallel work. For a new substantial change, use an isolated
