@@ -14,6 +14,7 @@ import {
   buildSupabaseAuthCallbackUrl,
   createAuthResumeIntent,
   clearAuthResumeIntent,
+  getAuthResumeRedirect,
   redeemAuthResumeIntent,
   setAuthResumeIntent,
 } from "@/lib/auth-resume";
@@ -238,7 +239,7 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
-  await setAuthResumeIntent({
+  const intent = await setAuthResumeIntent({
     locale,
     productSlug: productSlugFromReturnTo(returnTo, locale),
     returnTo,
@@ -253,7 +254,7 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     ({ error: resendError } = await supabase.auth.resend({
       type: "signup",
       email,
-      options: { emailRedirectTo: buildSupabaseAuthCallbackUrl(locale, returnTo) },
+      options: { emailRedirectTo: buildSupabaseAuthCallbackUrl(locale, returnTo, intent) },
     }));
   } catch (error) {
     logUnexpectedFailure("[auth] Verification email resend failed unexpectedly.", error);
@@ -318,7 +319,7 @@ export async function registerDemoAction(formData: FormData) {
             preferred_locale: result.value.preferredLocale,
             terms_accepted: true,
           },
-          emailRedirectTo: buildSupabaseAuthCallbackUrl(locale, safeRedirectTo),
+          emailRedirectTo: buildSupabaseAuthCallbackUrl(locale, safeRedirectTo, intent),
         },
       }));
     } catch (authError) {
@@ -350,7 +351,7 @@ export async function registerDemoAction(formData: FormData) {
     }
 
     if (isUnlockContext) {
-      redirect(appendQueryPath(safeRedirectTo, "step", "verify"));
+      redirect(appendQueryPath(getAuthResumeRedirect(intent, locale), "step", "verify"));
     }
 
     redirect(
@@ -605,7 +606,7 @@ function appendQueryPath(path: string, key: string, value: string) {
   const url = new URL(path, "http://lamilialomi.local");
   url.searchParams.set(key, value);
 
-  return `${url.pathname}${url.search}`;
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function logUnexpectedFailure(message: string, error: unknown) {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const actionMocks = vi.hoisted(() => ({
   buildAuthRedirect: vi.fn(),
+  buildSupabaseAuthCallbackUrl: vi.fn(),
   clearAuthResumeIntent: vi.fn(),
   clearDemoSession: vi.fn(),
   clearUnlockIntent: vi.fn(),
@@ -10,6 +11,7 @@ const actionMocks = vi.hoisted(() => ({
   createDemoSession: vi.fn(),
   getBackendMode: vi.fn(),
   getDemoSession: vi.fn(),
+  getAuthResumeRedirect: vi.fn(),
   getProductBySlugForRequest: vi.fn(),
   getUnlockIntent: vi.fn(),
   isSupabaseEmailNotConfirmedError: vi.fn(),
@@ -38,10 +40,11 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/auth-resume", () => ({
-  buildSupabaseAuthCallbackUrl: vi.fn(() => "https://app.example/auth/callback?locale=en"),
+  buildSupabaseAuthCallbackUrl: actionMocks.buildSupabaseAuthCallbackUrl,
   createAuthResumeIntent: actionMocks.createAuthResumeIntent,
   clearAuthResumeIntent: actionMocks.clearAuthResumeIntent,
   redeemAuthResumeIntent: actionMocks.redeemAuthResumeIntent,
+  getAuthResumeRedirect: actionMocks.getAuthResumeRedirect,
   setAuthResumeIntent: actionMocks.setAuthResumeIntent,
 }));
 
@@ -98,6 +101,15 @@ beforeEach(() => {
   actionMocks.createDemoSession.mockImplementation((input) => input);
   actionMocks.buildAuthRedirect.mockImplementation(({ locale, redirectTo }) =>
     redirectTo ?? `/${locale}/account`,
+  );
+  actionMocks.getAuthResumeRedirect.mockImplementation((intent, locale = "en") => {
+    const returnTo = intent?.returnTo ?? `/${locale}/account`;
+    return returnTo.startsWith(`/${locale}/products/`)
+      ? `${returnTo}#premium`
+      : returnTo;
+  });
+  actionMocks.buildSupabaseAuthCallbackUrl.mockReturnValue(
+    "https://app.example/auth/callback?locale=en&resume=opaque",
   );
   actionMocks.createAuthResumeIntent.mockImplementation(({ locale, returnTo, code }) => ({
     locale: locale ?? "en",
@@ -259,6 +271,11 @@ describe("registration auth action", () => {
       email: "reader@example.com",
       userId: "user-id",
     });
+    expect(actionMocks.buildSupabaseAuthCallbackUrl).toHaveBeenCalledWith(
+      "en",
+      "/en/account",
+      expect.objectContaining({ returnTo: "/en/account", code: "" }),
+    );
     expect(actionMocks.redirect.mock.calls[0]?.[0]).not.toContain("LOMI-BOOK-2026");
   });
 
@@ -281,7 +298,7 @@ describe("registration auth action", () => {
       registerDemoAction(
         registrationForm("/en/products/moon-garden-coloring-book"),
       ),
-      "/en/products/moon-garden-coloring-book?step=verify",
+      "/en/products/moon-garden-coloring-book?step=verify#premium",
     );
   });
 

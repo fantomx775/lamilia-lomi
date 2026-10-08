@@ -88,6 +88,7 @@
     "registrationFailed": "Nie udało się utworzyć konta. Sprawdź dane i spróbuj ponownie.",
     "emailNotConfirmed": "Twój adres e-mail nie został jeszcze zweryfikowany. Sprawdź skrzynkę lub poproś o nową wiadomość weryfikacyjną.",
     "verificationSent": "Jeśli konto może odbierać wiadomości, wysłaliśmy link weryfikacyjny. Sprawdź skrzynkę i spam.",
+    "verificationRequired": "Wpisz adres e-mail, na który wysłano link weryfikacyjny, a następnie poproś o nowy.",
     "verificationUnavailable": "Nie udało się teraz wysłać wiadomości weryfikacyjnej. Spróbuj ponownie za chwilę.",
     "verificationFailed": "Ten link weryfikacyjny jest nieprawidłowy lub wygasł. Poproś o nowy link i spróbuj ponownie.",
     "verificationMismatch": "Ten link weryfikacyjny należy do innego konta. Zaloguj się adresem, na który go wysłano.",

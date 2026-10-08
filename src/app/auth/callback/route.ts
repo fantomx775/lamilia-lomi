@@ -4,6 +4,7 @@ import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import {
   authResumeIntentMatchesUser,
   clearAuthResumeIntent,
+  decodeAuthResumeCallbackToken,
   getAuthResumeRedirect,
   redeemAuthResumeIntent,
   readAuthResumeIntent,
@@ -18,11 +19,17 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const locale = normalizeLocale(requestUrl.searchParams.get("locale") ?? undefined);
-  const callbackReturnTo = sanitizeInternalReturnTo(
+  const safeCallbackReturnTo = sanitizeInternalReturnTo(
     requestUrl.searchParams.get("returnTo"),
     locale,
   );
-  const intent = await readAuthResumeIntent();
+  const callbackReturnTo = getAuthResumeRedirect(
+    { locale, returnTo: safeCallbackReturnTo },
+    locale,
+  );
+  const cookieIntent = await readAuthResumeIntent();
+  const callbackIntent = decodeAuthResumeCallbackToken(requestUrl.searchParams.get("resume"));
+  const intent = callbackIntent ?? cookieIntent;
 
   if (getBackendMode() !== "supabase") {
     return failureResponse(locale);
@@ -128,7 +135,7 @@ function appendQuery(path: string, key: string, value: string) {
   const url = new URL(path, "http://lamilialomi.local");
   url.searchParams.set(key, value);
 
-  return `${url.pathname}${url.search}`;
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function successResponse(path: string) {

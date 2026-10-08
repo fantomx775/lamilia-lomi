@@ -39,6 +39,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
   const isDemo = getBackendMode() === "local";
   const canResendVerification =
     error === "email_unverified" ||
+    error === "verification_required" ||
     error === "verification_sent" ||
     error === "verification_unavailable" ||
     error === "verification_failed" ||
@@ -141,6 +142,8 @@ function getLoginErrorMessage(
       return t("emailNotConfirmed");
     case "verification_sent":
       return t("verificationSent");
+    case "verification_required":
+      return t("verificationRequired");
     case "verification_unavailable":
       return t("verificationUnavailable");
     case "verification_mismatch":

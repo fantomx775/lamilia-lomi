@@ -88,6 +88,7 @@
     "registrationFailed": "No pudimos crear tu cuenta. Revisa tus datos e inténtalo de nuevo.",
     "emailNotConfirmed": "Tu correo electrónico aún no está verificado. Revisa tu bandeja de entrada o solicita un nuevo correo de verificación.",
     "verificationSent": "Si la cuenta puede recibir correos, enviamos un enlace de verificación. Revisa también la carpeta de spam.",
+    "verificationRequired": "Introduce el correo que recibió el enlace de verificación y luego solicita uno nuevo.",
     "verificationUnavailable": "No pudimos enviar el correo de verificación ahora. Inténtalo de nuevo dentro de un momento.",
     "verificationFailed": "Este enlace de verificación no es válido o ha caducado. Solicita uno nuevo e inténtalo de nuevo.",
     "verificationMismatch": "Este enlace pertenece a otra cuenta. Inicia sesión con el correo que recibió el enlace.",

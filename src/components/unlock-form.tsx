@@ -79,7 +79,7 @@ export function UnlockForm({
             {verificationPending ? (
               <Link
                 className="mt-3 inline-flex text-sm font-medium text-[var(--color-terracotta)] underline underline-offset-4"
-                href={`/${locale}/login?error=verification_sent&returnTo=${encodeURIComponent(redirectTo)}`}
+                href={`/${locale}/login?error=verification_required&returnTo=${encodeURIComponent(redirectTo)}`}
               >
                 {copy.resendVerification}
               </Link>

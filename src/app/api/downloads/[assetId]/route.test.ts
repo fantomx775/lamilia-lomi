@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
+vi.mock("@/lib/config", () => ({
+  getBackendMode: mocks.getBackendMode,
+  getCanonicalAppUrl: () => new URL("https://lamilialomi.com"),
+}));
 vi.mock("@/lib/products-request", () => ({
   getAssetByIdForRequest: mocks.getAssetByIdForRequest,
 }));
@@ -81,6 +84,27 @@ describe("premium download delivery", () => {
     expect(response.headers.get("location")).toBe(
       "https://lamilialomi.com/en/login?returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
     );
+  });
+
+  it("uses the canonical origin when a guest download request has a forged host", async () => {
+    mocks.authorizePremiumDownloadForRequest.mockResolvedValue({
+      ok: false,
+      decision: { allowed: false, reason: "guest" },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://attacker.example/api/downloads/asset-1?locale=en&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+        { headers: { accept: "text/html,application/xhtml+xml" } },
+      ),
+      { params: Promise.resolve({ assetId: "asset-1" }) },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://lamilialomi.com/en/login?returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+    expect(response.headers.get("location")).not.toContain("attacker.example");
   });
 
   it("rejects an external browser return target", async () => {

@@ -122,7 +122,7 @@ describe("Supabase production foundation contracts", () => {
     expect(productAdmin).toContain('supabase.rpc("save_product"');
     expect(productAdmin).not.toContain('from("product_assets").delete');
     expect(productAdmin).not.toContain('from("premium_codes").delete');
-    expect(authActions).toContain("buildSupabaseAuthCallbackUrl(locale)");
+    expect(authActions).toContain("buildSupabaseAuthCallbackUrl(locale, safeRedirectTo, intent)");
     expect(authActions).toContain("setAuthResumeIntent");
     expect(authActions).toContain("redeemAuthResumeIntent");
     expect(authActions).toContain("await supabase.auth.resend({");

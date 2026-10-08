@@ -88,6 +88,7 @@
     "registrationFailed": "Dein Konto konnte nicht erstellt werden. Prüfe deine Angaben und versuche es erneut.",
     "emailNotConfirmed": "Deine E-Mail-Adresse ist noch nicht bestätigt. Prüfe deinen Posteingang oder fordere eine neue Bestätigungs-E-Mail an.",
     "verificationSent": "Wenn das Konto E-Mails empfangen kann, haben wir einen Bestätigungslink gesendet. Prüfe auch den Spam-Ordner.",
+    "verificationRequired": "Gib die E-Mail-Adresse ein, an die der Bestätigungslink gesendet wurde, und fordere dann einen neuen an.",
     "verificationUnavailable": "Die Bestätigungs-E-Mail konnte gerade nicht gesendet werden. Versuche es gleich noch einmal.",
     "verificationFailed": "Dieser Bestätigungslink ist ungültig oder abgelaufen. Fordere einen neuen Link an und versuche es erneut.",
     "verificationMismatch": "Dieser Bestätigungslink gehört zu einem anderen Konto. Melde dich mit der E-Mail-Adresse an, an die er gesendet wurde.",

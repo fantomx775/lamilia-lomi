@@ -1,6 +1,13 @@
 import "server-only";
 
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import { cookies } from "next/headers";
 
 import { normalizeLocale } from "./locale";
@@ -15,6 +22,8 @@ export const authResumeCookieName = "ll_auth_resume";
 export const authResumeMaxAgeSeconds = 60 * 60;
 
 const productSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const callbackResumeVersion = "v1";
+const callbackResumeAad = "lamilia-lomi:auth-resume:callback:v1";
 
 export type AuthResumeIntent = {
   locale: Locale;
@@ -26,7 +35,11 @@ export type AuthResumeIntent = {
   createdAt: number;
 };
 
-export function buildSupabaseAuthCallbackUrl(locale: string, returnTo?: string | null) {
+export function buildSupabaseAuthCallbackUrl(
+  locale: string,
+  returnTo?: string | null,
+  intent?: AuthResumeIntent,
+) {
   const url = new URL("/auth/callback", getCanonicalAppUrl());
   const normalizedLocale = normalizeLocale(locale);
   const safeReturnTo = sanitizeInternalReturnTo(returnTo, normalizedLocale);
@@ -35,8 +48,66 @@ export function buildSupabaseAuthCallbackUrl(locale: string, returnTo?: string |
   if (safeReturnTo !== `/${normalizedLocale}/account`) {
     url.searchParams.set("returnTo", safeReturnTo);
   }
+  if (intent) {
+    url.searchParams.set("resume", encodeAuthResumeCallbackToken(intent));
+  }
 
   return url.toString();
+}
+
+export function encodeAuthResumeCallbackToken(intent: AuthResumeIntent) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", getCallbackResumeKey(), iv);
+  cipher.setAAD(Buffer.from(callbackResumeAad));
+  const encrypted = Buffer.concat([
+    cipher.update(JSON.stringify(intent), "utf8"),
+    cipher.final(),
+  ]);
+
+  return [
+    callbackResumeVersion,
+    iv.toString("base64url"),
+    cipher.getAuthTag().toString("base64url"),
+    encrypted.toString("base64url"),
+  ].join(".");
+}
+
+export function decodeAuthResumeCallbackToken(value: string | null | undefined) {
+  if (!value || value.length > 5500) {
+    return null;
+  }
+
+  try {
+    const [version, ivValue, tagValue, encryptedValue, extra] = value.split(".");
+    if (
+      version !== callbackResumeVersion ||
+      !ivValue ||
+      !tagValue ||
+      !encryptedValue ||
+      extra !== undefined
+    ) {
+      return null;
+    }
+
+    const iv = Buffer.from(ivValue, "base64url");
+    const tag = Buffer.from(tagValue, "base64url");
+    const encrypted = Buffer.from(encryptedValue, "base64url");
+    if (iv.byteLength !== 12 || tag.byteLength !== 16 || !encrypted.byteLength) {
+      return null;
+    }
+
+    const decipher = createDecipheriv("aes-256-gcm", getCallbackResumeKey(), iv);
+    decipher.setAAD(Buffer.from(callbackResumeAad));
+    decipher.setAuthTag(tag);
+    const payload = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final(),
+    ]).toString("utf8");
+
+    return parseIntent(JSON.parse(payload) as Partial<AuthResumeIntent>);
+  } catch {
+    return null;
+  }
 }
 
 export function createAuthResumeIntent(input: {
@@ -101,13 +172,16 @@ export function sanitizeInternalReturnTo(
 }
 
 export function getAuthResumeRedirect(
-  intent: Pick<AuthResumeIntent, "locale" | "returnTo"> | null | undefined,
+  intent: Pick<AuthResumeIntent, "locale" | "returnTo" | "productSlug"> | null | undefined,
   callbackLocale?: string,
 ) {
   const locale = normalizeLocale(intent?.locale ?? callbackLocale);
   const fallback = `/${locale}/account`;
+  const returnTo = sanitizeInternalReturnTo(intent?.returnTo, locale, fallback);
 
-  return sanitizeInternalReturnTo(intent?.returnTo, locale, fallback);
+  return productSlugFromReturnTo(returnTo, locale)
+    ? `${returnTo}#premium`
+    : returnTo;
 }
 
 export async function setAuthResumeIntent(input: {
@@ -129,6 +203,8 @@ export async function setAuthResumeIntent(input: {
     maxAge: authResumeMaxAgeSeconds,
     path: "/",
   });
+
+  return intent;
 }
 
 export async function readAuthResumeIntent() {
@@ -178,28 +254,42 @@ function decodeIntent(value: string | undefined): AuthResumeIntent | null {
     }
 
     const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Partial<AuthResumeIntent>;
-    const locale = normalizeLocale(parsed.locale);
-    const returnTo = typeof parsed.returnTo === "string" ? parsed.returnTo : undefined;
-    const createdAt = typeof parsed.createdAt === "number" ? parsed.createdAt : 0;
-
-    if (!returnTo || !createdAt || Date.now() - createdAt > authResumeMaxAgeSeconds * 1000 || Date.now() - createdAt < 0) {
-      return null;
-    }
-
-    const intent = createAuthResumeIntent({
-      locale,
-      productSlug: typeof parsed.productSlug === "string" ? parsed.productSlug : undefined,
-      returnTo,
-      code: typeof parsed.code === "string" ? parsed.code : undefined,
-      userId: typeof parsed.userId === "string" ? parsed.userId : undefined,
-      emailHash: typeof parsed.emailHash === "string" ? parsed.emailHash : undefined,
-      now: createdAt,
-    });
-
-    return intent;
+    return parseIntent(parsed);
   } catch {
     return null;
   }
+}
+
+function parseIntent(parsed: Partial<AuthResumeIntent>): AuthResumeIntent | null {
+  const locale = normalizeLocale(parsed.locale);
+  const returnTo = typeof parsed.returnTo === "string" ? parsed.returnTo : undefined;
+  const createdAt = typeof parsed.createdAt === "number" ? parsed.createdAt : 0;
+
+  if (
+    !returnTo ||
+    !createdAt ||
+    Date.now() - createdAt > authResumeMaxAgeSeconds * 1000 ||
+    Date.now() - createdAt < 0
+  ) {
+    return null;
+  }
+
+  return createAuthResumeIntent({
+    locale,
+    productSlug: typeof parsed.productSlug === "string" ? parsed.productSlug : undefined,
+    returnTo,
+    code: typeof parsed.code === "string" ? parsed.code : undefined,
+    userId: typeof parsed.userId === "string" ? parsed.userId : undefined,
+    emailHash: typeof parsed.emailHash === "string" ? parsed.emailHash : undefined,
+    now: createdAt,
+  });
+}
+
+function getCallbackResumeKey() {
+  return createHash("sha256")
+    .update(`${callbackResumeAad}\0`)
+    .update(getIntentSigningSecret())
+    .digest();
 }
 
 function signIntent(payload: string) {

@@ -11,7 +11,7 @@ test("auth pages explain errors and preserve a product return path", async ({ pa
   );
 
   await expect(page.getByRole("heading", { name: "Log in" })).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveText(
+  await expect(page.locator("#login-error")).toHaveText(
     "That email and password combination could not be verified. Check both and try again.",
   );
   const createAccountLink = page.getByRole("link", { name: "Create account" });
@@ -58,16 +58,26 @@ test("registration required fields stop an empty submission in the browser", asy
 
 test("verification pending state explains the next step and offers a safe resend link", async ({ page }, testInfo) => {
   await page.context().clearCookies();
-  await page.goto(`/en/products/${productSlug}?step=verify`);
+  await page.goto(`/en/products/${productSlug}?step=verify#premium`);
 
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
   await expect(page.getByText("Check your inbox to verify your email")).toBeVisible();
   const resendLink = page.getByRole("link", { name: "Need a new verification link?" });
   await expect(resendLink).toHaveAttribute(
     "href",
-    `/en/login?error=verification_sent&returnTo=%2Fen%2Fproducts%2F${productSlug}`,
+    `/en/login?error=verification_required&returnTo=%2Fen%2Fproducts%2F${productSlug}`,
   );
   await expect(page.getByLabel("Premium code")).toHaveValue("");
   await saveEvidenceScreenshot(page, testInfo, "verification-pending");
+
+  await resendLink.click();
+  await expect(page).toHaveURL(
+    new RegExp(`/en/login\\?error=verification_required&returnTo=%2Fen%2Fproducts%2F${productSlug}$`),
+  );
+  await expect(page.locator("#login-error")).toHaveText(
+    "Enter the email address that received the verification link, then request a new one.",
+  );
+  await expect(page.locator("#verification-email")).toBeVisible();
 });
 
 test("auth route reports client and network errors without exposing form values", async ({ page }, testInfo) => {
@@ -179,6 +189,7 @@ async function saveEvidenceScreenshot(
   testInfo: TestInfo,
   name: string,
 ) {
+  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   const essentialConsent = page.getByRole("button", {
     name: "Essential",
     exact: true,
@@ -191,12 +202,14 @@ async function saveEvidenceScreenshot(
     await essentialConsent.click();
     await expect(essentialConsent).toBeHidden();
   }
-  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+  await page.addStyleTag({
+    content: 'input[id*="premium-code"]::placeholder { color: transparent !important; }',
+  });
 
   const folder = path.resolve(process.cwd(), "docs", "verification", "issue-30");
   await mkdir(folder, { recursive: true });
   await page.screenshot({
     path: path.join(folder, `${testInfo.project.name}-${name}.png`),
-    fullPage: true,
+    fullPage: name !== "verification-pending",
   });
 }

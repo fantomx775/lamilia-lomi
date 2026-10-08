@@ -38,6 +38,7 @@ vi.mock("next-intl/server", () => ({
       createAccount: "Create account",
       emailNotConfirmed: "Email not verified",
       verificationSent: "Verification sent",
+      verificationRequired: "Enter the email address that received the verification link, then request a new one.",
       invalid: "Invalid",
       resendVerification: "Send verification email again",
     })[key],

@@ -8,6 +8,7 @@ import { Suspense } from "react";
 import { AmazonLink } from "@/components/amazon-link";
 import { ProductImageGallery } from "@/components/product-image-gallery";
 import { ProductVideoPreview } from "@/components/product-video-preview";
+import { ScrollToFragment } from "@/components/scroll-to-fragment";
 import { UnlockForm } from "@/components/unlock-form";
 import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
@@ -105,6 +106,7 @@ async function ProductUnlockSection({
       className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8"
       data-testid="product-unlock-section"
     >
+      <ScrollToFragment targetId="premium" />
       <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
           <p className="text-sm font-medium text-[var(--color-terracotta)]">

@@ -4,7 +4,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 
 import { buildBusinessEventPayload } from "@/lib/analytics";
-import { getBackendMode } from "@/lib/config";
+import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { normalizeLocale } from "@/lib/locale";
 import { getAssetByIdForRequest } from "@/lib/products-request";
 import { authorizePremiumDownloadForRequest } from "@/lib/premium-request";
@@ -49,7 +49,7 @@ export async function GET(
         : undefined;
 
     if (next && request.headers.get("accept")?.includes("text/html")) {
-      const response = NextResponse.redirect(new URL(next, request.url));
+      const response = NextResponse.redirect(new URL(next, getCanonicalAppUrl()));
       response.headers.set("Cache-Control", "no-store");
       return response;
     }

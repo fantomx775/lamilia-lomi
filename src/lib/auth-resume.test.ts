@@ -27,6 +27,7 @@ import {
   buildSupabaseAuthCallbackUrl,
   clearAuthResumeIntent,
   createAuthResumeIntent,
+  decodeAuthResumeCallbackToken,
   getAuthResumeRedirect,
   readAuthResumeIntent,
   redeemAuthResumeIntent,
@@ -54,6 +55,53 @@ describe("Supabase auth resume contract", () => {
     expect(
       new URL(buildSupabaseAuthCallbackUrl("en", "https://evil.example")).searchParams.has("returnTo"),
     ).toBe(false);
+  });
+
+  it("encrypts cross-device resume state without exposing the premium code", () => {
+    const intent = createAuthResumeIntent({
+      locale: "en",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      email: "reader@example.com",
+    });
+    const callback = new URL(
+      buildSupabaseAuthCallbackUrl("en", intent.returnTo, intent),
+    );
+    const token = callback.searchParams.get("resume");
+
+    expect(token).toBeTruthy();
+    expect(callback.searchParams.has("code")).toBe(false);
+    expect(callback.toString()).not.toContain("LOMI-BOOK-2026");
+    expect(decodeAuthResumeCallbackToken(token)).toMatchObject({
+      returnTo: intent.returnTo,
+      code: "LOMI-BOOK-2026",
+      emailHash: intent.emailHash,
+    });
+
+    const [version, iv, tag, ciphertext] = String(token).split(".");
+    const changedIv = `${iv[0] === "A" ? "B" : "A"}${iv.slice(1)}`;
+    expect(decodeAuthResumeCallbackToken(`${version}.${changedIv}.${tag}.${ciphertext}`)).toBeNull();
+  });
+
+  it("expires encrypted callback resume state with the verification link window", () => {
+    const now = new Date("2026-10-08T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+
+    try {
+      const intent = createAuthResumeIntent({
+        locale: "en",
+        returnTo: "/en/account",
+        email: "reader@example.com",
+      });
+      const callback = new URL(buildSupabaseAuthCallbackUrl("en", intent.returnTo, intent));
+      const token = callback.searchParams.get("resume");
+      vi.setSystemTime(new Date(now.getTime() + authResumeMaxAgeSeconds * 1000 + 1));
+
+      expect(decodeAuthResumeCallbackToken(token)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects external and protocol-relative targets", () => {
