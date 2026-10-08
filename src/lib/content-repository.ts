@@ -5,9 +5,11 @@ import { cache } from "react";
 import { getBackendMode } from "@/lib/config";
 import { createClient } from "@/lib/supabase/server";
 
+import { normalizeCatalogSettings } from "./catalog-settings";
 import type {
   AmazonLink,
   Category,
+  CatalogSettings,
   ContentSnapshot,
   Product,
   ProductAsset,
@@ -111,6 +113,29 @@ export const getAdminContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: true }),
 );
 
+export const getCatalogSettingsForRequest = cache(async (): Promise<CatalogSettings> => {
+  if (getBackendMode() === "local") {
+    const { getContentSnapshot } = await import("./content-store");
+
+    return getContentSnapshot().catalogSettings;
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("catalog_settings")
+    .select("desktop_columns")
+    .eq("id", "global")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("Supabase catalog settings read failed: " + error.message);
+  }
+
+  return normalizeCatalogSettings(
+    data ? { desktopColumns: data.desktop_columns } : undefined,
+  );
+});
+
 export async function getContentSnapshotForRequest(options: {
   includePremiumCodes?: boolean;
 } = {}): Promise<ContentSnapshot> {
@@ -133,6 +158,7 @@ export async function getContentSnapshotForRequest(options: {
     tagRows,
     tagTranslationRows,
     staticPageRows,
+    catalogSettingsRows,
     premiumCodeRows,
   ] = await Promise.all([
     selectRows(supabase, "products"),
@@ -146,6 +172,7 @@ export async function getContentSnapshotForRequest(options: {
     selectRows(supabase, "tags"),
     selectRows(supabase, "tag_translations"),
     selectRows(supabase, "static_pages"),
+    selectRows(supabase, "catalog_settings"),
     options.includePremiumCodes
       ? selectRows(supabase, "premium_codes")
       : Promise.resolve([]),
@@ -184,6 +211,11 @@ export async function getContentSnapshotForRequest(options: {
     staticPages: staticPageRows
       .map(mapStaticPage)
       .filter((page): page is StaticPageRecord => Boolean(page)),
+    catalogSettings: normalizeCatalogSettings(
+      catalogSettingsRows[0]
+        ? { desktopColumns: catalogSettingsRows[0].desktop_columns }
+        : undefined,
+    ),
   };
 }
 
@@ -263,6 +295,7 @@ function mapPublicProductDetailRow(row: DbRow): ContentSnapshot {
     categories,
     tags,
     staticPages: [],
+    catalogSettings: normalizeCatalogSettings(undefined),
   };
 }
 

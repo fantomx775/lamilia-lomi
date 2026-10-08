@@ -5,13 +5,13 @@ import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Locale } from "@/i18n/routing";
-import { parseCatalogFilters } from "@/lib/products";
+import { getPublicContentSnapshot } from "@/lib/content-repository";
 import {
-  getAllProductTypesForRequest,
-  getCatalogProductsForRequest,
-  getCategoryOptionsForRequest,
-  getTagOptionsForRequest,
-} from "@/lib/products-request";
+  getAllProductTypesFromSnapshot,
+  getCatalogProductsFromSnapshot,
+  getTranslation,
+  parseCatalogFilters,
+} from "@/lib/products";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -21,12 +21,29 @@ type Props = {
 export default async function ProductsPage({ params, searchParams }: Props) {
   const { locale } = await params;
   const filters = parseCatalogFilters(await searchParams);
-  const [products, categories, tags, productTypes] = await Promise.all([
-    getCatalogProductsForRequest(locale, filters),
-    getCategoryOptionsForRequest(locale),
-    getTagOptionsForRequest(locale),
-    getAllProductTypesForRequest(),
-  ]);
+  const snapshot = await getPublicContentSnapshot();
+  const products = getCatalogProductsFromSnapshot(snapshot, locale, filters);
+  const categories = snapshot.categories
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((category) => ({
+      slug: category.slug,
+      name: getTranslation(category.translations, locale).name,
+    }));
+  const tags = snapshot.tags.map((tag) => ({
+    slug: tag.slug,
+    name: getTranslation(tag.translations, locale).name,
+  }));
+  const productTypes = getAllProductTypesFromSnapshot(snapshot);
+  const desktopColumnClass = {
+    3: "xl:grid-cols-3",
+    4: "xl:grid-cols-4",
+    5: "xl:grid-cols-5",
+  }[snapshot.catalogSettings.desktopColumns];
+  const imageSizes =
+    "(min-width: 1280px) " +
+    Math.round(100 / snapshot.catalogSettings.desktopColumns) +
+    "vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw";
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
@@ -85,13 +102,20 @@ export default async function ProductsPage({ params, searchParams }: Props) {
       </form>
 
       {products.length ? (
-        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div
+          data-testid="product-catalog-grid"
+          className={[
+            "mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3",
+            desktopColumnClass,
+          ].join(" ")}
+        >
           {products.map((product, index) => (
             <ProductCard
               key={product.id}
               product={product}
               locale={locale}
               imageLoading={index === 0 ? "eager" : "lazy"}
+              imageSizes={imageSizes}
             />
           ))}
         </div>

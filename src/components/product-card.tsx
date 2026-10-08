@@ -12,10 +12,12 @@ export function ProductCard({
   product,
   locale,
   imageLoading = "lazy",
+  imageSizes,
 }: {
   product: LocalizedProductView;
   locale: Locale;
   imageLoading?: "eager" | "lazy";
+  imageSizes?: string;
 }) {
   return (
     <Link
@@ -41,7 +43,7 @@ export function ProductCard({
           loading={imageLoading}
           unoptimized={isMediaProxyPath(product.cover.path)}
           className="object-cover"
-          sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
+          sizes={imageSizes ?? "(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"}
         />
       </div>
       <div className="grid gap-3 p-4">

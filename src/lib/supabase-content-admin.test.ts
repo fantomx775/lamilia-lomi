@@ -45,6 +45,7 @@ describe("Supabase content admin mutations", () => {
       categories: [],
       tags: [],
       staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
     });
 
     const resolvedQuery = () => Promise.resolve({ error: null });

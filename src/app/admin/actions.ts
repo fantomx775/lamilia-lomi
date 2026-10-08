@@ -10,12 +10,14 @@ import {
   deleteProductForRequest,
   deleteTagForRequest,
   saveCategoryForRequest,
+  saveCatalogSettingsForRequest,
   savePageForRequest,
   savePagesForRequest,
   saveProductForRequest,
   saveTagForRequest,
 } from "@/lib/supabase-content-admin";
 import { getDemoSession } from "@/lib/session.server";
+import { parseCatalogDesktopColumns } from "@/lib/catalog-settings";
 import type { StaticPageRecord } from "@/lib/types";
 import {
   mapAdminError,
@@ -118,6 +120,30 @@ export async function saveTagAction(formData: FormData) {
   }
 
   redirect("/admin/tags?saved=1");
+}
+
+export async function saveCatalogSettingsAction(formData: FormData) {
+  await assertAdmin();
+
+  const desktopColumns = parseCatalogDesktopColumns(
+    formData.get("desktopColumns"),
+  );
+
+  if (desktopColumns === null) {
+    redirect("/admin/settings?error=invalid_catalog_columns");
+  }
+
+  const result = await executeAdminMutation("catalog settings", () =>
+    saveCatalogSettingsForRequest(desktopColumns),
+  );
+
+  revalidateContentPaths();
+
+  if (!result.ok) {
+    redirect("/admin/settings?error=save_failed");
+  }
+
+  redirect("/admin/settings?saved=1");
 }
 
 export async function deleteTagAction(formData: FormData) {
