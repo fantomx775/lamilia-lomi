@@ -1,8 +1,9 @@
 "use client";
 
 import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RotateCcw, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { useFormStatus } from "react-dom";
+import { startTransition, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
 
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
 import { AdminDisclosure } from "@/components/admin/admin-disclosure";
@@ -13,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { routing, type Locale } from "@/i18n/routing";
-import { getAdminErrorMessage, type AdminErrorCode } from "@/lib/admin-errors";
+import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type AdminMutationResult } from "@/lib/admin-errors";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
@@ -100,23 +101,35 @@ export function ProductEditor({
   categories: Category[];
   tags: Tag[];
   feedback?: string;
-  saveAction?: (formData: FormData) => void | Promise<void>;
+  saveAction?: (formData: FormData) => Promise<AdminMutationResult>;
   archiveAction?: (formData: FormData) => void | Promise<void>;
   deleteAction?: (formData: FormData) => void | Promise<void>;
 }) {
+  const router = useRouter();
   const [locale, setLocale] = useState<Locale>("en");
   const [translations, setTranslations] = useState<Record<Locale, TranslationDraft>>(() => buildTranslations(product));
   const [assets, setAssets] = useState<AssetDraft[]>(() => buildAssets(product));
   const [draftProductId] = useState(() => product?.id ?? createClientId());
+  const [productSlug, setProductSlug] = useState(() => product?.slug ?? "");
+  const [productStatus, setProductStatus] = useState<Product["status"]>(() => product?.status ?? "draft");
+  const [createdProductHref, setCreatedProductHref] = useState<string | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
+  const [saveBarRoot, setSaveBarRoot] = useState<HTMLElement | null>(null);
+  const [saveErrorCodes, setSaveErrorCodes] = useState<AdminErrorCode[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product));
   const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product));
   const [premiumErrors, setPremiumErrors] = useState<Partial<Record<string, AdminErrorCode>>>({});
+  const formRef = useRef<HTMLFormElement>(null);
+  const savedFormSignatureRef = useRef<string | null>(null);
+  const isDirtyRef = useRef(false);
   const assetsRef = useRef(assets);
   const uploadVersionsRef = useRef(new Map<ProductAsset["kind"], number>());
   assetsRef.current = assets;
   const missingLocales = routing.locales.filter((code) => !translations[code].title.trim());
-  const returnTo = product ? `/admin/products/${product.id}` : "/admin/products/new";
   const visibleAssets = assets.filter((asset) => !asset.removed && asset.status === "uploaded");
   const coverAsset = visibleAssets.find((asset) => asset.kind === "cover");
   const videoAsset = visibleAssets.find((asset) => asset.kind === "video");
@@ -125,11 +138,85 @@ export function ProductEditor({
   const usedAmazonMarkets = new Set(activeAmazonLinks.map((link) => link.market));
   const canAddAmazonMarket = amazonMarketOptions.some(({ value }) => !usedAmazonMarkets.has(value));
 
+  const refreshDirtyState = useCallback(() => {
+    const form = formRef.current;
+    if (!form) return;
+
+    const signature = formSignature(form);
+    if (savedFormSignatureRef.current === null) {
+      savedFormSignatureRef.current = signature;
+      isDirtyRef.current = false;
+      setIsDirty(false);
+      return;
+    }
+
+    const nextIsDirty = signature !== savedFormSignatureRef.current;
+    isDirtyRef.current = nextIsDirty;
+    setIsDirty(nextIsDirty);
+
+  }, []);
+
+  const markDirty = useCallback(() => {
+    isDirtyRef.current = true;
+    setIsDirty(true);
+    setSaveStatus("idle");
+    setSaveErrorCodes([]);
+    setFieldErrors({});
+    setPremiumErrors({});
+    scheduleAfterRender(refreshDirtyState);
+  }, [refreshDirtyState]);
+
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    savedFormSignatureRef.current = formSignature(form);
+    isDirtyRef.current = false;
+    setIsDirty(false);
+    setSaveBarRoot(document.body);
+  }, [refreshDirtyState]);
+
+  useEffect(() => {
+    if (createdProductHref) router.replace(createdProductHref);
+  }, [createdProductHref, router]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    const confirmInternalNavigation = (event: MouseEvent) => {
+      if (!isDirtyRef.current || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (!(event.target instanceof Element)) return;
+
+      const link = event.target.closest<HTMLAnchorElement>("a[href]");
+      if (!link || link.target || link.hasAttribute("download")) return;
+
+      const destination = new URL(link.href, window.location.href);
+      if (destination.origin !== window.location.origin || destination.href === window.location.href) return;
+
+      if (window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", confirmInternalNavigation, true);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", confirmInternalNavigation, true);
+    };
+  }, []);
+
   const updateTranslation = (field: keyof TranslationDraft, value: string) => {
+    markDirty();
     setTranslations((current) => ({ ...current, [locale]: { ...current[locale], [field]: value } }));
   };
 
   const updateAsset = <K extends keyof AssetDraft>(clientId: string, field: K, value: AssetDraft[K]) => {
+    markDirty();
     setAssets((current) => current.map((asset) => {
       if (asset.clientId !== clientId) {
         return asset;
@@ -176,6 +263,7 @@ export function ProductEditor({
     }
 
     const files = spec.multiple ? validFiles : validFiles.slice(0, 1);
+    markDirty();
     const activeCount = assets.filter((asset) => !asset.removed && asset.kind === kind && asset.status !== "failed").length;
 
     if (kind === "gallery" && activeCount + files.length > MAX_GALLERY_ASSETS) {
@@ -342,6 +430,7 @@ export function ProductEditor({
     if (!asset.id || asset.uploaded || asset.upload) {
       try {
         if (asset.storagePath) await deleteUploadedStorage(asset.kind, asset.storagePath);
+        markDirty();
         setAssets((current) => current.filter((item) => item.clientId !== asset.clientId));
       } catch (error) {
         setMediaErrors((current) => ({
@@ -373,6 +462,7 @@ export function ProductEditor({
   };
 
   const reorderGallery = (clientId: string, direction: -1 | 1) => {
+    markDirty();
     setAssets((current) => {
       const gallery = sortGalleryAssets(current.filter((asset) => !asset.removed && asset.kind === "gallery"));
       const index = gallery.findIndex((asset) => asset.clientId === clientId);
@@ -387,14 +477,17 @@ export function ProductEditor({
   };
 
   const updateAmazon = <K extends keyof AmazonDraft>(clientId: string, field: K, value: AmazonDraft[K]) => {
+    markDirty();
     setAmazonLinks((current) => current.map((link) => link.clientId === clientId ? { ...link, [field]: value } : link));
   };
 
   const setPrimaryAmazon = (clientId: string) => {
+    markDirty();
     setAmazonLinks((current) => current.map((link) => ({ ...link, isPrimary: link.clientId === clientId })));
   };
 
   const addAmazon = () => {
+    markDirty();
     setAmazonLinks((current) => {
       const nextMarket = amazonMarketOptions.find(({ value }) =>
         !current.some((link) => !link.removed && link.market === value),
@@ -417,6 +510,7 @@ export function ProductEditor({
 
   const removeAmazon = (link: AmazonDraft) => {
     if (!link.id) {
+      markDirty();
       setAmazonLinks((current) => current.filter((item) => item.clientId !== link.clientId));
       return;
     }
@@ -424,6 +518,7 @@ export function ProductEditor({
   };
 
   const updatePremium = <K extends keyof PremiumDraft>(clientId: string, field: K, value: PremiumDraft[K]) => {
+    markDirty();
     setPremiumCodes((current) => current.map((code) => code.clientId === clientId ? { ...code, [field]: value } : code));
     setPremiumErrors((current) => {
       if (!current[clientId]) return current;
@@ -434,6 +529,7 @@ export function ProductEditor({
   };
 
   const addPremium = () => {
+    markDirty();
     setPremiumCodes((current) => [...current, {
       clientId: `code-${Date.now()}-${current.length}`,
       id: "",
@@ -445,6 +541,7 @@ export function ProductEditor({
 
   const removePremium = (code: PremiumDraft) => {
     if (!code.id) {
+      markDirty();
       setPremiumCodes((current) => current.filter((item) => item.clientId !== code.clientId));
       return;
     }
@@ -477,11 +574,77 @@ export function ProductEditor({
       .map((code) => getAdminErrorMessage(code, "pl")),
   ));
 
+  const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSaving || hasActiveMediaUpload || !saveAction) return;
+
+    if (!validatePremiumCodesBeforeSubmit()) {
+      setSaveStatus("error");
+      scheduleAfterRender(() => {
+        formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      });
+      return;
+    }
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    setIsSaving(true);
+    setSaveStatus("idle");
+    setSaveErrorCodes([]);
+    setFieldErrors({});
+
+    startTransition(async () => {
+      try {
+        const result = await saveAction(formData);
+        if (!result.ok) {
+          const mapped = mapProductSaveErrors(result.errors, formData, amazonLinks, premiumCodes);
+          setAssets((current) => current.map((asset) => asset.uploaded ? {
+            ...asset,
+            id: "",
+            path: "",
+            storagePath: undefined,
+            upload: undefined,
+            uploaded: false,
+            status: "failed",
+            error: "Produkt nie został zapisany. Prześlij ten plik ponownie przed kolejną próbą.",
+          } : asset));
+          setSaveStatus("error");
+          setSaveErrorCodes(result.errors);
+          setFieldErrors(mapped.fieldErrors);
+          setPremiumErrors(mapped.premiumErrors);
+          if (mapped.locale) setLocale(mapped.locale);
+          scheduleAfterRender(() => focusFirstError(mapped.focusTarget));
+          return;
+        }
+
+        setAssets((current) => current.map((asset) => ({ ...asset, uploaded: false, file: undefined, upload: undefined })));
+        isDirtyRef.current = false;
+        setIsDirty(false);
+        setSaveStatus("saved");
+        setSaveErrorCodes([]);
+        setFieldErrors({});
+        setPremiumErrors({});
+        scheduleAfterRender(() => {
+          const form = formRef.current;
+          if (form) savedFormSignatureRef.current = formSignature(form);
+        });
+
+        if (!product) {
+          setCreatedProductHref(`/admin/products/${result.id}?saved=1`);
+        }
+      } catch {
+        setSaveStatus("error");
+        setSaveErrorCodes([ADMIN_ERROR_CODES.INTERNAL]);
+      } finally {
+        setIsSaving(false);
+      }
+    });
+  };
+
   return (
-    <div className="min-w-0">
-      <form id="product-editor-form" action={saveAction} onSubmit={(event) => { if (!validatePremiumCodesBeforeSubmit()) event.preventDefault(); }} className="grid gap-6">
+    <div className="min-w-0 pb-28">
+      <form ref={formRef} id="product-editor-form" onSubmit={handleSave} onChangeCapture={markDirty} className="grid gap-6">
         <input type="hidden" name="id" value={draftProductId} />
-        <input type="hidden" name="returnTo" value={returnTo} />
         <input type="hidden" name="coverAssetId" value={coverAsset?.id ?? ""} />
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
         <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
@@ -495,17 +658,18 @@ export function ProductEditor({
           </span>
         ))}
 
+        <fieldset disabled={isSaving} className="m-0 grid min-w-0 gap-6 border-0 p-0">
         <AdminEditorHeader
           backHref="/admin/products"
           backLabel="Produkty"
           title={title}
-          subtitle={product ? `ID: ${product.id} · URL: /products/${product.slug}` : "Slug zostanie wygenerowany z tytułu EN, jeśli nie wpiszesz go ręcznie."}
-          status={product ? <Badge className={statusClass(product.status)}>{statusLabels[product.status]}</Badge> : <Badge>Szkic</Badge>}
-          actions={<ProductSubmitButton disabled={hasActiveMediaUpload} />}
+          subtitle={product ? `ID: ${product.id}` : "Nowy produkt zaczyna jako szkic."}
+          status={<Badge className={statusClass(productStatus)}>{statusLabels[productStatus]}</Badge>}
         />
 
         {hasActiveMediaUpload ? <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Zapis produktu będzie dostępny po zakończeniu przesyłania plików.</p> : null}
         {feedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
+        {saveErrorCodes.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"><p className="font-medium">Nie udało się zapisać. Twoje wpisane wartości są zachowane.</p><ul className="mt-2 list-disc space-y-1 pl-5">{Array.from(new Set(saveErrorCodes)).map((code) => <li key={code}>{getAdminErrorMessage(code, "pl")}</li>)}</ul></div> : null}
 
         <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
           <main className="grid min-w-0 gap-6">
@@ -513,11 +677,11 @@ export function ProductEditor({
               <div className="grid min-w-0 gap-5">
                 <LocaleTabs value={locale} onChange={setLocale} missingLocales={missingLocales} id="product-locale-panel" />
                 <div id="product-locale-panel" className="grid min-w-0 gap-4" role="tabpanel">
-                  <Field label="Tytuł" htmlFor={`product-title-${locale}`}>
-                    <Input id={`product-title-${locale}`} name={`title_${locale}`} value={translations[locale].title} onChange={(event) => updateTranslation("title", event.target.value)} />
+                  <Field label="Tytuł" htmlFor={`product-title-${locale}`} error={fieldErrors[`product-title-${locale}`]?.[0]}>
+                    <Input id={`product-title-${locale}`} name={`title_${locale}`} value={translations[locale].title} onChange={(event) => updateTranslation("title", event.target.value)} aria-invalid={Boolean(fieldErrors[`product-title-${locale}`]?.length)} aria-describedby={fieldErrors[`product-title-${locale}`]?.length ? `product-title-${locale}-error` : undefined} />
                   </Field>
-                  <Field label="Krótki opis" htmlFor={`product-short-description-${locale}`}>
-                    <Input id={`product-short-description-${locale}`} name={`shortDescription_${locale}`} value={translations[locale].shortDescription} onChange={(event) => updateTranslation("shortDescription", event.target.value)} />
+                  <Field label="Krótki opis" htmlFor={`product-short-description-${locale}`} error={fieldErrors[`product-short-description-${locale}`]?.[0]}>
+                    <Input id={`product-short-description-${locale}`} name={`shortDescription_${locale}`} value={translations[locale].shortDescription} onChange={(event) => updateTranslation("shortDescription", event.target.value)} aria-invalid={Boolean(fieldErrors[`product-short-description-${locale}`]?.length)} aria-describedby={fieldErrors[`product-short-description-${locale}`]?.length ? `product-short-description-${locale}-error` : undefined} />
                   </Field>
                   <Field label="Długi opis" htmlFor={`product-long-description-${locale}`}>
                     <Textarea id={`product-long-description-${locale}`} name={`longDescription_${locale}`} value={translations[locale].longDescription} onChange={(event) => updateTranslation("longDescription", event.target.value)} className="min-h-48" />
@@ -533,10 +697,10 @@ export function ProductEditor({
               </div>
             </AdminEditorSection>
 
-            <MediaSections assets={assets} errors={mediaErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
+            <MediaSections assets={assets} errors={mediaErrors} fieldErrors={fieldErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
 
             <AdminEditorSection title="Sprzedaż na Amazon" description="Dodaj maksymalnie jeden link dla każdego rynku i wybierz jeden domyślny.">
-              <div className="grid gap-3">
+              <div id="product-amazon-links" className="grid gap-3">
                 {amazonLinks.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze rynku.</p> : null}
                 {amazonLinks.map((link, index) => (
                   <AmazonEditor
@@ -552,11 +716,12 @@ export function ProductEditor({
                 ))}
                 <Button type="button" variant="outline" onClick={addAmazon} disabled={!canAddAmazonMarket} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj rynek</Button>
                 {!canAddAmazonMarket ? <p className="text-sm text-[var(--color-muted)]">Dodano wszystkie dostępne rynki.</p> : null}
+                {fieldErrors["product-amazon-links"]?.map((message) => <p key={message} className="text-sm text-red-800">{message}</p>)}
               </div>
             </AdminEditorSection>
 
             <AdminEditorSection title="Dostęp premium" description="Kody są pokazywane bez technicznych identyfikatorów; ich aktywność pozostaje zapisywana w obecnym modelu.">
-              <div className="grid gap-3">
+              <div id="product-premium-codes" className="grid gap-3">
                 {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}
                 {premiumCodes.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze kodów premium.</p> : null}
                 {premiumCodes.map((code, index) => (
@@ -568,13 +733,27 @@ export function ProductEditor({
           </main>
 
           <aside className="grid h-fit min-w-0 gap-6 xl:sticky xl:top-6">
-            <AdminEditorSection title="Publikacja">
-              <Field label="Status" htmlFor="product-status">
-                <select id="product-status" name="status" defaultValue={product?.status ?? "draft"} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm outline-none focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]">
+            <AdminEditorSection title="Publikacja i katalog">
+              <div className="grid gap-4">
+              <Field label="Status" htmlFor="product-status" error={fieldErrors["product-status"]?.[0]}>
+                <select id="product-status" name="status" value={productStatus} onChange={(event) => setProductStatus(event.target.value as Product["status"])} aria-invalid={Boolean(fieldErrors["product-status"]?.length)} aria-describedby={fieldErrors["product-status"]?.length ? "product-status-error" : undefined} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm outline-none focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]">
                   <option value="draft">Szkic</option><option value="published">Opublikowany</option><option value="archived">Zarchiwizowany</option>
                 </select>
               </Field>
-              <p className="mt-3 text-xs leading-5 text-[var(--color-muted)]">Przy publikacji wymagane są angielski tytuł, krótki opis, okładka i link Amazon.</p>
+              <p className="text-xs leading-5 text-[var(--color-muted)]">Produkt opublikowany jest widoczny w katalogu. Szkic i archiwum pozostają ukryte.</p>
+              <Field label="Adres produktu" htmlFor="product-slug" error={fieldErrors["product-slug"]?.[0]}>
+                <Input id="product-slug" name="slug" value={productSlug} onChange={(event) => setProductSlug(event.target.value)} placeholder="wygenerujemy-z-tytulu-angielskiego" aria-invalid={Boolean(fieldErrors["product-slug"]?.length)} aria-describedby={fieldErrors["product-slug"]?.length ? "product-slug-error" : undefined} />
+                <p className="text-xs leading-5 text-[var(--color-muted)]">Zostaw puste, aby utworzyć adres z angielskiego tytułu. {productSlug ? `/products/${productSlug}` : "Adres zostanie pokazany po zapisaniu."}</p>
+              </Field>
+              <Field label="Pozycja w katalogu" htmlFor="product-sort-order">
+                <Input id="product-sort-order" name="sortOrder" type="number" defaultValue={product?.sortOrder ?? 100} />
+                <p className="text-xs leading-5 text-[var(--color-muted)]">Niższa liczba wyświetla produkt wcześniej.</p>
+              </Field>
+              <Field label="Przypomnienie o opinii po (dniach)" htmlFor="product-review-delay">
+                <Input id="product-review-delay" name="reviewDelayDays" type="number" min={1} defaultValue={product?.reviewDelayDays ?? 14} />
+                <p className="text-xs leading-5 text-[var(--color-muted)]">Liczba dni od odblokowania produktu do przypomnienia.</p>
+              </Field>
+              </div>
             </AdminEditorSection>
 
             <AdminEditorSection title="Organizacja">
@@ -585,33 +764,38 @@ export function ProductEditor({
                 <CheckboxGroup label="Tagi" name="tagIds" values={tags.map((tag) => ({ id: tag.id, label: taxonomyLabel(tag.translations, tag.slug) }))} selected={product?.tagIds ?? []} />
               </div>
             </AdminEditorSection>
-
-            <AdminEditorSection title="Zaawansowane">
-              <div className="grid gap-4">
-                <Field label="URL produktu" htmlFor="product-slug"><Input id="product-slug" name="slug" defaultValue={product?.slug ?? ""} placeholder="moon-garden-coloring-book" /><p className="text-xs leading-5 text-[var(--color-muted)]">/products/{product?.slug || "slug-z-tytulu-en"}</p></Field>
-                <Field label="Kolejność" htmlFor="product-sort-order"><Input id="product-sort-order" name="sortOrder" type="number" defaultValue={product?.sortOrder ?? 100} /></Field>
-                <Field label="Opóźnienie opinii (dni)" htmlFor="product-review-delay"><Input id="product-review-delay" name="reviewDelayDays" type="number" min={1} defaultValue={product?.reviewDelayDays ?? 14} /></Field>
-              </div>
-            </AdminEditorSection>
           </aside>
         </div>
+        </fieldset>
       </form>
 
       {product && archiveAction && deleteAction ? (
-        <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} />
+        <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving} />
+      ) : null}
+
+      {saveBarRoot ? createPortal(
+        <div data-testid="product-save-bar" className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-white/95 px-4 pt-3 shadow-[0_-8px_30px_rgba(47,35,29,0.08)] backdrop-blur sm:px-6 lg:left-64 lg:px-8" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+            <p role={saveStatus === "error" ? "alert" : "status"} aria-live="polite" className={`min-w-0 text-sm ${saveStatus === "error" ? "text-red-800" : "text-[var(--color-muted)]"}`}>
+              {isSaving ? "Zapisywanie…" : saveStatus === "saved" ? "Zapisano. Zmiany są aktualne." : saveStatus === "error" ? "Zapis nie powiódł się. Sprawdź wskazane błędy." : isDirty ? "Niezapisane zmiany" : "Wszystkie zmiany są zapisane"}
+            </p>
+            <ProductSubmitButton pending={isSaving} dirty={isDirty} disabled={hasActiveMediaUpload || !saveAction} />
+          </div>
+        </div>,
+        saveBarRoot,
       ) : null}
     </div>
   );
 }
 
-function ProductSubmitButton({ disabled = false }: { disabled?: boolean }) {
-  const { pending } = useFormStatus();
-  return <Button type="submit" disabled={pending || disabled}><Save className="size-4" aria-hidden />{pending ? "Zapisywanie…" : "Zapisz"}</Button>;
+function ProductSubmitButton({ pending, dirty, disabled = false }: { pending: boolean; dirty: boolean; disabled?: boolean }) {
+  return <Button type="submit" form="product-editor-form" disabled={pending || disabled} className="shrink-0"><Save className="size-4" aria-hidden />{pending ? "Zapisywanie…" : dirty ? "Zapisz zmiany" : "Zapisz"}</Button>;
 }
 
 function MediaSections({
   assets,
   errors,
+  fieldErrors,
   onUpload,
   onRemove,
   onUndo,
@@ -620,6 +804,7 @@ function MediaSections({
 }: {
   assets: AssetDraft[];
   errors: Partial<Record<ProductAsset["kind"], string>>;
+  fieldErrors: Record<string, string[]>;
   onUpload: (kind: ProductAsset["kind"], files: FileList | File[]) => void;
   onRemove: (asset: AssetDraft) => void;
   onUndo: (asset: AssetDraft) => void;
@@ -627,11 +812,11 @@ function MediaSections({
   onMove: (clientId: string, direction: -1 | 1) => void;
 }) {
   return <div className="grid min-w-0 gap-6">
-    <MediaSection kind="cover" title="OKŁADKA" description="Jedna grafika reprezentująca produkt. Możesz ją później zastąpić lub usunąć." assets={assets} error={errors.cover} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
-    <MediaSection kind="gallery" title="GALERIA" description="Dodaj do 20 obrazów i ustaw ich kolejność przyciskami góra/dół." assets={assets} error={errors.gallery} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
-    <MediaSection kind="video" title="WIDEO FLIPTHROUGH" description="Jedno publiczne wideo pokazujące zawartość produktu." assets={assets} error={errors.video} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
-    <MediaSection kind="public_download" title="PUBLICZNE PLIKI DO POBRANIA" description="Pliki dostępne dla każdego odwiedzającego — bez logowania i bez odblokowania." assets={assets} error={errors.public_download} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
-    <MediaSection kind="premium_download" title="MATERIAŁY PREMIUM" description="Prywatne materiały dostępne dopiero po weryfikacji e-maila i odblokowaniu produktu." assets={assets} error={errors.premium_download} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="cover" title="OKŁADKA" description="Jedna grafika reprezentująca produkt. Możesz ją później zastąpić lub usunąć." assets={assets} error={errors.cover} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="gallery" title="GALERIA" description="Dodaj do 20 obrazów i ustaw ich kolejność przyciskami góra/dół." assets={assets} error={errors.gallery} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="video" title="WIDEO FLIPTHROUGH" description="Jedno publiczne wideo pokazujące zawartość produktu." assets={assets} error={errors.video} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="public_download" title="PUBLICZNE PLIKI DO POBRANIA" description="Pliki dostępne dla każdego odwiedzającego — bez logowania i bez odblokowania." assets={assets} error={errors.public_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="premium_download" title="MATERIAŁY PREMIUM" description="Prywatne materiały dostępne dopiero po weryfikacji e-maila i odblokowaniu produktu." assets={assets} error={errors.premium_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
   </div>;
 }
 
@@ -641,6 +826,7 @@ function MediaSection({
   description,
   assets,
   error,
+  fieldErrors,
   onUpload,
   onRemove,
   onUndo,
@@ -652,6 +838,7 @@ function MediaSection({
   description: string;
   assets: AssetDraft[];
   error?: string;
+  fieldErrors: Record<string, string[]>;
   onUpload: (kind: ProductAsset["kind"], files: FileList | File[]) => void;
   onRemove: (asset: AssetDraft) => void;
   onUndo: (asset: AssetDraft) => void;
@@ -663,15 +850,18 @@ function MediaSection({
   const visibleAssets = kind === "gallery" ? sortGalleryAssets(activeAssets) : activeAssets;
   const spec = MEDIA_UPLOAD_SPECS[kind];
 
-  return <AdminEditorSection title={title} description={description}>
+  const serverError = fieldErrors[`media-section-${kind}`]?.[0];
+
+  return <div id={`media-section-${kind}`} className="min-w-0"><AdminEditorSection title={title} description={description}>
     <div className="grid min-w-0 gap-4">
       <UploadDropzone kind={kind} accept={spec.accept} multiple={spec.multiple} onFiles={(files) => onUpload(kind, files)} />
       <p className="text-xs leading-5 text-[var(--color-muted)]">{uploadHint(kind)}</p>
       {error ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{error}</p> : null}
+      {serverError ? <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">{serverError}</p> : null}
       {visibleAssets.length ? <div className="grid min-w-0 gap-3" aria-live="polite">{visibleAssets.map((asset, index) => <MediaAssetRow key={asset.clientId} asset={asset} kind={kind} index={index} total={visibleAssets.length} onRemove={onRemove} onRetry={onRetry} onMove={onMove} />)}</div> : <p className="rounded-lg border border-dashed border-[var(--color-border)] px-4 py-5 text-sm text-[var(--color-muted)]">Nie dodano jeszcze plików.</p>}
       {sectionAssets.filter((asset) => asset.removed).map((asset) => <RemovedAssetRow key={asset.clientId} asset={asset} onUndo={onUndo} />)}
     </div>
-  </AdminEditorSection>;
+  </AdminEditorSection></div>;
 }
 
 function UploadDropzone({
@@ -863,20 +1053,170 @@ function CheckboxGroup({ label, name, values, selected }: { label: string; name:
   return <fieldset className="grid gap-2"><legend className="text-sm font-medium">{label}</legend>{values.length ? values.map((value) => <label key={value.id} className="flex min-w-0 items-start gap-2 text-sm"><input type="checkbox" name={name} value={value.id} defaultChecked={selected.includes(value.id)} className="mt-0.5 shrink-0" /><span className="break-words">{value.label}</span></label>) : <p className="text-sm text-[var(--color-muted)]">Brak dostępnych elementów.</p>}</fieldset>;
 }
 
-function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
-  return <div className="grid min-w-0 gap-2"><Label htmlFor={htmlFor}>{label}</Label>{children}</div>;
+function Field({ label, htmlFor, children, error }: { label: string; htmlFor?: string; children: React.ReactNode; error?: string }) {
+  return <div className="grid min-w-0 gap-2"><Label htmlFor={htmlFor}>{label}</Label>{children}{error ? <p id={htmlFor ? `${htmlFor}-error` : undefined} className="text-sm text-red-800">{error}</p> : null}</div>;
 }
 
 function DangerZone({
   product,
   archiveAction,
   deleteAction,
+  disabled,
 }: {
   product: Product;
   archiveAction: (formData: FormData) => void | Promise<void>;
   deleteAction: (formData: FormData) => void | Promise<void>;
+  disabled: boolean;
 }) {
-  return <section className="grid gap-4 rounded-lg border border-red-200 bg-red-50/60 p-5"><div><h2 className="font-serif text-2xl font-semibold text-red-950">Strefa niebezpieczna</h2><p className="mt-1 text-sm leading-6 text-red-900/80">Archiwizowanie i usuwanie nie są główną akcją edytora.</p></div><div className="flex flex-wrap gap-2"><form action={archiveAction}><input type="hidden" name="id" value={product.id} /><Button type="submit" variant="outline" className="border-red-200 text-red-900 hover:bg-red-100"><Archive className="size-4" aria-hidden />Archiwizuj</Button></form><form action={deleteAction} onSubmit={(event) => { if (!window.confirm("Czy na pewno usunąć ten produkt?")) event.preventDefault(); }}><input type="hidden" name="id" value={product.id} /><button type="submit" className={buttonClassName({ variant: "outline", className: "border-red-200 text-red-900 hover:bg-red-100" })}><Trash2 className="size-4" aria-hidden />Usuń produkt</button></form></div></section>;
+  return <section className="grid gap-4 rounded-lg border border-red-200 bg-red-50/60 p-5"><div><h2 className="font-serif text-2xl font-semibold text-red-950">Strefa niebezpieczna</h2><p className="mt-1 text-sm leading-6 text-red-900/80">Archiwizowanie i usuwanie nie są główną akcją edytora.</p>{disabled ? <p className="mt-2 text-sm text-red-900">Zapisz zmiany przed archiwizacją lub usunięciem produktu.</p> : null}</div><div className="flex flex-wrap gap-2"><form action={archiveAction}><input type="hidden" name="id" value={product.id} /><Button type="submit" variant="outline" disabled={disabled} className="border-red-200 text-red-900 hover:bg-red-100"><Archive className="size-4" aria-hidden />Archiwizuj</Button></form><form action={deleteAction} onSubmit={(event) => { if (!window.confirm("Czy na pewno usunąć ten produkt?")) event.preventDefault(); }}><input type="hidden" name="id" value={product.id} /><button type="submit" disabled={disabled} className={buttonClassName({ variant: "outline", className: "border-red-200 text-red-900 hover:bg-red-100" })}><Trash2 className="size-4" aria-hidden />Usuń produkt</button></form></div></section>;
+}
+
+type ProductSaveErrorMapping = {
+  fieldErrors: Record<string, string[]>;
+  premiumErrors: Partial<Record<string, AdminErrorCode>>;
+  focusTarget?: string;
+  locale?: Locale;
+};
+
+function mapProductSaveErrors(
+  errors: AdminErrorCode[],
+  formData: FormData,
+  amazonLinks: AmazonDraft[],
+  premiumCodes: PremiumDraft[],
+): ProductSaveErrorMapping {
+  const fieldErrors: Record<string, string[]> = {};
+  const premiumErrors: Partial<Record<string, AdminErrorCode>> = {};
+  let focusTarget: string | undefined;
+  let locale: Locale | undefined;
+
+  const addFieldError = (target: string, code: AdminErrorCode) => {
+    const message = getAdminErrorMessage(code, "pl");
+    fieldErrors[target] = Array.from(new Set([...(fieldErrors[target] ?? []), message]));
+    focusTarget ??= target;
+  };
+
+  for (const code of errors) {
+    switch (code) {
+      case ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED:
+        addFieldError("product-title-en", code);
+        locale = "en";
+        break;
+      case ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED:
+      case ADMIN_ERROR_CODES.CONFLICT_SLUG:
+        addFieldError("product-slug", code);
+        break;
+      case ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS: {
+        let foundTarget = false;
+        if (!String(formData.get("title_en") ?? "").trim()) {
+          addFieldError("product-title-en", code);
+          locale = "en";
+          foundTarget = true;
+        }
+        if (!String(formData.get("shortDescription_en") ?? "").trim()) {
+          addFieldError("product-short-description-en", code);
+          locale = "en";
+          foundTarget = true;
+        }
+        if (!String(formData.get("coverAssetId") ?? "").trim()) {
+          addFieldError("media-section-cover", code);
+          foundTarget = true;
+        }
+        if (!formData.getAll("amazonUrl").some((value) => String(value).trim())) {
+          addFieldError("product-amazon-links", code);
+          foundTarget = true;
+        }
+        if (!foundTarget) addFieldError("product-status", code);
+        break;
+      }
+      case ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE:
+        addFieldError("product-amazon-links", code);
+        break;
+      case ADMIN_ERROR_CODES.VALIDATION_COVER_DUPLICATE:
+        addFieldError("media-section-cover", code);
+        break;
+      case ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE:
+        addFieldError("media-section-video", code);
+        break;
+      case ADMIN_ERROR_CODES.VALIDATION_GALLERY_LIMIT:
+        addFieldError("media-section-gallery", code);
+        break;
+      case ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED:
+      case ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG:
+      case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE:
+      case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING: {
+        const activeCodes = premiumCodes.filter((premiumCode) => !premiumCode.removed);
+        let affectedCodes = activeCodes;
+
+        if (code === ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED) {
+          affectedCodes = activeCodes.filter((premiumCode) => !premiumCode.code.trim());
+        } else if (code === ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG) {
+          affectedCodes = activeCodes.filter((premiumCode) => premiumCode.code.length > MAX_PREMIUM_CODE_LENGTH);
+        } else if (code === ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE) {
+          const duplicateIndexes = new Set(validatePremiumCodeEntries(activeCodes).map((issue) => issue.index));
+          affectedCodes = activeCodes.filter((_, index) => duplicateIndexes.has(index));
+        }
+
+        affectedCodes.forEach((premiumCode) => {
+          premiumErrors[premiumCode.clientId] = code;
+          focusTarget ??= `premium-code-${premiumCode.clientId}`;
+        });
+        if (!focusTarget) focusTarget = "product-premium-codes";
+        break;
+      }
+      case ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_ACTIVE:
+      case ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_STATE:
+      case ADMIN_ERROR_CODES.VALIDATION_ASSET_UPLOAD_INCOMPLETE:
+      case ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH:
+      case ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE:
+      case ADMIN_ERROR_CODES.VALIDATION_ASSET_VISIBILITY: {
+        const knownKinds = new Set<ProductAsset["kind"]>(["cover", "gallery", "video", "public_download", "premium_download"]);
+        const submittedKinds = formData.getAll("assetKind").map(String).filter((kind): kind is ProductAsset["kind"] => knownKinds.has(kind as ProductAsset["kind"]));
+        for (const kind of new Set(submittedKinds.length ? submittedKinds : ["cover" as const])) {
+          addFieldError(`media-section-${kind}`, code);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  if (errors.includes(ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE) && amazonLinks.every((link) => link.removed)) {
+    focusTarget ??= "product-amazon-links";
+  }
+
+  return { fieldErrors, premiumErrors, focusTarget, locale };
+}
+
+function formSignature(form: HTMLFormElement) {
+  return formDataSignature(new FormData(form));
+}
+
+function formDataSignature(formData: FormData) {
+  return JSON.stringify(Array.from(formData.entries()).map(([name, value]) => [
+    name,
+    value instanceof File ? `${value.name}:${value.size}:${value.lastModified}` : value,
+  ]));
+}
+
+function scheduleAfterRender(callback: () => void) {
+  if (typeof window.requestAnimationFrame === "function") {
+    window.requestAnimationFrame(callback);
+  } else {
+    window.setTimeout(callback, 0);
+  }
+}
+
+function focusFirstError(targetId?: string) {
+  if (!targetId) return;
+  const target = document.getElementById(targetId);
+  if (!target) return;
+
+  target.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  const focusable = target.matches("input, select, textarea, button, [tabindex]")
+    ? target
+    : target.querySelector<HTMLElement>("input, select, textarea, button, [tabindex]");
+  focusable?.focus({ preventScroll: true });
 }
 
 function buildTranslations(product?: Product): Record<Locale, TranslationDraft> {

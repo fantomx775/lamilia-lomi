@@ -90,7 +90,7 @@ test("admin blocks duplicate normalized premium codes before the save action", a
   const codeInputs = page.getByLabel("Kod");
   await codeInputs.nth(0).fill("lomi-book");
   await codeInputs.nth(1).fill("LOMI – BOOK");
-  await page.getByRole("button", { name: "Zapisz" }).click();
+  await page.getByRole("button", { name: /Zapisz/ }).click();
 
   await expect(page.getByText("Każdy kod premium może wystąpić w tym produkcie tylko raz.")).toHaveCount(2);
   await expect(codeInputs.nth(0)).toHaveAttribute("aria-invalid", "true");
@@ -154,7 +154,7 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
 
     await Promise.all([
       page.waitForURL((url) => /\/admin\/products\/[0-9a-f-]+\?saved=1$/i.test(url.pathname + url.search)),
-      page.getByRole("button", { name: "Zapisz" }).click(),
+      page.getByRole("button", { name: /Zapisz/ }).click(),
     ]);
 
     productPath = new URL(page.url()).pathname;
@@ -173,11 +173,14 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
     await page.getByLabel("Tytuł").fill(`E2E Duplicate Product ${uniqueSuffix}`);
     await page.getByRole("button", { name: "Dodaj kod" }).click();
     await page.getByLabel("Kod").fill(` ${uniqueCode.toLowerCase()} `);
-    await Promise.all([
-      page.waitForURL((url) => url.pathname === "/admin/products/new" && url.searchParams.get("error") === "admin.conflict.premium_code_existing"),
-      page.getByRole("button", { name: "Zapisz" }).click(),
-    ]);
-    await expect(page.getByText("Ten kod premium jest już przypisany do innego produktu.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /Zapisz/ }).click();
+    await expect(page.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeVisible();
+    await expect(page.getByText("Ten kod premium jest już przypisany do innego produktu.", { exact: true })).toHaveCount(2);
+    await expect(page.getByText("Ten kod premium jest już przypisany do innego produktu.", { exact: true }).first()).toBeVisible();
+    await expect(page.getByLabel("Tytuł")).toHaveValue(`E2E Duplicate Product ${uniqueSuffix}`);
+    await expect(page.getByLabel("Kod")).toHaveValue(` ${uniqueCode} `);
+    await expect(page.getByLabel("Kod")).toHaveAttribute("aria-invalid", "true");
+    await expect(page).toHaveURL(/\/admin\/products\/new$/);
     expect(serverErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath("admin-premium-existing.png"), fullPage: true });

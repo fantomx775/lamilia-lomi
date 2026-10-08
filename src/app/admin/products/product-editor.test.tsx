@@ -1,11 +1,12 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, waitFor, within, type RenderResult } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within, type RenderResult } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const editorMocks = vi.hoisted(() => ({
   uploadMediaWithTus: vi.fn(),
+  routerReplace: vi.fn(),
 }));
 
 vi.mock("@/lib/media-upload-client", async (importOriginal) => {
@@ -21,6 +22,10 @@ vi.mock("@/app/admin/actions", () => ({
   archiveProductAction: vi.fn(),
   deleteProductAction: vi.fn(),
   saveProductAction: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: editorMocks.routerReplace }),
 }));
 
 import { ProductEditor } from "./product-editor";
@@ -91,6 +96,7 @@ afterEach(() => {
 
 beforeEach(() => {
   editorMocks.uploadMediaWithTus.mockReset();
+  editorMocks.routerReplace.mockReset();
 });
 
 describe("ProductEditor V2", () => {
@@ -127,6 +133,10 @@ describe("ProductEditor V2", () => {
     );
 
     expect(view.getByRole("heading", { name: "Organizacja" })).toBeInTheDocument();
+    expect(view.queryByRole("heading", { name: "Zaawansowane" })).not.toBeInTheDocument();
+    expect(view.getByLabelText("Adres produktu")).toHaveValue("");
+    expect(view.getByLabelText("Pozycja w katalogu")).toHaveValue(100);
+    expect(view.getByLabelText("Przypomnienie o opinii po (dniach)")).toHaveValue(14);
     expect(view.getByLabelText("Segment")).toHaveValue("kids");
     for (const title of ["OKŁADKA", "GALERIA", "WIDEO FLIPTHROUGH", "PUBLICZNE PLIKI DO POBRANIA", "MATERIAŁY PREMIUM"]) {
       expect(view.getByRole("heading", { name: title })).toBeInTheDocument();
@@ -217,7 +227,7 @@ describe("ProductEditor V2", () => {
   });
 
   it("submits current locale values through the provided server action", async () => {
-    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const saveAction = vi.fn().mockResolvedValue({ ok: true, id: product.id });
     const user = userEvent.setup();
     const view = render(
       <ProductEditor
@@ -231,11 +241,66 @@ describe("ProductEditor V2", () => {
     const title = view.container.querySelector<HTMLInputElement>("#product-title-en");
     expect(title).not.toBeNull();
     await user.type(title!, "Ocean Calm");
-    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await user.click(screen.getByRole("button", { name: /Zapisz/ }));
 
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
     const formData = saveAction.mock.calls[0][0] as FormData;
     expect(formData.get("title_en")).toBe("Ocean Calm");
+    expect(editorMocks.routerReplace).toHaveBeenCalledWith(`/admin/products/${product.id}?saved=1`);
+  });
+
+  it("keeps entered values and points to the title after a server validation error", async () => {
+    const saveAction = vi.fn().mockResolvedValue({
+      ok: false,
+      errors: ["admin.validation.product_title_required"],
+    });
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />,
+    );
+    const title = view.getByLabelText("Tytuł");
+    const shortDescription = view.getByLabelText("Krótki opis");
+    fireEvent.change(title, { target: { value: "Draft with retained fields" } });
+    fireEvent.change(shortDescription, { target: { value: "This value must remain after the failed save." } });
+    await user.click(screen.getByRole("button", { name: /Zapisz/ }));
+
+    await waitFor(() => expect(view.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeInTheDocument());
+    expect(title).toHaveValue("Draft with retained fields");
+    expect(shortDescription).toHaveValue("This value must remain after the failed save.");
+    expect(title).toHaveAttribute("aria-invalid", "true");
+    expect(view.getAllByText("Tytuł produktu po angielsku jest wymagany.").length).toBeGreaterThan(0);
+  });
+
+  it("warns before internal navigation and browser reload while edits are unsaved", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const view = render(
+      <ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />,
+    );
+    const title = view.getByLabelText("Tytuł");
+    fireEvent.change(title, { target: { value: "Unsaved draft" } });
+
+    const backLink = view.getByRole("link", { name: "Produkty" });
+    const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    backLink.dispatchEvent(clickEvent);
+
+    expect(confirm).toHaveBeenCalledWith("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
+    expect(clickEvent.defaultPrevented).toBe(true);
+    expect(title).toHaveValue("Unsaved draft");
+
+    const unloadEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unloadEvent);
+    expect(unloadEvent.defaultPrevented).toBe(true);
+  });
+
+  it("updates the visible status badge as the product status changes", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />,
+    );
+
+    await user.selectOptions(view.getByLabelText("Status"), "archived");
+    expect(view.getByLabelText("Status")).toHaveValue("archived");
+    expect(view.getAllByText("Zarchiwizowany")).toHaveLength(2);
   });
 
   it("moves the selected gallery thumbnail exactly one position and enforces both boundaries", async () => {
@@ -280,7 +345,7 @@ describe("ProductEditor V2", () => {
   it("loads existing images by sort order and preserves reordered IDs and metadata through save and reload", async () => {
     const names = ["image-a.png", "image-b.png", "image-c.png", "image-d.png"];
     const editorProduct = productWithGalleryAssets(product, names, true);
-    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const saveAction = vi.fn().mockResolvedValue({ ok: true, id: editorProduct.id });
     const user = userEvent.setup();
     const view = render(
       <ProductEditor title="Edycja produktu" product={editorProduct} categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />,
@@ -297,7 +362,7 @@ describe("ProductEditor V2", () => {
     await moveUp(names[3]);
     expect(galleryPreviewOrder(view)).toEqual([names[3], names[0], names[1], names[2]]);
 
-    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await user.click(screen.getByRole("button", { name: /Zapisz/ }));
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
     const formData = saveAction.mock.calls[0][0] as FormData;
     const submittedGallery = galleryAssetsFromFormData(formData);
@@ -360,7 +425,7 @@ describe("ProductEditor V2", () => {
         } }),
       });
     vi.stubGlobal("fetch", fetchMock);
-    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const saveAction = vi.fn().mockResolvedValue({ ok: true, id: editorProduct.id });
     const user = userEvent.setup();
     const view = render(
       <ProductEditor title="Edycja produktu" product={editorProduct} categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />,
@@ -379,7 +444,7 @@ describe("ProductEditor V2", () => {
 
     await user.click(galleryRow(view, names[1]).getByRole("button", { name: `Przenieś ${names[1]} wyżej` }));
     expect(galleryPreviewOrder(view)).toEqual([names[1], "image-c.png"]);
-    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await user.click(screen.getByRole("button", { name: /Zapisz/ }));
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
 
     const savedProduct = buildProductFromFormData(saveAction.mock.calls[0][0] as FormData, {
@@ -435,7 +500,8 @@ describe("ProductEditor V2", () => {
     }));
 
     const user = userEvent.setup();
-    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />);
+    const saveAction = vi.fn().mockResolvedValue({ ok: true, id: product.id });
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
     const input = view.container.querySelector<HTMLInputElement>("#media-upload-gallery");
     expect(input).not.toBeNull();
 
@@ -470,7 +536,7 @@ describe("ProductEditor V2", () => {
     );
 
     await user.click(view.getByRole("button", { name: "Dodaj kod" }));
-    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await user.click(screen.getByRole("button", { name: /Zapisz/ }));
 
     expect(saveAction).not.toHaveBeenCalled();
     expect(view.getByText("Wpisz kod premium albo usuń pusty wiersz.")).toBeInTheDocument();
@@ -493,7 +559,7 @@ describe("ProductEditor V2", () => {
     const codeInputs = view.getAllByLabelText("Kod");
     await user.type(codeInputs[0], "lomi-book");
     await user.type(codeInputs[1], "LOMI – BOOK");
-    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await user.click(screen.getByRole("button", { name: /Zapisz/ }));
 
     expect(saveAction).not.toHaveBeenCalled();
     expect(view.getAllByText("Każdy kod premium może wystąpić w tym produkcie tylko raz.")).toHaveLength(2);
@@ -518,7 +584,7 @@ describe("ProductEditor V2", () => {
     expect(codeInput).toHaveAttribute("maxLength", "128");
 
     fireEvent.change(codeInput, { target: { value: "x".repeat(129) } });
-    await user.click(view.getByRole("button", { name: "Zapisz" }));
+    await user.click(screen.getByRole("button", { name: /Zapisz/ }));
 
     expect(saveAction).not.toHaveBeenCalled();
     expect(view.getByText("Kod premium może mieć maksymalnie 128 znaków.")).toBeInTheDocument();
@@ -638,16 +704,17 @@ describe("ProductEditor V2", () => {
       }),
     }));
     const user = userEvent.setup();
-    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />);
+    const saveAction = vi.fn().mockResolvedValue({ ok: true, id: product.id });
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
     const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
 
     await user.upload(input!, new File(["cover"], "cover.jpg", { type: "image/jpeg" }));
-    await waitFor(() => expect(view.getByRole("button", { name: "Zapisz" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: /Zapisz/ })).toBeDisabled());
     expect(view.getByText("Zapis produktu będzie dostępny po zakończeniu przesyłania plików.")).toBeInTheDocument();
 
     finishUpload();
     await waitFor(() => expect(view.getByText("Przesłano")).toBeInTheDocument());
-    expect(view.getByRole("button", { name: "Zapisz" })).not.toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: /Zapisz/ })).not.toBeDisabled());
   });
 
   it("preserves the existing cover when a replacement upload fails", async () => {

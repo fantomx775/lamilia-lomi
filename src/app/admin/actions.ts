@@ -25,18 +25,16 @@ import {
   type AdminMutationResult,
 } from "@/lib/admin-errors";
 
-export async function saveProductAction(formData: FormData) {
+export async function saveProductAction(formData: FormData): Promise<AdminMutationResult> {
   await assertAdmin();
 
   const result = await executeAdminMutation("product mutation", () => saveProductForRequest(formData));
 
-  revalidateContentPaths();
-
-  if (!result.ok) {
-    redirect(withAdminError(returnTo(formData, "/admin/products/new"), result.errors));
+  if (result.ok) {
+    revalidateContentPaths();
   }
 
-  redirect(`/admin/products/${result.id}?saved=1`);
+  return result;
 }
 
 export async function deleteProductAction(formData: FormData) {
@@ -219,12 +217,6 @@ function revalidateContentPaths() {
   revalidatePath("/de", "layout");
   revalidatePath("/es", "layout");
   revalidatePath("/sitemap.xml");
-}
-
-function returnTo(formData: FormData, fallback: string) {
-  const value = formData.get("returnTo");
-
-  return typeof value === "string" && value.startsWith("/admin") ? value : fallback;
 }
 
 function withAdminError(path: string, errors: AdminErrorCode[]) {
