@@ -37,6 +37,27 @@ export async function saveProductAction(formData: FormData): Promise<AdminMutati
   return result;
 }
 
+export async function saveNewProductFormAction(formData: FormData): Promise<void> {
+  const result = await saveProductAction(formData);
+
+  if (!result.ok) {
+    redirect(withAdminError("/admin/products/new", result.errors));
+  }
+
+  redirect(`/admin/products/${result.id}?saved=1`);
+}
+
+export async function saveExistingProductFormAction(formData: FormData): Promise<void> {
+  const productId = String(formData.get("id") ?? "");
+  const result = await saveProductAction(formData);
+
+  if (!result.ok) {
+    redirect(withAdminError(`/admin/products/${productId}`, result.errors));
+  }
+
+  redirect(`/admin/products/${result.id}?saved=1`);
+}
+
 export async function deleteProductAction(formData: FormData) {
   await assertAdmin();
 

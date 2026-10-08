@@ -142,29 +142,32 @@ export async function removeUploadedMedia(input: {
 export async function cleanupNewMediaFromFormData(
   formData: FormData,
   authorizationToken?: string | null,
-) {
+): Promise<Array<{ assetId: string; kind: AssetKind; storagePath: string }>> {
   const productId = stringField(formData, "id");
   const ids = formData.getAll("assetId");
   const kinds = formData.getAll("assetKind");
   const paths = formData.getAll("assetPath");
   const uploaded = formData.getAll("assetUploaded");
 
-  if (!productId) return;
+  if (!productId) return [];
 
-  const tasks: Promise<void>[] = [];
+  const tasks: Promise<{ assetId: string; kind: AssetKind; storagePath: string } | null>[] = [];
 
   for (let index = 0; index < Math.max(ids.length, kinds.length, paths.length); index += 1) {
     if (stringAt(uploaded, index) !== "1") continue;
 
     const kind = stringAt(kinds, index);
     const storagePath = stringAt(paths, index);
+    const assetId = stringAt(ids, index);
 
-    if (isAssetKind(kind) && storagePath) {
-      tasks.push(removeUploadedMedia({ productId, kind, storagePath, authorizationToken }).catch(() => undefined));
+    if (isAssetKind(kind) && storagePath && assetId) {
+      tasks.push(removeUploadedMedia({ productId, kind, storagePath, authorizationToken })
+        .then(() => null)
+        .catch(() => ({ assetId, kind, storagePath })));
     }
   }
 
-  await Promise.all(tasks);
+  return (await Promise.all(tasks)).filter((failure): failure is NonNullable<typeof failure> => failure !== null);
 }
 
 export async function cleanupPersistedMedia(input: {

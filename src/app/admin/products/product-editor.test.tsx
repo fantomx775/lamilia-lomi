@@ -30,6 +30,7 @@ vi.mock("next/navigation", () => ({
 
 import { ProductEditor } from "./product-editor";
 import { buildProductFromFormData } from "@/lib/admin-content";
+import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 import { getSeedContentSnapshot } from "@/lib/content-store";
 import type { Product, ProductAsset } from "@/lib/types";
 
@@ -119,8 +120,14 @@ describe("ProductEditor V2", () => {
     expect(view.getByRole("tabpanel").querySelector('input[name="title_en"]')).toHaveValue(product.translations[0].title);
 
     await user.click(view.getByRole("tab", { name: /PL/ }));
-    expect(view.getByRole("tabpanel").querySelector('input[name="title_pl"]')).toHaveValue(product.translations[1].title);
+    const polishTitle = view.getByRole("tabpanel").querySelector<HTMLInputElement>('input[name="title_pl"]')!;
+    expect(polishTitle).toHaveValue(product.translations[1].title);
     expect(view.getByText("SEO i wygląd w Google")).toBeInTheDocument();
+    fireEvent.change(polishTitle, { target: { value: `${product.translations[1].title} temporary` } });
+    fireEvent.change(polishTitle, { target: { value: product.translations[1].title } });
+
+    await waitFor(() => expect(view.getByText("Wszystkie zmiany są zapisane")).toBeInTheDocument());
+    expect(view.queryByText("Niezapisane zmiany")).not.toBeInTheDocument();
   });
 
   it("shows five purpose-built media sections without the legacy asset builder", () => {
@@ -144,6 +151,7 @@ describe("ProductEditor V2", () => {
     expect(view.getByRole("heading", { name: "Sprzedaż na Amazon" })).toBeInTheDocument();
     expect(view.getByRole("heading", { name: "Dostęp premium" })).toBeInTheDocument();
     expect(view.getByLabelText("Status")).toHaveValue("draft");
+    expect(view.getByText("Nowy produkt nie został jeszcze zapisany")).toBeInTheDocument();
     expect(view.queryByText("Bucket")).not.toBeInTheDocument();
     expect(view.queryByText("Ścieżka / URL")).not.toBeInTheDocument();
     expect(view.queryByRole("button", { name: "Dodaj asset" })).not.toBeInTheDocument();
@@ -591,6 +599,57 @@ describe("ProductEditor V2", () => {
     expect(codeInput).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("shows an existing premium-code conflict at the section without marking every code invalid", async () => {
+    const saveAction = vi.fn().mockResolvedValue({
+      ok: false,
+      errors: [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING],
+    });
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+
+    await user.click(view.getByRole("button", { name: "Dodaj kod" }));
+    await user.click(view.getByRole("button", { name: "Dodaj kod" }));
+    const codeInputs = view.getAllByLabelText("Kod");
+    await user.type(codeInputs[0], "LOMI-ONE");
+    await user.type(codeInputs[1], "LOMI-TWO");
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+
+    expect(view.getAllByText("Ten kod premium jest już przypisany do innego produktu.")).toHaveLength(2);
+    expect(codeInputs[0]).not.toHaveAttribute("aria-invalid", "true");
+    expect(codeInputs[1]).not.toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("marks the only submitted premium code invalid for an existing-code conflict", async () => {
+    const saveAction = vi.fn().mockResolvedValue({
+      ok: false,
+      errors: [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING],
+    });
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+
+    await user.click(view.getByRole("button", { name: "Dodaj kod" }));
+    const codeInput = view.getByLabelText("Kod");
+    await user.type(codeInput, "LOMI-TAKEN");
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+
+    expect(codeInput).toHaveAttribute("aria-invalid", "true");
+    expect(view.getAllByText("Ten kod premium jest już przypisany do innego produktu.")).toHaveLength(2);
+  });
+
   it("uploads a selected file through the admin binary endpoint and keeps its filename", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -631,6 +690,60 @@ describe("ProductEditor V2", () => {
     await user.click(view.getByRole("button", { name: "Usuń" }));
     await waitFor(() => expect(view.queryByText("moon-garden-cover.jpg")).not.toBeInTheDocument());
     expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("retains an uploaded asset path when server cleanup fails so the user can retry deletion", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ asset: {
+          id: "asset-cleanup-retry",
+          productId: "product-upload",
+          kind: "cover",
+          bucket: "public-media",
+          path: "/uploads/product-upload/cover/cover-cleanup-retry.jpg",
+          storagePath: "/uploads/product-upload/cover/cover-cleanup-retry.jpg",
+          filename: "cover-cleanup-retry.jpg",
+          contentType: "image/jpeg",
+          sizeBytes: 12,
+          title: "cover-cleanup-retry.jpg",
+          sortOrder: 1,
+          isPublic: true,
+          isActive: true,
+          uploaded: true,
+        } }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const saveAction = vi.fn().mockResolvedValue({
+      ok: false,
+      errors: [ADMIN_ERROR_CODES.INTERNAL],
+      mediaCleanupFailures: [{
+        assetId: "asset-cleanup-retry",
+        kind: "cover",
+        storagePath: "/uploads/product-upload/cover/cover-cleanup-retry.jpg",
+      }],
+    });
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
+
+    await user.upload(input!, new File(["cover"], "cover-cleanup-retry.jpg", { type: "image/jpeg" }));
+    await waitFor(() => expect(view.getByText("Przesłano")).toBeInTheDocument());
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+
+    expect(await view.findByText("Nie udało się usunąć niezapisanego pliku. Możesz ponowić zapis albo użyć Usuń, aby ponowić sprzątanie.")).toBeInTheDocument();
+    expect(view.container.querySelector<HTMLInputElement>('input[name="assetPath"]')).toHaveValue("/uploads/product-upload/cover/cover-cleanup-retry.jpg");
+    await user.click(view.getByRole("button", { name: "Usuń" }));
+    await waitFor(() => expect(view.queryByText("cover-cleanup-retry.jpg")).not.toBeInTheDocument());
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
   });
 
   it("falls back to multipart upload for the local backend", async () => {

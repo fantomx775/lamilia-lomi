@@ -14,7 +14,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("product editor preserves work, saves all statuses, and keeps Save reachable", async ({ page }, testInfo) => {
+test("product editor preserves work, saves all statuses, and keeps Save reachable", async ({ page, browser }, testInfo) => {
   const suffix = `${Date.now()}-${testInfo.project.name}`;
   const titleText = `UX Product ${suffix}`;
   const slug = `ux-product-${suffix.toLowerCase()}`;
@@ -91,6 +91,8 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await saveScreenshot(page, `product-editor-${testInfo.project.name}.png`);
 
     await page.getByLabel("Pozycja w katalogu").fill("38");
+    await expect(page.getByText("Zapisano zmiany.", { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
     const productsBackLink = page.locator('a[href="/admin/products"]').last();
     page.once("dialog", (dialog) => void dialog.dismiss());
     await productsBackLink.click();
@@ -118,6 +120,34 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
     await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
 
+    await page.locator('a[href="/admin/products"]').last().click();
+    await expect(page).toHaveURL(/\/admin\/products$/);
+    await page.goBack();
+    await expect(page).toHaveURL(editorUrlRegex(productPath));
+    await page.getByLabel("Pozycja w katalogu").fill("39");
+    await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
+    await page.goForward({ timeout: 1_000 }).catch(() => null);
+    await expect(page).toHaveURL(editorUrlRegex(productPath));
+    await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("39");
+    await page.getByRole("button", { name: /Zapisz/ }).click();
+    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+
+    await page.locator('a[href="/admin/products"]').last().click();
+    await expect(page).toHaveURL(/\/admin\/products$/);
+    await page.getByRole("link", { name: titleText, exact: false }).click();
+    await expect(page).toHaveURL(editorUrlRegex(productPath));
+    await page.getByLabel("Pozycja w katalogu").fill("40");
+    await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
+    const backDialogPromise = page.waitForEvent("dialog", { timeout: 5_000 });
+    void page.goBack().catch(() => null);
+    const backDialog = await backDialogPromise;
+    expect(backDialog.type()).toBe("confirm");
+    await backDialog.dismiss();
+    await expect(page).toHaveURL(editorUrlRegex(productPath));
+    await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("40");
+    await page.getByRole("button", { name: /Zapisz/ }).click();
+    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+
     await page.locator("#media-upload-cover").setInputFiles({
       name: "ux-cover.png",
       mimeType: "image/png",
@@ -128,13 +158,39 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await page.getByLabel("Link").fill("https://www.amazon.com/dp/B0UXTEST25");
     await page.getByLabel("Status").selectOption("published");
     await page.getByRole("button", { name: /Zapisz/ }).click();
+    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
     await expect(page.locator("form header").getByText("Opublikowany", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Status")).toHaveValue("published");
+    await page.reload();
+    await expect(page.getByLabel("Status")).toHaveValue("published");
+    await expect(page.locator("form header").getByText("Opublikowany", { exact: true })).toBeVisible();
 
     await page.getByLabel("Status").selectOption("archived");
     await page.getByRole("button", { name: /Zapisz/ }).click();
+    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
     await expect(page.locator("form header").getByText("Zarchiwizowany", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Status")).toHaveValue("archived");
+    await page.reload();
+    await expect(page.getByLabel("Status")).toHaveValue("archived");
+    await expect(page.locator("form header").getByText("Zarchiwizowany", { exact: true })).toBeVisible();
+
+    if (testInfo.project.name === "chromium") {
+      const noJsContext = await browser.newContext({
+        baseURL: "http://127.0.0.1:3001",
+        javaScriptEnabled: false,
+      });
+      try {
+        await noJsContext.addCookies(await page.context().cookies());
+        const noJsPage = await noJsContext.newPage();
+        await noJsPage.goto(productPath, { waitUntil: "domcontentloaded" });
+        const form = noJsPage.locator("#product-editor-form");
+        await form.waitFor({ state: "attached" });
+        await expect(form).toHaveAttribute("method", "POST");
+        await expect(form.locator('input[name^="$ACTION_ID_"]')).toHaveCount(1);
+      } finally {
+        await noJsContext.close();
+      }
+    }
   } finally {
     const cleanupPath = productPath ?? (productSaved && createdProductId ? `/admin/products/${createdProductId}` : undefined);
     if (cleanupPath) {
@@ -142,10 +198,10 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       page.on("dialog", acceptDialogs);
       try {
         await page.goto(cleanupPath);
+        const localContentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
         await page.getByRole("button", { name: "Usuń produkt" }).click();
         await expect(page).toHaveURL(/\/admin\/products\?deleted=1$/);
         const productId = cleanupPath.split("/").at(-1)!;
-        const localContentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
         if (fs.existsSync(localContentPath)) {
           const snapshot = JSON.parse(fs.readFileSync(localContentPath, "utf8")) as {
             products?: Array<{ id?: string }>;

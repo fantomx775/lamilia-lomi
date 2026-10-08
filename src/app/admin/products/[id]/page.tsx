@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   archiveProductAction,
   deleteProductAction,
+  saveExistingProductFormAction,
   saveProductAction,
 } from "@/app/admin/actions";
 import { getAdminContentSnapshot } from "@/lib/content-repository";
@@ -36,6 +37,7 @@ export default async function EditProductPage({ params, searchParams }: Props) {
       tags={snapshot.tags}
       feedback={error ?? saved}
       saveAction={saveProductAction}
+      saveFormAction={saveExistingProductFormAction}
       archiveAction={archiveProductAction}
       deleteAction={deleteProductAction}
     />

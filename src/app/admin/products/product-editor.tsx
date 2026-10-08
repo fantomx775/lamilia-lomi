@@ -80,6 +80,13 @@ const productTypes = ["coloring-book", "picture-book", "audiobook"];
 
 type UploadStatus = "queued" | "uploading" | "uploaded" | "failed";
 
+type ProductEditorHistoryGuard = {
+  owner: string;
+  role: "base" | "guard";
+};
+
+const productEditorHistoryGuardKey = "__lamiliaProductEditorHistoryGuard";
+
 const statusLabels = {
   draft: "Szkic",
   published: "Opublikowany",
@@ -93,6 +100,7 @@ export function ProductEditor({
   tags,
   feedback,
   saveAction,
+  saveFormAction,
   archiveAction,
   deleteAction,
 }: {
@@ -102,6 +110,7 @@ export function ProductEditor({
   tags: Tag[];
   feedback?: string;
   saveAction?: (formData: FormData) => Promise<AdminMutationResult>;
+  saveFormAction?: (formData: FormData) => void | Promise<void>;
   archiveAction?: (formData: FormData) => void | Promise<void>;
   deleteAction?: (formData: FormData) => void | Promise<void>;
 }) {
@@ -113,6 +122,7 @@ export function ProductEditor({
   const [productSlug, setProductSlug] = useState(() => product?.slug ?? "");
   const [productStatus, setProductStatus] = useState<Product["status"]>(() => product?.status ?? "draft");
   const [createdProductHref, setCreatedProductHref] = useState<string | null>(null);
+  const [showRouteFeedback, setShowRouteFeedback] = useState(Boolean(feedback));
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
@@ -126,6 +136,9 @@ export function ProductEditor({
   const formRef = useRef<HTMLFormElement>(null);
   const savedFormSignatureRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
+  const currentEditorUrlRef = useRef<string | null>(null);
+  const acceptedHistoryTraversalRef = useRef(false);
+  const pendingCreatedProductHrefRef = useRef<string | null>(null);
   const assetsRef = useRef(assets);
   const uploadVersionsRef = useRef(new Map<ProductAsset["kind"], number>());
   assetsRef.current = assets;
@@ -157,9 +170,27 @@ export function ProductEditor({
   }, []);
 
   const markDirty = useCallback(() => {
+    if (!isDirtyRef.current) {
+      const owner = window.location.href;
+      currentEditorUrlRef.current = owner;
+      const currentGuard = readProductEditorHistoryGuard(window.history.state);
+      if (currentGuard?.owner !== owner) {
+        window.history.replaceState(
+          withProductEditorHistoryGuard(window.history.state, { owner, role: "base" }),
+          "",
+          owner,
+        );
+      }
+      window.history.pushState(
+        withProductEditorHistoryGuard(window.history.state, { owner, role: "guard" }),
+        "",
+        owner,
+      );
+    }
     isDirtyRef.current = true;
     setIsDirty(true);
     setSaveStatus("idle");
+    setShowRouteFeedback(false);
     setSaveErrorCodes([]);
     setFieldErrors({});
     setPremiumErrors({});
@@ -169,6 +200,15 @@ export function ProductEditor({
   useEffect(() => {
     const form = formRef.current;
     if (!form) return;
+    currentEditorUrlRef.current = window.location.href;
+    const currentGuard = readProductEditorHistoryGuard(window.history.state);
+    if (currentGuard?.owner !== window.location.href) {
+      window.history.replaceState(
+        withProductEditorHistoryGuard(window.history.state, { owner: window.location.href, role: "base" }),
+        "",
+        window.location.href,
+      );
+    }
     savedFormSignatureRef.current = formSignature(form);
     isDirtyRef.current = false;
     setIsDirty(false);
@@ -176,7 +216,10 @@ export function ProductEditor({
   }, [refreshDirtyState]);
 
   useEffect(() => {
-    if (createdProductHref) router.replace(createdProductHref);
+    if (createdProductHref) {
+      currentEditorUrlRef.current = new URL(createdProductHref, window.location.href).href;
+      router.replace(createdProductHref);
+    }
   }, [createdProductHref, router]);
 
   useEffect(() => {
@@ -202,10 +245,60 @@ export function ProductEditor({
       event.stopImmediatePropagation();
     };
 
+    const confirmHistoryNavigation = (event: PopStateEvent) => {
+      const owner = currentEditorUrlRef.current;
+      if (!owner) return;
+
+      if (acceptedHistoryTraversalRef.current) {
+        if (window.location.href === owner) {
+          window.history.back();
+          return;
+        }
+        acceptedHistoryTraversalRef.current = false;
+        return;
+      }
+
+      const destinationGuard = readProductEditorHistoryGuard(event.state);
+      const isGuardBoundary = window.location.href === owner && destinationGuard?.owner === owner;
+      if (!isGuardBoundary) {
+        if (!isDirtyRef.current || window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) return;
+
+        event.stopImmediatePropagation();
+        window.history.pushState(
+          withProductEditorHistoryGuard(window.history.state, { owner, role: "guard" }),
+          "",
+          owner,
+        );
+        return;
+      }
+
+      const createdProductHref = pendingCreatedProductHrefRef.current;
+      if (createdProductHref) {
+        pendingCreatedProductHrefRef.current = null;
+        setCreatedProductHref(createdProductHref);
+        return;
+      }
+
+      if (!isDirtyRef.current || window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) {
+        acceptedHistoryTraversalRef.current = true;
+        window.history.back();
+        return;
+      }
+
+      event.stopImmediatePropagation();
+      window.history.pushState(
+        withProductEditorHistoryGuard(window.history.state, { owner, role: "guard" }),
+        "",
+        owner,
+      );
+    };
+
     window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("popstate", confirmHistoryNavigation, true);
     document.addEventListener("click", confirmInternalNavigation, true);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("popstate", confirmHistoryNavigation, true);
       document.removeEventListener("click", confirmInternalNavigation, true);
     };
   }, []);
@@ -598,16 +691,26 @@ export function ProductEditor({
         const result = await saveAction(formData);
         if (!result.ok) {
           const mapped = mapProductSaveErrors(result.errors, formData, amazonLinks, premiumCodes);
-          setAssets((current) => current.map((asset) => asset.uploaded ? {
-            ...asset,
-            id: "",
-            path: "",
-            storagePath: undefined,
-            upload: undefined,
-            uploaded: false,
-            status: "failed",
-            error: "Produkt nie został zapisany. Prześlij ten plik ponownie przed kolejną próbą.",
-          } : asset));
+          const cleanupFailures = new Map((result.mediaCleanupFailures ?? []).map((failure) => [failure.assetId, failure]));
+          setAssets((current) => current.map((asset) => {
+            if (!asset.uploaded) return asset;
+            if (cleanupFailures.has(asset.id)) {
+              return {
+                ...asset,
+                error: "Nie udało się usunąć niezapisanego pliku. Możesz ponowić zapis albo użyć Usuń, aby ponowić sprzątanie.",
+              };
+            }
+            return {
+              ...asset,
+              id: "",
+              path: "",
+              storagePath: undefined,
+              upload: undefined,
+              uploaded: false,
+              status: "failed",
+              error: "Produkt nie został zapisany. Prześlij ten plik ponownie przed kolejną próbą.",
+            };
+          }));
           setSaveStatus("error");
           setSaveErrorCodes(result.errors);
           setFieldErrors(mapped.fieldErrors);
@@ -630,7 +733,15 @@ export function ProductEditor({
         });
 
         if (!product) {
-          setCreatedProductHref(`/admin/products/${result.id}?saved=1`);
+          const href = `/admin/products/${result.id}?saved=1`;
+          const owner = currentEditorUrlRef.current;
+          const guard = readProductEditorHistoryGuard(window.history.state);
+          if (owner && guard?.owner === owner && guard.role === "guard") {
+            pendingCreatedProductHrefRef.current = href;
+            window.history.back();
+          } else {
+            setCreatedProductHref(href);
+          }
         }
       } catch {
         setSaveStatus("error");
@@ -643,7 +754,7 @@ export function ProductEditor({
 
   return (
     <div className="min-w-0 pb-28">
-      <form ref={formRef} id="product-editor-form" onSubmit={handleSave} onChangeCapture={markDirty} className="grid gap-6">
+      <form ref={formRef} id="product-editor-form" action={saveFormAction} onSubmit={handleSave} onChangeCapture={markDirty} className="grid gap-6">
         <input type="hidden" name="id" value={draftProductId} />
         <input type="hidden" name="coverAssetId" value={coverAsset?.id ?? ""} />
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
@@ -668,7 +779,7 @@ export function ProductEditor({
         />
 
         {hasActiveMediaUpload ? <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Zapis produktu będzie dostępny po zakończeniu przesyłania plików.</p> : null}
-        {feedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
+        {feedback && showRouteFeedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
         {saveErrorCodes.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"><p className="font-medium">Nie udało się zapisać. Twoje wpisane wartości są zachowane.</p><ul className="mt-2 list-disc space-y-1 pl-5">{Array.from(new Set(saveErrorCodes)).map((code) => <li key={code}>{getAdminErrorMessage(code, "pl")}</li>)}</ul></div> : null}
 
         <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
@@ -722,6 +833,7 @@ export function ProductEditor({
 
             <AdminEditorSection title="Dostęp premium" description="Kody są pokazywane bez technicznych identyfikatorów; ich aktywność pozostaje zapisywana w obecnym modelu.">
               <div id="product-premium-codes" className="grid gap-3">
+                {fieldErrors["product-premium-codes"]?.map((message) => <p key={message} role="alert" className="text-sm text-red-800">{message}</p>)}
                 {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}
                 {premiumCodes.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze kodów premium.</p> : null}
                 {premiumCodes.map((code, index) => (
@@ -777,7 +889,7 @@ export function ProductEditor({
         <div data-testid="product-save-bar" className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-white/95 px-4 pt-3 shadow-[0_-8px_30px_rgba(47,35,29,0.08)] backdrop-blur sm:px-6 lg:left-64 lg:px-8" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
             <p role={saveStatus === "error" ? "alert" : "status"} aria-live="polite" className={`min-w-0 text-sm ${saveStatus === "error" ? "text-red-800" : "text-[var(--color-muted)]"}`}>
-              {isSaving ? "Zapisywanie…" : saveStatus === "saved" ? "Zapisano. Zmiany są aktualne." : saveStatus === "error" ? "Zapis nie powiódł się. Sprawdź wskazane błędy." : isDirty ? "Niezapisane zmiany" : "Wszystkie zmiany są zapisane"}
+              {isSaving ? "Zapisywanie…" : saveStatus === "saved" ? "Zapisano. Zmiany są aktualne." : saveStatus === "error" ? "Zapis nie powiódł się. Sprawdź wskazane błędy." : isDirty ? "Niezapisane zmiany" : product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"}
             </p>
             <ProductSubmitButton pending={isSaving} dirty={isDirty} disabled={hasActiveMediaUpload || !saveAction} />
           </div>
@@ -917,6 +1029,7 @@ function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }:
         {asset.status === "uploading" ? "Przesyłanie…" : isFailed ? asset.error || "Upload nie powiódł się." : asset.status === "queued" ? "Oczekuje" : "Przesłano"}
       </p>
       {isUploading ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg)]" role="progressbar" aria-label="Postęp przesyłania" aria-valuemin={0} aria-valuemax={100} aria-valuenow={asset.progress ?? 0}><div className="h-full rounded-full bg-[var(--color-terracotta)] transition-[width]" style={{ width: `${asset.progress ?? 0}%` }} /></div> : null}
+      {asset.status === "uploaded" && asset.error ? <p role="alert" className="mt-2 text-xs text-red-800">{asset.error}</p> : null}
     </div>
     <div className="flex flex-wrap items-center justify-end gap-1 sm:max-w-32">
       {kind === "gallery" ? <><Button type="button" variant="ghost" size="icon" disabled={index === 0} onClick={() => onMove(asset.clientId, -1)} aria-label={`Przenieś ${asset.filename} wyżej`}><MoveUp className="size-4" aria-hidden /></Button><Button type="button" variant="ghost" size="icon" disabled={index === total - 1} onClick={() => onMove(asset.clientId, 1)} aria-label={`Przenieś ${asset.filename} niżej`}><MoveDown className="size-4" aria-hidden /></Button></> : null}
@@ -1142,8 +1255,7 @@ function mapProductSaveErrors(
         break;
       case ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED:
       case ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG:
-      case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE:
-      case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING: {
+      case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE: {
         const activeCodes = premiumCodes.filter((premiumCode) => !premiumCode.removed);
         let affectedCodes = activeCodes;
 
@@ -1161,6 +1273,16 @@ function mapProductSaveErrors(
           focusTarget ??= `premium-code-${premiumCode.clientId}`;
         });
         if (!focusTarget) focusTarget = "product-premium-codes";
+        break;
+      }
+      case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING: {
+        const submittedCodes = premiumCodes.filter((premiumCode) => !premiumCode.removed && premiumCode.code.trim());
+        if (submittedCodes.length === 1) {
+          premiumErrors[submittedCodes[0].clientId] = code;
+          focusTarget ??= `premium-code-${submittedCodes[0].clientId}`;
+        } else {
+          addFieldError("product-premium-codes", code);
+        }
         break;
       }
       case ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_ACTIVE:
@@ -1192,8 +1314,34 @@ function formSignature(form: HTMLFormElement) {
   return formDataSignature(new FormData(form));
 }
 
+function readProductEditorHistoryGuard(state: unknown): ProductEditorHistoryGuard | null {
+  if (!state || typeof state !== "object") return null;
+  const guard = (state as Record<string, unknown>)[productEditorHistoryGuardKey];
+  if (!guard || typeof guard !== "object") return null;
+  const { owner, role } = guard as Record<string, unknown>;
+  if (typeof owner !== "string" || (role !== "base" && role !== "guard")) return null;
+  return { owner, role };
+}
+
+function withProductEditorHistoryGuard(state: unknown, guard: ProductEditorHistoryGuard) {
+  const currentState = state && typeof state === "object" ? state as Record<string, unknown> : {};
+  return { ...currentState, [productEditorHistoryGuardKey]: guard };
+}
+
 function formDataSignature(formData: FormData) {
-  return JSON.stringify(Array.from(formData.entries()).map(([name, value]) => [
+  const seenTranslations = new Set<string>();
+  const entries = Array.from(formData.entries()).filter(([name]) => {
+    const isTranslation = routing.locales.some((locale) =>
+      ["title", "shortDescription", "longDescription", "seoTitle", "seoDescription"]
+        .some((field) => name === `${field}_${locale}`),
+    );
+    if (!isTranslation || !seenTranslations.has(name)) {
+      if (isTranslation) seenTranslations.add(name);
+      return true;
+    }
+    return false;
+  });
+  return JSON.stringify(entries.map(([name, value]) => [
     name,
     value instanceof File ? `${value.name}:${value.size}:${value.lastModified}` : value,
   ]));
