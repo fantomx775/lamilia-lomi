@@ -32,7 +32,9 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   type ProductActionContext = {
     id: number;
     sourcePath: string;
-    cancellations: string[];
+    requests: Request[];
+    cancellations: Array<{ request: Request; detail: string }>;
+    expectedRequest?: Request;
     redirectedTo?: string;
   };
   const productActions: ProductActionContext[] = [];
@@ -67,6 +69,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     const requestUrl = new URL(request.url());
     if (requestUrl.origin === new URL(page.url()).origin && requestUrl.pathname === action.sourcePath) {
       productActionRequests.set(request, action);
+      action.requests.push(request);
     }
   });
   page.on("requestfailed", (request) => {
@@ -100,7 +103,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       failedUrl.pathname === "/__nextjs_font/geist-latin.woff2" &&
       new URL(page.url()).pathname.startsWith("/admin");
     if (failure === "net::ERR_ABORTED" && exactProductAction) {
-      exactProductAction.cancellations.push(JSON.stringify(detail));
+      exactProductAction.cancellations.push({ request, detail: JSON.stringify(detail) });
       return;
     }
     if (
@@ -122,6 +125,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     const action: ProductActionContext = {
       id: productActions.length + 1,
       sourcePath: new URL(page.url()).pathname,
+      requests: [],
       cancellations: [],
     };
     productActions.push(action);
@@ -130,6 +134,16 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       await Promise.all([page.waitForURL(expectedRedirect), submit()]);
       const finalUrl = new URL(page.url());
       action.redirectedTo = finalUrl.origin + finalUrl.pathname + finalUrl.search;
+      if (action.requests.length === 1) {
+        action.expectedRequest = action.requests[0];
+      } else {
+        requestFailures.push(JSON.stringify({
+          productActionId: action.id,
+          productActionPath: action.sourcePath,
+          matchingPostRequestCount: action.requests.length,
+          verifiedRedirect: action.redirectedTo,
+        }));
+      }
     } finally {
       if (activeProductAction === action) activeProductAction = undefined;
     }
@@ -329,9 +343,13 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     }
 
     for (const action of productActions) {
-      for (const [index, cancellation] of action.cancellations.entries()) {
-        if (action.redirectedTo && index === 0) {
-          const detail = JSON.parse(cancellation) as Record<string, unknown>;
+      for (const cancellation of action.cancellations) {
+        if (
+          action.redirectedTo &&
+          action.requests.length === 1 &&
+          cancellation.request === action.expectedRequest
+        ) {
+          const detail = JSON.parse(cancellation.detail) as Record<string, unknown>;
           expectedNavigationCancellations.push(JSON.stringify({
             ...detail,
             productActionId: action.id,
@@ -339,7 +357,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
             verifiedRedirect: action.redirectedTo,
           }));
         } else {
-          requestFailures.push(cancellation);
+          requestFailures.push(cancellation.detail);
         }
       }
     }

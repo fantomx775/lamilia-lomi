@@ -243,10 +243,53 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const sameOriginFailures: string[] = [];
+  type VerifiedNavigationTransition = {
+    from: string;
+    to: string;
+    startedAt: number;
+    verifiedAt?: number;
+  };
+  const navigationCancellations: Array<{
+    detail: {
+      method: string;
+      failure: string;
+      path: string;
+      resourceType: string;
+      isNavigationRequest: boolean;
+      isNextRsc: boolean;
+      failedAt: number;
+    };
+    transition: VerifiedNavigationTransition;
+  }> = [];
+  const verifiedNavigationTransitions: VerifiedNavigationTransition[] = [];
+  let activeNavigationTransition: VerifiedNavigationTransition | undefined;
   let appOrigin = "";
   const safeRequestPath = (value: string) => {
     const url = new URL(value);
     return url.origin + url.pathname;
+  };
+  const navigateToVerifiedRoute = async (
+    targetPath: string,
+    action: () => Promise<unknown>,
+    verify: () => Promise<void>,
+  ) => {
+    const transition: VerifiedNavigationTransition = {
+      from: new URL(page.url()).pathname,
+      to: targetPath,
+      startedAt: Date.now(),
+    };
+    activeNavigationTransition = transition;
+    try {
+      await Promise.all([
+        page.waitForURL((url) => url.pathname === targetPath),
+        action(),
+      ]);
+      await verify();
+      transition.verifiedAt = Date.now();
+      verifiedNavigationTransitions.push(transition);
+    } finally {
+      if (activeNavigationTransition === transition) activeNavigationTransition = undefined;
+    }
   };
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -258,7 +301,34 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   page.on("requestfailed", (request) => {
     if (appOrigin && new URL(request.url()).origin === appOrigin) {
       const failure = request.failure()?.errorText ?? "request failed";
-      sameOriginFailures.push(`${request.method()} ${failure} ${safeRequestPath(request.url())}`);
+      const requestUrl = new URL(request.url());
+      const detail = {
+        method: request.method(),
+        failure,
+        path: safeRequestPath(request.url()),
+        resourceType: request.resourceType(),
+        isNavigationRequest: request.isNavigationRequest(),
+        isNextRsc: requestUrl.searchParams.has("_rsc"),
+        failedAt: Date.now(),
+      };
+      const activeTransition = activeNavigationTransition &&
+        [activeNavigationTransition.from, activeNavigationTransition.to].includes(requestUrl.pathname)
+        ? activeNavigationTransition
+        : [...verifiedNavigationTransitions].reverse().find((transition) =>
+          Date.now() - (transition.verifiedAt ?? 0) <= 500 &&
+          [transition.from, transition.to].includes(requestUrl.pathname),
+        );
+      if (
+        failure === "net::ERR_ABORTED" &&
+        request.method() === "GET" &&
+        request.resourceType() === "fetch" &&
+        detail.isNextRsc &&
+        activeTransition
+      ) {
+        navigationCancellations.push({ detail, transition: activeTransition });
+      } else {
+        sameOriginFailures.push(JSON.stringify(detail));
+      }
     }
   });
   page.on("response", (response) => {
@@ -278,23 +348,37 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
   await page.screenshot({ path: testInfo.outputPath("mobile-home-navigation.png"), fullPage: true });
-  await nav.getByRole("link", { name: "My Library" }).tap();
-  await expect(page).toHaveURL(/\/en\/library$/);
-  await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
+  await navigateToVerifiedRoute(
+    "/en/library",
+    () => nav.getByRole("link", { name: "My Library" }).tap(),
+    () => expect(page.getByRole("heading", { name: "My Library" })).toBeVisible(),
+  );
 
-  await nav.getByRole("link", { name: "Catalog", exact: true }).tap();
-  await expect(page).toHaveURL(/\/en\/products$/);
-  await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
+  await navigateToVerifiedRoute(
+    "/en/products",
+    () => nav.getByRole("link", { name: "Catalog", exact: true }).tap(),
+    () => expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible(),
+  );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.getByRole("link", { name: /Moon Garden Coloring Book/i }).tap();
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
-  await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
+  await navigateToVerifiedRoute(
+    `/en/products/${productSlug}`,
+    () => page.getByRole("link", { name: /Moon Garden Coloring Book/i }).tap(),
+    () => expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible(),
+  );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.goBack();
-  await expect(page).toHaveURL(/\/en\/products$/);
-  await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
-  expect(pageErrors).toEqual([]);
-  expect(sameOriginFailures).toEqual([]);
+  await navigateToVerifiedRoute(
+    "/en/products",
+    () => page.goBack(),
+    () => expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible(),
+  );
+  for (const cancellation of navigationCancellations) {
+    const verified = cancellation.transition.verifiedAt !== undefined &&
+      cancellation.detail.failedAt >= cancellation.transition.startedAt &&
+      cancellation.detail.failedAt <= cancellation.transition.verifiedAt + 500;
+    if (!verified) {
+      sameOriginFailures.push(JSON.stringify(cancellation.detail));
+    }
+  }
   await testInfo.attach("mobile-navigation-browser-errors.log", {
     body: [
       "Console errors:",
@@ -303,7 +387,17 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
       ...pageErrors,
       "Same-origin failed or error responses:",
       ...sameOriginFailures,
+      "RSC request cancellations during verified route transitions:",
+      ...navigationCancellations
+        .filter((cancellation) => cancellation.transition.verifiedAt !== undefined)
+        .map(({ detail, transition }) => JSON.stringify({
+          ...detail,
+          verifiedNavigationFrom: transition.from,
+          verifiedNavigationTo: transition.to,
+        })),
     ].join("\n"),
     contentType: "text/plain",
   });
+  expect(pageErrors).toEqual([]);
+  expect(sameOriginFailures).toEqual([]);
 });
