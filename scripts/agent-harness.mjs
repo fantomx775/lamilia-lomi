@@ -9,6 +9,31 @@ const PROJECT_NUMBER = Number(process.env.AGENT_HARNESS_PROJECT_NUMBER ?? 1);
 const PROJECT_OWNER = process.env.AGENT_HARNESS_PROJECT_OWNER;
 const STATUS_FIELD = "Status";
 const DONE_STATUS = "Done";
+const VERCEL_DEPLOYMENT_BOT = "vercel[bot]";
+const VERCEL_PROJECT_ALIAS = "lamilia-lomi.vercel.app";
+const VERCEL_PROJECT_DEPLOYMENT_HOST = /^lamilia-lomi-[a-z0-9-]+-fantomxs-projects\.vercel\.app$/i;
+
+function isVercelActor(actor) {
+  return actor?.login?.toLowerCase() === VERCEL_DEPLOYMENT_BOT ||
+    actor?.slug?.toLowerCase() === "vercel";
+}
+
+function isExpectedVercelProductionUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password &&
+      url.pathname === "/" && !url.search && !url.hash &&
+      (url.hostname.toLowerCase() === VERCEL_PROJECT_ALIAS ||
+        VERCEL_PROJECT_DEPLOYMENT_HOST.test(url.hostname));
+  } catch {
+    return false;
+  }
+}
+
+function commentAuthoredBy(comment, expectedAuthor) {
+  return typeof expectedAuthor !== "string" || !expectedAuthor.trim() ||
+    comment?.user?.login?.toLowerCase() === expectedAuthor.trim().toLowerCase();
+}
 
 const PROJECT_QUERY = `
   query($login: String!, $number: Int!, $after: String) {
@@ -902,7 +927,7 @@ function hasStructuredReviewItems(value) {
   );
 }
 
-export function validateAiReview({ headSha, comments = [], available = true }) {
+export function validateAiReview({ headSha, comments = [], available = true, expectedAuthor = null }) {
   if (!available || !validSha(headSha)) {
     return {
       status: "BLOCKED",
@@ -924,10 +949,21 @@ export function validateAiReview({ headSha, comments = [], available = true }) {
       details: "No structured AI sub-agent review record is present.",
     };
   }
-  const current = marked.filter(({ record, error }) =>
+  const currentForSha = marked.filter(({ record, error }) =>
     !error && record && typeof record === "object" && !Array.isArray(record) &&
     typeof record.reviewedSha === "string" && record.reviewedSha.toLowerCase() === headSha.toLowerCase(),
   );
+  const current = currentForSha.filter(({ comment }) => commentAuthoredBy(comment, expectedAuthor));
+  if (!current.length && currentForSha.length) {
+    return {
+      status: "BLOCKED",
+      reviewedSha: headSha,
+      reviewers: [],
+      findings: null,
+      unresolvedFindings: null,
+      details: "Current-SHA AI review records were not posted by the pull request author.",
+    };
+  }
   if (!current.length) {
     const malformed = marked.some(({ record, error }) =>
       Boolean(error) || !record || typeof record !== "object" || Array.isArray(record) ||
@@ -1022,18 +1058,23 @@ export function validateAiReview({ headSha, comments = [], available = true }) {
   };
 }
 
-function latestMarkedRecord(comments, marker, headSha) {
+function latestMarkedRecord(comments, marker, headSha, expectedAuthor = null) {
   const marked = parseMarkedRecords(comments, marker);
   if (!marked.length) return { record: null, comment: null, stale: false, malformed: false };
-  const current = marked
+  const currentForSha = marked
     .filter(({ record, error }) =>
       !error && record && typeof record === "object" && !Array.isArray(record) &&
       typeof record.headSha === "string" && record.headSha.toLowerCase() === headSha.toLowerCase(),
-    )
+    );
+  const current = currentForSha
+    .filter(({ comment }) => commentAuthoredBy(comment, expectedAuthor))
     .sort((left, right) =>
       (left.comment.created_at || "").localeCompare(right.comment.created_at || ""),
     );
   if (!current.length) {
+    if (currentForSha.length) {
+      return { record: null, comment: null, stale: false, malformed: false, authorMismatch: true };
+    }
     const malformed = marked.some(({ record, error }) =>
       Boolean(error) || !record || typeof record !== "object" || Array.isArray(record) ||
       typeof record.headSha !== "string" || !validSha(record.headSha),
@@ -1060,6 +1101,7 @@ export function validateLocalVerification({
   headSha,
   comments = [],
   available = true,
+  expectedAuthor = null,
 }) {
   if (!available || !validSha(headSha)) {
     return {
@@ -1071,7 +1113,7 @@ export function validateLocalVerification({
       details: "Verification comments or the current PR head SHA could not be verified.",
     };
   }
-  const selected = latestMarkedRecord(comments, VERIFICATION_MARKER, headSha);
+  const selected = latestMarkedRecord(comments, VERIFICATION_MARKER, headSha, expectedAuthor);
   if (selected.malformed) {
     return {
       status: "FAIL",
@@ -1080,6 +1122,16 @@ export function validateLocalVerification({
       checks: {},
       uiBehavior: null,
       details: "A verification marker is malformed; the evidence cannot be trusted.",
+    };
+  }
+  if (selected.authorMismatch) {
+    return {
+      status: "BLOCKED",
+      reviewedSha: null,
+      record: null,
+      checks: {},
+      uiBehavior: null,
+      details: "Current-SHA verification evidence was not posted by the pull request author.",
     };
   }
   if (!selected.record) {
@@ -1154,7 +1206,7 @@ function isUiBehaviorFile(filename) {
 }
 
 function isApplicationFlowFile(filename) {
-  return (/^(?:src\/(?:app|components|lib)|app|components|pages|lib)\//.test(filename) ||
+  return (/^(?:src\/(?:app|pages|components|lib)|app|components|pages|lib)\//.test(filename) ||
       /^(?:src\/)?(?:middleware|proxy)\.[cm]?[jt]sx?$/i.test(filename) ||
       /^next\.config\.[cm]?[jt]sx?$/i.test(filename)) &&
     !/\.(?:test|spec)\.[^.]+$/i.test(filename);
@@ -1925,6 +1977,7 @@ export function assessPullRequestVerification({
     headSha,
     comments,
     available: available.comments !== false,
+    expectedAuthor: pullRequest?.user?.login || null,
   });
   const productionSmokePlan = validateProductionSmokePlan({
     files: fileList,
@@ -1949,6 +2002,7 @@ export function assessPullRequestVerification({
     headSha,
     comments,
     available: available.comments !== false,
+    expectedAuthor: pullRequest?.user?.login || null,
   });
   const githubReview = validateGitHubReview({
     pullRequestAuthor: pullRequest?.user?.login,
@@ -2329,8 +2383,16 @@ export async function waitForProductionDeployment(client, mergeSha, {
         deployment.environment?.toLowerCase() === "production",
       )
       .sort((left, right) => (right.created_at || "").localeCompare(left.created_at || ""));
-    if (exactShaDeployments.length) {
-      const deployment = exactShaDeployments[0];
+    const vercelDeployments = exactShaDeployments.filter((deployment) =>
+      (isVercelActor(deployment.creator) || isVercelActor(deployment.performed_via_github_app)) &&
+      deployment.task === "deploy" &&
+      deployment.ref?.toLowerCase() === mergeSha.toLowerCase(),
+    );
+    if (!vercelDeployments.length && exactShaDeployments.length) {
+      lastReadError = "Exact-SHA Production deployment records exist, but none are verifiable as a Vercel Git deployment for this project.";
+    }
+    if (vercelDeployments.length) {
+      const deployment = vercelDeployments[0];
       let statuses;
       try {
         statuses = await pagedRest(
@@ -2357,8 +2419,18 @@ export async function waitForProductionDeployment(client, mergeSha, {
         statusUrl: latest?.target_url || null,
         logUrl: latest?.log_url || null,
         description: latest?.description || null,
+        provider: "Vercel Git integration",
+        providerActor: deployment.creator?.login || deployment.performed_via_github_app?.slug || null,
+        statusActor: latest?.creator?.login || latest?.performed_via_github_app?.slug || null,
       };
       if (lastObserved.state === "success") {
+        if (!isVercelActor(latest?.creator) && !isVercelActor(latest?.performed_via_github_app)) {
+          return {
+            status: "BLOCKED",
+            deployment: lastObserved,
+            details: "GitHub reports success, but the status was not authored by the Vercel Git integration.",
+          };
+        }
         if (!lastObserved.environmentUrl) {
           return {
             status: "BLOCKED",
@@ -2366,21 +2438,32 @@ export async function waitForProductionDeployment(client, mergeSha, {
             details: "GitHub reports the deployment ready but did not provide its Production environment URL.",
           };
         }
+        if (!isExpectedVercelProductionUrl(lastObserved.environmentUrl)) {
+          return {
+            status: "BLOCKED",
+            deployment: lastObserved,
+            details: "The Vercel deployment URL does not identify this repository's expected Production project.",
+          };
+        }
         return {
           status: "PASS",
           deployment: lastObserved,
-          details: "GitHub reports a successful Production deployment for the exact merge SHA.",
+          details: "Vercel's Git integration reports a successful Production deployment for the exact merge SHA and expected project origin.",
         };
       }
       if (["failure", "error", "inactive"].includes(lastObserved.state)) {
-        return {
-          status: "FAIL",
-          deployment: lastObserved,
-          details: "The exact-SHA Production deployment ended in state " + lastObserved.state +
-            (lastObserved.description ? ": " + lastObserved.description : ".") +
-            (lastObserved.logUrl ? " Logs: " + lastObserved.logUrl : "") +
-            (lastObserved.statusUrl ? " Deployment details: " + lastObserved.statusUrl : ""),
-        };
+        if (!isVercelActor(latest?.creator) && !isVercelActor(latest?.performed_via_github_app)) {
+          lastReadError = "The latest deployment status is not authored by the Vercel Git integration.";
+        } else {
+          return {
+            status: "FAIL",
+            deployment: lastObserved,
+            details: "The exact-SHA Production deployment ended in state " + lastObserved.state +
+              (lastObserved.description ? ": " + lastObserved.description : ".") +
+              (lastObserved.logUrl ? " Logs: " + lastObserved.logUrl : "") +
+              (lastObserved.statusUrl ? " Deployment details: " + lastObserved.statusUrl : ""),
+          };
+        }
       }
     }
     if (now() >= deadline) break;
@@ -2518,7 +2601,7 @@ export function findClosingIssueReferences(text = "", repository) {
   return found;
 }
 
-async function readPullRequestCommitMessages(client, pullRequestNumber) {
+async function readPullRequestCommits(client, pullRequestNumber) {
   const commits = await pagedRest(
     client,
     "/repos/" + client.owner + "/" + client.repo + "/pulls/" + pullRequestNumber + "/commits",
@@ -2526,24 +2609,38 @@ async function readPullRequestCommitMessages(client, pullRequestNumber) {
   if (!Array.isArray(commits) || !commits.length) {
     throw new Error("GitHub returned no pull-request commits to validate.");
   }
-  const messages = commits.map((commit) => commit?.commit?.message);
-  if (messages.some((message) => typeof message !== "string")) {
-    throw new Error("GitHub returned an incomplete pull-request commit message list.");
+  if (commits.some((commit) => !validSha(commit?.sha) || typeof commit?.commit?.message !== "string")) {
+    throw new Error("GitHub returned an incomplete pull-request commit SHA/message list.");
   }
-  return messages;
+  return commits;
 }
 
-async function issueWasClosedByPullRequest(client, issueNumber, pullRequest) {
+async function readPullRequestCommitMessages(client, pullRequestNumber) {
+  const commits = await readPullRequestCommits(client, pullRequestNumber);
+  return commits.map((commit) => commit.commit.message);
+}
+
+async function issueWasClosedByPullRequest(client, issueNumber, pullRequest, pullRequestCommitShas) {
   let after = null;
   let issue;
+  const closeEvents = [];
   for (let page = 0; page < 10; page += 1) {
     const data = await client.graphql(`
       query($owner: String!, $repo: String!, $number: Int!, $after: String) {
         repository(owner: $owner, name: $repo) {
           issue(number: $number) {
             closedAt
-            closedByPullRequestsReferences(first: 100, after: $after) {
-              nodes { number mergedAt mergeCommit { oid } }
+            timelineItems(first: 100, after: $after, itemTypes: [CLOSED_EVENT]) {
+              nodes {
+                ... on ClosedEvent {
+                  createdAt
+                  closer {
+                    __typename
+                    ... on PullRequest { number mergeCommit { oid } }
+                    ... on Commit { oid }
+                  }
+                }
+              }
               pageInfo { hasNextPage endCursor }
             }
           }
@@ -2552,28 +2649,47 @@ async function issueWasClosedByPullRequest(client, issueNumber, pullRequest) {
     `, { owner: client.owner, repo: client.repo, number: issueNumber, after });
     issue = data.repository?.issue;
     if (!issue) return false;
-    const connection = issue.closedByPullRequestsReferences;
-    const reference = connection?.nodes?.find((candidate) =>
-      candidate.number === pullRequest.number &&
-      candidate.mergeCommit?.oid?.toLowerCase() === pullRequest.merge_commit_sha?.toLowerCase(),
-    );
-    if (reference) {
-      const closedAt = Date.parse(issue.closedAt || "");
-      const mergedAt = Date.parse(reference.mergedAt || pullRequest.merged_at || "");
-      return Number.isFinite(closedAt) && Number.isFinite(mergedAt) &&
-        closedAt >= mergedAt && closedAt - mergedAt <= 5 * 60 * 1000;
+    const connection = issue.timelineItems;
+    if (!Array.isArray(connection?.nodes)) throw new Error("GitHub returned no issue closure timeline evidence.");
+    if (!connection.pageInfo || typeof connection.pageInfo.hasNextPage !== "boolean") {
+      throw new Error("GitHub returned incomplete issue closure timeline pagination evidence.");
     }
-    if (!connection?.pageInfo?.hasNextPage) return false;
-    if (!connection.pageInfo.endCursor) throw new Error("Issue closure references have an invalid pagination cursor.");
+    closeEvents.push(...connection.nodes.filter((event) => event?.createdAt));
+    if (!connection.pageInfo?.hasNextPage) break;
+    if (!connection.pageInfo.endCursor) throw new Error("Issue closure timeline has an invalid pagination cursor.");
     after = connection.pageInfo.endCursor;
+    if (page === 9) throw new Error("Issue closure timeline pagination limit reached; closure source is unknown.");
   }
-  throw new Error("Issue closure reference pagination limit reached; closure source is unknown.");
+  const closedAt = Date.parse(issue.closedAt || "");
+  if (!Number.isFinite(closedAt)) throw new Error("GitHub returned no valid issue close time.");
+  const latestCloseTime = Math.max(...closeEvents.map((event) => Date.parse(event.createdAt)).filter(Number.isFinite));
+  if (!Number.isFinite(latestCloseTime) || Math.abs(latestCloseTime - closedAt) > 5_000) return false;
+  const mergedAt = Date.parse(pullRequest.merged_at || "");
+  if (!Number.isFinite(mergedAt) || latestCloseTime < mergedAt) return false;
+  const latestCloseEvents = closeEvents.filter((event) => Date.parse(event.createdAt) === latestCloseTime);
+  if (latestCloseEvents.length !== 1) return false;
+  const closer = latestCloseEvents[0].closer;
+  const exactPullRequest = closer?.__typename === "PullRequest" &&
+    closer.number === pullRequest.number &&
+    closer.mergeCommit?.oid?.toLowerCase() === pullRequest.merge_commit_sha?.toLowerCase();
+  const exactPullRequestCommit = closer?.__typename === "Commit" &&
+    pullRequestCommitShas?.has(closer.oid?.toLowerCase());
+  return exactPullRequest || exactPullRequestCommit;
 }
 
-async function prepareTrackedIssueForProduction(client, issueNumber, pullRequest) {
+async function prepareTrackedIssueForProduction(client, issueNumber, pullRequest, pullRequestCommitShas) {
   let issue = await readIssue(client, issueNumber);
   if (issue.state === "closed") {
-    const previouslyVerified = await readVerifiedIssueDelivery(client, issueNumber, pullRequest).catch(() => null);
+    let previouslyVerified;
+    try {
+      previouslyVerified = await readVerifiedIssueDelivery(client, issueNumber, pullRequest);
+    } catch (error) {
+      return {
+        status: "BLOCKED",
+        state: issue.state,
+        details: "The closed issue's prior exact-SHA Production evidence could not be read; it remains untouched: " + error.message,
+      };
+    }
     if (previouslyVerified) {
       const projectContext = await readProjectItem(client, issue);
       const projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
@@ -2595,7 +2711,7 @@ async function prepareTrackedIssueForProduction(client, issueNumber, pullRequest
     }
     let closedByPullRequest = false;
     try {
-      closedByPullRequest = await issueWasClosedByPullRequest(client, issueNumber, pullRequest);
+      closedByPullRequest = await issueWasClosedByPullRequest(client, issueNumber, pullRequest, pullRequestCommitShas);
     } catch (error) {
       return {
         status: "BLOCKED",
@@ -2676,6 +2792,7 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
   details,
   trackingPrepared,
   pullRequest,
+  pullRequestCommitShas,
   deliveryEvidence,
 }) {
   if (!issueNumber) return { status: "NOT RUN", issue: null, details: "No issue number was provided." };
@@ -2714,7 +2831,7 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
     let closedByPullRequest = false;
     if (!previouslyVerified) {
       try {
-        closedByPullRequest = await issueWasClosedByPullRequest(client, issueNumber, pullRequest);
+        closedByPullRequest = await issueWasClosedByPullRequest(client, issueNumber, pullRequest, pullRequestCommitShas);
       } catch (error) {
         return { status: "BLOCKED", issue: issueNumber, state: issue.state, details: "The tracked issue was closed during Production verification and its closure source is unknown: " + error.message };
       }
@@ -2889,6 +3006,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   let mergeResult = { merged: Boolean(pullRequest.merged), alreadyMerged: Boolean(pullRequest.merged) };
   let verification = null;
   let issueBeforeMerge = null;
+  let pullRequestCommitShas = new Set();
   const trackingPreparations = new Map();
 
   let closingIssues = findClosingIssueReferences(
@@ -2897,11 +3015,12 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   );
   if (pullRequest.merged) {
     try {
-      const commitMessages = await readPullRequestCommitMessages(client, number);
+      const commits = await readPullRequestCommits(client, number);
+      pullRequestCommitShas = new Set(commits.map((commit) => commit.sha.toLowerCase()));
       closingIssues = [...new Set([
         ...closingIssues,
-        ...commitMessages.flatMap((message) =>
-          findClosingIssueReferences(message, client.owner + "/" + client.repo),
+        ...commits.flatMap((commit) =>
+          findClosingIssueReferences(commit.commit.message, client.owner + "/" + client.repo),
         ),
       ])];
     } catch (error) {
@@ -2916,7 +3035,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       };
     }
   }
-  const trackedIssueNumbers = [...new Set([
+  let trackedIssueNumbers = [...new Set([
     ...(issue === null ? [] : [issue]),
     ...(pullRequest.merged ? closingIssues : []),
   ])];
@@ -3120,9 +3239,41 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     }
   }
 
+  let closingReferenceError = null;
+  try {
+    const confirmedMergedPullRequest = await client.request(pullRequestPath);
+    if (!confirmedMergedPullRequest.merged ||
+      confirmedMergedPullRequest.merge_commit_sha?.toLowerCase() !== mergeSha?.toLowerCase() ||
+      confirmedMergedPullRequest.head?.sha?.toLowerCase() !== candidateSha?.toLowerCase()) {
+      throw new Error("The merged PR no longer matches the verified head and merge commit.");
+    }
+    pullRequest = confirmedMergedPullRequest;
+    const confirmedBodyClosers = findClosingIssueReferences(
+      pullRequest.body || "",
+      client.owner + "/" + client.repo,
+    );
+    const confirmedCommits = await readPullRequestCommits(client, number);
+    pullRequestCommitShas = new Set(confirmedCommits.map((commit) => commit.sha.toLowerCase()));
+    const confirmedCommitClosers = confirmedCommits.flatMap((commit) =>
+      findClosingIssueReferences(commit.commit.message, client.owner + "/" + client.repo),
+    );
+    trackedIssueNumbers = [...new Set([
+      ...trackedIssueNumbers,
+      ...confirmedBodyClosers,
+      ...confirmedCommitClosers,
+    ])];
+  } catch (error) {
+    closingReferenceError = "After merge, the complete closing-issue references could not be reconciled; delivery cannot be marked complete: " + error.message;
+  }
+
   for (const trackedIssue of trackedIssueNumbers) {
     try {
-      trackingPreparations.set(trackedIssue, await prepareTrackedIssueForProduction(client, trackedIssue, pullRequest));
+      trackingPreparations.set(trackedIssue, await prepareTrackedIssueForProduction(
+        client,
+        trackedIssue,
+        pullRequest,
+        pullRequestCommitShas,
+      ));
     } catch (error) {
       trackingPreparations.set(trackedIssue, {
         status: "BLOCKED",
@@ -3145,7 +3296,11 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       if (productionSmoke.status === "PASS") {
         const files = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number + "/files");
         const comments = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/issues/" + number + "/comments");
-        const localVerification = validateLocalVerification({ headSha: candidateSha, comments });
+        const localVerification = validateLocalVerification({
+          headSha: candidateSha,
+          comments,
+          expectedAuthor: pullRequest.user?.login || null,
+        });
         postDeploymentMigration = validatePostDeploymentMigrationEvidence({
           files,
           filesAvailable: true,
@@ -3170,6 +3325,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     "Production deployment: " + (productionDeployment?.status || "NOT RUN") + " — " + (productionDeployment?.details || "not verified"),
     "Production smoke: " + (productionSmoke?.status || "NOT RUN") + " — " + (productionSmoke?.details || "not run"),
     "Post-deployment migration: " + (postDeploymentMigration?.status || "NOT RUN") + " — " + (postDeploymentMigration?.details || "not run"),
+    ...(closingReferenceError ? [closingReferenceError] : []),
   ].join("\n");
   const issueOutcomes = [];
   for (const trackedIssue of trackedIssueNumbers) {
@@ -3179,6 +3335,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
         details,
         trackingPrepared: trackingPreparations.get(trackedIssue),
         pullRequest,
+        pullRequestCommitShas,
         deliveryEvidence: {
           candidateSha,
           mergeSha,
@@ -3191,6 +3348,9 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       issueOutcomes.push({ status: "BLOCKED", issue: trackedIssue, details: "Issue/Project tracking update failed: " + error.message });
     }
   }
+  if (closingReferenceError) {
+    issueOutcomes.push({ status: "BLOCKED", issue: null, details: closingReferenceError });
+  }
   const issueOutcome = issueOutcomes.length === 0
     ? { status: "NOT RUN", issue: null, details: "No issue number was provided or inferred from a merged closing reference." }
     : issueOutcomes.length === 1
@@ -3198,7 +3358,9 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       : {
           status: issueOutcomes.every((outcome) => outcome.status === "PASS") ? "PASS" : "BLOCKED",
           issues: issueOutcomes,
-          details: issueOutcomes.map((outcome) => "#" + outcome.issue + ": " + outcome.status + " — " + outcome.details).join("\n"),
+          details: issueOutcomes.map((outcome) =>
+            (outcome.issue === null ? "Closing issue references" : "#" + outcome.issue) + ": " + outcome.status + " — " + outcome.details,
+          ).join("\n"),
         };
   const issuePreparationValues = trackedIssueNumbers.map((trackedIssue) => ({
     issue: trackedIssue,
@@ -3212,7 +3374,8 @@ export async function deliverPullRequest(client, pullRequestNumber, {
           status: issuePreparationValues.every((preparation) => preparation.status === "PASS") ? "PASS" : "BLOCKED",
           issues: issuePreparationValues,
         };
-  const completed = status === "PASS" && (trackedIssueNumbers.length === 0 || issueOutcome.status === "PASS");
+  const completed = status === "PASS" && !closingReferenceError &&
+    (trackedIssueNumbers.length === 0 || issueOutcome.status === "PASS");
   const record = {
     schemaVersion: 1,
     status: completed ? "PASS" : status === "PASS" ? "BLOCKED" : status,

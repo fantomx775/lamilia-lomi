@@ -186,6 +186,14 @@ fail closed if that history is unavailable. Reopen only issues GitHub proves
 this exact PR merge closed, hold each at Blocked through Production, and update
 each only after verification. Independently closed issues remain untouched. Do
 not pass a parent epic that still has unfinished work as the issue to close.
+When recovering a merged PR, reconcile closing references again from its
+confirmed merged body and complete commit history before preparing issue state.
+Issue reopening requires the latest GitHub `ClosedEvent` to name this exact PR
+and merge SHA, or a commit from that PR's complete commit history. The event
+must align with the issue's close time; unreadable prior-delivery evidence or a
+later independent close fails closed. The Production gate accepts only Vercel
+Git deployment and status records for the exact merge SHA and this project's
+expected HTTPS origin.
 
 ## UI browser verification
 

@@ -185,6 +185,12 @@ current SHA. The GitHub identity that posts the comments may be the same.
 Each finding object needs a `summary` and `requiredFix`. Empty arrays mean no
 findings at that severity.
 
+The harness accepts current-SHA review and local-verification records only
+when the PR author posted them. This keeps evidence on the existing PR identity;
+it does not require a second GitHub account or create a formal GitHub approval.
+Post these records only after receiving the actual independent sub-agent
+reviews and running the recorded checks.
+
 ````text
 <!-- agent-harness-ai-review:v1 -->
 ```json
@@ -319,6 +325,17 @@ plan's affected paths. On deployment failure, inspect the recorded Vercel
 target/log URLs and recover through the ordinary implementation, test,
 independent-review, and merge path. Never use a manual Vercel production deploy
 as a substitute for Git integration.
+
+The deployment gate requires a Vercel Git integration deployment and success
+status for the exact merge SHA, and checks that the environment URL belongs to
+the `lamilia-lomi` Production project. A matching GitHub `Production` label
+from another deployment provider is insufficient. The application-flow
+detector includes `src/pages/**` as well as the App Router. After merge, the
+harness rereads the merged PR body and full commit history to catch closing
+references added during the merge race. It reopens an issue only when its latest
+GitHub close event identifies this exact PR merge or one of its commits, aligned
+with the issue's close time; unreadable prior delivery evidence and later
+independent closures fail closed.
 
 Post a concise issue update from a file when durable progress is useful:
 

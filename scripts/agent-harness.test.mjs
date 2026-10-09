@@ -148,8 +148,12 @@ function createDeliveryClient({
   alreadyMerged = false,
   initialIssueState = "open",
   pullRequestBody = "Part of #7",
+  bodyAfterMerge = null,
   pullRequestCommitMessages = ["Update the agent harness"],
   closedByPullRequest = alreadyMerged,
+  closedByCommitInPullRequest = false,
+  laterIndependentClosure = false,
+  issueCommentsReadError = false,
   projectUpdateDelayReads = 0,
   previouslyVerifiedDelivery = false,
 } = {}) {
@@ -157,6 +161,7 @@ function createDeliveryClient({
   const issueId = "I_issue-7";
   const calls = [];
   let merged = alreadyMerged;
+  let mergedBody = pullRequestBody;
   let issueState = initialIssueState;
   let projectStatus = initialIssueState === "closed" ? "Done" : "Review";
   let delayedProjectStatus = null;
@@ -191,7 +196,7 @@ function createDeliveryClient({
               merged: true,
               merge_commit_sha: mergeSha,
               merged_at: "2026-10-08T12:00:00Z",
-              body: pullRequestBody,
+              body: mergedBody,
             })
           : cleanPullRequest({ body: pullRequestBody });
       }
@@ -199,6 +204,14 @@ function createDeliveryClient({
         const body = JSON.parse(options.body);
         assert.equal(body.sha, CURRENT_SHA);
         merged = true;
+        if (bodyAfterMerge !== null) {
+          mergedBody = bodyAfterMerge;
+          if (findClosingIssueReferences(bodyAfterMerge, "example/repo").includes(7)) {
+            issueState = "closed";
+            projectStatus = "Done";
+            closedByPullRequest = true;
+          }
+        }
         return { merged: true, sha: mergeSha, message: "Pull Request successfully merged" };
       }
       if (path === "/repos/example/repo/issues/7" && method === "PATCH") {
@@ -215,7 +228,10 @@ function createDeliveryClient({
         issueComments.push({ user: { login: "author" }, created_at: "2026-10-08T12:00:03Z", body });
         return { id: calls.length, html_url: "https://github.com/example/repo/issues/7#issuecomment-" + calls.length };
       }
-      if (path.startsWith("/repos/example/repo/issues/7/comments")) return issueComments;
+      if (path.startsWith("/repos/example/repo/issues/7/comments")) {
+        if (issueCommentsReadError) throw new Error("GitHub issue comments unavailable");
+        return issueComments;
+      }
       if (method === "POST" && (
         path.startsWith("/repos/example/repo/issues/52/comments") ||
         path.startsWith("/repos/example/repo/issues/7/comments")
@@ -224,24 +240,43 @@ function createDeliveryClient({
       }
       if (path.startsWith("/repos/example/repo/pulls/52/files")) return [];
       if (path.startsWith("/repos/example/repo/pulls/52/commits")) {
-        return pullRequestCommitMessages.map((message) => ({ commit: { message } }));
+        return pullRequestCommitMessages.map((message, index) => ({
+          sha: String(index + 1).padStart(40, "0"),
+          commit: { message },
+        }));
       }
       if (path.startsWith("/repos/example/repo/issues/52/comments")) return [];
       throw new Error("Unexpected delivery API request: " + method + " " + path);
     },
     graphql: async (query, variables = {}) => {
       calls.push({ path: "graphql", method: "POST", body: query });
-      if (query.includes("closedByPullRequestsReferences")) {
+      if (query.includes("timelineItems")) {
+        const timelineItems = [];
+        if (closedByPullRequest) {
+          timelineItems.push({
+            createdAt: "2026-10-08T12:00:02Z",
+            closer: { __typename: "PullRequest", number: 52, mergeCommit: { oid: mergeSha } },
+          });
+        }
+        if (closedByCommitInPullRequest) {
+          timelineItems.push({
+            createdAt: "2026-10-08T12:00:02Z",
+            closer: { __typename: "Commit", oid: "0".repeat(39) + "1" },
+          });
+        }
+        if (laterIndependentClosure) {
+          timelineItems.push({
+            createdAt: "2026-10-08T12:03:00Z",
+            closer: { __typename: "Commit", oid: "d".repeat(40) },
+          });
+        }
         return {
           repository: {
             issue: {
-              closedAt: "2026-10-08T12:00:02Z",
-              closedByPullRequestsReferences: {
-                nodes: closedByPullRequest ? [{
-                  number: 52,
-                  mergedAt: "2026-10-08T12:00:00Z",
-                  mergeCommit: { oid: mergeSha },
-                }] : [],
+              closedAt: laterIndependentClosure ? "2026-10-08T12:03:00Z" :
+                closedByPullRequest || closedByCommitInPullRequest ? "2026-10-08T12:00:03Z" : null,
+              timelineItems: {
+                nodes: timelineItems,
                 pageInfo: { hasNextPage: false, endCursor: null },
               },
             },
@@ -331,7 +366,10 @@ function createMultiIssueMergedDeliveryClient({
         });
       }
       if (path.startsWith("/repos/example/repo/pulls/52/commits")) {
-        return pullRequestCommitMessages.map((message) => ({ commit: { message } }));
+        return pullRequestCommitMessages.map((message, index) => ({
+          sha: String(index + 1).padStart(40, "0"),
+          commit: { message },
+        }));
       }
       if (path.startsWith("/repos/example/repo/pulls/52/files")) return [];
       if (path.startsWith("/repos/example/repo/issues/52/comments") && method === "POST") {
@@ -370,16 +408,15 @@ function createMultiIssueMergedDeliveryClient({
     },
     graphql: async (query, variables = {}) => {
       calls.push({ path: "graphql", method: "POST", body: query });
-      if (query.includes("closedByPullRequestsReferences")) {
+      if (query.includes("timelineItems")) {
         return {
           repository: {
             issue: {
-              closedAt: "2026-10-08T12:00:02Z",
-              closedByPullRequestsReferences: {
+              closedAt: "2026-10-08T12:00:03Z",
+              timelineItems: {
                 nodes: [{
-                  number: 52,
-                  mergedAt: "2026-10-08T12:00:00Z",
-                  mergeCommit: { oid: mergeSha },
+                  createdAt: "2026-10-08T12:00:02Z",
+                  closer: { __typename: "PullRequest", number: 52, mergeCommit: { oid: mergeSha } },
                 }],
                 pageInfo: { hasNextPage: false, endCursor: null },
               },
@@ -1117,11 +1154,21 @@ test("requires two distinct independently tasked AI reviews and allows them to s
 
   const twoReviews = validateAiReview({
     headSha: CURRENT_SHA,
+    expectedAuthor: "author",
     comments: cleanAiReviewComments(),
   });
   assert.equal(twoReviews.status, "PASS");
   assert.equal(twoReviews.independentReviewCount, 2);
   assert.deepEqual(twoReviews.reviewers.map(({ recordedBy }) => recordedBy), ["author", "author"]);
+
+  assert.equal(validateAiReview({
+    headSha: CURRENT_SHA,
+    expectedAuthor: "author",
+    comments: [
+      structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord(CURRENT_SHA, "reviewer-A"), "other-writer"),
+      structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord(CURRENT_SHA, "reviewer-B"), "other-writer"),
+    ],
+  }).status, "BLOCKED");
 
   assert.equal(validateAiReview({
     headSha: CURRENT_SHA,
@@ -1170,7 +1217,16 @@ test("requires current-SHA structured local evidence and distinguishes missing, 
     VERIFICATION_MARKER,
     cleanVerificationRecord(),
   );
-  assert.equal(validateLocalVerification({ headSha: CURRENT_SHA, comments: [current] }).status, "PASS");
+  assert.equal(validateLocalVerification({
+    headSha: CURRENT_SHA,
+    expectedAuthor: "author",
+    comments: [current],
+  }).status, "PASS");
+  assert.equal(validateLocalVerification({
+    headSha: CURRENT_SHA,
+    expectedAuthor: "author",
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord(), "other-writer")],
+  }).status, "BLOCKED");
 
   const stale = structuredComment(
     VERIFICATION_MARKER,
@@ -1840,6 +1896,20 @@ test("production smoke plans bind changed route files to valid paths and expecte
     });
     assert.equal(routingPlan.status, "PASS", filename);
   }
+
+  const srcPagesRoute = "src/pages/catalog.tsx";
+  assert.equal(validateProductionSmokePlan({ files: [srcPagesRoute] }).status, "BLOCKED");
+  assert.equal(validateProductionSmokePlan({
+    files: [srcPagesRoute],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "Pages Router catalog",
+        affectedFiles: [srcPagesRoute],
+        paths: [{ path: "/catalog", expectedText: "Catalog" }],
+      }],
+    } } },
+  }).status, "PASS");
 });
 
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
@@ -1879,7 +1949,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
       if (path === "/repos/example/repo/pulls/52") return pullRequest;
       if (path.endsWith("/pulls/52/reviews?per_page=100&page=1")) return [];
       if (path.endsWith("/pulls/52/files?per_page=100&page=1")) return [{ filename: "scripts/agent-harness.mjs" }];
-      if (path.endsWith("/pulls/52/commits?per_page=100&page=1")) return [{ commit: { message: "Add harness changes" } }];
+      if (path.endsWith("/pulls/52/commits?per_page=100&page=1")) return [{ sha: "d".repeat(40), commit: { message: "Add harness changes" } }];
       if (path.endsWith("/issues/52/comments?per_page=100&page=1")) return comments;
       if (path.endsWith("/check-runs?per_page=100&page=1")) return { total_count: 0, check_runs: [] };
       if (path.endsWith("/statuses?per_page=100&page=1")) return [];
@@ -1926,7 +1996,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   const closingCommitClient = {
     ...client,
     request: async (path) => path.endsWith("/pulls/52/commits?per_page=100&page=1")
-      ? [{ commit: { message: "Fixes #29 after delivery" } }]
+      ? [{ sha: "d".repeat(40), commit: { message: "Fixes #29 after delivery" } }]
       : client.request(path),
   };
   const closingCommit = await verifyPullRequest(closingCommitClient, 52);
@@ -2186,6 +2256,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
 
 test("waits for a successful Production deployment of the exact merge SHA", async () => {
   const mergeSha = "c".repeat(40);
+  const deploymentUrl = "https://lamilia-lomi-8bozqd5pu-fantomxs-projects.vercel.app";
   const calls = [];
   const client = {
     owner: "example",
@@ -2195,14 +2266,23 @@ test("waits for a successful Production deployment of the exact merge SHA", asyn
       if (path.includes("/deployments?sha=")) {
         return [
           { id: 1, sha: "b".repeat(40), environment: "Production", created_at: "2026-10-08T11:00:00Z" },
-          { id: 2, sha: mergeSha, environment: "Production", created_at: "2026-10-08T12:00:00Z" },
+          {
+            id: 2,
+            sha: mergeSha,
+            ref: mergeSha,
+            task: "deploy",
+            creator: { login: "vercel[bot]" },
+            environment: "Production",
+            created_at: "2026-10-08T12:00:00Z",
+          },
         ];
       }
       if (path.endsWith("/deployments/2/statuses?per_page=100&page=1")) {
         return [{
           id: 9,
           state: "success",
-          environment_url: "https://production.example.test",
+          environment_url: deploymentUrl,
+          creator: { login: "vercel[bot]" },
           created_at: "2026-10-08T12:05:00Z",
         }];
       }
@@ -2212,7 +2292,8 @@ test("waits for a successful Production deployment of the exact merge SHA", asyn
   const ready = await waitForProductionDeployment(client, mergeSha, { timeoutMs: 0 });
   assert.equal(ready.status, "PASS");
   assert.equal(ready.deployment.sha, mergeSha);
-  assert.equal(ready.deployment.environmentUrl, "https://production.example.test");
+  assert.equal(ready.deployment.environmentUrl, deploymentUrl);
+  assert.equal(ready.deployment.provider, "Vercel Git integration");
   assert.equal(calls.length, 2);
 
   const missing = await waitForProductionDeployment({
@@ -2232,11 +2313,19 @@ test("waits for a successful Production deployment of the exact merge SHA", asyn
       if (path.includes("/deployments?sha=")) {
         deploymentReads += 1;
         if (deploymentReads === 1) throw new Error("temporary GitHub API error");
-        return [{ id: 4, sha: mergeSha, environment: "Production" }];
+        return [{
+          id: 4,
+          sha: mergeSha,
+          ref: mergeSha,
+          task: "deploy",
+          creator: { login: "vercel[bot]" },
+          environment: "Production",
+        }];
       }
       if (path.includes("/deployments/4/statuses?")) return [{
         state: "success",
-        environment_url: "https://production.example.test",
+        environment_url: deploymentUrl,
+        creator: { login: "vercel[bot]" },
       }];
       throw new Error("Unexpected retry request: " + path);
     },
@@ -2253,9 +2342,17 @@ test("waits for a successful Production deployment of the exact merge SHA", asyn
     owner: "example",
     repo: "repo",
     request: async (path) => path.includes("/deployments?sha=")
-      ? [{ id: 5, sha: mergeSha, environment: "Production" }]
+      ? [{
+          id: 5,
+          sha: mergeSha,
+          ref: mergeSha,
+          task: "deploy",
+          creator: { login: "vercel[bot]" },
+          environment: "Production",
+        }]
       : [{
           state: "failure",
+          creator: { login: "vercel[bot]" },
           target_url: "https://vercel.example.test/deployments/5",
           log_url: "https://vercel.example.test/deployments/5/logs",
           description: "Build failed.",
@@ -2264,6 +2361,64 @@ test("waits for a successful Production deployment of the exact merge SHA", asyn
   assert.equal(failed.status, "FAIL");
   assert.match(failed.details, /Build failed/);
   assert.match(failed.details, /deployments\/5\/logs/);
+});
+
+test("Production deployment verification requires Vercel provenance and this project's HTTPS origin", async () => {
+  const mergeSha = "c".repeat(40);
+  const untrusted = await waitForProductionDeployment({
+    owner: "example",
+    repo: "repo",
+    request: async (path) => path.includes("/deployments?sha=")
+      ? [{
+          id: 6,
+          sha: mergeSha,
+          ref: mergeSha,
+          task: "deploy",
+          creator: { login: "another-bot[bot]" },
+          environment: "Production",
+        }]
+      : [{ state: "success", environment_url: "https://lamilia-lomi.vercel.app", creator: { login: "vercel[bot]" } }],
+  }, mergeSha, { timeoutMs: 0 });
+  assert.equal(untrusted.status, "BLOCKED");
+  assert.match(untrusted.details, /none are verifiable as a Vercel Git deployment/);
+
+  const wrongOrigin = await waitForProductionDeployment({
+    owner: "example",
+    repo: "repo",
+    request: async (path) => path.includes("/deployments?sha=")
+      ? [{
+          id: 7,
+          sha: mergeSha,
+          ref: mergeSha,
+          task: "deploy",
+          creator: { login: "vercel[bot]" },
+          environment: "Production",
+        }]
+      : [{ state: "success", environment_url: "https://attacker.example", creator: { login: "vercel[bot]" } }],
+  }, mergeSha, { timeoutMs: 0 });
+  assert.equal(wrongOrigin.status, "BLOCKED");
+  assert.match(wrongOrigin.details, /expected Production project/);
+
+  const untrustedStatus = await waitForProductionDeployment({
+    owner: "example",
+    repo: "repo",
+    request: async (path) => path.includes("/deployments?sha=")
+      ? [{
+          id: 8,
+          sha: mergeSha,
+          ref: mergeSha,
+          task: "deploy",
+          creator: { login: "vercel[bot]" },
+          environment: "Production",
+        }]
+      : [{
+          state: "success",
+          environment_url: "https://lamilia-lomi.vercel.app",
+          creator: { login: "other-writer" },
+        }],
+  }, mergeSha, { timeoutMs: 0 });
+  assert.equal(untrustedStatus.status, "BLOCKED");
+  assert.match(untrustedStatus.details, /status was not authored by the Vercel Git integration/);
 });
 
 test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty responses", async () => {
@@ -2379,6 +2534,28 @@ test("automatically merges a fully green PR and updates its issue only after Pro
   assert.ok(fixture.calls.some(({ path, method, body }) =>
     path.startsWith("/repos/example/repo/issues/52/comments") && method === "POST" && body.includes("agent-harness-delivery:v1"),
   ));
+});
+
+test("reconciles closing references added in the merge race before Production tracking", async () => {
+  const fixture = createDeliveryClient({
+    pullRequestBody: "Part of #7",
+    bodyAfterMerge: "Closes #7",
+  });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => ({
+      status: "FAIL",
+      deployment: { id: 14, sha: fixture.mergeSha, state: "failure" },
+      details: "Vercel deployment failed during build.",
+    }),
+  });
+
+  assert.equal(result.decision, "DELIVERY_FAILED");
+  assert.equal(result.completed, false);
+  assert.equal(result.issues.length, 1);
+  assert.equal(result.issues[0].issue, 7);
+  assert.equal(fixture.issueState, "open");
+  assert.equal(fixture.projectStatus, "Blocked");
 });
 
 test("retries verified delivery when Project status propagation is delayed", async () => {
@@ -2508,6 +2685,27 @@ test("resumed delivery reopens a previously auto-closed issue when Production ve
   assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
 });
 
+test("resumed delivery recognizes an exact PR commit as the issue closer", async () => {
+  const fixture = createDeliveryClient({
+    alreadyMerged: true,
+    initialIssueState: "closed",
+    pullRequestBody: "Part of #7",
+    pullRequestCommitMessages: ["Closes #7 in the merged change"],
+    closedByPullRequest: false,
+    closedByCommitInPullRequest: true,
+  });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    verify: async () => ({ decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => ({ status: "FAIL", details: "Production failed." }),
+  });
+
+  assert.equal(result.decision, "DELIVERY_FAILED");
+  assert.equal(result.completed, false);
+  assert.equal(result.issues[0].issue, 7);
+  assert.equal(fixture.issueState, "open");
+  assert.equal(fixture.projectStatus, "Blocked");
+});
+
 test("merged recovery infers every closing issue without --issue and blocks them after Production failure", async () => {
   const fixture = createMultiIssueMergedDeliveryClient();
   const result = await deliverPullRequest(fixture.client, 52, {
@@ -2612,6 +2810,52 @@ test("resumed delivery does not reopen an issue closed independently of the merg
     path.endsWith("/issues/7") && method === "PATCH" && JSON.parse(body).state === "open",
   ), false);
   assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
+});
+
+test("resumed delivery preserves a later independently closed issue despite an earlier PR closure", async () => {
+  const fixture = createDeliveryClient({
+    alreadyMerged: true,
+    initialIssueState: "closed",
+    closedByPullRequest: true,
+    laterIndependentClosure: true,
+  });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({ decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => ({ status: "FAIL", details: "Production failed." }),
+  });
+
+  assert.equal(result.decision, "DELIVERY_FAILED");
+  assert.equal(result.completed, false);
+  assert.equal(result.issue.status, "BLOCKED");
+  assert.equal(fixture.issueState, "closed");
+  assert.equal(fixture.projectStatus, "Done");
+  assert.equal(fixture.calls.some(({ path, method, body }) =>
+    path.endsWith("/issues/7") && method === "PATCH" && JSON.parse(body).state === "open",
+  ), false);
+});
+
+test("unreadable prior delivery evidence never reopens a closed issue", async () => {
+  const fixture = createDeliveryClient({
+    alreadyMerged: true,
+    initialIssueState: "closed",
+    closedByPullRequest: true,
+    issueCommentsReadError: true,
+  });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({ decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => ({ status: "FAIL", details: "Production failed." }),
+  });
+
+  assert.equal(result.decision, "DELIVERY_FAILED");
+  assert.equal(result.completed, false);
+  assert.equal(result.issue.status, "BLOCKED");
+  assert.equal(fixture.issueState, "closed");
+  assert.equal(fixture.projectStatus, "Done");
+  assert.equal(fixture.calls.some(({ path, method, body }) =>
+    path.endsWith("/issues/7") && method === "PATCH" && JSON.parse(body).state === "open",
+  ), false);
 });
 
 test("delivery requires an exact PR-to-issue link and blocks GitHub closing keywords", async () => {
