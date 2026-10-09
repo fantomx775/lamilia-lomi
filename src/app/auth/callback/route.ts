@@ -141,16 +141,7 @@ export async function GET(request: Request) {
     console.error("[auth-callback] Auth resume redemption failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,
     });
-    if (intent?.userId || intent?.emailHash) {
-      await setAuthResumeIntent({
-        locale: intent.locale,
-        productSlug: intent.productSlug,
-        returnTo: intent.returnTo,
-        code: intent.code,
-        userId: intent.userId,
-        emailHash: intent.emailHash,
-      });
-    }
+    await persistAuthResumeIntent(intent);
     await persistUnlockIntent(intent);
     if (intent?.productSlug && intent.code) {
       return successResponse(
@@ -160,9 +151,8 @@ export async function GET(request: Request) {
 
     return failureResponse(locale, intent, callbackReturnTo);
   }
-  await clearAuthResumeIntent();
-
   if (redemption?.ok) {
+    await clearAuthResumeIntent();
     await clearUnlockIntent();
     return successResponse(
       appendQuery(
@@ -174,13 +164,39 @@ export async function GET(request: Request) {
   }
 
   if (redemption && !redemption.ok) {
+    await persistAuthResumeIntent(intent);
     await persistUnlockIntent(intent);
     return successResponse(
       appendQuery(getAuthResumeRedirect(intent, locale), "unlock", redemption.status),
     );
   }
 
+  await clearAuthResumeIntent();
   return successResponse(intent ? getAuthResumeRedirect(intent, locale) : callbackReturnTo);
+}
+
+async function persistAuthResumeIntent(
+  intent: {
+    locale: string;
+    productSlug?: string;
+    returnTo: string;
+    code?: string;
+    userId?: string;
+    emailHash?: string;
+  } | null,
+) {
+  if (!intent || (!intent.userId && !intent.emailHash)) {
+    return;
+  }
+
+  await setAuthResumeIntent({
+    locale: intent.locale,
+    productSlug: intent.productSlug,
+    returnTo: intent.returnTo,
+    code: intent.code,
+    userId: intent.userId,
+    emailHash: intent.emailHash,
+  });
 }
 
 async function persistUnlockIntent(

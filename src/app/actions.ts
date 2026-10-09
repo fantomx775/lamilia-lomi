@@ -541,10 +541,10 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
       appendQueryPath(getAuthResumeRedirect(intent, intent.locale), "unlock", "unexpected"),
     );
   }
-  await clearAuthResumeIntent();
   const resumeRedirect = getAuthResumeRedirect(intent, intent.locale);
 
   if (redemption?.ok) {
+    await clearAuthResumeIntent();
     await clearUnlockIntent();
     if (redemption.status === "success") {
       const product = intent.productSlug
@@ -578,6 +578,7 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
     redirect(appendQueryPath(resumeRedirect, "unlock", redemption.status));
   }
 
+  await clearAuthResumeIntent();
   redirect(resumeRedirect);
 }
 

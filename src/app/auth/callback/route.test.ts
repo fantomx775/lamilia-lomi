@@ -169,7 +169,7 @@ describe("Supabase auth callback", () => {
     expect(resume.clear).not.toHaveBeenCalled();
   });
 
-  it("retains the premium code on another device when redemption returns a failure", async () => {
+  it("retains the account-bound premium intent on another device when redemption returns auth_required", async () => {
     resume.callbackIntent = {
       locale: "en",
       emailHash: "reader-email-hash",
@@ -187,7 +187,7 @@ describe("Supabase auth callback", () => {
         },
       },
     });
-    resume.redeem.mockResolvedValue({ ok: false, status: "invalid_code" });
+    resume.redeem.mockResolvedValue({ ok: false, status: "auth_required" });
 
     const response = await GET(
       new Request(
@@ -201,7 +201,16 @@ describe("Supabase auth callback", () => {
       returnTo: "/en/products/moon-garden-coloring-book",
       code: "LOMI-BOOK-2026",
     });
-    expect(response.headers.get("location")).toContain("unlock=invalid_code");
+    expect(resume.setAuthResume).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      userId: undefined,
+      emailHash: "reader-email-hash",
+    });
+    expect(resume.clear).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toContain("unlock=auth_required");
     expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
   });
 
