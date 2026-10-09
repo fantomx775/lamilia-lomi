@@ -70,7 +70,7 @@ test("registration form completes through its server action without JavaScript",
     ? { width: 393, height: 852 }
     : { width: 1280, height: 800 };
   const context = await browser.newContext({
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
+    baseURL: testInfo.project.use.baseURL ?? "http://127.0.0.1:3000",
     javaScriptEnabled: false,
     viewport,
   });
