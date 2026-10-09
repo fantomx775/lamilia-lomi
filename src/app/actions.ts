@@ -177,7 +177,7 @@ export async function loginDemoAction(formData: FormData) {
     await clearUnlockIntent();
   }
 
-  const code = text(formData, "code") || currentIntent?.code || "";
+  const formCode = text(formData, "code") || currentIntent?.code || "";
 
   if (!email || !isValidEmail(email) || !password) {
     redirect(`/${locale}/login?error=invalid_input&returnTo=${encodeURIComponent(returnTo)}`);
@@ -190,6 +190,14 @@ export async function loginDemoAction(formData: FormData) {
         pendingResumeIntent.returnTo === returnTo &&
         authResumeIntentMatchesEmail(pendingResumeIntent, email),
     );
+    const retryingPendingResume = Boolean(
+      pendingResumeMatchesEmail &&
+        pendingResumeIntent?.productSlug &&
+        pendingResumeIntent.code,
+    );
+    const code = retryingPendingResume
+      ? pendingResumeIntent?.code ?? ""
+      : formCode;
     const intent = createAuthResumeIntent({
       locale,
       productSlug: returnProductSlug,
@@ -207,14 +215,14 @@ export async function loginDemoAction(formData: FormData) {
       }));
     } catch (authError) {
       logUnexpectedFailure("[auth] Sign-in failed unexpectedly.", authError);
-      if (!pendingResumeMatchesEmail || code) {
+      if (!pendingResumeMatchesEmail || !pendingResumeIntent?.code) {
         await setAuthResumeIntent({ locale, returnTo, code, email });
       }
       redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
     if (error) {
-      if (!pendingResumeMatchesEmail || code) {
+      if (!pendingResumeMatchesEmail || !pendingResumeIntent?.code) {
         await setAuthResumeIntent({ locale, returnTo, code, email });
       }
       const errorCode = isSupabaseEmailNotConfirmedError(error)
@@ -224,11 +232,11 @@ export async function loginDemoAction(formData: FormData) {
     }
 
     if (
-      !code &&
-      pendingResumeMatchesEmail &&
+      retryingPendingResume &&
       pendingResumeIntent?.productSlug &&
       pendingResumeIntent.code
     ) {
+      await clearUnlockIntent();
       let pendingUser: Awaited<ReturnType<typeof supabase.auth.getUser>> | null = null;
       try {
         pendingUser = await supabase.auth.getUser();
@@ -266,7 +274,7 @@ export async function loginDemoAction(formData: FormData) {
     await completeSupabaseAuthResume(intent, code);
   }
 
-  await preserveUnlockIntent({ locale, returnTo, code });
+  await preserveUnlockIntent({ locale, returnTo, code: formCode });
   await setDemoSession(
     createDemoSession({
       email,
@@ -308,14 +316,23 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
       pendingResumeIntent.returnTo === returnTo &&
       authResumeIntentMatchesEmail(pendingResumeIntent, email),
   );
+  const retryingPendingResume = Boolean(
+    pendingResumeMatchesEmail &&
+      pendingResumeIntent?.productSlug &&
+      pendingResumeIntent.code,
+  );
+  if (retryingPendingResume) {
+    await clearUnlockIntent();
+  }
   const intent = await setAuthResumeIntent({
     locale,
-    productSlug:
-      pendingResumeMatchesEmail && !code
-        ? pendingResumeIntent?.productSlug
-        : productSlugFromReturnTo(returnTo, locale),
+    productSlug: retryingPendingResume
+      ? pendingResumeIntent?.productSlug
+      : productSlugFromReturnTo(returnTo, locale),
     returnTo,
-    code: code || (pendingResumeMatchesEmail ? pendingResumeIntent?.code : undefined),
+    code: retryingPendingResume
+      ? pendingResumeIntent?.code
+      : code || (pendingResumeMatchesEmail ? pendingResumeIntent?.code : undefined),
     userId: pendingResumeMatchesEmail ? pendingResumeIntent?.userId : undefined,
     emailHash: pendingResumeMatchesEmail ? pendingResumeIntent?.emailHash : undefined,
     email: text(formData, "email"),

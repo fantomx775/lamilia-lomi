@@ -97,6 +97,7 @@ export async function GET(request: Request) {
 
   if (!user?.email_confirmed_at) {
     if (intent && (intent.userId || intent.emailHash)) {
+      await clearUnlockIntent();
       await setAuthResumeIntent({
         locale: intent.locale,
         productSlug: intent.productSlug,

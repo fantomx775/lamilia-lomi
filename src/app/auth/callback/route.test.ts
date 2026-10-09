@@ -244,6 +244,7 @@ describe("Supabase auth callback", () => {
       emailHash: "reader-email-hash",
     });
     expect(resume.redeem).not.toHaveBeenCalled();
+    expect(resume.clearUnlock).toHaveBeenCalledTimes(1);
     expect(response.headers.get("location")).toContain(
       "error=verification_unavailable",
     );
