@@ -477,7 +477,7 @@ describe("premium unlock action", () => {
 
     await expectRedirect(
       unlockPremiumAction(formData),
-      "/en/products/moon-garden-coloring-book?unlock=unexpected",
+      "/en/products/moon-garden-coloring-book?unlock=unexpected#premium",
     );
 
     expect(actionMocks.setUnlockIntent).toHaveBeenCalledWith({
@@ -489,5 +489,34 @@ describe("premium unlock action", () => {
     expect(actionMocks.redirect.mock.calls.flat().join(" ")).not.toContain(
       "raw database details",
     );
+  });
+
+  it.each([
+    ["success", { ok: true, status: "success" }, true, "/en/products/moon-garden-coloring-book?unlocked=1#premium"],
+    ["already_unlocked", { ok: true, status: "already_unlocked" }, true, "/en/products/moon-garden-coloring-book?unlocked=already#premium"],
+    ["invalid_code", { ok: false, status: "invalid_code" }, true, "/en/products/moon-garden-coloring-book?unlock=invalid_code#premium"],
+    ["email_unverified", { ok: false, status: "email_unverified" }, true, "/en/products/moon-garden-coloring-book?step=verify#premium"],
+    ["session_email_unverified", null, false, "/en/products/moon-garden-coloring-book?step=verify#premium"],
+  ] as const)("keeps the premium section visible after %s", async (name, redemption, emailVerified, location) => {
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+      reviewDelayDays: 7,
+    });
+    actionMocks.getDemoSession.mockResolvedValue({
+      email: "reader@example.com",
+      emailVerified,
+      unlockedProductIds: [],
+    });
+    if (redemption) {
+      actionMocks.redeemPremiumCodeForRequest.mockResolvedValue(redemption);
+    }
+
+    const formData = new FormData();
+    formData.set("locale", "en");
+    formData.set("productSlug", "moon-garden-coloring-book");
+    formData.set("code", "LOMI-BOOK-2026");
+
+    await expectRedirect(unlockPremiumAction(formData), location);
   });
 });

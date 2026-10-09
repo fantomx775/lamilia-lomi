@@ -104,6 +104,112 @@ test("local product registration returns to the visible demo verification action
   await expect(page.getByLabel("Premium code")).toBeInViewport();
 });
 
+test("premium code intent survives login and unlocks the product", async ({ page }) => {
+  await page.context().clearCookies();
+  await page.goto(`/en/products/${productSlug}#premium`);
+
+  const unlockSection = page.getByTestId("product-unlock-section");
+  await unlockSection.getByLabel("Premium code").fill("LOMI-BOOK-2026");
+  await unlockSection.getByRole("button", { name: "Log in" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/en/login\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+  await expect(page).not.toHaveURL(/LOMI-BOOK-2026|premiumCode|[?&]code=/i);
+  await expect(page.locator('input[name="code"]')).toHaveValue("LOMI-BOOK-2026");
+  await page.getByLabel("Email").fill("premium-flow-reader@example.com");
+  await page.getByRole("button", { name: "Continue" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
+  await page.getByRole("button", { name: "Unlock premium content" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}\\?unlocked=1#premium$`));
+  await expect(page.getByTestId("unlock-success-state")).toBeVisible();
+  await expect(page).not.toHaveURL(/LOMI-BOOK-2026|premiumCode|[?&]code=/i);
+});
+
+test("premium code intent survives local registration, demo verification, and unlock", async ({ page }, testInfo) => {
+  await page.context().clearCookies();
+  await page.goto(`/en/products/${productSlug}#premium`);
+
+  const unlockSection = page.getByTestId("product-unlock-section");
+  await unlockSection.getByLabel("Premium code").fill("LOMI-BOOK-2026");
+  await unlockSection.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(new RegExp(`/en/register\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+  await expect(page.locator('input[name="code"]')).toHaveValue("LOMI-BOOK-2026");
+
+  await page.getByLabel("Email").fill("premium-registration-reader@example.com");
+  await page.getByLabel("Password").fill("password123");
+  await page.getByRole("checkbox", { name: /Terms/ }).check();
+  await page.getByRole("button", { name: "Create account" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  const verifyButton = page.getByRole("button", { name: "Mark demo email as verified" });
+  await expect(verifyButton).toBeInViewport();
+  await saveEvidenceScreenshot(page, testInfo, "premium-registration-verification");
+
+  await verifyButton.click();
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
+  await page.getByRole("button", { name: "Unlock premium content" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}\\?unlocked=1#premium$`));
+  await expect(page.getByTestId("unlock-success-state")).toBeVisible();
+  await expect(page).not.toHaveURL(/LOMI-BOOK-2026|premiumCode|[?&]code=/i);
+  await saveEvidenceScreenshot(page, testInfo, "premium-registration-unlocked");
+});
+
+test("a missing session returns from a protected download to its product", async ({ page }) => {
+  await page.context().clearCookies();
+  await page.goto(`/en/login?returnTo=%2Fen%2Fproducts%2F${productSlug}`);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+
+  await page.context().clearCookies({ name: "ll_demo_session" });
+  await page.goto(
+    `/api/downloads/asset-moon-premium-pdf?locale=en&returnTo=%2Fen%2Fproducts%2F${productSlug}`,
+    { waitUntil: "domcontentloaded" },
+  );
+  await expect(page).toHaveURL(
+    new RegExp(`/en/login\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`),
+  );
+
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
+});
+
+test("browser back and forward preserve the selected product return destination", async ({ page }) => {
+  await page.context().clearCookies();
+  await page.goto(`/en/products/${productSlug}#premium`);
+
+  await page.getByTestId("product-unlock-section").getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(new RegExp(`/en/register\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/en/register\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+
+  await page.getByRole("main").getByRole("link", { name: "Log in" }).click();
+  await expect(page).toHaveURL(new RegExp(`/en/login\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/en/register\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/en/login\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+  await expect(page.locator('input[name="returnTo"]')).toHaveValue(`/en/products/${productSlug}`);
+  await page.reload();
+  await expect(page).toHaveURL(new RegExp(`/en/login\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+  await expect(page.locator('input[name="returnTo"]')).toHaveValue(`/en/products/${productSlug}`);
+});
+
+test("an external login return destination falls back to the library", async ({ page }) => {
+  await page.goto("/en/login?returnTo=https%3A%2F%2Fevil.example%2Fphish");
+
+  await expect(page.locator('input[name="returnTo"]')).toHaveValue("/en/library");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(/\/en\/library$/);
+  await expect(page).not.toHaveURL(/evil\.example/);
+});
+
 test("auth route reports client and network errors without exposing form values", async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
@@ -150,7 +256,7 @@ test("auth route reports client and network errors without exposing form values"
   expect(consoleErrors.filter((message) => !message.includes("A tree hydrated") && !message.includes("caret-color"))).toEqual([]);
 });
 
-test("pending login disables repeat submission until the action finishes", async ({ page }) => {
+test("pending login disables repeat submission until the action finishes", async ({ page }, testInfo) => {
   await page.goto("/en/login?returnTo=%2Fen%2Faccount");
 
   let releaseAction = () => {};
@@ -181,6 +287,7 @@ test("pending login disables repeat submission until the action finishes", async
     await actionStarted;
     await expect(submit).toBeDisabled();
     await expect(submit).toHaveText("Signing in…");
+    await saveEvidenceScreenshot(page, testInfo, "login-pending");
     await submit.evaluate((element) => (element as HTMLButtonElement).click());
     expect(actionCount).toBe(1);
   } finally {

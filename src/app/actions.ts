@@ -492,7 +492,6 @@ export async function unlockPremiumAction(formData: FormData) {
   const locale = normalizeLocale(text(formData, "locale"));
   const productSlug = text(formData, "productSlug");
   const product = await getProductBySlugForRequest(productSlug);
-  const returnTo = `/${locale}/products/${productSlug}`;
   const existingIntent = await getUnlockIntent();
   const code =
     text(formData, "code") ||
@@ -505,6 +504,9 @@ export async function unlockPremiumAction(formData: FormData) {
     redirect(`/${locale}/products?unlock=product_not_found`);
   }
 
+  const returnTo = `/${locale}/products/${product.slug}`;
+  const premiumReturnTo = buildAuthRedirect({ locale, redirectTo: returnTo });
+
   const session = await getDemoSession();
 
   if (!session) {
@@ -514,7 +516,7 @@ export async function unlockPremiumAction(formData: FormData) {
 
   if (!session.emailVerified) {
     await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
-    redirect(appendQueryPath(returnTo, "step", "verify"));
+    redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
   }
 
   let result;
@@ -527,7 +529,7 @@ export async function unlockPremiumAction(formData: FormData) {
   } catch (error) {
     logUnexpectedFailure("[premium-unlock] Redemption failed unexpectedly.", error);
     await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
-    redirect(appendQueryPath(returnTo, "unlock", "unexpected"));
+    redirect(appendQueryPath(premiumReturnTo, "unlock", "unexpected"));
   }
 
   if (!result.ok) {
@@ -538,11 +540,11 @@ export async function unlockPremiumAction(formData: FormData) {
 
     if (result.status === "email_unverified") {
       await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
-      redirect(appendQueryPath(returnTo, "step", "verify"));
+      redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
     }
 
     await setUnlockIntent({ locale, productSlug: product.slug, returnTo, code });
-    redirect(appendQueryPath(returnTo, "unlock", result.status));
+    redirect(appendQueryPath(premiumReturnTo, "unlock", result.status));
   }
 
   await clearUnlockIntent();
@@ -551,7 +553,7 @@ export async function unlockPremiumAction(formData: FormData) {
   }
   redirect(
     appendQueryPath(
-      returnTo,
+      premiumReturnTo,
       "unlocked",
       result.status === "already_unlocked" ? "already" : "1",
     ),
