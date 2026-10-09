@@ -179,9 +179,11 @@ requires new AI-review and verification records with the exact new head SHA.
 Never fabricate a formal GitHub approval.
 
 Each PR needs two genuinely independent AI reviews. The records must use
-distinct `reviewerAgent` values, both must state that each agent was tasked
-independently and read the actual diff, and both must name the same full
-current SHA. The GitHub identity that posts the comments may be the same.
+distinct `reviewerAgent` values containing the actual independent agent task
+IDs, both must state that each agent was tasked independently and read the
+actual diff, and both must name the same full head SHA and base SHA. Check the
+records against the two real orchestration reports before posting them. The
+GitHub identity that posts the comments may be the same.
 Each finding object needs a `summary` and `requiredFix`. Empty arrays mean no
 findings at that severity.
 
@@ -197,10 +199,11 @@ reviews and running the recorded checks.
 {
   "schemaVersion": 1,
   "reviewType": "ai-subagent",
-  "reviewerAgent": "correctness-reviewer",
+  "reviewerAgent": "<actual-independent-agent-task-id>",
   "independentlyTasked": true,
   "taskGoalProvided": true,
   "actualDiffRead": true,
+  "reviewedBaseSha": "<full-current-base-40-character-sha>",
   "reviewedSha": "<full-current-40-character-sha>",
   "reviewScope": ["correctness", "regressions", "testing", "scope"],
   "findings": {"Critical": [], "High": [], "Medium": [], "Low": []},
@@ -335,7 +338,14 @@ harness rereads the merged PR body and full commit history to catch closing
 references added during the merge race. It reopens an issue only when its latest
 GitHub close event identifies this exact PR merge or one of its commits, aligned
 with the issue's close time; unreadable prior delivery evidence and later
-independent closures fail closed.
+independent closures fail closed. Prior issue-delivery records must be authored
+by the PR author. Commit histories that hit the 250-commit REST limit are read
+through GraphQL pagination rather than assumed complete. Before merge, the
+current base SHA must still match the one used for gate verification. When
+GitHub enforces approval of the latest reviewable push, the harness also checks
+GitHub's current `reviewDecision` before reporting merge readiness. The
+generated Vercel URL must match this project's exact name, nine-character
+commit hash, and team scope.
 
 Post a concise issue update from a file when durable progress is useful:
 

@@ -36,6 +36,7 @@ import {
 } from "./agent-harness.mjs";
 
 const CURRENT_SHA = "a".repeat(40);
+const CURRENT_BASE_SHA = "b".repeat(40);
 const AI_REVIEW_MARKER = "<!-- agent-harness-ai-review:v1 -->";
 const ISSUE_DELIVERY_MARKER = "<!-- agent-harness-issue-delivery:v1 -->";
 const VERIFICATION_MARKER = "<!-- agent-harness-verification:v1 -->";
@@ -48,7 +49,7 @@ function structuredComment(marker, record, user = "author", createdAt = "2026-10
   };
 }
 
-function cleanAiReviewRecord(headSha = CURRENT_SHA, reviewerAgent = "reviewer-A") {
+function cleanAiReviewRecord(headSha = CURRENT_SHA, reviewerAgent = "reviewer-A", baseSha = CURRENT_BASE_SHA) {
   const noFindings = { Critical: [], High: [], Medium: [], Low: [] };
   return {
     schemaVersion: 1,
@@ -57,6 +58,7 @@ function cleanAiReviewRecord(headSha = CURRENT_SHA, reviewerAgent = "reviewer-A"
     independentlyTasked: true,
     taskGoalProvided: true,
     actualDiffRead: true,
+    reviewedBaseSha: baseSha,
     reviewedSha: headSha,
     reviewScope: ["correctness", "regressions", "testing", "scope"],
     findings: structuredClone(noFindings),
@@ -125,9 +127,32 @@ function cleanPullRequest(overrides = {}) {
     draft: false,
     body: "Part of #7",
     user: { login: "author" },
-    base: { ref: "main", sha: "b".repeat(40) },
+    base: { ref: "main", sha: CURRENT_BASE_SHA },
     head: { ref: "codex/harness", sha: CURRENT_SHA },
     ...overrides,
+  };
+}
+
+function pullRequestCommitPage(messages, after) {
+  const start = after ? Number(after) : 0;
+  const end = Math.min(start + 100, messages.length);
+  return {
+    repository: {
+      pullRequest: {
+        commits: {
+          nodes: messages.slice(start, end).map((message, index) => ({
+            commit: {
+              oid: String(start + index + 1).padStart(40, "0"),
+              message,
+            },
+          })),
+          pageInfo: {
+            hasNextPage: end < messages.length,
+            endCursor: end < messages.length ? String(end) : null,
+          },
+        },
+      },
+    },
   };
 }
 
@@ -156,11 +181,14 @@ function createDeliveryClient({
   issueCommentsReadError = false,
   projectUpdateDelayReads = 0,
   previouslyVerifiedDelivery = false,
+  previouslyVerifiedDeliveryAuthor = "author",
+  baseShaOnPreMerge = null,
 } = {}) {
   const mergeSha = "c".repeat(40);
   const issueId = "I_issue-7";
   const calls = [];
   let merged = alreadyMerged;
+  let pullRequestReads = 0;
   let mergedBody = pullRequestBody;
   let issueState = initialIssueState;
   let projectStatus = initialIssueState === "closed" ? "Done" : "Review";
@@ -178,7 +206,7 @@ function createDeliveryClient({
         productionDeployment: { status: "PASS", deployment: { sha: mergeSha } },
         productionSmoke: { status: "PASS" },
         postDeploymentMigration: { status: "PASS" },
-      })]
+      }, previouslyVerifiedDeliveryAuthor)]
     : [];
   const client = {
     owner: "example",
@@ -190,6 +218,10 @@ function createDeliveryClient({
       const method = options.method || "GET";
       calls.push({ path, method, body: options.body || null });
       if (path === "/repos/example/repo/pulls/52") {
+        pullRequestReads += 1;
+        const baseSha = baseShaOnPreMerge && !merged && pullRequestReads >= 2
+          ? baseShaOnPreMerge
+          : CURRENT_BASE_SHA;
         return merged
           ? cleanPullRequest({
               state: "closed",
@@ -198,7 +230,7 @@ function createDeliveryClient({
               merged_at: "2026-10-08T12:00:00Z",
               body: mergedBody,
             })
-          : cleanPullRequest({ body: pullRequestBody });
+          : cleanPullRequest({ body: pullRequestBody, base: { ref: "main", sha: baseSha } });
       }
       if (path === "/repos/example/repo/pulls/52/merge" && method === "PUT") {
         const body = JSON.parse(options.body);
@@ -477,6 +509,18 @@ test("reads GitHub HTTPS and SSH repository remotes", () => {
     owner: "fantomx775",
     repo: "lamilia-lomi",
   });
+  assert.deepEqual(repositoryFromRemote("ssh://git@github.com/fantomx775/lamilia-lomi.git"), {
+    owner: "fantomx775",
+    repo: "lamilia-lomi",
+  });
+  assert.throws(
+    () => repositoryFromRemote("https://evil.example/github.com/attacker/victim.git"),
+    /Could not parse a GitHub owner\/repository/,
+  );
+  assert.throws(
+    () => repositoryFromRemote("git@evil.example:attacker/victim.git"),
+    /Could not parse a GitHub owner\/repository/,
+  );
 });
 
 test("extracts acceptance criteria without consuming the following section", () => {
@@ -489,6 +533,8 @@ test("extracts acceptance criteria without consuming the following section", () 
 
 test("matches exact issue references and avoids adjacent issue numbers", () => {
   assert.equal(referencesIssue("Fixes #29", 29, "example/repo"), true);
+  assert.equal(referencesIssue("Closes: #29", 29, "example/repo"), true);
+  assert.equal(referencesIssue("RESOLVES: example/repo#29", 29, "example/repo"), true);
   assert.equal(referencesIssue("Fixes example/repo#29", 29, "example/repo"), true);
   assert.equal(referencesIssue("https://github.com/example/repo/issues/29", 29, "example/repo"), true);
   assert.equal(referencesIssue("See https://github.com/example/repo/issues/29.", 29, "example/repo"), true);
@@ -1163,6 +1209,15 @@ test("requires two distinct independently tasked AI reviews and allows them to s
 
   assert.equal(validateAiReview({
     headSha: CURRENT_SHA,
+    baseSha: CURRENT_BASE_SHA,
+    expectedAuthor: "author",
+    comments: ["reviewer-A", "reviewer-B"].map((reviewerAgent) =>
+      structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord(CURRENT_SHA, reviewerAgent, "c".repeat(40))),
+    ),
+  }).status, "BLOCKED");
+
+  assert.equal(validateAiReview({
+    headSha: CURRENT_SHA,
     expectedAuthor: "author",
     comments: [
       structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord(CURRENT_SHA, "reviewer-A"), "other-writer"),
@@ -1627,6 +1682,8 @@ test("two AI reviews and local evidence satisfy an unprotected branch without op
     ...input,
     mergePolicy: cleanMergePolicy({ requiredApprovals: 1, requireLastPushApproval: true }),
     reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "reviewer", state: "APPROVED" })],
+    latestPushReviewDecision: "APPROVED",
+    latestPushReviewDecisionAvailable: true,
   });
   assert.equal(lastPushApprovalPresent.decision, "READY_FOR_MERGE");
   assert.equal(lastPushApprovalPresent.checks.branchReviewPolicy.approvalsPresent, 1);
@@ -1635,6 +1692,8 @@ test("two AI reviews and local evidence satisfy an unprotected branch without op
     ...input,
     mergePolicy: cleanMergePolicy({ requiredApprovals: 1, requireLastPushApproval: true }),
     reviews: [cleanGitHubReview({ headSha: "b".repeat(40), user: "reviewer", state: "APPROVED" })],
+    latestPushReviewDecision: "REVIEW_REQUIRED",
+    latestPushReviewDecisionAvailable: true,
   });
   assert.equal(lastPushApprovalStale.decision, "READY_FOR_REVIEW");
   assert.equal(lastPushApprovalStale.checks.branchReviewPolicy.approvalsPresent, 0);
@@ -1944,6 +2003,9 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   const client = {
     owner: "example",
     repo: "repo",
+    graphql: async (query) => query.includes("reviewDecision")
+      ? { repository: { pullRequest: { reviewDecision: "APPROVED" } } }
+      : { repository: { pullRequest: { commits: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } },
     request: async (path) => {
       calls.push(path);
       if (path === "/repos/example/repo/pulls/52") return pullRequest;
@@ -2002,6 +2064,30 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   const closingCommit = await verifyPullRequest(closingCommitClient, 52);
   assert.equal(closingCommit.decision, "BLOCKED");
   assert.ok(closingCommit.reasons.some((reason) => /commit message.*auto-close issue references/.test(reason)));
+
+  const longCommitMessages = Array.from({ length: 251 }, (_, index) =>
+    index === 250 ? "Closes: #29 in a commit beyond the REST cap" : "Ordinary implementation commit " + index,
+  );
+  const longHistoryClient = {
+    ...client,
+    request: async (path) => {
+      const match = path.match(/\/pulls\/52\/commits\?per_page=100&page=(\d+)/);
+      if (match) {
+        const page = Number(match[1]);
+        return longCommitMessages.slice((page - 1) * 100, page * 100).map((message, index) => ({
+          sha: String((page - 1) * 100 + index + 1).padStart(40, "0"),
+          commit: { message },
+        }));
+      }
+      return client.request(path);
+    },
+    graphql: async (query, variables = {}) => query.includes("commits(first: 100")
+      ? pullRequestCommitPage(longCommitMessages, variables.after)
+      : client.graphql(query, variables),
+  };
+  const longHistory = await verifyPullRequest(longHistoryClient, 52);
+  assert.equal(longHistory.decision, "BLOCKED");
+  assert.ok(longHistory.reasons.some((reason) => /commit message.*auto-close issue references/.test(reason)));
 
   const unreadableCommitHistory = {
     ...client,
@@ -2138,6 +2224,15 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   const lastPushApprovalVerified = await verifyPullRequest(lastPushApprovalPolicyClient, 52);
   assert.equal(lastPushApprovalVerified.decision, "READY_FOR_MERGE");
   assert.equal(lastPushApprovalVerified.checks.branchReviewPolicy.approvalsPresent, 1);
+  const latestPushStillNeedsReview = await verifyPullRequest({
+    ...lastPushApprovalPolicyClient,
+    graphql: async (query, variables) => query.includes("reviewDecision")
+      ? { repository: { pullRequest: { reviewDecision: "REVIEW_REQUIRED" } } }
+      : client.graphql(query, variables),
+  }, 52);
+  assert.equal(latestPushStillNeedsReview.decision, "READY_FOR_REVIEW");
+  assert.equal(latestPushStillNeedsReview.checks.branchReviewPolicy.status, "BLOCKED");
+  assert.match(latestPushStillNeedsReview.checks.branchReviewPolicy.details, /most recent reviewable push/);
 
   const appBoundPolicyClient = {
     ...client,
@@ -2399,6 +2494,27 @@ test("Production deployment verification requires Vercel provenance and this pro
   assert.equal(wrongOrigin.status, "BLOCKED");
   assert.match(wrongOrigin.details, /expected Production project/);
 
+  const siblingProjectOrigin = await waitForProductionDeployment({
+    owner: "example",
+    repo: "repo",
+    request: async (path) => path.includes("/deployments?sha=")
+      ? [{
+          id: 71,
+          sha: mergeSha,
+          ref: mergeSha,
+          task: "deploy",
+          creator: { login: "vercel[bot]" },
+          environment: "Production",
+        }]
+      : [{
+          state: "success",
+          environment_url: "https://lamilia-lomi-other-project-abc123456-fantomxs-projects.vercel.app",
+          creator: { login: "vercel[bot]" },
+        }],
+  }, mergeSha, { timeoutMs: 0 });
+  assert.equal(siblingProjectOrigin.status, "BLOCKED");
+  assert.match(siblingProjectOrigin.details, /expected Production project/);
+
   const untrustedStatus = await waitForProductionDeployment({
     owner: "example",
     repo: "repo",
@@ -2501,6 +2617,17 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
   assert.equal((await runProductionSmoke("https://production.example.test", { paths: ["//elsewhere.test"] })).status, "BLOCKED");
 });
 
+test("blocks merge when the base SHA changes after verification", async () => {
+  const fixture = createDeliveryClient({ baseShaOnPreMerge: "d".repeat(40) });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+  });
+
+  assert.equal(result.decision, "BLOCKED");
+  assert.equal(result.stage, "pre-merge-snapshot");
+  assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
+});
+
 test("automatically merges a fully green PR and updates its issue only after Production passes", async () => {
   const fixture = createDeliveryClient();
   const result = await deliverPullRequest(fixture.client, 52, {
@@ -2539,7 +2666,7 @@ test("automatically merges a fully green PR and updates its issue only after Pro
 test("reconciles closing references added in the merge race before Production tracking", async () => {
   const fixture = createDeliveryClient({
     pullRequestBody: "Part of #7",
-    bodyAfterMerge: "Closes #7",
+    bodyAfterMerge: "Closes: #7",
   });
   const result = await deliverPullRequest(fixture.client, 52, {
     verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
@@ -2784,6 +2911,27 @@ test("failed retry preserves a closed issue with prior exact-SHA Production pass
   assert.equal(fixture.calls.some(({ path, method, body }) =>
     path.endsWith("/issues/7") && method === "PATCH" && JSON.parse(body).state === "open",
   ), false);
+});
+
+test("ignores prior Production evidence posted by someone other than the PR author", async () => {
+  const fixture = createDeliveryClient({
+    alreadyMerged: true,
+    initialIssueState: "closed",
+    previouslyVerifiedDelivery: true,
+    previouslyVerifiedDeliveryAuthor: "untrusted-writer",
+    closedByPullRequest: true,
+  });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({ decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => ({ status: "FAIL", details: "The exact Production deployment failed." }),
+  });
+
+  assert.equal(result.decision, "DELIVERY_FAILED");
+  assert.equal(result.completed, false);
+  assert.equal(result.issue.status, "PASS");
+  assert.equal(fixture.issueState, "open");
+  assert.equal(fixture.projectStatus, "Blocked");
 });
 
 test("resumed delivery does not reopen an issue closed independently of the merged PR", async () => {

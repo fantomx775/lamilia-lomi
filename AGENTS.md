@@ -193,7 +193,13 @@ and merge SHA, or a commit from that PR's complete commit history. The event
 must align with the issue's close time; unreadable prior-delivery evidence or a
 later independent close fails closed. The Production gate accepts only Vercel
 Git deployment and status records for the exact merge SHA and this project's
-expected HTTPS origin.
+expected HTTPS origin, including its exact generated project domain. Recheck
+the verified base SHA immediately before merge. Read PR commit history fully,
+using GraphQL when the REST response reaches its 250-commit cap. For enforced
+latest-push approval rules, require GitHub's current `reviewDecision` to be
+`APPROVED`. Trust prior issue-delivery comments only when posted by the PR
+author. AI review records must identify the actual independent agent task IDs,
+bind both base and head SHA, and be checked against the two real agent reports.
 
 ## UI browser verification
 

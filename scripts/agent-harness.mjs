@@ -11,7 +11,7 @@ const STATUS_FIELD = "Status";
 const DONE_STATUS = "Done";
 const VERCEL_DEPLOYMENT_BOT = "vercel[bot]";
 const VERCEL_PROJECT_ALIAS = "lamilia-lomi.vercel.app";
-const VERCEL_PROJECT_DEPLOYMENT_HOST = /^lamilia-lomi-[a-z0-9-]+-fantomxs-projects\.vercel\.app$/i;
+const VERCEL_PROJECT_DEPLOYMENT_HOST = /^lamilia-lomi-[a-z0-9]{9}-fantomxs-projects\.vercel\.app$/i;
 
 function isVercelActor(actor) {
   return actor?.login?.toLowerCase() === VERCEL_DEPLOYMENT_BOT ||
@@ -128,13 +128,26 @@ function parseIssueNumber(value) {
 }
 
 export function repositoryFromRemote(remoteUrl) {
-  const match = remoteUrl.match(
-    /github\.com[:/]([^/]+)\/([^/?#]+?)(?:\.git)?(?:[?#].*)?$/i,
-  );
-  if (!match) {
-    throw new Error(`Could not read owner/repository from origin: ${remoteUrl}`);
+  const value = String(remoteUrl || "").trim();
+  const scpRemote = value.match(/^git@github\.com:([^/]+)\/([^/?#]+?)(?:\.git)?$/i);
+  if (scpRemote) return { owner: scpRemote[1], repo: scpRemote[2] };
+
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    url = null;
   }
-  return { owner: match[1], repo: match[2] };
+  if (!url || !["https:", "http:", "ssh:", "git:"].includes(url.protocol) ||
+    url.hostname.toLowerCase() !== "github.com") {
+    throw new Error("Could not parse a GitHub owner/repository from origin.");
+  }
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (segments.length !== 2) throw new Error("Could not parse a GitHub owner/repository from origin.");
+  const owner = segments[0];
+  const repo = segments[1].replace(/\.git$/i, "");
+  if (!owner || !repo) throw new Error("Could not parse a GitHub owner/repository from origin.");
+  return { owner, repo };
 }
 
 function currentRepository() {
@@ -927,7 +940,13 @@ function hasStructuredReviewItems(value) {
   );
 }
 
-export function validateAiReview({ headSha, comments = [], available = true, expectedAuthor = null }) {
+export function validateAiReview({
+  headSha,
+  baseSha = null,
+  comments = [],
+  available = true,
+  expectedAuthor = null,
+}) {
   if (!available || !validSha(headSha)) {
     return {
       status: "BLOCKED",
@@ -949,11 +968,24 @@ export function validateAiReview({ headSha, comments = [], available = true, exp
       details: "No structured AI sub-agent review record is present.",
     };
   }
-  const currentForSha = marked.filter(({ record, error }) =>
+  const currentForHead = marked.filter(({ record, error }) =>
     !error && record && typeof record === "object" && !Array.isArray(record) &&
     typeof record.reviewedSha === "string" && record.reviewedSha.toLowerCase() === headSha.toLowerCase(),
   );
+  const currentForSha = currentForHead.filter(({ record }) =>
+    !validSha(baseSha) || record.reviewedBaseSha?.toLowerCase?.() === baseSha.toLowerCase(),
+  );
   const current = currentForSha.filter(({ comment }) => commentAuthoredBy(comment, expectedAuthor));
+  if (!current.length && currentForHead.length && validSha(baseSha) && !currentForSha.length) {
+    return {
+      status: "BLOCKED",
+      reviewedSha: headSha,
+      reviewers: [],
+      findings: null,
+      unresolvedFindings: null,
+      details: "AI review records were prepared against a different or unrecorded base SHA.",
+    };
+  }
   if (!current.length && currentForSha.length) {
     return {
       status: "BLOCKED",
@@ -1883,6 +1915,8 @@ export function summarizeBranchReviewPolicy({
   reviewsAvailable = true,
   pullRequestAuthor,
   headSha,
+  latestPushReviewDecision = null,
+  latestPushReviewDecisionAvailable = false,
 }) {
   if (!policy?.available || !reviewsAvailable || !validSha(headSha)) {
     return {
@@ -1920,14 +1954,20 @@ export function summarizeBranchReviewPolicy({
     .map(([login]) => login));
   const required = Number(policy.requiredApprovals || 0);
   const enough = approvals.size >= required;
+  const latestPushApproved = policy.requireLastPushApproval !== true ||
+    (latestPushReviewDecisionAvailable && latestPushReviewDecision === "APPROVED");
   return {
-    status: enough ? "PASS" : "BLOCKED",
+    status: enough && latestPushApproved ? "PASS" : "BLOCKED",
     approvalsRequired: required,
     approvalsPresent: approvals.size,
+    latestPushApprovalRequired: policy.requireLastPushApproval === true,
+    latestPushReviewDecision: latestPushReviewDecisionAvailable ? latestPushReviewDecision : null,
     unassessedRules: [],
-    details: required
-      ? approvals.size + " of " + required + " required current-SHA external approval(s) are present."
-      : "No enforced external GitHub approval-count requirement is configured.",
+    details: !latestPushApproved
+      ? "GitHub has not confirmed approval of the most recent reviewable push; the enforced latest-push approval rule remains unsatisfied or unreadable."
+      : required
+        ? approvals.size + " of " + required + " required current-SHA external approval(s) are present."
+        : "No enforced external GitHub approval-count requirement is configured.",
   };
 }
 
@@ -1962,6 +2002,8 @@ export function assessPullRequestVerification({
   checkRuns = [],
   statuses = [],
   mergePolicy = { available: false, requiredChecks: null, requiredApprovals: null, unassessedRules: [] },
+  latestPushReviewDecision = null,
+  latestPushReviewDecisionAvailable = false,
   available = {},
   allowAlreadyMerged = false,
   snapshotStable = true,
@@ -2000,6 +2042,7 @@ export function assessPullRequestVerification({
   const implementationStatus = combineEvidenceStatuses(implementationStatuses);
   const aiReview = validateAiReview({
     headSha,
+    baseSha: pullRequest?.base?.sha || null,
     comments,
     available: available.comments !== false,
     expectedAuthor: pullRequest?.user?.login || null,
@@ -2016,6 +2059,8 @@ export function assessPullRequestVerification({
     reviewsAvailable: available.reviews !== false,
     pullRequestAuthor: pullRequest?.user?.login,
     headSha,
+    latestPushReviewDecision,
+    latestPushReviewDecisionAvailable,
   });
   const observedChecks = summarizeGitHubChecks({
     checkRuns,
@@ -2228,6 +2273,28 @@ export function assessPullRequestVerification({
   };
 }
 
+async function readPullRequestReviewDecision(client, pullRequestNumber) {
+  if (typeof client.graphql !== "function") {
+    throw new Error("GitHub GraphQL review decision is unavailable.");
+  }
+  const data = await client.graphql(`
+    query($owner: String!, $repo: String!, $number: Int!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) { reviewDecision }
+      }
+    }
+  `, { owner: client.owner, repo: client.repo, number: pullRequestNumber });
+  const pullRequest = data.repository?.pullRequest;
+  if (!pullRequest || !Object.prototype.hasOwnProperty.call(pullRequest, "reviewDecision")) {
+    throw new Error("GitHub returned no pull-request review decision.");
+  }
+  const decision = pullRequest.reviewDecision;
+  if (decision !== null && !["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"].includes(decision)) {
+    throw new Error("GitHub returned an unknown pull-request review decision.");
+  }
+  return decision;
+}
+
 export async function verifyPullRequest(client, pullRequestNumber, {
   expectedBase = "main",
   allowMerged = false,
@@ -2302,6 +2369,9 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     details: "GitHub merge policy could not be read.",
     error: mergePolicyResult.error?.message || latestPullRequestResult.error?.message || null,
   };
+  const latestPushReviewDecisionResult = mergePolicy.requireLastPushApproval === true
+    ? await result(readPullRequestReviewDecision(client, number))
+    : { value: null };
   const validateAsMergedDelivery = allowMerged && Boolean(assessmentPullRequest?.merged);
   const verificationPullRequest = validateAsMergedDelivery
     ? {
@@ -2323,6 +2393,8 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     checkRuns: checkRunsResult.value || [],
     statuses: statusesResult.value || [],
     mergePolicy,
+    latestPushReviewDecision: latestPushReviewDecisionResult.value ?? null,
+    latestPushReviewDecisionAvailable: !latestPushReviewDecisionResult.error,
     available: {
       files: !filesResult.error,
       reviews: !reviewsResult.error,
@@ -2566,10 +2638,14 @@ function formatIssueDeliveryComment(record) {
 async function readVerifiedIssueDelivery(client, issueNumber, pullRequest) {
   const mergeSha = pullRequest.merge_commit_sha?.toLowerCase();
   const candidateSha = pullRequest.head?.sha?.toLowerCase();
+  const expectedAuthor = pullRequest.user?.login;
   if (!validSha(mergeSha) || !validSha(candidateSha)) return null;
+  if (typeof expectedAuthor !== "string" || !expectedAuthor.trim()) {
+    throw new Error("The merged PR author could not be verified for prior delivery evidence.");
+  }
   const comments = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/issues/" + issueNumber + "/comments");
   return parseMarkedRecords(comments, ISSUE_DELIVERY_MARKER)
-    .filter(({ record, error }) => !error && record && record.schemaVersion === 1 &&
+    .filter(({ record, error, comment }) => commentAuthoredBy(comment, expectedAuthor) && !error && record && record.schemaVersion === 1 &&
       record.status === "PASS" && record.issueNumber === issueNumber &&
       record.pullRequestNumber === pullRequest.number &&
       record.candidateSha?.toLowerCase?.() === candidateSha &&
@@ -2592,13 +2668,59 @@ export function findClosingIssueReferences(text = "", repository) {
   if (!owner || !repo) throw new Error("A repository in owner/name form is required to match issue references.");
   const escapedRepository = `${owner}/${repo}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const reference = `(?:${escapedRepository}#(\\d+)|(?<![\\w/])#(\\d+)|https?://github\\.com/${escapedRepository}/issues/(\\d+)(?:[?#/.,;:]|$))`;
-  const matcher = new RegExp(`\\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\\s+${reference}(?=$|\\W)`, "gi");
+  const matcher = new RegExp(`\\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\\s*:?[\\t\\r\\n ]+${reference}(?=$|\\W)`, "gi");
   const found = [];
   for (const match of String(text).matchAll(matcher)) {
     const number = Number(match[1] || match[2] || match[3]);
     if (Number.isSafeInteger(number) && !found.includes(number)) found.push(number);
   }
   return found;
+}
+
+async function readPullRequestCommitsViaGraphql(client, pullRequestNumber) {
+  if (typeof client.graphql !== "function") {
+    throw new Error("GitHub REST commit history reached its 250-commit limit and GraphQL is unavailable.");
+  }
+  let after = null;
+  const seenCursors = new Set();
+  const commits = [];
+  for (let page = 0; page < 100; page += 1) {
+    const data = await client.graphql(`
+      query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) {
+            commits(first: 100, after: $after) {
+              nodes { commit { oid message } }
+              pageInfo { hasNextPage endCursor }
+            }
+          }
+        }
+      }
+    `, { owner: client.owner, repo: client.repo, number: pullRequestNumber, after });
+    const connection = data.repository?.pullRequest?.commits;
+    if (!Array.isArray(connection?.nodes) || !connection.pageInfo ||
+      typeof connection.pageInfo.hasNextPage !== "boolean") {
+      throw new Error("GitHub returned incomplete GraphQL pull-request commit history.");
+    }
+    for (const node of connection.nodes) {
+      const sha = node?.commit?.oid;
+      const message = node?.commit?.message;
+      if (!validSha(sha) || typeof message !== "string") {
+        throw new Error("GitHub returned an incomplete GraphQL pull-request commit SHA/message list.");
+      }
+      commits.push({ sha, commit: { message } });
+    }
+    if (!connection.pageInfo.hasNextPage) break;
+    const cursor = connection.pageInfo.endCursor;
+    if (typeof cursor !== "string" || !cursor || seenCursors.has(cursor)) {
+      throw new Error("GitHub returned an invalid GraphQL commit-history pagination cursor.");
+    }
+    seenCursors.add(cursor);
+    after = cursor;
+    if (page === 99) throw new Error("GraphQL pull-request commit-history pagination limit reached.");
+  }
+  if (!commits.length) throw new Error("GitHub returned no GraphQL pull-request commits to validate.");
+  return commits;
 }
 
 async function readPullRequestCommits(client, pullRequestNumber) {
@@ -2608,6 +2730,9 @@ async function readPullRequestCommits(client, pullRequestNumber) {
   );
   if (!Array.isArray(commits) || !commits.length) {
     throw new Error("GitHub returned no pull-request commits to validate.");
+  }
+  if (commits.length >= 250) {
+    return readPullRequestCommitsViaGraphql(client, pullRequestNumber);
   }
   if (commits.some((commit) => !validSha(commit?.sha) || typeof commit?.commit?.message !== "string")) {
     throw new Error("GitHub returned an incomplete pull-request commit SHA/message list.");
@@ -3081,6 +3206,19 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       };
     }
     candidateSha = verification.currentSha;
+    const verifiedBaseSha = validSha(verification.pullRequest?.baseSha)
+      ? verification.pullRequest.baseSha.toLowerCase()
+      : pullRequest.base?.sha?.toLowerCase();
+    if (!validSha(verifiedBaseSha)) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "base-snapshot",
+        merged: false,
+        candidateSha,
+        reasons: ["The exact base SHA used for gate verification could not be verified; no merge was attempted."],
+      };
+    }
     const smokePlan = resolveSmokePlan(verification);
     if (smokePlan.status !== "PASS") {
       return {
@@ -3096,14 +3234,15 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     effectiveSmokeExpectations = smokePlan.expectations;
     pullRequest = await client.request(pullRequestPath);
     if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft ||
-      pullRequest.base?.ref !== "main" || pullRequest.head?.sha !== candidateSha) {
+      pullRequest.base?.ref !== "main" || pullRequest.base?.sha?.toLowerCase() !== verifiedBaseSha ||
+      pullRequest.head?.sha !== candidateSha) {
       return {
         status: "BLOCKED",
         decision: "BLOCKED",
         stage: "pre-merge-snapshot",
         merged: false,
         candidateSha,
-        reasons: ["PR state, draft status, base, or head changed after gate verification; no merge was attempted."],
+        reasons: ["PR state, draft status, base ref/SHA, or head changed after gate verification; no merge was attempted."],
       };
     }
     const freshClosingIssues = findClosingIssueReferences(
