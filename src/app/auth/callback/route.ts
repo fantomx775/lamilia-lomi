@@ -12,7 +12,7 @@ import {
 } from "@/lib/auth-resume";
 import { normalizeLocale } from "@/lib/locale";
 import { createClient } from "@/lib/supabase/server";
-import { clearUnlockIntent } from "@/lib/unlock-intent";
+import { clearUnlockIntent, setUnlockIntent } from "@/lib/unlock-intent";
 
 export const dynamic = "force-dynamic";
 
@@ -100,7 +100,17 @@ export async function GET(request: Request) {
 
   if (intent && !authResumeIntentMatchesUser(intent, user)) {
     await clearAuthResumeIntent();
+    await clearUnlockIntent();
     return failureResponse(locale, intent, callbackReturnTo, "verification_mismatch");
+  }
+
+  if (
+    callbackIntent &&
+    cookieIntent &&
+    !authResumeIntentMatchesUser(cookieIntent, user)
+  ) {
+    await clearAuthResumeIntent();
+    await clearUnlockIntent();
   }
 
   let redemption;
@@ -111,6 +121,7 @@ export async function GET(request: Request) {
     console.error("[auth-callback] Auth resume redemption failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,
     });
+    await persistUnlockIntent(intent);
     return failureResponse(locale, intent, callbackReturnTo);
   }
   await clearAuthResumeIntent();
@@ -127,12 +138,33 @@ export async function GET(request: Request) {
   }
 
   if (redemption && !redemption.ok) {
+    await persistUnlockIntent(intent);
     return successResponse(
       appendQuery(getAuthResumeRedirect(intent, locale), "unlock", redemption.status),
     );
   }
 
   return successResponse(intent ? getAuthResumeRedirect(intent, locale) : callbackReturnTo);
+}
+
+async function persistUnlockIntent(
+  intent: {
+    locale: string;
+    productSlug?: string;
+    returnTo: string;
+    code?: string;
+  } | null,
+) {
+  if (!intent?.productSlug || !intent.code) {
+    return;
+  }
+
+  await setUnlockIntent({
+    locale: intent.locale,
+    productSlug: intent.productSlug,
+    returnTo: intent.returnTo,
+    code: intent.code,
+  });
 }
 
 async function getCallbackUser(supabase: Awaited<ReturnType<typeof createClient>>) {

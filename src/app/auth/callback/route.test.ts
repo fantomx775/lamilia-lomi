@@ -13,6 +13,7 @@ const resume = vi.hoisted(() => ({
   clear: vi.fn(),
   redeem: vi.fn(),
   clearUnlock: vi.fn(),
+  setUnlock: vi.fn(),
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -43,7 +44,10 @@ vi.mock("@/lib/auth-resume", () => ({
   sanitizeInternalReturnTo: (value: string | null, locale: string) =>
     value?.startsWith(`/${locale}/`) ? value : `/${locale}/account`,
 }));
-vi.mock("@/lib/unlock-intent", () => ({ clearUnlockIntent: resume.clearUnlock }));
+vi.mock("@/lib/unlock-intent", () => ({
+  clearUnlockIntent: resume.clearUnlock,
+  setUnlockIntent: resume.setUnlock,
+}));
 
 import { GET } from "./route";
 
@@ -57,6 +61,7 @@ describe("Supabase auth callback", () => {
     resume.clear.mockReset();
     resume.redeem.mockReset();
     resume.clearUnlock.mockReset();
+    resume.setUnlock.mockReset();
     resume.redeem.mockResolvedValue(null);
   });
 
@@ -111,6 +116,78 @@ describe("Supabase auth callback", () => {
     expect(response.headers.get("location")).toBe(
       "https://canonical.lamilialomi.example/en/products/moon-garden-coloring-book?unlocked=1#premium",
     );
+    expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
+  });
+
+  it("retains the premium code on another device when redemption throws", async () => {
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      productSlug: "moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    };
+    auth.verifyOtp.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "new-device-user",
+          email: "reader@example.com",
+          email_confirmed_at: "2026-08-16T10:00:00.000Z",
+        },
+      },
+    });
+    resume.redeem.mockRejectedValue(new Error("temporary redemption failure"));
+
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?token_hash=actual-token-hash&type=email&locale=en&resume=opaque-resume",
+      ),
+    );
+
+    expect(resume.setUnlock).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    });
+    expect(response.headers.get("location")).toContain("/en/login?error=verification_failed");
+    expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
+  });
+
+  it("retains the premium code on another device when redemption returns a failure", async () => {
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      productSlug: "moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    };
+    auth.verifyOtp.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "new-device-user",
+          email: "reader@example.com",
+          email_confirmed_at: "2026-08-16T10:00:00.000Z",
+        },
+      },
+    });
+    resume.redeem.mockResolvedValue({ ok: false, status: "invalid_code" });
+
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?token_hash=actual-token-hash&type=email&locale=en&resume=opaque-resume",
+      ),
+    );
+
+    expect(resume.setUnlock).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    });
+    expect(response.headers.get("location")).toContain("unlock=invalid_code");
     expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
   });
 
@@ -275,7 +352,7 @@ describe("Supabase auth callback", () => {
     expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
   });
 
-  it("uses the clicked callback intent when another account has a stale resume cookie", async () => {
+  it("uses the clicked callback intent and clears another account's stale unlock state", async () => {
     resume.intent = {
       locale: "en",
       userId: "stale-cookie-user",
@@ -300,7 +377,7 @@ describe("Supabase auth callback", () => {
         },
       },
     });
-    resume.redeem.mockResolvedValue({ ok: true, status: "success" });
+    resume.redeem.mockResolvedValue({ ok: false, status: "invalid_code" });
 
     const response = await GET(
       new Request(
@@ -309,8 +386,15 @@ describe("Supabase auth callback", () => {
     );
 
     expect(resume.redeem).toHaveBeenCalledWith(resume.callbackIntent);
+    expect(resume.clearUnlock).toHaveBeenCalledTimes(1);
+    expect(resume.setUnlock).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    });
     expect(response.headers.get("location")).toContain(
-      "/en/products/moon-garden-coloring-book?unlocked=1#premium",
+      "/en/products/moon-garden-coloring-book?unlock=invalid_code#premium",
     );
     expect(response.headers.get("location")).not.toContain("OTHER-CODE");
   });
@@ -344,7 +428,7 @@ describe("Supabase auth callback", () => {
     expect(response.headers.get("location")).toContain("error=verification_failed");
   });
 
-  it("rejects a successful callback for a different user", async () => {
+  it("rejects a callback for a different user and clears stale unlock state", async () => {
     resume.intent = {
       locale: "en",
       userId: "expected-user",
@@ -361,6 +445,8 @@ describe("Supabase auth callback", () => {
 
     expect(resume.redeem).not.toHaveBeenCalled();
     expect(resume.clear).toHaveBeenCalledTimes(1);
+    expect(resume.clearUnlock).toHaveBeenCalledTimes(1);
+    expect(resume.setUnlock).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toContain("error=verification_mismatch");
   });
 
