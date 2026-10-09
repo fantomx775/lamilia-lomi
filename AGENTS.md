@@ -196,7 +196,10 @@ Git deployment and status records for the exact merge SHA and this project's
 exact generated deployment hostname. The stable project alias is mutable and
 cannot identify which deployment answered a smoke request. Recheck the base
 SHA in the final PR read immediately before merge; GitHub's merge API pins the
-head SHA but has no base-SHA compare-and-swap condition. Read PR commit history fully,
+head SHA but has no base-SHA compare-and-swap condition. Use a merge commit so
+its first parent records the exact reviewed base SHA, and use that immutable
+parent when validating a merged-delivery retry after `main` advances. Read PR
+commit history fully,
 using GraphQL when the REST response reaches its 250-commit cap. For enforced
 latest-push approval rules, require GitHub's current `reviewDecision` to be
 `APPROVED`. Trust prior issue-delivery comments only when posted by the PR

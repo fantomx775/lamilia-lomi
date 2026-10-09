@@ -1737,6 +1737,7 @@ async function readGitHubMergePolicy(client, baseRef) {
       available: false,
       requiredChecks: null,
       requiredApprovals: null,
+      strictRequiredChecks: false,
       unassessedRules: [],
       details: "The PR base branch is unavailable.",
     };
@@ -1758,6 +1759,7 @@ async function readGitHubMergePolicy(client, baseRef) {
       available: false,
       requiredChecks: null,
       requiredApprovals: null,
+      strictRequiredChecks: false,
       unassessedRules: [],
       details: "GitHub branch protection or effective branch rules could not be read.",
       error: protectionResult.error?.message || rulesResult.error?.message || "Branch rules response was malformed.",
@@ -1779,6 +1781,7 @@ async function readGitHubMergePolicy(client, baseRef) {
   const rawRequiredApprovals = protection.required_pull_request_reviews?.required_approving_review_count ?? 0;
   let requiredApprovals = Number(rawRequiredApprovals);
   const unassessedRules = [];
+  let strictRequiredChecks = false;
   let dismissStaleReviews = protection.required_pull_request_reviews?.dismiss_stale_reviews === true;
   let requireLastPushApproval = protection.required_pull_request_reviews?.require_last_push_approval === true;
   if (!Number.isSafeInteger(requiredApprovals) || requiredApprovals < 0) {
@@ -1809,7 +1812,7 @@ async function readGitHubMergePolicy(client, baseRef) {
     unassessedRules.push("classic required-status-check entries are malformed");
   }
   if (requiredStatusChecks?.strict && requiredChecks.length) {
-    unassessedRules.push("classic branch protection requires the PR branch to be up to date with the base");
+    strictRequiredChecks = true;
   }
   if (protection.required_signatures?.enabled) {
     unassessedRules.push("classic branch protection requires signed commits");
@@ -1851,7 +1854,7 @@ async function readGitHubMergePolicy(client, baseRef) {
           integration_id: check.integration_id ?? null,
         })));
         if (parameters.strict_required_status_checks_policy && validChecks.length) {
-          unassessedRules.push("ruleset requires the PR branch to be up to date with the base");
+          strictRequiredChecks = true;
         }
       }
     } else if (rule.type === "pull_request") {
@@ -1894,6 +1897,7 @@ async function readGitHubMergePolicy(client, baseRef) {
     available: true,
     requiredChecks: uniqueRequiredChecks,
     requiredApprovals,
+    strictRequiredChecks,
     dismissStaleReviews,
     requireLastPushApproval,
     unassessedRules: [...new Set(unassessedRules)],
@@ -1913,6 +1917,7 @@ export function summarizeBranchReviewPolicy({
   reviewsAvailable = true,
   pullRequestAuthor,
   headSha,
+  pullRequestMergeableState = null,
   latestPushReviewDecision = null,
   latestPushReviewDecisionAvailable = false,
 }) {
@@ -1932,6 +1937,19 @@ export function summarizeBranchReviewPolicy({
       approvalsPresent: null,
       unassessedRules: policy.unassessedRules,
       details: "Additional mandatory branch rules are not evaluated: " + policy.unassessedRules.join("; ") + ".",
+    };
+  }
+  if (policy.strictRequiredChecks === true &&
+    !["clean", "unstable"].includes(String(pullRequestMergeableState || "").toLowerCase())) {
+    const behind = String(pullRequestMergeableState || "").toLowerCase() === "behind";
+    return {
+      status: "BLOCKED",
+      approvalsRequired: policy.requiredApprovals,
+      approvalsPresent: null,
+      unassessedRules: [],
+      details: behind
+        ? "GitHub reports that the PR branch is behind its base and the enforced up-to-date requirement is not satisfied."
+        : "The enforced up-to-date requirement cannot be verified from GitHub's current PR merge state.",
     };
   }
   const latestReviewByUser = new Map();
@@ -2057,6 +2075,7 @@ export function assessPullRequestVerification({
     reviewsAvailable: available.reviews !== false,
     pullRequestAuthor: pullRequest?.user?.login,
     headSha,
+    pullRequestMergeableState: pullRequest?.mergeable_state || null,
     latestPushReviewDecision,
     latestPushReviewDecisionAvailable,
   });
@@ -2349,6 +2368,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
   ]);
   const latestPullRequestResult = await result(client.request(pullRequestPath));
   const latestPullRequest = latestPullRequestResult.value;
+  const isMergedRecovery = allowMerged && Boolean(pullRequest?.merged) && Boolean(latestPullRequest?.merged);
   const snapshotStable = Boolean(
     latestPullRequest &&
     latestPullRequest.head?.sha === pullRequest.head?.sha &&
@@ -2356,7 +2376,9 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     Boolean(latestPullRequest.merged) === Boolean(pullRequest.merged) &&
     Boolean(latestPullRequest.draft) === Boolean(pullRequest.draft) &&
     latestPullRequest.base?.ref === pullRequest.base?.ref &&
-    latestPullRequest.base?.sha === pullRequest.base?.sha,
+    (isMergedRecovery
+      ? latestPullRequest.merge_commit_sha?.toLowerCase() === pullRequest.merge_commit_sha?.toLowerCase()
+      : latestPullRequest.base?.sha === pullRequest.base?.sha),
   );
   const assessmentPullRequest = latestPullRequest || pullRequest;
   const mergePolicy = mergePolicyResult.value || {
@@ -2371,9 +2393,29 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     ? await result(readPullRequestReviewDecision(client, number))
     : { value: null };
   const validateAsMergedDelivery = allowMerged && Boolean(assessmentPullRequest?.merged);
+  let mergedBaseSha = null;
+  if (validateAsMergedDelivery && validSha(assessmentPullRequest.merge_commit_sha)) {
+    const mergeCommitResult = await result(client.request(
+      "/repos/" + client.owner + "/" + client.repo + "/commits/" + assessmentPullRequest.merge_commit_sha,
+    ));
+    const parents = mergeCommitResult.value?.parents;
+    if (Array.isArray(parents) && parents.length >= 2 && validSha(parents[0]?.sha)) {
+      mergedBaseSha = parents[0].sha.toLowerCase();
+    }
+  }
+  if (validateAsMergedDelivery && !validSha(mergedBaseSha)) {
+    return {
+      decision: "BLOCKED",
+      currentSha: headSha || null,
+      pullRequest: assessmentPullRequest,
+      mergeBase: { status: "BLOCKED", sha: null },
+      reasons: ["The merged PR's reviewed base SHA could not be verified from the immutable merge commit's first parent."],
+    };
+  }
   const verificationPullRequest = validateAsMergedDelivery
     ? {
         ...assessmentPullRequest,
+        base: { ...assessmentPullRequest.base, sha: mergedBaseSha },
         state: "open",
         merged: false,
         mergeable: true,
@@ -3338,7 +3380,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     try {
       mergeResult = await client.request(pullRequestPath + "/merge", {
         method: "PUT",
-        body: JSON.stringify({ sha: candidateSha }),
+        body: JSON.stringify({ sha: candidateSha, merge_method: "merge" }),
       });
     } catch (error) {
       return {

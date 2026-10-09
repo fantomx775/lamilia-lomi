@@ -142,7 +142,8 @@ to `Ready`.
     the issue before Production is checked. Unreadable or incomplete PR commit
     history fails closed; rewrite or squash closing messages before merging.
     The command reruns the gate, merges with the verified head SHA through
-    GitHub's normal merge API, confirms the merge commit, sets the issue to
+    GitHub's normal merge API using a merge commit, confirms the merge commit,
+    sets the issue to
     `Blocked` during Production verification, waits for its GitHub Production
     deployment, and runs HTTPS smoke paths. The default `/` is a health check.
     Application-flow changes require a current-SHA `productionSmokePlan` that
@@ -166,7 +167,9 @@ to `Ready`.
     missing history fails closed. It reopens only issues GitHub proves this
     exact PR merge closed, holds each at `Blocked` through Production, and
     updates each only after verification. Independently closed issues remain
-    untouched. Do not pass an unfinished parent epic as the issue to close. If
+    untouched. The merge commit's first parent preserves the exact reviewed
+    base SHA for recovery after `main` advances. Do not pass an unfinished
+    parent epic as the issue to close. If
     a new agent resumes, rerun inspect and continue from the existing branch.
 
 ## Durable review and verification records

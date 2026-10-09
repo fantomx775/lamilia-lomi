@@ -161,6 +161,7 @@ function cleanMergePolicy(overrides = {}) {
     available: true,
     requiredChecks: [],
     requiredApprovals: 0,
+    strictRequiredChecks: false,
     dismissStaleReviews: false,
     requireLastPushApproval: false,
     unassessedRules: [],
@@ -236,6 +237,7 @@ function createDeliveryClient({
       if (path === "/repos/example/repo/pulls/52/merge" && method === "PUT") {
         const body = JSON.parse(options.body);
         assert.equal(body.sha, CURRENT_SHA);
+        assert.equal(body.merge_method, "merge");
         merged = true;
         if (bodyAfterMerge !== null) {
           mergedBody = bodyAfterMerge;
@@ -2034,17 +2036,37 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
     merged: true,
     merge_commit_sha: "d".repeat(40),
     mergeable: null,
+    base: { ref: "main", sha: "e".repeat(40) },
   });
   const mergedClient = {
     ...client,
-    request: async (path) => path === "/repos/example/repo/pulls/52"
-      ? mergedPullRequest
-      : client.request(path),
+    request: async (path) => {
+      if (path === "/repos/example/repo/pulls/52") return mergedPullRequest;
+      if (path.endsWith("/commits/" + "d".repeat(40))) {
+        return { sha: "d".repeat(40), parents: [{ sha: CURRENT_BASE_SHA }, { sha: CURRENT_SHA }] };
+      }
+      return client.request(path);
+    },
   };
   const verifiedMerge = await verifyPullRequest(mergedClient, 52, { allowMerged: true });
   assert.equal(verifiedMerge.decision, "VERIFIED_MERGE");
   assert.equal(verifiedMerge.pullRequest.merged, true);
+  assert.equal(verifiedMerge.pullRequest.baseSha, CURRENT_BASE_SHA);
   assert.equal(verifiedMerge.currentSha, CURRENT_SHA);
+
+  const mergedWithWrongParentClient = {
+    ...mergedClient,
+    request: async (path) => {
+      if (path === "/repos/example/repo/pulls/52") return mergedPullRequest;
+      if (path.endsWith("/commits/" + "d".repeat(40))) {
+        return { sha: "d".repeat(40), parents: [{ sha: "f".repeat(40) }, { sha: CURRENT_SHA }] };
+      }
+      return client.request(path);
+    },
+  };
+  const wrongMergedBase = await verifyPullRequest(mergedWithWrongParentClient, 52, { allowMerged: true });
+  assert.equal(wrongMergedBase.decision, "BLOCKED");
+  assert.match(wrongMergedBase.aiReview.details, /different or unrecorded base SHA/);
 
   const closingPrClient = {
     ...client,
@@ -2140,14 +2162,35 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
 
   const strictPolicyClient = {
     ...client,
-    request: async (path) => path.endsWith("/branches/main/protection")
-      ? { required_status_checks: { contexts: ["build"], checks: [], strict: true } }
-      : client.request(path),
+    request: async (path) => path === "/repos/example/repo/pulls/52"
+      ? cleanPullRequest({ mergeable_state: "behind" })
+      : path.endsWith("/branches/main/protection")
+        ? { required_status_checks: { contexts: ["build"], checks: [], strict: true } }
+        : client.request(path),
   };
   const strictPolicy = await verifyPullRequest(strictPolicyClient, 52);
   assert.equal(strictPolicy.decision, "BLOCKED");
   assert.equal(strictPolicy.mergeReadiness.status, "BLOCKED");
-  assert.ok(strictPolicy.checks.branchReviewPolicy.unassessedRules.some((rule) => /up to date/.test(rule)));
+  assert.match(strictPolicy.checks.branchReviewPolicy.details, /behind its base/);
+
+  const strictPolicySatisfiedClient = {
+    ...strictPolicyClient,
+    request: async (path) => path === "/repos/example/repo/pulls/52"
+      ? cleanPullRequest({ mergeable_state: "clean" })
+      : path.endsWith("/branches/main/protection")
+        ? { required_status_checks: { contexts: ["build"], checks: [], strict: true } }
+        : path.endsWith("/check-runs?per_page=100&page=1")
+          ? { total_count: 1, check_runs: [{
+              name: "build",
+              head_sha: CURRENT_SHA,
+              status: "completed",
+              conclusion: "success",
+            }] }
+          : client.request(path),
+  };
+  const strictPolicySatisfied = await verifyPullRequest(strictPolicySatisfiedClient, 52);
+  assert.equal(strictPolicySatisfied.decision, "READY_FOR_MERGE", JSON.stringify(strictPolicySatisfied));
+  assert.equal(strictPolicySatisfied.checks.branchReviewPolicy.status, "PASS");
 
   const oldApproval = cleanGitHubReview({
     headSha: "b".repeat(40),
