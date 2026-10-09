@@ -37,6 +37,11 @@ printed. `inspect` needs Issues, Projects, Pull requests, and Contents read
 access to retrieve the issue and comments, board card, linked PRs, review
 records, changed files, CI checks, and branch names. `add`, `status`, and
 `field` also need Projects write access. `comment` needs Issues write access.
+`deliver-pr` and `resume-pr` additionally need Contents write access to create
+Git objects and create or advance the per-PR lease ref. Branch rules must allow
+the dedicated `agent-harness-locks/*` ref to be created and advanced; missing
+write access or a rejected ref update blocks delivery before merge or other
+delivery side effects.
 REST lookups stop after 1,000 records and report incomplete results instead of
 silently treating a partial history as complete. Missing essential dependency
 data blocks readiness. Missing comments warn; missing PR/branch history blocks

@@ -2942,18 +2942,107 @@ export async function acquireDeliveryLease(client, pullRequestNumber, {
   return { status: "BLOCKED", details: "Another worker acquired the delivery lease, or GitHub could not create it after bounded retries." };
 }
 
+async function readDeliveryLease(client, lease) {
+  const path = "/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/" + lease.ref.replace(/^refs\/heads\//, "");
+  const current = await client.request(path);
+  if (!validSha(current?.object?.sha)) throw new Error("The delivery lease ref is unavailable.");
+  const commit = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/commits/" + current.object.sha);
+  const tree = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/trees/" + commit.tree.sha + "?recursive=1");
+  const entry = tree.tree?.find((item) => item.path === "lease.json" && item.type === "blob");
+  if (!entry) throw new Error("The delivery lease has no readable metadata.");
+  const blob = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/blobs/" + entry.sha);
+  const payload = JSON.parse(Buffer.from(blob.content, "base64").toString("utf8"));
+  return { path, currentSha: current.object.sha, commit, payload };
+}
+
+async function advanceDeliveryLease(client, lease, payload, baseTreeSha) {
+  const pullRequestNumber = lease.pullRequestNumber || Number(lease.ref.match(/pr-(\d+)$/)?.[1]);
+  const apiPath = lease.apiPath || "/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/" + lease.ref.replace(/^refs\/heads\//, "");
+  const blob = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/blobs", {
+    method: "POST",
+    body: JSON.stringify({ content: JSON.stringify(payload), encoding: "utf-8" }),
+  });
+  const tree = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/trees", {
+    method: "POST",
+    body: JSON.stringify({
+      base_tree: baseTreeSha,
+      tree: [{ path: "lease.json", mode: "100644", type: "blob", sha: blob.sha }],
+    }),
+  });
+  const commit = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/commits", {
+    method: "POST",
+    body: JSON.stringify({
+      message: "Agent Harness delivery lease for PR #" + pullRequestNumber,
+      tree: tree.sha,
+      parents: [lease.sha],
+    }),
+  });
+  await client.request(apiPath, {
+    method: "PATCH",
+    body: JSON.stringify({ sha: commit.sha, force: false }),
+  });
+  const confirmed = await client.request(apiPath);
+  if (confirmed?.object?.sha !== commit.sha) throw new Error("The delivery lease changed during its update.");
+  lease.sha = commit.sha;
+  return lease;
+}
+
+export async function renewDeliveryLease(client, lease, {
+  leaseMs = 30 * 60 * 1000,
+  now = Date.now,
+} = {}) {
+  if (lease?.status !== "PASS" || !validSha(lease.sha)) {
+    return { status: "BLOCKED", details: "No active owned delivery lease was supplied." };
+  }
+  try {
+    const current = await readDeliveryLease(client, lease);
+    const expiresAt = Date.parse(current.payload?.expiresAt || "");
+    if (current.payload?.nonce !== lease.nonce || !Number.isFinite(expiresAt) || expiresAt <= now()) {
+      return { status: "BLOCKED", details: "The delivery lease expired or is now owned by another worker." };
+    }
+    lease.sha = current.currentSha;
+    await advanceDeliveryLease(client, lease, {
+      ...current.payload,
+      expiresAt: new Date(now() + leaseMs).toISOString(),
+      renewedAt: new Date(now()).toISOString(),
+      parentSha: current.currentSha,
+    }, current.commit.tree.sha);
+    return { status: "PASS", details: "The owned delivery lease was renewed." };
+  } catch (error) {
+    return { status: "BLOCKED", details: "The delivery lease could not be renewed: " + error.message };
+  }
+}
+
+export async function assertDeliveryLease(client, lease, { now = Date.now } = {}) {
+  if (lease?.status !== "PASS" || !validSha(lease.sha)) {
+    throw new Error("No active owned delivery lease is available; side effect blocked.");
+  }
+  const current = await readDeliveryLease(client, lease);
+  const expiresAt = Date.parse(current.payload?.expiresAt || "");
+  if (current.payload?.nonce !== lease.nonce || !Number.isFinite(expiresAt) || expiresAt <= now()) {
+    throw new Error("The delivery lease expired or changed owners; side effect blocked.");
+  }
+  lease.sha = current.currentSha;
+  return true;
+}
+
 export async function releaseDeliveryLease(client, lease) {
   if (lease?.status !== "PASS" || typeof lease.ref !== "string" || !validSha(lease.sha)) {
     return { status: "NOT RUN", details: "No owned delivery lease was supplied." };
   }
-  const path = "/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/" + lease.ref.replace(/^refs\/heads\//, "");
   try {
-    const current = await client.request(path);
-    if (current?.object?.sha !== lease.sha) {
+    const current = await readDeliveryLease(client, lease);
+    if (current.payload?.nonce !== lease.nonce) {
       return { status: "SKIPPED", details: "The lease now belongs to another worker and was left untouched." };
     }
-    await client.request(path, { method: "DELETE" });
-    return { status: "PASS", details: "The owned delivery lease was released." };
+    lease.sha = current.currentSha;
+    await advanceDeliveryLease(client, lease, {
+      ...current.payload,
+      expiresAt: new Date().toISOString(),
+      releasedAt: new Date().toISOString(),
+      parentSha: current.currentSha,
+    }, current.commit.tree.sha);
+    return { status: "PASS", details: "The owned delivery lease was safely expired with a fast-forward ref update." };
   } catch (error) {
     return { status: "BLOCKED", details: "The owned delivery lease could not be released: " + error.message };
   }
@@ -2974,10 +3063,51 @@ export async function runWithDeliveryLease(client, pullRequestNumber, operation,
       reasons: [lease.details || "Another worker is processing this PR."],
     };
   }
+  lease.apiPath = "/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/" + lease.ref.replace(/^refs\/heads\//, "");
+  lease.pullRequestNumber = parseIssueNumber(pullRequestNumber);
+  const leaseMs = 30 * 60 * 1000;
+  let leaseFailure = null;
+  let renewalActive = false;
+  const renew = async () => {
+    if (renewalActive || leaseFailure) return;
+    renewalActive = true;
+    try {
+      const renewed = await renewDeliveryLease(client, lease, { leaseMs });
+      if (renewed.status !== "PASS") leaseFailure = renewed.details;
+    } finally {
+      renewalActive = false;
+    }
+  };
+  const renewalTimer = setInterval(renew, Math.max(1_000, Math.floor(leaseMs / 3)));
+  const assertOwned = async () => {
+    if (leaseFailure) throw new Error(leaseFailure + "; side effect blocked.");
+    const owned = await assertDeliveryLease(client, lease);
+    if (leaseFailure) throw new Error(leaseFailure + "; side effect blocked.");
+    return owned;
+  };
+  const guardedClient = Object.create(client);
+  guardedClient.request = async (path, options = {}) => {
+    const method = (options.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") await assertOwned();
+    return client.request(path, options);
+  };
+  if (typeof client.graphql === "function") {
+    guardedClient.graphql = async (...args) => {
+      await assertOwned();
+      return client.graphql(...args);
+    };
+  }
   let result;
   try {
-    result = await operation();
+    result = await operation(guardedClient, { assertOwned, lease });
+    if (leaseFailure && result) {
+      result.status = "BLOCKED";
+      result.decision = "BLOCKED";
+      result.completed = false;
+      result.reasons = [...(result.reasons || []), leaseFailure];
+    }
   } finally {
+    clearInterval(renewalTimer);
     const released = await release(client, lease);
     if (result && released.status !== "PASS") result.leaseReleaseWarning = released.details;
   }
@@ -4527,7 +4657,7 @@ async function main(args) {
         checkpointReadError = error.message;
       }
     }
-    const delivery = await runWithDeliveryLease(client, issueNumber, () => deliverPullRequest(client, issueNumber, {
+    const delivery = await runWithDeliveryLease(client, issueNumber, (guardedClient) => deliverPullRequest(guardedClient, issueNumber, {
       issueNumber: trackedIssueNumber,
     }));
     if (command === "resume-pr") {
