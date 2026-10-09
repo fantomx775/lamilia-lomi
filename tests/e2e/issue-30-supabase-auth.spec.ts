@@ -30,6 +30,10 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       process.env.RUN_ISSUE_30_SUPABASE_E2E !== "1",
       "Run only against the explicitly configured isolated local Supabase stack.",
     );
+    test.skip(
+      testInfo.project.name !== "chromium",
+      "The local Supabase E2E mutates shared fixtures and runs only once in Chromium.",
+    );
 
     const mailpitUrl = requireLoopbackUrl(
       process.env.ISSUE_30_MAILPIT_URL ?? "http://127.0.0.1:56324",
