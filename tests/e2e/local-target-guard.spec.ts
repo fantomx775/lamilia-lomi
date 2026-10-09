@@ -1,8 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-import { isLocalDemoAppTarget } from "./local-target";
+import { isLocalDemoAppTarget, isLoopbackPlaywrightTarget } from "./local-target";
 
 test("the running local app proves demo mode before demo-backed E2E proceeds", async ({ page }, testInfo) => {
+  test.skip(
+    !isLoopbackPlaywrightTarget(testInfo.project.use.baseURL),
+    "The local backend proof runs only against a loopback Playwright target.",
+  );
   expect(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)).toBe(true);
 });
 
