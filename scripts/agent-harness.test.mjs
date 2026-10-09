@@ -4,6 +4,7 @@ import {
   buildReleaseRequirements,
   buildReadiness,
   assessPullRequestVerification,
+  acquireDeliveryLease,
   closesIssueReference,
   deliverPullRequest,
   findClosingIssueReferences,
@@ -17,10 +18,14 @@ import {
   projectItemMatchesIssue,
   parseWorktreeBranches,
   referencesIssue,
+  readLatestResumeCheckpoint,
+  releaseDeliveryLease,
+  resolveConfirmedMerge,
   repositoryFromRemote,
   summarizeGitHubChecks,
   summarizeRequiredGitHubChecks,
   runProductionSmoke,
+  runWithDeliveryLease,
   statusTransitionBlockers,
   validateAiReview,
   validateBrowserVerification,
@@ -186,10 +191,12 @@ function createDeliveryClient({
   previouslyVerifiedDeliveryAuthor = "author",
   baseShaOnPreMerge = null,
   mergeParentSha = CURRENT_BASE_SHA,
+  omitRestMergeSha = false,
 } = {}) {
   const mergeSha = "c".repeat(40);
   const issueId = "I_issue-7";
   const calls = [];
+  const pullRequestComments = [];
   let merged = alreadyMerged;
   let pullRequestReads = 0;
   let mergedBody = pullRequestBody;
@@ -229,7 +236,7 @@ function createDeliveryClient({
           ? cleanPullRequest({
               state: "closed",
               merged: true,
-              merge_commit_sha: mergeSha,
+              merge_commit_sha: omitRestMergeSha ? null : mergeSha,
               merged_at: "2026-10-08T12:00:00Z",
               body: mergedBody,
             })
@@ -271,10 +278,17 @@ function createDeliveryClient({
         if (issueCommentsReadError) throw new Error("GitHub issue comments unavailable");
         return issueComments;
       }
-      if (method === "POST" && (
-        path.startsWith("/repos/example/repo/issues/52/comments") ||
-        path.startsWith("/repos/example/repo/issues/7/comments")
-      )) {
+      if (path === "/repos/example/repo/issues/52/comments" && method === "POST") {
+        const body = JSON.parse(options.body).body;
+        pullRequestComments.push({
+          user: { login: "author" },
+          created_at: new Date(Date.now() + pullRequestComments.length * 1000).toISOString(),
+          body,
+        });
+        return { id: calls.length, html_url: "https://github.com/example/repo/pull/52#issuecomment-" + calls.length };
+      }
+      if (path.startsWith("/repos/example/repo/issues/52/comments")) return pullRequestComments;
+      if (method === "POST" && path.startsWith("/repos/example/repo/issues/7/comments")) {
         return { id: calls.length, html_url: "https://github.com/example/repo/issues/52#issuecomment-" + calls.length };
       }
       if (path.startsWith("/repos/example/repo/pulls/52/files")) return [];
@@ -289,6 +303,17 @@ function createDeliveryClient({
     },
     graphql: async (query, variables = {}) => {
       calls.push({ path: "graphql", method: "POST", body: query });
+      if (query.includes("headRefOid") && query.includes("mergeCommit")) {
+        return {
+          repository: {
+            pullRequest: {
+              merged,
+              headRefOid: CURRENT_SHA,
+              mergeCommit: { oid: mergeSha },
+            },
+          },
+        };
+      }
       if (query.includes("timelineItems")) {
         const timelineItems = [];
         if (closedByPullRequest) {
@@ -403,6 +428,9 @@ function createMultiIssueMergedDeliveryClient({
           merged_at: "2026-10-08T12:00:00Z",
           body: pullRequestBody,
         });
+      }
+      if (path === "/repos/example/repo/commits/" + mergeSha) {
+        return { sha: mergeSha, parents: [{ sha: CURRENT_BASE_SHA }, { sha: CURRENT_SHA }] };
       }
       if (path.startsWith("/repos/example/repo/pulls/52/commits")) {
         return pullRequestCommitMessages.map((message, index) => ({
@@ -592,7 +620,7 @@ test("does not treat a foreign repository issue reference as a local PR link", (
 test("finds existing branches by issue number or meaningful title terms", () => {
   assert.deepEqual(
     findBranchCandidates(
-      ["main", "codex/issue-29-layout", "codex/catalog-layout", "codex/auth-polish"],
+      ["main", "codex/issue-29-layout", "codex/catalog-layout", "codex/auth-polish", "agent-harness-locks/pr-29"],
       { number: 29, title: "Configurable books-per-row catalog layout" },
     ),
     ["codex/issue-29-layout", "codex/catalog-layout"],
@@ -2767,6 +2795,342 @@ test("blocks merge when the base SHA changes after verification", async () => {
   assert.equal(result.decision, "BLOCKED");
   assert.equal(result.stage, "final-merge-snapshot");
   assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
+});
+
+test("recovers a successful merge when REST omits merge_commit_sha and never merges twice", async () => {
+  const fixture = createDeliveryClient({ omitRestMergeSha: true });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({
+      decision: "READY_FOR_MERGE",
+      currentSha: CURRENT_SHA,
+      pullRequest: { baseSha: CURRENT_BASE_SHA },
+      reasons: [],
+    }),
+    waitForDeployment: async (_client, mergeSha) => ({
+      status: "PASS",
+      deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
+      details: "Exact-SHA deployment passed.",
+    }),
+    smoke: async () => ({ status: "PASS", checks: [], details: "Production smoke passed." }),
+  });
+
+  const mergeCalls = fixture.calls.filter(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT");
+  const checkpoint = fixture.calls.find(({ path, method, body }) =>
+    path === "/repos/example/repo/issues/52/comments" && method === "POST" && body.includes("agent-harness-resume:v1"),
+  );
+  assert.equal(result.mergeSha, fixture.mergeSha);
+  assert.equal(result.decision, "DELIVERED");
+  assert.equal(mergeCalls.length, 1);
+  assert.ok(checkpoint);
+  const checkpointText = JSON.parse(checkpoint.body).body;
+  assert.match(checkpointText, /"baseSha": "b{40}"/);
+  assert.match(checkpointText, /"stage": "merge-request-ready"/);
+  assert.ok(fixture.calls.some(({ path }) => path === "graphql"));
+});
+
+test("merge recovery retries transient reads and accepts squash merges after exact head confirmation", async () => {
+  const mergeSha = "c".repeat(40);
+  let pullReads = 0;
+  let graphqlReads = 0;
+  const delays = [];
+  const result = await resolveConfirmedMerge({
+    owner: "example",
+    repo: "repo",
+    request: async (path) => {
+      if (path === "/repos/example/repo/pulls/52") {
+        pullReads += 1;
+        if (pullReads === 1) throw new Error("temporary API timeout");
+        return cleanPullRequest({
+          merged: true,
+          merge_commit_sha: null,
+          head: { sha: CURRENT_SHA },
+        });
+      }
+      if (path === "/repos/example/repo/commits/" + mergeSha) {
+        return { sha: mergeSha, parents: [{ sha: CURRENT_BASE_SHA }] };
+      }
+      throw new Error("Unexpected request: " + path);
+    },
+    graphql: async () => {
+      graphqlReads += 1;
+      return {
+        repository: {
+          pullRequest: { merged: true, headRefOid: CURRENT_SHA, mergeCommit: { oid: mergeSha } },
+        },
+      };
+    },
+  }, 52, CURRENT_SHA, {
+    attempts: 3,
+    sleep: async (milliseconds) => { delays.push(milliseconds); },
+  });
+
+  assert.equal(result.status, "PASS");
+  assert.equal(result.mergeSha, mergeSha);
+  assert.equal(pullReads, 2);
+  assert.equal(graphqlReads, 1);
+  assert.deepEqual(delays, [250]);
+});
+
+test("a later invocation resumes an interrupted post-merge delivery without merging again", async () => {
+  const fixture = createDeliveryClient();
+  const verify = async (_client, _number, { allowMerged } = {}) => allowMerged
+    ? {
+        decision: "VERIFIED_MERGE",
+        currentSha: CURRENT_SHA,
+        pullRequest: { baseSha: CURRENT_BASE_SHA },
+        mergeBase: { status: "PASS", reviewedBaseShaVerified: true, reviewedBaseSha: CURRENT_BASE_SHA },
+        reasons: [],
+      }
+    : {
+        decision: "READY_FOR_MERGE",
+        currentSha: CURRENT_SHA,
+        pullRequest: { baseSha: CURRENT_BASE_SHA },
+        reasons: [],
+      };
+  const interrupted = await deliverPullRequest(fixture.client, 52, {
+    verify,
+    waitForDeployment: async () => ({ status: "BLOCKED", details: "Simulated process interruption before Production verification." }),
+  });
+  assert.equal(interrupted.decision, "BLOCKED", JSON.stringify(interrupted));
+  assert.equal(interrupted.completed, false);
+
+  const checkpoint = await readLatestResumeCheckpoint(fixture.client, 52);
+  assert.equal(checkpoint.stage, "production-deployment-blocked");
+  assert.equal(checkpoint.headSha, CURRENT_SHA);
+  assert.equal(checkpoint.baseSha, CURRENT_BASE_SHA);
+  assert.deepEqual(checkpoint.remainingStages, [
+    "production-deployment",
+    "production-smoke",
+    "post-deployment-migration",
+    "issue-completion",
+  ]);
+
+  const resumed = await deliverPullRequest(fixture.client, 52, {
+    verify,
+    waitForDeployment: async (_client, mergeSha) => ({
+      status: "PASS",
+      deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
+      details: "Exact-SHA deployment passed after recovery.",
+    }),
+    smoke: async () => ({ status: "PASS", checks: [], details: "Recovered Production smoke passed." }),
+  });
+  assert.equal(resumed.decision, "DELIVERED");
+  assert.equal(resumed.completed, true);
+  assert.equal(fixture.calls.filter(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT").length, 1);
+  const completedCheckpoint = await readLatestResumeCheckpoint(fixture.client, 52);
+  assert.equal(completedCheckpoint.stage, "complete");
+  assert.deepEqual(completedCheckpoint.remainingStages, []);
+});
+
+test("concurrent delivery workers are serialized by an expiring GitHub ref lease", async () => {
+  const refs = new Map();
+  const blobs = new Map();
+  const trees = new Map();
+  const commits = new Map();
+  let sequence = 0;
+  let replaceRefDuringNextPatch = null;
+  const client = {
+    owner: "example",
+    repo: "repo",
+    request: async (path, options = {}) => {
+      const method = options.method || "GET";
+      if (path.endsWith("/git/ref/heads/main")) return { object: { sha: CURRENT_BASE_SHA } };
+      if (path === "/repos/example/repo/git/refs" && method === "POST") {
+        const body = JSON.parse(options.body);
+        if (refs.has(body.ref)) throw new Error("POST ref failed (422): Reference already exists");
+        refs.set(body.ref, body.sha);
+        return { ref: body.ref, object: { sha: body.sha } };
+      }
+      const refPath = "/repos/example/repo/git/ref/heads/agent-harness-locks/pr-52";
+      if (path === refPath && method === "GET") {
+        const sha = refs.get("refs/heads/agent-harness-locks/pr-52");
+        if (!sha) throw new Error("GET ref failed (404): Not Found");
+        return { object: { sha } };
+      }
+      if (path === refPath && method === "PATCH") {
+        const body = JSON.parse(options.body);
+        const commit = commits.get(body.sha);
+        if (replaceRefDuringNextPatch) {
+          refs.set("refs/heads/agent-harness-locks/pr-52", replaceRefDuringNextPatch);
+          replaceRefDuringNextPatch = null;
+        }
+        const currentSha = refs.get("refs/heads/agent-harness-locks/pr-52");
+        if (!commit?.parents?.includes(currentSha)) throw new Error("PATCH ref failed (422): Not a fast-forward update");
+        refs.set("refs/heads/agent-harness-locks/pr-52", body.sha);
+        return { object: { sha: body.sha } };
+      }
+      if (path === "/repos/example/repo/git/blobs" && method === "POST") {
+        const body = JSON.parse(options.body);
+        const sha = "blob-" + (++sequence);
+        blobs.set(sha, body.content);
+        return { sha };
+      }
+      if (path === "/repos/example/repo/git/trees" && method === "POST") {
+        const body = JSON.parse(options.body);
+        const sha = "tree-" + (++sequence);
+        trees.set(sha, body.tree);
+        return { sha };
+      }
+      if (path === "/repos/example/repo/git/commits" && method === "POST") {
+        const body = JSON.parse(options.body);
+        const sha = "a".repeat(38) + String(++sequence).padStart(2, "0");
+        commits.set(sha, { sha, tree: body.tree, parents: body.parents });
+        return { sha };
+      }
+      if (path.startsWith("/repos/example/repo/git/commits/")) {
+        const sha = path.split("/").at(-1);
+        const commit = commits.get(sha);
+        if (!commit) throw new Error("Unknown test commit");
+        return { sha, tree: { sha: commit.tree } };
+      }
+      if (path.startsWith("/repos/example/repo/git/trees/") && path.includes("?recursive=1")) {
+        const sha = path.split("/git/trees/")[1].split("?")[0];
+        return { tree: (trees.get(sha) || []).map((entry) => ({ ...entry })) };
+      }
+      if (path.startsWith("/repos/example/repo/git/blobs/")) {
+        const sha = path.split("/").at(-1);
+        return { content: Buffer.from(blobs.get(sha), "utf8").toString("base64") };
+      }
+      throw new Error("Unexpected lease request " + method + " " + path);
+    },
+  };
+  let sideEffects = 0;
+  let workerNumber = 0;
+  const deliver = () => runWithDeliveryLease(client, 52, async () => {
+    sideEffects += 1;
+    await Promise.resolve();
+    return { status: "PASS", completed: true };
+  }, {
+    acquire: (target, number) => acquireDeliveryLease(target, number, { nonce: "worker-" + (++workerNumber) }),
+  });
+
+  let finishFirst;
+  const firstOperationFinished = new Promise((resolve) => { finishFirst = resolve; });
+  const first = runWithDeliveryLease(client, 52, async () => {
+    sideEffects += 1;
+    await firstOperationFinished;
+    return { status: "PASS", completed: true };
+  }, {
+    acquire: (target, number) => acquireDeliveryLease(target, number, { nonce: "worker-" + (++workerNumber) }),
+  });
+  while (sideEffects === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+  const second = await deliver();
+  finishFirst();
+  const results = [await first, second];
+  assert.equal(results.filter((result) => result.completed).length, 1, JSON.stringify(results));
+  assert.equal(results.filter((result) => result.stage === "delivery-lease").length, 1);
+  assert.equal(sideEffects, 1);
+  assert.equal(refs.size, 1);
+  const latest = commits.get(refs.get("refs/heads/agent-harness-locks/pr-52"));
+  const latestBlob = blobs.get(trees.get(latest.tree)[0].sha);
+  assert.ok(Date.parse(JSON.parse(latestBlob).expiresAt) <= Date.now());
+
+  const oldOwner = await acquireDeliveryLease(client, 52, { nonce: "release-race-owner" });
+  const successorSha = "c".repeat(40);
+  commits.set(successorSha, { sha: successorSha, tree: latest.tree, parents: [oldOwner.sha] });
+  replaceRefDuringNextPatch = successorSha;
+  const release = await releaseDeliveryLease(client, oldOwner);
+  assert.equal(release.status, "BLOCKED");
+  assert.equal(refs.get("refs/heads/agent-harness-locks/pr-52"), successorSha);
+});
+
+test("an expired worker is fenced before its next GitHub side effect", async () => {
+  const refs = new Map();
+  const blobs = new Map();
+  const trees = new Map();
+  const commits = new Map();
+  let sequence = 0;
+  const refName = "refs/heads/agent-harness-locks/pr-52";
+  const refPath = "/repos/example/repo/git/ref/heads/agent-harness-locks/pr-52";
+  const client = {
+    owner: "example",
+    repo: "repo",
+    request: async (path, options = {}) => {
+      const method = options.method || "GET";
+      if (path.endsWith("/git/ref/heads/main")) return { object: { sha: CURRENT_BASE_SHA } };
+      if (path === "/repos/example/repo/git/refs" && method === "POST") {
+        const body = JSON.parse(options.body);
+        if (refs.has(body.ref)) throw new Error("Reference already exists");
+        refs.set(body.ref, body.sha);
+        return {};
+      }
+      if (path === refPath && method === "GET") {
+        const sha = refs.get(refName);
+        if (!sha) throw new Error("GET ref failed (404): Not Found");
+        return { object: { sha } };
+      }
+      if (path === refPath && method === "PATCH") {
+        const body = JSON.parse(options.body);
+        const commit = commits.get(body.sha);
+        const currentSha = refs.get(refName);
+        if (!commit?.parents?.includes(currentSha)) throw new Error("Not a fast-forward update");
+        refs.set(refName, body.sha);
+        return { object: { sha: body.sha } };
+      }
+      if (path === "/repos/example/repo/git/blobs" && method === "POST") {
+        const body = JSON.parse(options.body);
+        const sha = "blob-" + (++sequence);
+        blobs.set(sha, body.content);
+        return { sha };
+      }
+      if (path === "/repos/example/repo/git/trees" && method === "POST") {
+        const body = JSON.parse(options.body);
+        const sha = "tree-" + (++sequence);
+        trees.set(sha, body.tree);
+        return { sha };
+      }
+      if (path === "/repos/example/repo/git/commits" && method === "POST") {
+        const body = JSON.parse(options.body);
+        const sha = "b".repeat(38) + String(++sequence).padStart(2, "0");
+        commits.set(sha, { sha, tree: body.tree, parents: body.parents });
+        return { sha };
+      }
+      if (path.startsWith("/repos/example/repo/git/commits/")) {
+        const sha = path.split("/").at(-1);
+        const commit = commits.get(sha);
+        if (!commit) throw new Error("Unknown test commit");
+        return { sha, tree: { sha: commit.tree } };
+      }
+      if (path.startsWith("/repos/example/repo/git/trees/") && path.includes("?recursive=1")) {
+        const sha = path.split("/git/trees/")[1].split("?")[0];
+        return { tree: (trees.get(sha) || []).map((entry) => ({ ...entry })) };
+      }
+      if (path.startsWith("/repos/example/repo/git/blobs/")) {
+        const sha = path.split("/").at(-1);
+        return { content: Buffer.from(blobs.get(sha), "utf8").toString("base64") };
+      }
+      if (method === "POST") throw new Error("Unexpected mutation passed the expired lease guard");
+      throw new Error("Unexpected lease request " + method + " " + path);
+    },
+  };
+  let reachSideEffect;
+  const reached = new Promise((resolve) => { reachSideEffect = resolve; });
+  let continueOperation;
+  const hold = new Promise((resolve) => { continueOperation = resolve; });
+  const worker = runWithDeliveryLease(client, 52, async (guardedClient) => {
+    reachSideEffect();
+    await hold;
+    await assert.rejects(() => guardedClient.request("/repos/example/repo/issues/52/comments", {
+      method: "POST",
+      body: JSON.stringify({ body: "must not post" }),
+    }), /expired or changed owners/);
+    return { status: "BLOCKED", completed: false };
+  }, {
+    acquire: (target, number) => acquireDeliveryLease(target, number, {
+      nonce: "stale-worker",
+      leaseMs: 30,
+      now: () => Date.now(),
+    }),
+  });
+  await reached;
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const successor = await acquireDeliveryLease(client, 52, { nonce: "new-owner", leaseMs: 30_000 });
+  assert.equal(successor.status, "PASS");
+  continueOperation();
+  const result = await worker;
+  assert.equal(result.completed, false);
+  assert.equal(result.leaseReleaseWarning?.includes("another worker"), true);
 });
 
 test("blocks delivery when the merge commit first parent differs from the reviewed base", async () => {

@@ -37,6 +37,11 @@ printed. `inspect` needs Issues, Projects, Pull requests, and Contents read
 access to retrieve the issue and comments, board card, linked PRs, review
 records, changed files, CI checks, and branch names. `add`, `status`, and
 `field` also need Projects write access. `comment` needs Issues write access.
+`deliver-pr` and `resume-pr` additionally need Contents write access to create
+Git objects and create or advance the per-PR lease ref. Branch rules must allow
+the dedicated `agent-harness-locks/*` ref to be created and advanced; missing
+write access or a rejected ref update blocks delivery before merge or other
+delivery side effects.
 REST lookups stop after 1,000 records and report incomplete results instead of
 silently treating a partial history as complete. Missing essential dependency
 data blocks readiness. Missing comments warn; missing PR/branch history blocks
@@ -84,6 +89,49 @@ condition is resolved, readiness can be reevaluated and the issue moved back
 to `Ready`.
 
 ## Execution and recovery
+
+### Interrupted delivery recovery (v1.1)
+
+`deliver-pr` records a durable `agent-harness-resume:v1` checkpoint on the PR
+before it sends the merge request. The record includes the PR number, exact
+head and base SHAs, dependency status reported by the verifier, completed
+stages, and remaining stages. After a merge is confirmed, it records the merge
+SHA and the Production stages still pending. These comments are a recovery
+journal, not approval evidence: every run re-reads GitHub and revalidates the
+current PR, exact merge, deployment, smoke, and issue state.
+
+The CLI also acquires a per-PR GitHub ref lease before `deliver-pr` or
+`resume-pr`. The lock is an expiring commit under
+`agent-harness-locks/pr-<number>` and is released only when the ref still
+points at the worker's own lease. Expired leases can be advanced with a
+non-forced ref update; if a worker stops, a later invocation can take over
+after the lease expires. A worker that sees an active lease exits BLOCKED
+without merging, checking Production, or updating the Project.
+
+Run `node scripts/agent-harness.mjs resume-pr <pull-request> [--issue <issue>]`
+to recover an interrupted run. It reports the latest checkpoint, then uses
+live GitHub state to select the safe continuation. If the PR is already merged,
+recovery never sends another merge request; it resolves the merge SHA and
+continues with Production verification. If the head or base changed, the normal
+current-SHA verification runs again and stale evidence cannot pass. The
+checkpoint is an operator-visible journal; it cannot skip or satisfy a gate.
+
+After a successful merge response, merge recovery checks the PR REST response,
+then GitHub GraphQL when the REST merge SHA is absent, and verifies the
+candidate commit through the GitHub commit endpoint. It retries these reads a
+bounded number of times with backoff. A merge request with an ambiguous network
+result is never blindly repeated in the same invocation; the harness first
+tries to establish the merged state and otherwise leaves a resumable BLOCKED
+result.
+
+**Automatic dependency-triggered Codex resumption is not configured by this
+repository.** There is no checked-in GitHub Actions workflow or configured
+Codex runner credential. `resume-pr` provides durable recovery when invoked,
+but does not itself wake an agent when a dependency closes. A future runner
+integration must use an authorized Codex runner, serialize jobs per PR, and
+prove that the runner starts and completes a dependent task; a status-only
+workflow does not satisfy this requirement. Until that infrastructure is
+configured and tested, report autonomous dependency resumption as BLOCKED.
 
 1. Inspect the issue, its parent/related issues, comments, dependencies,
    project metadata, branches, linked PRs, review evidence, CI status, and PR
