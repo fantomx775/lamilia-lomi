@@ -720,6 +720,42 @@ describe("registration auth action", () => {
     expect(actionMocks.redeemAuthResumeIntent).not.toHaveBeenCalled();
   });
 
+  it("does not rebind a saved account code when login targets another product", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "first-reader-email-hash",
+      userId: "first-reader",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(false);
+    const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
+    const getUser = vi.fn();
+    actionMocks.createClient.mockResolvedValue({
+      auth: { signInWithPassword, getUser },
+    });
+
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "second-reader@example.com",
+          "password123",
+          "/en/products/another-product",
+          "LOMI-BOOK-2026",
+        ),
+      ),
+      "/en/products/another-product#premium",
+    );
+
+    expect(getUser).not.toHaveBeenCalled();
+    expect(actionMocks.clearAuthResumeIntent).toHaveBeenCalledTimes(1);
+    expect(actionMocks.setAuthResumeIntent).not.toHaveBeenCalled();
+    expect(actionMocks.redeemAuthResumeIntent).not.toHaveBeenCalled();
+  });
+
   it("keeps a local-mode product password-login return anchored to premium", async () => {
     await expectRedirect(
       loginDemoAction(

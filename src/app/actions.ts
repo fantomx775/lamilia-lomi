@@ -203,6 +203,16 @@ export async function loginDemoAction(formData: FormData) {
       pendingResumeTargetsReturnTo &&
       Boolean(pendingResumeIntent?.userId) &&
       !pendingResumeMatchesEmail;
+    const pendingResumeCode = normalizePremiumCodeForRequest(
+      pendingResumeIntent?.code,
+    );
+    const normalizedFormCode = normalizePremiumCodeForRequest(formCode);
+    const submittedBoundCodeHasDifferentContext = Boolean(
+      pendingResumeIntent?.userId &&
+        pendingResumeCode &&
+        normalizedFormCode === pendingResumeCode &&
+        !pendingResumeMatchesEmail,
+    );
     const retryingPendingResume = Boolean(
       pendingResumeMatchesEmail &&
         pendingResumeIntent?.productSlug &&
@@ -221,7 +231,7 @@ export async function loginDemoAction(formData: FormData) {
       // sign-in. Require the user to enter the code again.
       await clearAuthResumeIntent();
     }
-    const code = pendingResumeAccountMismatch
+    const code = submittedBoundCodeHasDifferentContext
       ? ""
       : pendingResumeIntentForRetry?.code ?? formCode;
     const preservePendingResumeRetry = async () => {
@@ -270,7 +280,7 @@ export async function loginDemoAction(formData: FormData) {
       redirect(`/${locale}/login?error=${errorCode}&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
-    if (pendingResumeAccountMismatch) {
+    if (pendingResumeAccountMismatch || submittedBoundCodeHasDifferentContext) {
       await clearAuthResumeIntent();
     }
 
