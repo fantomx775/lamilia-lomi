@@ -72,6 +72,7 @@ export const getDemoSession = cache(async () => {
 
     return {
       email: context.user.email ?? "",
+      userId: context.user.id,
       role: profile?.role === "admin" ? "admin" : "user",
       emailVerified: Boolean(context.user.email_confirmed_at),
       marketingConsent: Boolean(profile?.marketing_consent),

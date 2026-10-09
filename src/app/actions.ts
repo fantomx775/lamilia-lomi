@@ -196,10 +196,13 @@ export async function loginDemoAction(formData: FormData) {
     const pendingResumeMatchesEmail = Boolean(
       pendingResumeTargetsReturnTo &&
         pendingResumeIntent &&
+        pendingResumeIntent.userId &&
         authResumeIntentMatchesEmail(pendingResumeIntent, email),
     );
     const pendingResumeAccountMismatch =
-      pendingResumeTargetsReturnTo && !pendingResumeMatchesEmail;
+      pendingResumeTargetsReturnTo &&
+      Boolean(pendingResumeIntent?.userId) &&
+      !pendingResumeMatchesEmail;
     const retryingPendingResume = Boolean(
       pendingResumeMatchesEmail &&
         pendingResumeIntent?.productSlug &&
@@ -210,17 +213,18 @@ export async function loginDemoAction(formData: FormData) {
         ? { ...pendingResumeIntent, code: submittedCode || pendingResumeIntent.code }
         : null;
     if (
-      pendingResumeIntentForRetry &&
-      submittedCode &&
-      submittedCode !== pendingResumeIntent?.code
+      pendingResumeTargetsReturnTo &&
+      pendingResumeIntent &&
+      !pendingResumeIntent.userId
     ) {
-      // Keep a replacement code in the same account-bound intent if login or lookup fails.
-      await setAuthResumeIntent(pendingResumeIntentForRetry);
+      // An email hash alone is not enough to authorize reuse after a later
+      // sign-in. Require the user to enter the code again.
+      await clearAuthResumeIntent();
     }
     const code = pendingResumeAccountMismatch
       ? ""
       : pendingResumeIntentForRetry?.code ?? formCode;
-    const intent = createAuthResumeIntent({
+    let intent = createAuthResumeIntent({
       locale,
       productSlug: returnProductSlug,
       returnTo,
@@ -240,16 +244,10 @@ export async function loginDemoAction(formData: FormData) {
       }));
     } catch (authError) {
       logUnexpectedFailure("[auth] Sign-in failed unexpectedly.", authError);
-      if (!pendingResumeAccountMismatch && (!pendingResumeMatchesEmail || !pendingResumeIntent?.code)) {
-        await setAuthResumeIntent({ locale, returnTo, code, email });
-      }
       redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
     if (error) {
-      if (!pendingResumeAccountMismatch && (!pendingResumeMatchesEmail || !pendingResumeIntent?.code)) {
-        await setAuthResumeIntent({ locale, returnTo, code, email });
-      }
       const errorCode = isSupabaseEmailNotConfirmedError(error)
         ? "email_unverified"
         : "invalid_credentials";
@@ -298,7 +296,41 @@ export async function loginDemoAction(formData: FormData) {
       );
     }
 
-    await completeSupabaseAuthResume(intent, code);
+    if (code) {
+      let signedInUser: Awaited<ReturnType<typeof supabase.auth.getUser>> | null = null;
+      try {
+        signedInUser = await supabase.auth.getUser();
+      } catch (userError) {
+        logUnexpectedFailure("[auth] Sign-in user lookup failed unexpectedly.", userError);
+      }
+
+      if (
+        !signedInUser ||
+        signedInUser.error ||
+        !signedInUser.data.user?.email_confirmed_at
+      ) {
+        redirect(
+          `/${locale}/login?error=verification_unavailable&returnTo=${encodeURIComponent(returnTo)}`,
+        );
+      }
+
+      const signedInIntent = {
+        ...intent,
+        userId: signedInUser.data.user.id,
+      };
+      if (!authResumeIntentMatchesUser(signedInIntent, signedInUser.data.user)) {
+        await clearAuthResumeIntent();
+        await clearUnlockIntent();
+        redirect(
+          `/${locale}/login?error=verification_mismatch&returnTo=${encodeURIComponent(returnTo)}`,
+        );
+      }
+
+      intent = signedInIntent;
+      await completeSupabaseAuthResume(intent, code);
+    }
+
+    redirect(getAuthResumeRedirect(intent, locale));
   }
 
   await preserveUnlockIntent({ locale, returnTo, code: formCode });
@@ -348,17 +380,20 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
   const pendingResumeMatchesEmail = Boolean(
     pendingResumeTargetsReturnTo &&
       pendingResumeIntent &&
+      pendingResumeIntent.userId &&
       authResumeIntentMatchesEmail(pendingResumeIntent, email),
   );
   const pendingResumeAccountMismatch =
-    pendingResumeTargetsReturnTo && !pendingResumeMatchesEmail;
+    pendingResumeTargetsReturnTo &&
+    Boolean(pendingResumeIntent?.userId) &&
+    !pendingResumeMatchesEmail;
   const retryingPendingResume = Boolean(
     pendingResumeMatchesEmail &&
       pendingResumeIntent?.productSlug &&
       pendingResumeIntent.code,
   );
   await clearUnlockIntent();
-  const intent = await setAuthResumeIntent({
+  const intent = createAuthResumeIntent({
     locale,
     productSlug: retryingPendingResume
       ? pendingResumeIntent?.productSlug
@@ -373,6 +408,22 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     emailHash: pendingResumeMatchesEmail ? pendingResumeIntent?.emailHash : undefined,
     email: text(formData, "email"),
   });
+  if (intent.userId) {
+    await setAuthResumeIntent({
+      locale: intent.locale,
+      productSlug: intent.productSlug,
+      returnTo: intent.returnTo,
+      code: intent.code,
+      userId: intent.userId,
+      emailHash: intent.emailHash,
+      email,
+    });
+  } else {
+    // Keep the code only in the signed callback token until confirmation
+    // establishes the account ID. An email-only cookie must not authorize a
+    // later login to reuse it.
+    await clearAuthResumeIntent();
+  }
   const supabase = await createClient();
   let resendError;
 
@@ -434,20 +485,36 @@ export async function registerDemoAction(formData: FormData) {
     const pendingResumeMatchesAccount = Boolean(
       pendingResumeTargetsReturnTo &&
         pendingResumeIntent &&
+        pendingResumeIntent.userId &&
         authResumeIntentMatchesEmail(pendingResumeIntent, result.value.email),
     );
     const pendingResumeHasDifferentAccount = Boolean(
       pendingResumeTargetsReturnTo &&
         pendingResumeIntent &&
+        pendingResumeIntent.userId &&
         pendingResumeIntent?.code &&
         !pendingResumeMatchesAccount,
     );
+    if (
+      pendingResumeTargetsReturnTo &&
+      pendingResumeIntent &&
+      !pendingResumeIntent.userId
+    ) {
+      // A retained email hash cannot authorize reuse during a new registration.
+      // The user may enter the code again explicitly in this form.
+      await clearAuthResumeIntent();
+    }
     const normalizedCode = normalizePremiumCodeForRequest(code);
     const normalizedPendingCode = normalizePremiumCodeForRequest(
       pendingResumeIntent?.code,
     );
     const submittedPendingCode = Boolean(
       normalizedCode && normalizedCode === normalizedPendingCode,
+    );
+    const reusingPendingResumeCode = Boolean(
+      pendingResumeMatchesAccount &&
+        normalizedPendingCode &&
+        (!normalizedCode || submittedPendingCode),
     );
     if (pendingResumeHasDifferentAccount && submittedPendingCode) {
       code = "";
@@ -459,10 +526,10 @@ export async function registerDemoAction(formData: FormData) {
       returnTo,
       code,
       email: result.value.email,
+      userId: reusingPendingResumeCode ? pendingResumeIntent?.userId : undefined,
     });
     const safeRedirectTo = intent.returnTo;
     await clearUnlockIntent();
-    await setAuthResumeIntent({ locale, returnTo, code, email: result.value.email });
     const supabase = await createClient();
     let data;
     let error;
@@ -489,6 +556,16 @@ export async function registerDemoAction(formData: FormData) {
       redirect(`/${locale}/register?error=auth&returnTo=${encodeURIComponent(safeRedirectTo)}`);
     }
 
+    if (
+      reusingPendingResumeCode &&
+      pendingResumeIntent?.userId &&
+      data.user?.id !== pendingResumeIntent.userId
+    ) {
+      // A matching email is not proof that registration returned the same
+      // account that owns the saved code.
+      code = "";
+    }
+
     intent = createAuthResumeIntent({
       locale,
       returnTo: safeRedirectTo,
@@ -496,15 +573,19 @@ export async function registerDemoAction(formData: FormData) {
       email: result.value.email,
       userId: data.user?.id,
     });
-    await setAuthResumeIntent({
-      locale,
-      returnTo: safeRedirectTo,
-      code,
-      email: result.value.email,
-      userId: data.user?.id,
-    });
+    if (data.user?.id) {
+      await setAuthResumeIntent({
+        locale,
+        returnTo: safeRedirectTo,
+        code,
+        email: result.value.email,
+        userId: data.user.id,
+      });
+    } else {
+      await clearAuthResumeIntent();
+    }
 
-    if (data.session) {
+    if (data.session && intent.userId) {
       await completeSupabaseAuthResume(intent, code);
     }
 
@@ -668,6 +749,7 @@ export async function unlockPremiumAction(formData: FormData) {
       returnTo,
       code,
       email: session.email,
+      userId: session.userId,
     });
     redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
   }
@@ -687,6 +769,7 @@ export async function unlockPremiumAction(formData: FormData) {
       returnTo,
       code,
       email: session.email,
+      userId: session.userId,
     });
     redirect(appendQueryPath(premiumReturnTo, "unlock", "unexpected"));
   }
@@ -699,6 +782,7 @@ export async function unlockPremiumAction(formData: FormData) {
         returnTo,
         code,
         email: session.email,
+        userId: session.userId,
       });
       redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
     }
@@ -710,6 +794,7 @@ export async function unlockPremiumAction(formData: FormData) {
         returnTo,
         code,
         email: session.email,
+        userId: session.userId,
       });
       redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
     }
@@ -720,6 +805,7 @@ export async function unlockPremiumAction(formData: FormData) {
       returnTo,
       code,
       email: session.email,
+      userId: session.userId,
     });
     redirect(appendQueryPath(premiumReturnTo, "unlock", result.status));
   }
@@ -729,6 +815,7 @@ export async function unlockPremiumAction(formData: FormData) {
     const pendingResumeIntent = await readAuthResumeIntent();
     if (
       pendingResumeIntent?.productSlug === product.slug &&
+      pendingResumeIntent.userId === session.userId &&
       authResumeIntentMatchesEmail(pendingResumeIntent, session.email)
     ) {
       await clearAuthResumeIntent();
@@ -752,6 +839,7 @@ async function preserveUnlockRecoveryIntent(input: {
   returnTo: string;
   code: string;
   email?: string;
+  userId?: string;
 }) {
   if (getBackendMode() !== "supabase") {
     await setUnlockIntent({
@@ -765,14 +853,17 @@ async function preserveUnlockRecoveryIntent(input: {
 
   await clearUnlockIntent();
 
-  if (input.email && input.code) {
+  if (input.email && input.userId && input.code) {
     await setAuthResumeIntent({
       locale: input.locale,
       productSlug: input.productSlug,
       returnTo: input.returnTo,
       code: input.code,
+      userId: input.userId,
       email: input.email,
     });
+  } else {
+    await clearAuthResumeIntent();
   }
 
   await setUnlockIntent({

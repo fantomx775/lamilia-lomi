@@ -145,11 +145,7 @@ export function authResumeIntentMatchesUser(
   intent: Pick<AuthResumeIntent, "userId" | "emailHash">,
   user: { id?: string | null; email?: string | null },
 ) {
-  if (!intent.userId && !intent.emailHash) {
-    return false;
-  }
-
-  if (intent.userId && intent.userId !== user.id) {
+  if (!intent.userId || intent.userId !== user.id) {
     return false;
   }
 
@@ -161,6 +157,15 @@ export function authResumeIntentMatchesUser(
   }
 
   return true;
+}
+
+export function authResumeCallbackIntentMatchesUser(
+  intent: Pick<AuthResumeIntent, "userId" | "emailHash">,
+  user: { id?: string | null; email?: string | null },
+) {
+  return intent.userId
+    ? authResumeIntentMatchesUser(intent, user)
+    : authResumeIntentMatchesEmail(intent, user.email);
 }
 
 export function getAccountBoundResumeCode(

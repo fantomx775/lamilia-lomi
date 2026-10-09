@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import {
+  authResumeCallbackIntentMatchesUser,
   authResumeIntentMatchesUser,
   clearAuthResumeIntent,
   decodeAuthResumeCallbackToken,
@@ -99,32 +100,48 @@ export async function GET(request: Request) {
 
   const user = await getCallbackUser(supabase);
 
+  if (intent && user && !authResumeCallbackIntentMatchesUser(intent, user)) {
+    await clearAuthResumeIntent();
+    await clearUnlockIntent();
+    return failureResponse(locale, intent, callbackReturnTo, "verification_mismatch");
+  }
+
+  // Email confirmation callbacks can carry an email-bound intent created
+  // before Supabase returns the new user's ID. Bind it as soon as the
+  // callback establishes that identity so a later retry cannot be claimed by
+  // another account that reuses the email address.
+  const verifiedIntent =
+    intent && user?.id && !intent.userId
+      ? { ...intent, userId: user.id }
+      : intent;
+
   if (!user?.email_confirmed_at) {
-    if (intent && (intent.userId || intent.emailHash)) {
+    if (verifiedIntent && (verifiedIntent.userId || verifiedIntent.emailHash)) {
       await clearUnlockIntent();
-      await setAuthResumeIntent({
-        locale: intent.locale,
-        productSlug: intent.productSlug,
-        returnTo: intent.returnTo,
-        code: intent.code,
-        userId: intent.userId,
-        emailHash: intent.emailHash,
-      });
+      if (verifiedIntent.userId) {
+        await setAuthResumeIntent({
+          locale: verifiedIntent.locale,
+          productSlug: verifiedIntent.productSlug,
+          returnTo: verifiedIntent.returnTo,
+          code: verifiedIntent.code,
+          userId: verifiedIntent.userId,
+          emailHash: verifiedIntent.emailHash,
+        });
+      } else {
+        // An email hash alone cannot authorize a later account to resume a
+        // premium code. Require the user to enter it again if identity lookup
+        // did not provide an account ID for this callback.
+        await clearAuthResumeIntent();
+      }
       return failureResponse(
         locale,
-        intent,
+        verifiedIntent.userId ? verifiedIntent : undefined,
         callbackReturnTo,
         "verification_unavailable",
       );
     }
 
-    return failureResponse(locale, intent, callbackReturnTo);
-  }
-
-  if (intent && !authResumeIntentMatchesUser(intent, user)) {
-    await clearAuthResumeIntent();
-    await clearUnlockIntent();
-    return failureResponse(locale, intent, callbackReturnTo, "verification_mismatch");
+    return failureResponse(locale, verifiedIntent, callbackReturnTo);
   }
 
   if (
@@ -144,27 +161,27 @@ export async function GET(request: Request) {
   let redemption;
 
   try {
-    redemption = await redeemAuthResumeIntent(intent ?? {});
+    redemption = await redeemAuthResumeIntent(verifiedIntent ?? {});
   } catch (error) {
     console.error("[auth-callback] Auth resume redemption failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,
     });
-    await persistAuthResumeIntent(intent);
-    await persistUnlockIntent(intent);
-    if (intent?.productSlug && intent.code) {
+    await persistAuthResumeIntent(verifiedIntent);
+    await persistUnlockIntent(verifiedIntent);
+    if (verifiedIntent?.productSlug && verifiedIntent.code) {
       return successResponse(
-        appendQuery(getAuthResumeRedirect(intent, locale), "unlock", "unexpected"),
+        appendQuery(getAuthResumeRedirect(verifiedIntent, locale), "unlock", "unexpected"),
       );
     }
 
-    return failureResponse(locale, intent, callbackReturnTo);
+    return failureResponse(locale, verifiedIntent, callbackReturnTo);
   }
   if (redemption?.ok) {
     await clearAuthResumeIntent();
     await clearUnlockIntent();
     return successResponse(
       appendQuery(
-        getAuthResumeRedirect(intent, locale),
+        getAuthResumeRedirect(verifiedIntent, locale),
         "unlocked",
         redemption.status === "already_unlocked" ? "already" : "1",
       ),
@@ -172,15 +189,19 @@ export async function GET(request: Request) {
   }
 
   if (redemption && !redemption.ok) {
-    await persistAuthResumeIntent(intent);
-    await persistUnlockIntent(intent);
+    await persistAuthResumeIntent(verifiedIntent);
+    await persistUnlockIntent(verifiedIntent);
     return successResponse(
-      appendQuery(getAuthResumeRedirect(intent, locale), "unlock", redemption.status),
+      appendQuery(getAuthResumeRedirect(verifiedIntent, locale), "unlock", redemption.status),
     );
   }
 
   await clearAuthResumeIntent();
-  return successResponse(intent ? getAuthResumeRedirect(intent, locale) : callbackReturnTo);
+  return successResponse(
+    verifiedIntent
+      ? getAuthResumeRedirect(verifiedIntent, locale)
+      : callbackReturnTo,
+  );
 }
 
 async function persistAuthResumeIntent(
@@ -193,7 +214,7 @@ async function persistAuthResumeIntent(
     emailHash?: string;
   } | null,
 ) {
-  if (!intent || (!intent.userId && !intent.emailHash)) {
+  if (!intent?.userId) {
     return;
   }
 

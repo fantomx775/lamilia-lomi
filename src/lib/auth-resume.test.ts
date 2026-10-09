@@ -22,6 +22,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import {
+  authResumeCallbackIntentMatchesUser,
   authResumeIntentMatchesEmail,
   authResumeIntentMatchesUser,
   authResumeMaxAgeSeconds,
@@ -158,6 +159,27 @@ describe("Supabase auth resume contract", () => {
     expect(authResumeIntentMatchesUser(intent, { id: "other-user", email: "reader@example.com" })).toBe(false);
     expect(authResumeIntentMatchesUser(intent, { id: "user-123", email: "other@example.com" })).toBe(false);
     expect(authResumeIntentMatchesUser({ userId: undefined, emailHash: undefined }, { id: "user-123" })).toBe(false);
+  });
+
+  it("requires a user ID for ordinary resume matching but permits email matching during callback binding", () => {
+    const emailOnlyIntent = createAuthResumeIntent({
+      locale: "en",
+      returnTo: "/en/account",
+      email: "reader@example.com",
+    });
+    const sameEmailDifferentUser = {
+      id: "replacement-user",
+      email: "reader@example.com",
+    };
+
+    expect(authResumeIntentMatchesUser(emailOnlyIntent, sameEmailDifferentUser)).toBe(false);
+    expect(authResumeCallbackIntentMatchesUser(emailOnlyIntent, sameEmailDifferentUser)).toBe(true);
+    expect(
+      authResumeCallbackIntentMatchesUser(
+        { ...emailOnlyIntent, userId: "original-user" },
+        sameEmailDifferentUser,
+      ),
+    ).toBe(false);
   });
 
   it("returns a saved code to the matching account and product across locales", () => {

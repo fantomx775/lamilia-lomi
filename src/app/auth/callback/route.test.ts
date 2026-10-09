@@ -26,13 +26,18 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ auth }),
 }));
 vi.mock("@/lib/auth-resume", () => ({
-  authResumeIntentMatchesUser: (
+  authResumeCallbackIntentMatchesUser: (
     intent: Record<string, string | undefined>,
     user: { id?: string; email?: string },
   ) =>
     intent.userId
       ? intent.userId === user.id
       : intent.emailHash === "reader-email-hash" && user.email === "reader@example.com",
+  authResumeIntentMatchesUser: (
+    intent: Record<string, string | undefined>,
+    user: { id?: string; email?: string },
+  ) =>
+    Boolean(intent.userId && intent.userId === user.id),
   clearAuthResumeIntent: resume.clear,
   decodeAuthResumeCallbackToken: (token: string | null) =>
     token === "opaque-resume" ? resume.callbackIntent : null,
@@ -115,7 +120,10 @@ describe("Supabase auth callback", () => {
       type: "email",
     });
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
-    expect(resume.redeem).toHaveBeenCalledWith(resume.callbackIntent);
+    expect(resume.redeem).toHaveBeenCalledWith({
+      ...resume.callbackIntent,
+      userId: "new-device-user",
+    });
     expect(response.headers.get("location")).toBe(
       "https://canonical.lamilialomi.example/en/products/moon-garden-coloring-book?unlocked=1#premium",
     );
@@ -162,8 +170,12 @@ describe("Supabase auth callback", () => {
       productSlug: "moon-garden-coloring-book",
       returnTo: "/en/products/moon-garden-coloring-book",
       code: "LOMI-BOOK-2026",
-      userId: undefined,
+      userId: "new-device-user",
       emailHash: "reader-email-hash",
+    });
+    expect(resume.redeem).toHaveBeenCalledWith({
+      ...resume.callbackIntent,
+      userId: "new-device-user",
     });
     expect(resume.clearUnlock.mock.invocationCallOrder[0]).toBeLessThan(
       resume.redeem.mock.invocationCallOrder[0],
@@ -207,8 +219,12 @@ describe("Supabase auth callback", () => {
       productSlug: "moon-garden-coloring-book",
       returnTo: "/en/products/moon-garden-coloring-book",
       code: "LOMI-BOOK-2026",
-      userId: undefined,
+      userId: "new-device-user",
       emailHash: "reader-email-hash",
+    });
+    expect(resume.redeem).toHaveBeenCalledWith({
+      ...resume.callbackIntent,
+      userId: "new-device-user",
     });
     expect(resume.clearUnlock.mock.invocationCallOrder[0]).toBeLessThan(
       resume.redeem.mock.invocationCallOrder[0],
@@ -236,18 +252,11 @@ describe("Supabase auth callback", () => {
     expect(auth.verifyOtp).not.toHaveBeenCalled();
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
     expect(resume.redeem).not.toHaveBeenCalled();
-    expect(resume.setAuthResume).toHaveBeenCalledWith({
-      locale: "en",
-      productSlug: "moon-garden-coloring-book",
-      returnTo: "/en/products/moon-garden-coloring-book",
-      code: "LOMI-BOOK-2026",
-      userId: undefined,
-      emailHash: "reader-email-hash",
-    });
+    expect(resume.setAuthResume).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toContain("error=verification_failed");
   });
 
-  it("retains account-bound retry context when the confirmed user lookup is unavailable", async () => {
+  it("does not retain an email-only retry when the verified user lookup is unavailable", async () => {
     resume.callbackIntent = {
       locale: "en",
       emailHash: "reader-email-hash",
@@ -264,20 +273,51 @@ describe("Supabase auth callback", () => {
       ),
     );
 
-    expect(resume.setAuthResume).toHaveBeenCalledWith({
-      locale: "en",
-      productSlug: "moon-garden-coloring-book",
-      returnTo: "/en/products/moon-garden-coloring-book",
-      code: "LOMI-BOOK-2026",
-      userId: undefined,
-      emailHash: "reader-email-hash",
-    });
+    expect(resume.setAuthResume).not.toHaveBeenCalled();
+    expect(resume.clear).toHaveBeenCalledTimes(1);
     expect(resume.redeem).not.toHaveBeenCalled();
     expect(resume.clearUnlock).toHaveBeenCalledTimes(1);
     expect(response.headers.get("location")).toContain(
       "error=verification_unavailable",
     );
     expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
+  });
+
+  it("binds an unconfirmed callback intent to the verified user before retaining it", async () => {
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      productSlug: "moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    };
+    auth.verifyOtp.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "new-device-user",
+          email: "reader@example.com",
+          email_confirmed_at: null,
+        },
+      },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?token_hash=actual-token-hash&type=email&locale=en&resume=opaque-resume",
+      ),
+    );
+
+    expect(resume.setAuthResume).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      userId: "new-device-user",
+      emailHash: "reader-email-hash",
+    });
+    expect(resume.redeem).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toContain("error=verification_unavailable");
   });
 
   it("rejects callback URLs that mix a code and a token hash", async () => {
@@ -298,14 +338,7 @@ describe("Supabase auth callback", () => {
     expect(auth.verifyOtp).not.toHaveBeenCalled();
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
     expect(resume.redeem).not.toHaveBeenCalled();
-    expect(resume.setAuthResume).toHaveBeenCalledWith({
-      locale: "en",
-      productSlug: "moon-garden-coloring-book",
-      returnTo: "/en/products/moon-garden-coloring-book",
-      code: "LOMI-BOOK-2026",
-      userId: undefined,
-      emailHash: "reader-email-hash",
-    });
+    expect(resume.setAuthResume).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toContain("error=verification_failed");
   });
 
@@ -328,14 +361,7 @@ describe("Supabase auth callback", () => {
     expect(auth.verifyOtp).not.toHaveBeenCalled();
     expect(auth.getUser).not.toHaveBeenCalled();
     expect(resume.redeem).not.toHaveBeenCalled();
-    expect(resume.setAuthResume).toHaveBeenCalledWith({
-      locale: "en",
-      productSlug: "moon-garden-coloring-book",
-      returnTo: "/en/products/moon-garden-coloring-book",
-      code: "LOMI-BOOK-2026",
-      userId: undefined,
-      emailHash: "reader-email-hash",
-    });
+    expect(resume.setAuthResume).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toBe(
       "https://canonical.lamilialomi.example/en/login?error=verification_failed&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book%23premium",
     );
@@ -450,7 +476,10 @@ describe("Supabase auth callback", () => {
       ),
     );
 
-    expect(resume.redeem).toHaveBeenCalledWith(resume.callbackIntent);
+    expect(resume.redeem).toHaveBeenCalledWith({
+      ...resume.callbackIntent,
+      userId: "new-device-user",
+    });
     expect(response.headers.get("location")).toBe(
       "https://canonical.lamilialomi.example/en/products/moon-garden-coloring-book?unlocked=1#premium",
     );
@@ -490,7 +519,10 @@ describe("Supabase auth callback", () => {
       ),
     );
 
-    expect(resume.redeem).toHaveBeenCalledWith(resume.callbackIntent);
+    expect(resume.redeem).toHaveBeenCalledWith({
+      ...resume.callbackIntent,
+      userId: "reader-user",
+    });
     expect(resume.clearUnlock).toHaveBeenCalledTimes(1);
     expect(resume.setUnlock).toHaveBeenCalledWith({
       locale: "en",
@@ -586,14 +618,7 @@ describe("Supabase auth callback", () => {
         ),
       );
 
-      expect(resume.setAuthResume).toHaveBeenCalledWith({
-        locale: "en",
-        productSlug: "moon-garden-coloring-book",
-        returnTo: "/en/products/moon-garden-coloring-book",
-        code: "LOMI-BOOK-2026",
-        userId: undefined,
-        emailHash: "reader-email-hash",
-      });
+      expect(resume.setAuthResume).not.toHaveBeenCalled();
       expect(resume.redeem).not.toHaveBeenCalled();
       expect(response.headers.get("location")).toContain("error=verification_failed");
       expect(response.headers.get("location")).toContain(

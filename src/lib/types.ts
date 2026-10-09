@@ -152,6 +152,7 @@ export type CatalogFilters = {
 
 export type DemoSession = {
   email: string;
+  userId?: string;
   role: UserRole;
   emailVerified: boolean;
   marketingConsent: boolean;
