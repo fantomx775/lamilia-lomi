@@ -2084,6 +2084,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   assert.equal(verifiedMerge.currentSha, CURRENT_SHA);
   assert.equal(verifiedMerge.mergeBase.status, "PASS");
   assert.equal(verifiedMerge.mergeBase.reviewedBaseSha, CURRENT_BASE_SHA);
+  assert.equal(verifiedMerge.mergeBase.reviewedBaseShaVerified, true);
 
   const mergedWithWrongParentClient = {
     ...mergedClient,
@@ -2101,6 +2102,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   assert.equal(wrongMergedBase.mergeBase.status, "BLOCKED");
   assert.equal(wrongMergedBase.mergeBase.sha, "f".repeat(40));
   assert.equal(wrongMergedBase.mergeBase.reviewedBaseSha, CURRENT_BASE_SHA);
+  assert.equal(wrongMergedBase.mergeBase.reviewedBaseShaVerified, false);
 
   const mergedWithUnreadableParentClient = {
     ...mergedClient,
@@ -2872,7 +2874,7 @@ test("merged recovery reports a blocked merge base when review evidence names a 
 
   assert.equal(result.mergeBaseVerification.status, "BLOCKED");
   assert.equal(result.mergeBaseVerification.sha, CURRENT_BASE_SHA);
-  assert.equal(result.mergeBaseVerification.expectedSha, reviewedBaseSha);
+  assert.equal(result.mergeBaseVerification.expectedSha, null);
   assert.equal(result.decision, "BLOCKED");
   assert.equal(result.completed, false);
   assert.equal(fixture.issueState, "open");

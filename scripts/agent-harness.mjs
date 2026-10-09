@@ -2471,6 +2471,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
         status: "BLOCKED",
         sha: null,
         reviewedBaseSha: verification.aiReview?.reviewedBaseSha || null,
+        reviewedBaseShaVerified: verification.aiReview?.reviewedBaseShaVerified === true,
         details: "The merged PR's first parent could not be verified against current-SHA AI review evidence.",
       },
       reasons: [...new Set([
@@ -2485,6 +2486,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     status: mergeBaseMatchesReview ? "PASS" : "BLOCKED",
     sha: mergedBaseSha,
     reviewedBaseSha: verification.aiReview?.reviewedBaseSha || null,
+    reviewedBaseShaVerified: verification.aiReview?.reviewedBaseShaVerified === true,
     details: mergeBaseMatchesReview
       ? "The immutable first parent matches the base SHA bound to valid current-SHA AI reviews."
       : "Current-SHA AI review evidence does not verify the immutable first parent as its reviewed base.",
@@ -3473,7 +3475,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     verification = await verify(client, number, { allowMerged: true });
     reviewGatesPassed = verification.decision === "VERIFIED_MERGE";
     candidateSha = verification.currentSha || candidateSha;
-    if (validSha(verification.mergeBase?.reviewedBaseSha)) {
+    if (verification.mergeBase?.reviewedBaseShaVerified === true && validSha(verification.mergeBase?.reviewedBaseSha)) {
       verifiedBaseSha = verification.mergeBase.reviewedBaseSha.toLowerCase();
     } else if (verification.mergeBase?.status === "BLOCKED") {
       verifiedBaseSha = null;
