@@ -31,6 +31,10 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   const mainFrameNavigations: Array<{ at: number; url: string }> = [];
   const unexpectedHttpFailures: string[] = [];
   const localUploadFallbacks: string[] = [];
+  let productUpdateSavePending = false;
+  let productDeletePending = false;
+  let adminLoginPending = false;
+  let adminLoginVerified = false;
   let productId = "";
   let productPath: string | undefined;
   let flowFailure: unknown;
@@ -67,6 +71,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     const failedUrl = new URL(request.url());
     const exactLoginPost = request.method() === "POST" && failedUrl.pathname === "/pl/login" &&
       failedUrl.search === "?redirectTo=/admin";
+    const expectedAdminLoginCancellation = exactLoginPost && (adminLoginPending || adminLoginVerified);
     const exactNextDevChunk = request.method() === "GET" && request.resourceType() === "script" &&
       failedUrl.pathname.startsWith("/_next/static/chunks/") && failedUrl.pathname.endsWith(".js");
     const createActionPost = request.method() === "POST" && failedUrl.pathname === "/admin/products/new" &&
@@ -74,11 +79,29 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     const nextFlightFetch = request.method() === "GET" && request.resourceType() === "fetch" &&
       failedUrl.searchParams.has("_rsc");
     const expectedCreateSaveCancellation = createSaveNavigationPending && (createActionPost || nextFlightFetch);
-    if (failure === "net::ERR_ABORTED" && ((recentNavigation && (exactLoginPost || exactNextDevChunk)) || expectedCreateSaveCancellation)) {
+    const productMutationAction = request.method() === "POST" && failedUrl.pathname === `/admin/products/${productId}` &&
+      Boolean(request.headers()["next-action"]);
+    const expectedVerifiedUpdateSaveCancellation = productUpdateSavePending && productMutationAction;
+    const expectedVerifiedProductDeleteCancellation = productDeletePending && productMutationAction;
+    if (failure === "net::ERR_ABORTED" && (
+      (recentNavigation && exactNextDevChunk) ||
+      expectedAdminLoginCancellation ||
+      expectedCreateSaveCancellation ||
+      expectedVerifiedUpdateSaveCancellation ||
+      expectedVerifiedProductDeleteCancellation
+    )) {
       const cancellation = JSON.stringify({
         ...detail,
         adjacentMainFrameNavigation: recentNavigation?.url ?? page.url(),
-        reason: expectedCreateSaveCancellation ? "product create save navigated to the created editor" : "expected browser navigation",
+        reason: expectedAdminLoginCancellation
+          ? "the login action was followed by an asserted redirect to /admin"
+          : expectedCreateSaveCancellation
+          ? "product create save navigated to the created editor"
+          : expectedVerifiedUpdateSaveCancellation
+            ? "the update save response was followed by an asserted reload of the persisted gallery order"
+            : expectedVerifiedProductDeleteCancellation
+              ? "the product delete response was followed by an asserted navigation and cleanup check"
+              : "expected browser navigation",
       });
       expectedNavigationCancellations.push(cancellation);
       console.log("Expected navigation cancellation: " + cancellation);
@@ -105,10 +128,16 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     await page.goto("/pl/login?redirectTo=/admin");
     await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
     await page.getByLabel("Hasło").fill("demo-password");
-    await Promise.all([
-      page.waitForURL((url) => url.pathname === "/admin"),
-      page.getByRole("button", { name: "Kontynuuj" }).click(),
-    ]);
+    adminLoginPending = true;
+    try {
+      await Promise.all([
+        page.waitForURL((url) => url.pathname === "/admin"),
+        page.getByRole("button", { name: "Kontynuuj" }).click(),
+      ]);
+      adminLoginVerified = true;
+    } finally {
+      adminLoginPending = false;
+    }
 
     await page.goto("/admin/products/new");
     await expect(page.getByRole("heading", { name: "Nowy produkt" })).toBeVisible();
@@ -219,12 +248,17 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     expectedOrder = [imageFixtures[0], imageFixtures[4], imageFixtures[2], imageFixtures[3]];
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     const editUrlBeforeSave = page.url();
-    await page.getByRole("button", { name: /Zapisz/ }).click();
-    await expect(page.getByTestId("product-save-bar")).toContainText("Zapisano. Zmiany są aktualne.");
-    expect(page.url()).toBe(editUrlBeforeSave);
-    await page.reload();
-    await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
-    await capture(page, testInfo, "08-existing-image-order-saved-again");
+    productUpdateSavePending = true;
+    try {
+      await page.getByRole("button", { name: /Zapisz/ }).click();
+      await expect(page.getByTestId("product-save-bar")).toContainText("Zapisano. Zmiany są aktualne.");
+      expect(page.url()).toBe(editUrlBeforeSave);
+      await page.reload();
+      await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
+      await capture(page, testInfo, "08-existing-image-order-saved-again");
+    } finally {
+      productUpdateSavePending = false;
+    }
   } catch (error) {
     flowFailure = error;
     try {
@@ -269,10 +303,15 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
           const deleteProduct = page.getByRole("button", { name: "Usuń produkt", exact: true });
           await expect(deleteProduct).toBeVisible();
           await expect(deleteProduct).toBeEnabled();
-          await Promise.all([
-            page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
-            deleteProduct.click(),
-          ]);
+          productDeletePending = true;
+          try {
+            await Promise.all([
+              page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
+              deleteProduct.click(),
+            ]);
+          } finally {
+            productDeletePending = false;
+          }
         } finally {
           page.off("dialog", acceptDialogs);
         }

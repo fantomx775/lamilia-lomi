@@ -341,6 +341,81 @@ describe("ProductEditor V2", () => {
     expect(unloadEvent.defaultPrevented).toBe(true);
   });
 
+  it("unregisters its popstate guard after the editor unmounts", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const forward = vi.spyOn(window.history, "forward").mockImplementation(() => {});
+    const view = render(
+      <AdminProductEditorHistoryGuard>
+        <ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />
+      </AdminProductEditorHistoryGuard>,
+    );
+
+    fireEvent.change(view.getByLabelText("Tytuł"), { target: { value: "Unsaved before unmount" } });
+    view.rerender(<AdminProductEditorHistoryGuard>{null}</AdminProductEditorHistoryGuard>);
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(forward).not.toHaveBeenCalled();
+  });
+
+  it("registers a fresh guard after remount and keeps Back/Forward protection active", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const forward = vi.spyOn(window.history, "forward").mockImplementation(() => {});
+    const editor = (
+      <AdminProductEditorHistoryGuard>
+        <ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />
+      </AdminProductEditorHistoryGuard>
+    );
+    const view = render(editor);
+
+    fireEvent.change(view.getByLabelText("Tytuł"), { target: { value: "First mount" } });
+    view.rerender(<AdminProductEditorHistoryGuard>{null}</AdminProductEditorHistoryGuard>);
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    expect(confirm).not.toHaveBeenCalled();
+
+    view.rerender(editor);
+    fireEvent.change(view.getByLabelText("Tytuł"), { target: { value: "Second mount" } });
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(forward).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an older editor's cleanup unregister the newer editor", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const forward = vi.spyOn(window.history, "forward").mockImplementation(() => {});
+    const newerEditor = (
+      <ProductEditor key="newer" title="Nowszy produkt" categories={snapshot.categories} tags={snapshot.tags} />
+    );
+    const view = render(
+      <AdminProductEditorHistoryGuard>
+        <>
+          <ProductEditor key="older" title="Starszy produkt" categories={snapshot.categories} tags={snapshot.tags} />
+          {newerEditor}
+        </>
+      </AdminProductEditorHistoryGuard>,
+    );
+
+    const titles = view.container.querySelectorAll<HTMLInputElement>("#product-title-en");
+    expect(titles).toHaveLength(2);
+    fireEvent.change(titles[0], { target: { value: "Older editor" } });
+    fireEvent.change(titles[1], { target: { value: "Newer editor" } });
+    view.rerender(
+      <AdminProductEditorHistoryGuard>
+        <>{newerEditor}</>
+      </AdminProductEditorHistoryGuard>,
+    );
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(forward).toHaveBeenCalledTimes(1);
+
+    view.rerender(<AdminProductEditorHistoryGuard>{null}</AdminProductEditorHistoryGuard>);
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(forward).toHaveBeenCalledTimes(1);
+  });
+
   it("updates the visible status badge as the product status changes", async () => {
     const user = userEvent.setup();
     const view = render(

@@ -15,11 +15,13 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("product editor preserves work, saves all statuses, and keeps Save reachable", async ({ page, browser }, testInfo) => {
-  const suffix = `${Date.now()}-${testInfo.project.name}`;
+  const suffix = `issue-25-${testInfo.project.name}`;
   const titleText = `UX Product ${suffix}`;
   const slug = `ux-product-${suffix.toLowerCase()}`;
   const shortDescription = "Temporary local product used to verify the complete editor flow.";
   const simulatedFailures: string[] = [];
+  const browserDiagnostics = createBrowserDiagnostics();
+  collectBrowserDiagnostics(page, browserDiagnostics);
   let productPath: string | undefined;
   let createdProductId: string | undefined;
   let productSaved = false;
@@ -145,6 +147,22 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await expect(page).toHaveURL(editorUrlRegex(productPath));
     await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
 
+    await page.getByLabel("Pozycja w katalogu").fill("42");
+    const acceptAfterUnmountNavigationPromise = page.waitForEvent("dialog", { timeout: 5_000 });
+    void page.locator('a[href="/admin/products"]').last().click().catch(() => null);
+    const acceptAfterUnmountNavigation = await acceptAfterUnmountNavigationPromise;
+    expect(acceptAfterUnmountNavigation.type()).toBe("confirm");
+    await acceptAfterUnmountNavigation.accept();
+    await expect(page).toHaveURL(/\/admin\/products$/);
+    await page.goBack();
+    await expect(page).toHaveURL(editorUrlRegex(productPath));
+    await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
+    await page.goForward();
+    await expect(page).toHaveURL(/\/admin\/products$/);
+    await page.goBack();
+    await expect(page).toHaveURL(editorUrlRegex(productPath));
+    await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
+
     await page.getByLabel("Pozycja w katalogu").fill("40");
     await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
     const backDialogPromise = page.waitForEvent("dialog", { timeout: 5_000 });
@@ -191,6 +209,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       try {
         await noJsContext.addCookies(await page.context().cookies());
         const noJsPage = await noJsContext.newPage();
+        collectBrowserDiagnostics(noJsPage, browserDiagnostics);
         await noJsPage.goto(productPath, { waitUntil: "domcontentloaded" });
         const form = noJsPage.locator("#product-editor-form");
         await form.waitFor({ state: "attached" });
@@ -206,6 +225,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           Object.defineProperty(window, "navigation", { configurable: true, value: undefined });
         });
         const legacyPage = await legacyContext.newPage();
+        collectBrowserDiagnostics(legacyPage, browserDiagnostics);
         await legacyPage.goto(productPath);
         await legacyPage.locator('a[href="/admin/products"]').last().click();
         await expect(legacyPage).toHaveURL(/\/admin\/products$/);
@@ -293,6 +313,11 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         page.off("dialog", acceptDialogs);
       }
     }
+    await testInfo.attach("browser-diagnostics.json", {
+      body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
+      contentType: "application/json",
+    });
+    console.log(`BROWSER_DIAGNOSTICS ${testInfo.project.name} ${JSON.stringify(browserDiagnostics)}`);
   }
 });
 
@@ -306,9 +331,11 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
     javaScriptEnabled: false,
     storageState: await page.context().storageState(),
   });
+  const browserDiagnostics = createBrowserDiagnostics();
 
   try {
     const noJsPage = await context.newPage();
+    collectBrowserDiagnostics(noJsPage, browserDiagnostics);
     await noJsPage.goto("/admin/products/new", { waitUntil: "domcontentloaded", timeout: 15_000 });
     await expect(noJsPage.locator("#product-editor-form")).toBeVisible({ timeout: 15_000 });
     const titleInput = noJsPage.getByLabel("Tytuł");
@@ -342,6 +369,11 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
     await expect(noJsPage.getByLabel("Status")).toHaveValue("published");
   } finally {
     await context.close();
+    await testInfo.attach("browser-diagnostics.json", {
+      body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
+      contentType: "application/json",
+    });
+    console.log(`BROWSER_DIAGNOSTICS no-js ${JSON.stringify(browserDiagnostics)}`);
   }
 });
 
@@ -355,11 +387,118 @@ async function signInAsAdmin(page: Page) {
   ]);
 }
 
+function createBrowserDiagnostics() {
+  return {
+    consoleErrors: [] as Array<{ message: string; disposition: string; reason?: string }>,
+    pageErrors: [] as string[],
+    failedRequests: [] as Array<{ method: string; url: string; error: string | null; disposition: string; reason?: string }>,
+    failedResponses: [] as Array<{ method: string; url: string; status: number; disposition: string; reason?: string }>,
+  };
+}
+
+function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof createBrowserDiagnostics>) {
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    const text = message.text();
+    if (text.includes("status of 503")) {
+      diagnostics.consoleErrors.push({
+        message: text,
+        disposition: "expected",
+        reason: "The test deliberately returns HTTP 503 once to verify retained form values after a failed save.",
+      });
+    } else if (text.includes("status of 415")) {
+      diagnostics.consoleErrors.push({
+        message: text,
+        disposition: "expected",
+        reason: "Local upload mode intentionally returns 415 to select the multipart fallback, which the test verifies succeeds.",
+      });
+    } else {
+      diagnostics.consoleErrors.push({ message: text, disposition: "unresolved" });
+    }
+  });
+  page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
+  page.on("requestfailed", (request) => {
+    const error = request.failure()?.errorText ?? null;
+    const url = new URL(request.url());
+    const sanitizedUrl = sanitizeRequestUrl(request.url());
+    if (error === "net::ERR_ABORTED") {
+      diagnostics.failedRequests.push({
+        method: request.method(),
+        url: sanitizedUrl,
+        error,
+        disposition: "expected",
+        reason: "The browser canceled an in-flight request during navigation, reload, or history traversal; the destination and persisted values were asserted.",
+      });
+    } else if (error === "csp" && url.pathname.includes("browser_dev_hmr-client")) {
+      diagnostics.failedRequests.push({
+        method: request.method(),
+        url: sanitizedUrl,
+        error,
+        disposition: "expected",
+        reason: "The local Next.js development HMR client is blocked by the app CSP; this development-only bundle is not used in Production.",
+      });
+    } else {
+      diagnostics.failedRequests.push({
+        method: request.method(),
+        url: sanitizedUrl,
+        error,
+        disposition: "unresolved",
+      });
+    }
+  });
+  page.on("response", (response) => {
+    if (response.status() < 400) return;
+    const request = response.request();
+    const url = sanitizeRequestUrl(request.url());
+    if (response.status() === 503 && request.method() === "POST" && Boolean(request.headers()["next-action"])) {
+      diagnostics.failedResponses.push({
+        method: request.method(),
+        url,
+        status: response.status(),
+        disposition: "expected",
+        reason: "The test deliberately injects one failed Server Action response to verify the editor retains submitted values.",
+      });
+      return;
+    }
+    if (response.status() === 415 && request.method() === "POST" && new URL(request.url()).pathname === "/api/admin/assets") {
+      diagnostics.failedResponses.push({
+        method: request.method(),
+        url,
+        status: response.status(),
+        disposition: "expected",
+        reason: "The local upload endpoint selects the multipart fallback; the upload then succeeds and appears in the editor.",
+      });
+      return;
+    }
+    diagnostics.failedResponses.push({
+      method: request.method(),
+      url,
+      status: response.status(),
+      disposition: "unresolved",
+    });
+  });
+}
+
+function sanitizeRequestUrl(requestUrl: string) {
+  const url = new URL(requestUrl);
+  return `${url.origin}${url.pathname}`;
+}
+
 async function saveScreenshot(page: Page, filename: string) {
-  const directory = path.resolve(process.cwd(), "artifacts", "issue-25");
+  const directory = path.resolve(process.cwd(), "docs", "verification", "issue-25");
   fs.mkdirSync(directory, { recursive: true });
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
-  await page.screenshot({ path: path.join(directory, filename), animations: "disabled" });
+  const productId = page.getByText(/^ID: /);
+  const productIdBounds = await productId.boundingBox();
+  const viewport = page.viewportSize();
+  const visibleProductId = productIdBounds && viewport && productIdBounds.y < viewport.height &&
+    productIdBounds.y + productIdBounds.height > 0;
+  await page.screenshot({
+    path: path.join(directory, filename),
+    animations: "disabled",
+    mask: visibleProductId ? [productId] : [],
+    maskColor: "#e6ddd1",
+  });
 }
 
 async function waitForAdminTransition(page: Page) {

@@ -399,13 +399,15 @@ export function ProductEditor({
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);
+    let unregisterPopStateGuard: (() => void) | undefined;
     if (navigationApi) {
       navigationApi.addEventListener("navigate", confirmHistoryApiNavigation);
     } else {
-      registerProductEditorPopStateGuard(confirmHistoryNavigation);
+      unregisterPopStateGuard = registerProductEditorPopStateGuard(confirmHistoryNavigation);
     }
     document.addEventListener("click", confirmInternalNavigation, true);
     return () => {
+      unregisterPopStateGuard?.();
       window.removeEventListener("beforeunload", handleBeforeUnload);
       if (navigationApi) {
         navigationApi.removeEventListener("navigate", confirmHistoryApiNavigation);

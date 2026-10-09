@@ -2,16 +2,28 @@
 
 import { useEffect, type ReactNode } from "react";
 
-let activeProductEditorPopStateGuard: ((event: PopStateEvent) => void) | null = null;
+type ProductEditorPopStateGuard = (event: PopStateEvent) => void;
+
+const productEditorPopStateGuards = new Map<symbol, ProductEditorPopStateGuard>();
 
 export function registerProductEditorPopStateGuard(guard: (event: PopStateEvent) => void) {
   // Next may unmount the editor before the persistent layout listener receives this traversal.
-  activeProductEditorPopStateGuard = guard;
+  const registration = Symbol("product-editor-popstate-guard");
+  productEditorPopStateGuards.set(registration, guard);
+
+  return () => {
+    productEditorPopStateGuards.delete(registration);
+  };
 }
 
 export function AdminProductEditorHistoryGuard({ children }: { children: ReactNode }) {
   useEffect(() => {
-    const handlePopState = (event: PopStateEvent) => activeProductEditorPopStateGuard?.(event);
+    const handlePopState = (event: PopStateEvent) => {
+      let activeGuard: ProductEditorPopStateGuard | undefined;
+      for (const guard of productEditorPopStateGuards.values()) activeGuard = guard;
+      activeGuard?.(event);
+    };
+
     window.addEventListener("popstate", handlePopState, true);
     return () => window.removeEventListener("popstate", handlePopState, true);
   }, []);
