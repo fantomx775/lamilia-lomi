@@ -322,6 +322,94 @@ describe("registration auth action", () => {
     expect(actionMocks.clearAuthResumeIntent).not.toHaveBeenCalled();
   });
 
+  it("keeps a failed redemption bound to account A when account B logs in later", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    const accountAResumeIntent = {
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "first-reader-email-hash",
+      userId: "first-reader",
+      createdAt: Date.now(),
+    };
+    actionMocks.readAuthResumeIntent.mockResolvedValue(accountAResumeIntent);
+    actionMocks.authResumeIntentMatchesEmail
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    actionMocks.authResumeIntentMatchesUser.mockReturnValue(true);
+    actionMocks.getUnlockIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    });
+    actionMocks.redeemAuthResumeIntent.mockRejectedValueOnce(
+      new Error("temporary redemption failure"),
+    );
+    const accountAClient = {
+      auth: {
+        signInWithPassword: vi.fn().mockResolvedValue({ error: null }),
+        getUser: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: "first-reader",
+              email: "first-reader@example.com",
+              email_confirmed_at: "2026-10-09T10:00:00.000Z",
+            },
+          },
+          error: null,
+        }),
+      },
+    };
+    const accountBClient = {
+      auth: { signInWithPassword: vi.fn().mockResolvedValue({ error: null }) },
+    };
+    actionMocks.createClient
+      .mockResolvedValueOnce(accountAClient)
+      .mockResolvedValueOnce(accountBClient);
+
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "first-reader@example.com",
+          "password123",
+          "/en/products/moon-garden-coloring-book",
+        ),
+      ),
+      "/en/products/moon-garden-coloring-book?unlock=unexpected#premium",
+    );
+
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "LOMI-BOOK-2026",
+        userId: "first-reader",
+        emailHash: "first-reader-email-hash",
+      }),
+    );
+    expect(actionMocks.clearAuthResumeIntent).not.toHaveBeenCalled();
+
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "second-reader@example.com",
+          "password123",
+          "/en/products/moon-garden-coloring-book?source=retry",
+        ),
+      ),
+      "/en/products/moon-garden-coloring-book?source=retry#premium",
+    );
+
+    expect(actionMocks.redeemAuthResumeIntent).toHaveBeenNthCalledWith(
+      1,
+      accountAResumeIntent,
+    );
+    expect(actionMocks.redeemAuthResumeIntent).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ code: "" }),
+    );
+  });
+
   it("does not transfer a pending account's premium code to another login", async () => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     actionMocks.readAuthResumeIntent.mockResolvedValue({

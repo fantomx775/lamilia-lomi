@@ -158,7 +158,15 @@ describe("Supabase auth callback", () => {
       "/en/products/moon-garden-coloring-book?unlock=unexpected#premium",
     );
     expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
-    expect(resume.clear).toHaveBeenCalledTimes(1);
+    expect(resume.setAuthResume).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      userId: undefined,
+      emailHash: "reader-email-hash",
+    });
+    expect(resume.clear).not.toHaveBeenCalled();
   });
 
   it("retains the premium code on another device when redemption returns a failure", async () => {

@@ -531,7 +531,6 @@ async function completeSupabaseAuthResume(intent: AuthResumeIntent, code: string
     redemption = await redeemAuthResumeIntent(intent);
   } catch (error) {
     logUnexpectedFailure("[premium-unlock] Auth resume redemption failed unexpectedly.", error);
-    await clearAuthResumeIntent();
     await setUnlockIntent({
       locale: intent.locale,
       productSlug: intent.productSlug ?? "",

@@ -141,7 +141,16 @@ export async function GET(request: Request) {
     console.error("[auth-callback] Auth resume redemption failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,
     });
-    await clearAuthResumeIntent();
+    if (intent?.userId || intent?.emailHash) {
+      await setAuthResumeIntent({
+        locale: intent.locale,
+        productSlug: intent.productSlug,
+        returnTo: intent.returnTo,
+        code: intent.code,
+        userId: intent.userId,
+        emailHash: intent.emailHash,
+      });
+    }
     await persistUnlockIntent(intent);
     if (intent?.productSlug && intent.code) {
       return successResponse(
