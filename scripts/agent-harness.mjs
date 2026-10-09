@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -710,6 +711,7 @@ const AI_REVIEW_MARKER = "<!-- agent-harness-ai-review:v1 -->";
 const VERIFICATION_MARKER = "<!-- agent-harness-verification:v1 -->";
 const DELIVERY_MARKER = "<!-- agent-harness-delivery:v1 -->";
 const ISSUE_DELIVERY_MARKER = "<!-- agent-harness-issue-delivery:v1 -->";
+const RESUME_CHECKPOINT_MARKER = "<!-- agent-harness-resume:v1 -->";
 const REQUIRED_LOCAL_CHECKS = Object.freeze(["diff", "lint", "tests"]);
 
 function reviewFields(body) {
@@ -2723,6 +2725,265 @@ function formatIssueDeliveryComment(record) {
   return ISSUE_DELIVERY_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
 }
 
+function formatResumeCheckpoint(record) {
+  return RESUME_CHECKPOINT_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+}
+
+async function recordResumeCheckpoint(client, pullRequestNumber, record) {
+  const comment = await client.request(
+    "/repos/" + client.owner + "/" + client.repo + "/issues/" + pullRequestNumber + "/comments",
+    { method: "POST", body: JSON.stringify({ body: formatResumeCheckpoint(record) }) },
+  );
+  return { id: comment.id || null, url: comment.html_url || null, record };
+}
+
+export async function readLatestResumeCheckpoint(client, pullRequestNumber) {
+  const number = parseIssueNumber(pullRequestNumber);
+  const comments = await pagedRest(
+    client,
+    "/repos/" + client.owner + "/" + client.repo + "/issues/" + number + "/comments",
+  );
+  return parseMarkedRecords(comments, RESUME_CHECKPOINT_MARKER)
+    .filter(({ record, error }) => !error && record?.schemaVersion === 1 && record.pullRequestNumber === number)
+    .sort((left, right) => (right.comment.created_at || "").localeCompare(left.comment.created_at || ""))[0]?.record || null;
+}
+
+export async function resolveConfirmedMerge(client, pullRequestNumber, expectedHeadSha, {
+  attempts = 5,
+  sleep = delay,
+} = {}) {
+  const number = parseIssueNumber(pullRequestNumber);
+  if (!validSha(expectedHeadSha)) {
+    return { status: "BLOCKED", mergeSha: null, details: "The expected PR head SHA is missing or invalid." };
+  }
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const pullRequest = await client.request("/repos/" + client.owner + "/" + client.repo + "/pulls/" + number);
+      const restHeadSha = pullRequest?.head?.sha?.toLowerCase();
+      let mergeSha = pullRequest.merged && validSha(pullRequest.merge_commit_sha)
+        ? pullRequest.merge_commit_sha.toLowerCase()
+        : null;
+      let graphqlConfirmedMerge = false;
+      if (!mergeSha && client.graphql) {
+        const data = await client.graphql(`
+          query($owner: String!, $repo: String!, $number: Int!) {
+            repository(owner: $owner, name: $repo) {
+              pullRequest(number: $number) {
+                merged
+                headRefOid
+                mergeCommit { oid }
+              }
+            }
+          }
+        `, { owner: client.owner, repo: client.repo, number });
+        const graphPullRequest = data?.repository?.pullRequest;
+        if (graphPullRequest?.merged === true &&
+          graphPullRequest.headRefOid?.toLowerCase() === expectedHeadSha.toLowerCase() &&
+          validSha(graphPullRequest.mergeCommit?.oid)) {
+          mergeSha = graphPullRequest.mergeCommit.oid.toLowerCase();
+          graphqlConfirmedMerge = true;
+        }
+      }
+      if (mergeSha) {
+        const confirmedHeadSha = graphqlConfirmedMerge
+          ? expectedHeadSha.toLowerCase()
+          : restHeadSha;
+        const mergeCommit = await client.request(
+          "/repos/" + client.owner + "/" + client.repo + "/commits/" + mergeSha,
+        );
+        const confirmedSha = mergeCommit?.sha?.toLowerCase();
+        if (confirmedHeadSha === expectedHeadSha.toLowerCase() && confirmedSha === mergeSha) {
+          const confirmedPullRequest = graphqlConfirmedMerge
+            ? {
+                ...pullRequest,
+                merged: true,
+                merge_commit_sha: mergeSha,
+                head: { ...pullRequest.head, sha: expectedHeadSha },
+              }
+            : pullRequest;
+          return {
+            status: "PASS",
+            mergeSha,
+            pullRequest: confirmedPullRequest,
+            details: "GitHub confirms the merged PR head and its merge commit through independent API responses.",
+          };
+        }
+        lastError = new Error("GitHub has not confirmed the expected PR head SHA and merge commit together.");
+      } else {
+        lastError = new Error(pullRequest.merged
+          ? "The PR is merged, but GitHub has not exposed a confirmed merge commit SHA yet."
+          : "GitHub has not confirmed that the PR is merged yet.");
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt + 1 < attempts) await sleep(Math.min(250 * (2 ** attempt), 2_000));
+  }
+  return {
+    status: "BLOCKED",
+    mergeSha: null,
+    details: "A successful merge could not be confirmed after " + attempts + " bounded attempts: " +
+      (lastError?.message || "GitHub returned incomplete merge data."),
+  };
+}
+
+export async function acquireDeliveryLease(client, pullRequestNumber, {
+  leaseMs = 30 * 60 * 1000,
+  now = Date.now,
+  sleep = delay,
+  nonce = randomUUID(),
+} = {}) {
+  const number = parseIssueNumber(pullRequestNumber);
+  const ref = "refs/heads/agent-harness-locks/pr-" + number;
+  const apiRef = "/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/agent-harness-locks/pr-" + number;
+  const encodeLease = async (payload, baseTreeSha = null) => {
+    const blob = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/blobs", {
+      method: "POST",
+      body: JSON.stringify({ content: JSON.stringify(payload), encoding: "utf-8" }),
+    });
+    const tree = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/trees", {
+      method: "POST",
+      body: JSON.stringify({
+        ...(baseTreeSha ? { base_tree: baseTreeSha } : {}),
+        tree: [{ path: "lease.json", mode: "100644", type: "blob", sha: blob.sha }],
+      }),
+    });
+    return client.request("/repos/" + client.owner + "/" + client.repo + "/git/commits", {
+      method: "POST",
+      body: JSON.stringify({
+        message: "Agent Harness delivery lease for PR #" + number,
+        tree: tree.sha,
+        parents: payload.parentSha ? [payload.parentSha] : [payload.baseSha],
+      }),
+    });
+  };
+  const readExistingLease = async (refSha) => {
+    const commit = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/commits/" + refSha);
+    const tree = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/trees/" + commit.tree.sha + "?recursive=1");
+    const entry = tree.tree?.find((item) => item.path === "lease.json" && item.type === "blob");
+    if (!entry) throw new Error("The existing delivery lease has no readable lease metadata.");
+    const blob = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/blobs/" + entry.sha);
+    return { commit, payload: JSON.parse(Buffer.from(blob.content, "base64").toString("utf8")) };
+  };
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    let current;
+    try {
+      current = await client.request(apiRef);
+    } catch (error) {
+      if (!/\(404\)/.test(error.message)) {
+        return { status: "BLOCKED", details: "The per-PR delivery lease could not be read: " + error.message };
+      }
+    }
+    if (current?.object?.sha) {
+      let existing;
+      try {
+        existing = await readExistingLease(current.object.sha);
+      } catch (error) {
+        return { status: "BLOCKED", details: "The existing per-PR delivery lease is unreadable: " + error.message };
+      }
+      const expiresAt = Date.parse(existing.payload?.expiresAt || "");
+      if (!Number.isFinite(expiresAt)) {
+        return { status: "BLOCKED", details: "The existing per-PR delivery lease has invalid expiry metadata." };
+      }
+      if (existing.payload.nonce === nonce) {
+        return { status: "PASS", ref, sha: current.object.sha, nonce };
+      }
+      if (expiresAt > now()) {
+        return {
+          status: "BLOCKED",
+          details: "Another delivery worker holds the PR lease until " + new Date(expiresAt).toISOString() + ".",
+          leaseExpiresAt: new Date(expiresAt).toISOString(),
+        };
+      }
+      let updated;
+      try {
+        updated = await encodeLease({
+          schemaVersion: 1,
+          pullRequestNumber: number,
+          nonce,
+          acquiredAt: new Date(now()).toISOString(),
+          expiresAt: new Date(now() + leaseMs).toISOString(),
+          parentSha: current.object.sha,
+        }, existing.commit.tree.sha);
+        await client.request(apiRef, {
+          method: "PATCH",
+          body: JSON.stringify({ sha: updated.sha, force: false }),
+        });
+      } catch {
+        await sleep(100 * (attempt + 1));
+        continue;
+      }
+      return { status: "PASS", ref, sha: updated.sha, nonce };
+    }
+
+    let base;
+    let created;
+    try {
+      base = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/main");
+      created = await encodeLease({
+        schemaVersion: 1,
+        pullRequestNumber: number,
+        nonce,
+        acquiredAt: new Date(now()).toISOString(),
+        expiresAt: new Date(now() + leaseMs).toISOString(),
+        baseSha: base.object.sha,
+      });
+      await client.request("/repos/" + client.owner + "/" + client.repo + "/git/refs", {
+        method: "POST",
+        body: JSON.stringify({ ref, sha: created.sha }),
+      });
+      return { status: "PASS", ref, sha: created.sha, nonce };
+    } catch {
+      await sleep(100 * (attempt + 1));
+    }
+  }
+  return { status: "BLOCKED", details: "Another worker acquired the delivery lease, or GitHub could not create it after bounded retries." };
+}
+
+export async function releaseDeliveryLease(client, lease) {
+  if (lease?.status !== "PASS" || typeof lease.ref !== "string" || !validSha(lease.sha)) {
+    return { status: "NOT RUN", details: "No owned delivery lease was supplied." };
+  }
+  const path = "/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/" + lease.ref.replace(/^refs\/heads\//, "");
+  try {
+    const current = await client.request(path);
+    if (current?.object?.sha !== lease.sha) {
+      return { status: "SKIPPED", details: "The lease now belongs to another worker and was left untouched." };
+    }
+    await client.request(path, { method: "DELETE" });
+    return { status: "PASS", details: "The owned delivery lease was released." };
+  } catch (error) {
+    return { status: "BLOCKED", details: "The owned delivery lease could not be released: " + error.message };
+  }
+}
+
+export async function runWithDeliveryLease(client, pullRequestNumber, operation, {
+  acquire = acquireDeliveryLease,
+  release = releaseDeliveryLease,
+} = {}) {
+  const lease = await acquire(client, pullRequestNumber);
+  if (lease.status !== "PASS") {
+    return {
+      status: "BLOCKED",
+      decision: "BLOCKED",
+      stage: "delivery-lease",
+      merged: false,
+      completed: false,
+      reasons: [lease.details || "Another worker is processing this PR."],
+    };
+  }
+  let result;
+  try {
+    result = await operation();
+  } finally {
+    const released = await release(client, lease);
+    if (result && released.status !== "PASS") result.leaseReleaseWarning = released.details;
+  }
+  return result;
+}
+
 async function readVerifiedIssueDelivery(client, issueNumber, pullRequest) {
   const mergeSha = pullRequest.merge_commit_sha?.toLowerCase();
   const candidateSha = pullRequest.head?.sha?.toLowerCase();
@@ -3432,35 +3693,52 @@ export async function deliverPullRequest(client, pullRequestNumber, {
         reasons: ["PR body now contains closing reference(s) " + finalClosingIssues.map((value) => "#" + value).join(", ") + "; no merge was attempted."],
       };
     }
+    const checkpointRecord = {
+      schemaVersion: 1,
+      pullRequestNumber: number,
+      headSha: candidateSha,
+      baseSha: verifiedBaseSha,
+      dependencyStatus: verification.dependencyStatus || "not-reported-by-pr-verifier",
+      stage: "merge-request-ready",
+      completedStages: ["preflight", "current-sha-verification", "production-smoke-plan"],
+      remainingStages: ["merge-confirmation", "production-deployment", "production-smoke"],
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await recordResumeCheckpoint(client, number, checkpointRecord);
+    } catch (error) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "resume-checkpoint",
+        merged: false,
+        candidateSha,
+        reasons: ["The durable pre-merge recovery checkpoint could not be saved; no merge was attempted: " + error.message],
+      };
+    }
     try {
       mergeResult = await client.request(pullRequestPath + "/merge", {
         method: "PUT",
         body: JSON.stringify({ sha: candidateSha, merge_method: "merge" }),
       });
     } catch (error) {
-      return {
-        status: "BLOCKED",
-        decision: "BLOCKED",
-        stage: "merge",
-        merged: false,
-        candidateSha,
-        reasons: ["GitHub rejected the normal merge request; no protection bypass was attempted: " + error.message],
-      };
+      mergeResult = { merged: null, message: error.message };
     }
-    if (mergeResult?.merged !== true || !validSha(mergeResult.sha)) {
+    const confirmedMerge = await resolveConfirmedMerge(client, number, candidateSha);
+    if (confirmedMerge.status !== "PASS") {
       return {
         status: "BLOCKED",
         decision: "BLOCKED",
-        stage: "merge",
-        merged: false,
+        stage: "merge-confirmation",
+        merged: mergeResult?.merged === true,
         candidateSha,
         mergeResult,
-        reasons: ["GitHub did not confirm a successful merge commit."],
+        reasons: ["GitHub's normal merge endpoint was used once; merge recovery did not confirm a trusted merge commit: " + confirmedMerge.details],
       };
     }
-    mergeSha = mergeResult.sha;
-    pullRequest = await client.request(pullRequestPath);
-    if (!pullRequest.merged || pullRequest.merge_commit_sha?.toLowerCase() !== mergeSha.toLowerCase()) {
+    mergeSha = confirmedMerge.mergeSha;
+    pullRequest = confirmedMerge.pullRequest;
+    if (!pullRequest.merged || pullRequest.head?.sha?.toLowerCase() !== candidateSha.toLowerCase()) {
       return {
         status: "BLOCKED",
         decision: "BLOCKED",
@@ -3468,8 +3746,22 @@ export async function deliverPullRequest(client, pullRequestNumber, {
         merged: true,
         candidateSha,
         mergeSha,
-        reasons: ["GitHub accepted the merge request but the PR merge commit could not be confirmed."],
+        reasons: ["GitHub accepted the merge request but the merged PR head could not be confirmed."],
       };
+    }
+    try {
+      await recordResumeCheckpoint(client, number, {
+        ...checkpointRecord,
+        mergeSha,
+        stage: "merge-confirmed",
+        completedStages: [...checkpointRecord.completedStages, "merge-confirmation"],
+        remainingStages: ["production-deployment", "production-smoke"],
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      // GitHub's merged PR state is durable and authoritative. Keep recovery
+      // moving; the next invocation can reconstruct this checkpoint from GitHub.
+      mergeResult.checkpointWarning = error.message;
     }
   } else {
     verification = await verify(client, number, { allowMerged: true });
@@ -3493,27 +3785,46 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       effectiveSmokePaths = smokePlan.paths;
       effectiveSmokeExpectations = smokePlan.expectations;
     }
-    if (!validSha(mergeSha)) {
+    const confirmedMerge = await resolveConfirmedMerge(client, number, candidateSha);
+    if (confirmedMerge.status === "PASS") {
+      mergeSha = confirmedMerge.mergeSha;
+      pullRequest = confirmedMerge.pullRequest;
+      try {
+        await recordResumeCheckpoint(client, number, {
+          schemaVersion: 1,
+          pullRequestNumber: number,
+          headSha: candidateSha,
+          baseSha: verifiedBaseSha,
+          dependencyStatus: verification.dependencyStatus || "not-reported-by-pr-verifier",
+          mergeSha,
+          stage: "merge-confirmed",
+          completedStages: ["preflight", "merge-confirmation"],
+          remainingStages: ["production-deployment", "production-smoke"],
+          updatedAt: new Date().toISOString(),
+        });
+      } catch {
+        // The confirmed merge itself is durable on GitHub; retain safe recovery.
+      }
+    }
+    if (confirmedMerge.status !== "PASS" || !validSha(mergeSha)) {
       return {
         status: "BLOCKED",
         decision: "BLOCKED",
         stage: "merge-confirmation",
         merged: true,
         candidateSha,
-        reasons: ["The already-merged PR does not expose a valid merge commit SHA."],
+        reasons: [confirmedMerge.details || "The already-merged PR does not expose a valid merge commit SHA."],
       };
     }
   }
 
   let closingReferenceError = null;
   try {
-    const confirmedMergedPullRequest = await client.request(pullRequestPath);
-    if (!confirmedMergedPullRequest.merged ||
-      confirmedMergedPullRequest.merge_commit_sha?.toLowerCase() !== mergeSha?.toLowerCase() ||
-      confirmedMergedPullRequest.head?.sha?.toLowerCase() !== candidateSha?.toLowerCase()) {
-      throw new Error("The merged PR no longer matches the verified head and merge commit.");
+    const confirmed = await resolveConfirmedMerge(client, number, candidateSha);
+    if (confirmed.status !== "PASS" || confirmed.mergeSha.toLowerCase() !== mergeSha?.toLowerCase()) {
+      throw new Error(confirmed.details || "The merged PR no longer matches the verified head and merge commit.");
     }
-    pullRequest = confirmedMergedPullRequest;
+    pullRequest = confirmed.pullRequest;
     const confirmedBodyClosers = findClosingIssueReferences(
       pullRequest.body || "",
       client.owner + "/" + client.repo,
@@ -3594,11 +3905,43 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   try {
     productionDeployment = await waitForDeployment(client, mergeSha);
     if (productionDeployment.status === "PASS") {
+      try {
+        await recordResumeCheckpoint(client, number, {
+          schemaVersion: 1,
+          pullRequestNumber: number,
+          headSha: candidateSha,
+          baseSha: verifiedBaseSha,
+          mergeSha,
+          dependencyStatus: verification?.dependencyStatus || "not-reported-by-pr-verifier",
+          stage: "production-deployment-passed",
+          completedStages: ["preflight", "merge-confirmation", "production-deployment"],
+          remainingStages: ["production-smoke", "post-deployment-migration", "issue-completion"],
+          updatedAt: new Date().toISOString(),
+        });
+      } catch {
+        // The exact-SHA deployment remains queryable from GitHub on a later run.
+      }
       productionSmoke = await smoke(productionDeployment.deployment.environmentUrl, {
         paths: effectiveSmokePaths,
         expectations: effectiveSmokeExpectations,
       });
       if (productionSmoke.status === "PASS") {
+        try {
+          await recordResumeCheckpoint(client, number, {
+            schemaVersion: 1,
+            pullRequestNumber: number,
+            headSha: candidateSha,
+            baseSha: verifiedBaseSha,
+            mergeSha,
+            dependencyStatus: verification?.dependencyStatus || "not-reported-by-pr-verifier",
+            stage: "production-smoke-passed",
+            completedStages: ["preflight", "merge-confirmation", "production-deployment", "production-smoke"],
+            remainingStages: ["post-deployment-migration", "issue-completion"],
+            updatedAt: new Date().toISOString(),
+          });
+        } catch {
+          // Production deployment and smoke can be rechecked from their exact SHA.
+        }
         const files = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number + "/files");
         const comments = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/issues/" + number + "/comments");
         const localVerification = validateLocalVerification({
@@ -3704,6 +4047,37 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     completed,
     recordedAt: new Date().toISOString(),
   };
+  try {
+    await recordResumeCheckpoint(client, number, {
+      schemaVersion: 1,
+      pullRequestNumber: number,
+      headSha: candidateSha,
+      baseSha: verifiedBaseSha,
+      mergeSha,
+      dependencyStatus: verification?.dependencyStatus || "not-reported-by-pr-verifier",
+      stage: completed ? "complete" :
+        productionDeployment?.status !== "PASS" ? "production-deployment-blocked" :
+          productionSmoke?.status !== "PASS" ? "production-smoke-blocked" :
+            postDeploymentMigration?.status !== "PASS" ? "post-deployment-migration-blocked" : "delivery-blocked",
+      completedStages: [
+        "preflight",
+        "merge-confirmation",
+        ...(productionDeployment?.status === "PASS" ? ["production-deployment"] : []),
+        ...(productionSmoke?.status === "PASS" ? ["production-smoke"] : []),
+        ...(postDeploymentMigration?.status === "PASS" ? ["post-deployment-migration"] : []),
+        ...(completed ? ["issue-completion"] : []),
+      ],
+      remainingStages: completed ? [] : [
+        ...(productionDeployment?.status === "PASS" ? [] : ["production-deployment"]),
+        ...(productionSmoke?.status === "PASS" ? [] : ["production-smoke"]),
+        ...(postDeploymentMigration?.status === "PASS" ? [] : ["post-deployment-migration"]),
+        ...(completed ? [] : ["issue-completion"]),
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+  } catch {
+    // The delivery record below remains the authoritative final report.
+  }
   const comment = await postIssueComment(client, number, formatDeliveryComment(record));
   return {
     status: record.status,
@@ -3793,6 +4167,7 @@ export function findBranchCandidates(branches, issue) {
   }
   return branches.filter((branch) => {
     const normalized = branch.toLowerCase();
+    if (normalized.startsWith("agent-harness-locks/")) return false;
     const numberMatch = new RegExp(`(?:^|[/_-])${issue.number}(?:$|[/_-])`).test(normalized);
     const titleMatches = keywords.filter((word) => normalized.includes(word)).length;
     return numberMatch || titleMatches >= Math.min(2, keywords.length);
@@ -4112,6 +4487,7 @@ function printUsage() {
   node scripts/agent-harness.mjs inspect <issue>
   node scripts/agent-harness.mjs verify-pr <pull-request>
   node scripts/agent-harness.mjs deliver-pr <pull-request> [--issue <issue>]
+  node scripts/agent-harness.mjs resume-pr <pull-request> [--issue <issue>]
   node scripts/agent-harness.mjs add <issue>
   node scripts/agent-harness.mjs status <issue> <Backlog|Ready|In Progress|Review|Blocked>
   node scripts/agent-harness.mjs field <issue> <Priority|Area> <value>
@@ -4135,16 +4511,32 @@ async function main(args) {
     if (verification.decision !== "READY_FOR_MERGE") process.exitCode = 1;
     return;
   }
-  if (command === "deliver-pr") {
+  if (command === "deliver-pr" || command === "resume-pr") {
     const trackedIssueNumber = fieldOrStatus === "--issue" && value && !extra.length
       ? parseIssueNumber(value)
       : null;
     if ((fieldOrStatus && trackedIssueNumber === null) || (!fieldOrStatus && value) || extra.length) {
-      throw new Error("Use deliver-pr <pull-request> [--issue <issue>].");
+      throw new Error("Use " + command + " <pull-request> [--issue <issue>].");
     }
-    const delivery = await deliverPullRequest(client, issueNumber, {
+    let priorCheckpoint = null;
+    let checkpointReadError = null;
+    if (command === "resume-pr") {
+      try {
+        priorCheckpoint = await readLatestResumeCheckpoint(client, issueNumber);
+      } catch (error) {
+        checkpointReadError = error.message;
+      }
+    }
+    const delivery = await runWithDeliveryLease(client, issueNumber, () => deliverPullRequest(client, issueNumber, {
       issueNumber: trackedIssueNumber,
-    });
+    }));
+    if (command === "resume-pr") {
+      delivery.resume = {
+        priorCheckpoint,
+        checkpointReadError,
+        decisionSource: "live GitHub PR, merge, deployment, and evidence state is always revalidated; saved checkpoint data never bypasses a gate",
+      };
+    }
     console.log(JSON.stringify(delivery, null, 2));
     if (!delivery.completed) process.exitCode = 1;
     return;
