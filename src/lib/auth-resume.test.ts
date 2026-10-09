@@ -29,6 +29,7 @@ import {
   clearAuthResumeIntent,
   createAuthResumeIntent,
   decodeAuthResumeCallbackToken,
+  getAccountBoundResumeCode,
   getAuthResumeRedirect,
   readAuthResumeIntent,
   redeemAuthResumeIntent,
@@ -157,6 +158,57 @@ describe("Supabase auth resume contract", () => {
     expect(authResumeIntentMatchesUser(intent, { id: "other-user", email: "reader@example.com" })).toBe(false);
     expect(authResumeIntentMatchesUser(intent, { id: "user-123", email: "other@example.com" })).toBe(false);
     expect(authResumeIntentMatchesUser({ userId: undefined, emailHash: undefined }, { id: "user-123" })).toBe(false);
+  });
+
+  it("only returns a saved code to the matching account and product", () => {
+    const intent = createAuthResumeIntent({
+      locale: "en",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      email: "reader@example.com",
+      userId: "user-123",
+    });
+
+    expect(
+      getAccountBoundResumeCode(
+        intent,
+        { id: "user-123", email: "reader@example.com" },
+        "en",
+        "moon-garden-coloring-book",
+      ),
+    ).toBe("LOMI-BOOK-2026");
+    expect(
+      getAccountBoundResumeCode(
+        intent,
+        { id: "other-user", email: "other@example.com" },
+        "en",
+        "moon-garden-coloring-book",
+      ),
+    ).toBeUndefined();
+    expect(
+      getAccountBoundResumeCode(
+        intent,
+        { id: "user-123", email: "reader@example.com" },
+        "pl",
+        "moon-garden-coloring-book",
+      ),
+    ).toBeUndefined();
+    expect(
+      getAccountBoundResumeCode(
+        intent,
+        { id: "user-123", email: "reader@example.com" },
+        "en",
+        "another-product",
+      ),
+    ).toBeUndefined();
+    expect(
+      getAccountBoundResumeCode(
+        intent,
+        null,
+        "en",
+        "moon-garden-coloring-book",
+      ),
+    ).toBeUndefined();
   });
 
   it("matches a signed resume identity to an email without storing the email", () => {

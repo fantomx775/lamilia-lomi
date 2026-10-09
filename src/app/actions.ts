@@ -417,15 +417,21 @@ export async function registerDemoAction(formData: FormData) {
     const returnProductSlug = productSlugFromReturnTo(returnTo, locale);
     const pendingResumeTargetsReturnTo = Boolean(
       pendingResumeIntent &&
+        pendingResumeIntent.locale === locale &&
         (pendingResumeIntent.returnTo === returnTo ||
           (returnProductSlug &&
             pendingResumeIntent.productSlug === returnProductSlug)),
+    );
+    const pendingResumeMatchesAccount = Boolean(
+      pendingResumeTargetsReturnTo &&
+        pendingResumeIntent &&
+        authResumeIntentMatchesEmail(pendingResumeIntent, result.value.email),
     );
     const pendingResumeHasDifferentAccount = Boolean(
       pendingResumeTargetsReturnTo &&
         pendingResumeIntent &&
         pendingResumeIntent?.code &&
-        !authResumeIntentMatchesEmail(pendingResumeIntent, result.value.email),
+        !pendingResumeMatchesAccount,
     );
     const normalizedCode = normalizePremiumCodeForRequest(code);
     const normalizedPendingCode = normalizePremiumCodeForRequest(
@@ -436,6 +442,8 @@ export async function registerDemoAction(formData: FormData) {
     );
     if (pendingResumeHasDifferentAccount && submittedPendingCode) {
       code = "";
+    } else if (!normalizedCode && pendingResumeMatchesAccount) {
+      code = pendingResumeIntent?.code ?? "";
     }
     let intent = createAuthResumeIntent({
       locale,

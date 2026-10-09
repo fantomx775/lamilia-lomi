@@ -14,8 +14,12 @@ import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
 import type { Locale } from "@/i18n/routing";
 import { isMediaProxyPath } from "@/lib/media-upload";
+import {
+  getAccountBoundResumeCode,
+  readAuthResumeIntent,
+} from "@/lib/auth-resume";
 import { getUnlockIntent } from "@/lib/unlock-intent";
-import { getProductDetailAccessForRequest } from "@/lib/session.server";
+import { getProductDetailAccessForRequest, getSupabaseAuthContext } from "@/lib/session.server";
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { createSignedDownloadUrl } from "@/lib/premium-core";
 import {
@@ -63,17 +67,30 @@ async function ProductUnlockSection({
   alreadyUnlocked: boolean;
   verificationPending: boolean;
 }) {
-  const [accessResult, unlockIntent, copy] = await Promise.all([
+  const [accessResult, unlockIntent, authResumeIntent, authContext, copy] = await Promise.all([
     getProductDetailAccessForRequest(product.id)
       .then((access) => ({ access }))
       .catch(() => ({ access: null })),
     getUnlockIntent(),
+    readAuthResumeIntent(),
+    getSupabaseAuthContext(),
     getTranslations("Funnel"),
   ]);
   const access = accessResult.access;
   const hasCurrentIntent =
     unlockIntent?.locale === locale && unlockIntent.productSlug === product.slug;
   const backendMode = getBackendMode();
+  const initialCode =
+    backendMode === "supabase" && authContext.user
+      ? getAccountBoundResumeCode(
+          authResumeIntent,
+          authContext.user,
+          locale,
+          product.slug,
+        )
+      : hasCurrentIntent
+        ? unlockIntent?.code
+        : undefined;
   const downloadLinks =
     access?.session?.emailVerified && access.isUnlocked
       ? product.premiumAssets
@@ -125,7 +142,7 @@ async function ProductUnlockSection({
               <UnlockForm
                 locale={locale}
                 productSlug={product.slug}
-                initialCode={hasCurrentIntent ? unlockIntent?.code : undefined}
+                initialCode={initialCode}
                 session={access.session}
                 isUnlocked={access.isUnlocked}
                 isDemo={backendMode === "local"}

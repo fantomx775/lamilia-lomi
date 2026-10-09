@@ -693,6 +693,50 @@ describe("registration auth action", () => {
     );
   });
 
+  it("recovers a matching account's saved code when registration is retried", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+    });
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "reader-email-hash",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(true);
+    const signUp = vi.fn().mockResolvedValue({
+      data: { user: null, session: null },
+      error: { message: "Signup temporarily unavailable." },
+    });
+    actionMocks.createClient.mockResolvedValue({ auth: { signUp } });
+
+    await expectRedirect(
+      registerDemoAction(
+        registrationForm("/en/products/moon-garden-coloring-book"),
+      ),
+      "/en/register?error=auth&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith({
+      locale: "en",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      email: "reader@example.com",
+    });
+    expect(signUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "reader@example.com",
+        options: expect.objectContaining({
+          emailRedirectTo: "https://app.example/auth/callback?locale=en&resume=opaque",
+        }),
+      }),
+    );
+  });
+
   it("clears a pending account's stale unlock code when another registration omits the code", async () => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     actionMocks.getProductBySlugForRequest.mockResolvedValue({

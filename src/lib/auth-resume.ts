@@ -163,6 +163,25 @@ export function authResumeIntentMatchesUser(
   return true;
 }
 
+export function getAccountBoundResumeCode(
+  intent: AuthResumeIntent | null | undefined,
+  user: { id?: string | null; email?: string | null } | null | undefined,
+  locale: Locale,
+  productSlug: string,
+) {
+  if (
+    !intent?.code ||
+    !user ||
+    intent.locale !== locale ||
+    intent.productSlug !== productSlug ||
+    !authResumeIntentMatchesUser(intent, user)
+  ) {
+    return undefined;
+  }
+
+  return intent.code;
+}
+
 export function authResumeIntentMatchesEmail(
   intent: Pick<AuthResumeIntent, "emailHash">,
   email: string | null | undefined,
