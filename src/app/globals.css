@@ -120,6 +120,12 @@ body {
   animation-name: admin-page-enter-back;
 }
 
+@media (scripting: none) {
+  .admin-page-transition {
+    animation: none;
+  }
+}
+
 .admin-drawer-backdrop {
   animation: admin-drawer-backdrop-enter var(--admin-motion-duration) var(--admin-motion-easing) both;
 }

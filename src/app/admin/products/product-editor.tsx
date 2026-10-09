@@ -1,10 +1,11 @@
 "use client";
 
 import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RotateCcw, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
-import { startTransition, useCallback, useEffect, useRef, useState } from "react";
+import { startTransition, useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 
+import { registerProductEditorPopStateGuard } from "@/app/admin/admin-product-editor-history-guard";
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
 import { AdminDisclosure } from "@/components/admin/admin-disclosure";
 import { LocaleTabs } from "@/components/admin/locale-tabs";
@@ -18,6 +19,7 @@ import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type Admi
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
+import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
 type TranslationDraft = {
@@ -83,6 +85,7 @@ type UploadStatus = "queued" | "uploading" | "uploaded" | "failed";
 type ProductEditorHistoryGuard = {
   owner: string;
   role: "base" | "guard";
+  forwardHref?: string;
 };
 
 type ProductEditorNavigateEvent = Event & {
@@ -96,6 +99,15 @@ type ProductEditorNavigation = {
 };
 
 type ProductEditorWindow = Window & { navigation?: ProductEditorNavigation };
+
+type ProductSaveFormAction = (
+  previousState: ProductSaveFormState,
+  formData: FormData,
+) => Promise<ProductSaveFormState>;
+
+async function keepProductSaveFormState(state: ProductSaveFormState) {
+  return state;
+}
 
 const productEditorHistoryGuardKey = "__lamiliaProductEditorHistoryGuard";
 
@@ -122,35 +134,43 @@ export function ProductEditor({
   tags: Tag[];
   feedback?: string;
   saveAction?: (formData: FormData) => Promise<AdminMutationResult>;
-  saveFormAction?: (formData: FormData) => void | Promise<void>;
+  saveFormAction?: ProductSaveFormAction;
   archiveAction?: (formData: FormData) => void | Promise<void>;
   deleteAction?: (formData: FormData) => void | Promise<void>;
 }) {
   const router = useRouter();
-  const [locale, setLocale] = useState<Locale>("en");
-  const [translations, setTranslations] = useState<Record<Locale, TranslationDraft>>(() => buildTranslations(product));
-  const [assets, setAssets] = useState<AssetDraft[]>(() => buildAssets(product));
-  const [draftProductId] = useState(() => product?.id ?? createClientId());
-  const [productSlug, setProductSlug] = useState(() => product?.slug ?? "");
-  const [productStatus, setProductStatus] = useState<Product["status"]>(() => product?.status ?? "draft");
+  const formPermalink = product ? `/admin/products/${product.id}` : "/admin/products/new";
+  const [nativeSaveState, nativeSaveFormAction] = useActionState(
+    saveFormAction ?? keepProductSaveFormState,
+    emptyProductSaveFormState,
+    formPermalink,
+  );
+  const submittedValues = nativeSaveState.values;
+  const [locale, setLocale] = useState<Locale>(() => parseLocale(submittedValue(submittedValues, "editorLocale", "en")));
+  const [translations, setTranslations] = useState<Record<Locale, TranslationDraft>>(() => buildTranslations(product, submittedValues));
+  const [assets, setAssets] = useState<AssetDraft[]>(() => buildAssets(product, submittedValues));
+  const [draftProductId, setDraftProductId] = useState(() => submittedValue(submittedValues, "id", product?.id ?? createClientId()));
+  const [productSlug, setProductSlug] = useState(() => submittedValue(submittedValues, "slug", product?.slug ?? ""));
+  const [productStatus, setProductStatus] = useState<Product["status"]>(() => parseProductStatus(submittedValue(submittedValues, "status", product?.status ?? "draft")));
   const [createdProductHref, setCreatedProductHref] = useState<string | null>(null);
   const [showRouteFeedback, setShowRouteFeedback] = useState(Boolean(feedback));
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [saveBarRoot, setSaveBarRoot] = useState<HTMLElement | null>(null);
-  const [saveErrorCodes, setSaveErrorCodes] = useState<AdminErrorCode[]>([]);
+  const [saveErrorCodes, setSaveErrorCodes] = useState<AdminErrorCode[]>(() => nativeSaveState.errors);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
-  const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product));
-  const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product));
+  const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product, submittedValues));
+  const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product, submittedValues));
   const [premiumErrors, setPremiumErrors] = useState<Partial<Record<string, AdminErrorCode>>>({});
   const formRef = useRef<HTMLFormElement>(null);
   const savedFormSignatureRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
   const navigationApiAvailableRef = useRef(false);
   const currentEditorUrlRef = useRef<string | null>(null);
-  const acceptedHistoryTraversalRef = useRef(false);
+  const knownForwardHrefRef = useRef<string | null>(null);
+  const historyRollbackRef = useRef(false);
   const pendingCreatedProductHrefRef = useRef<string | null>(null);
   const assetsRef = useRef(assets);
   const uploadVersionsRef = useRef(new Map<ProductAsset["kind"], number>());
@@ -188,20 +208,24 @@ export function ProductEditor({
       const hasNavigationApi = Boolean((window as ProductEditorWindow).navigation);
       navigationApiAvailableRef.current = hasNavigationApi;
       currentEditorUrlRef.current = owner;
-      const currentGuard = readProductEditorHistoryGuard(window.history.state);
+      let currentGuard = readProductEditorHistoryGuard(window.history.state);
       if (!hasNavigationApi && currentGuard?.owner !== owner) {
+        currentGuard = { owner, role: "base" };
         window.history.replaceState(
-          withProductEditorHistoryGuard(window.history.state, { owner, role: "base" }),
+          withProductEditorHistoryGuard(window.history.state, currentGuard),
           "",
           owner,
         );
+        knownForwardHrefRef.current = null;
       }
-      if (!hasNavigationApi) {
+      if (!hasNavigationApi && currentGuard?.role === "base" && !currentGuard.forwardHref) {
         window.history.pushState(
           withProductEditorHistoryGuard(window.history.state, { owner, role: "guard" }),
           "",
           owner,
         );
+      } else if (!hasNavigationApi) {
+        knownForwardHrefRef.current = currentGuard?.forwardHref ?? null;
       }
     }
     isDirtyRef.current = true;
@@ -220,19 +244,49 @@ export function ProductEditor({
     currentEditorUrlRef.current = window.location.href;
     const navigationApi = (window as ProductEditorWindow).navigation;
     navigationApiAvailableRef.current = Boolean(navigationApi);
-    const currentGuard = readProductEditorHistoryGuard(window.history.state);
+    let currentGuard = readProductEditorHistoryGuard(window.history.state);
     if (!navigationApi && currentGuard?.owner !== window.location.href) {
+      currentGuard = { owner: window.location.href, role: "base" };
       window.history.replaceState(
-        withProductEditorHistoryGuard(window.history.state, { owner: window.location.href, role: "base" }),
+        withProductEditorHistoryGuard(window.history.state, currentGuard),
         "",
         window.location.href,
       );
     }
+    knownForwardHrefRef.current = !navigationApi && currentGuard?.owner === window.location.href
+      ? currentGuard.forwardHref ?? null
+      : null;
     savedFormSignatureRef.current = formSignature(form);
     isDirtyRef.current = false;
     setIsDirty(false);
     setSaveBarRoot(document.body);
   }, [refreshDirtyState]);
+
+  useEffect(() => {
+    if (!submittedValues) return;
+
+    const formData = formDataFromProductSaveValues(submittedValues);
+    const nextAssets = buildAssets(product, submittedValues);
+    const nextAmazonLinks = buildAmazonLinks(product, submittedValues);
+    const nextPremiumCodes = buildPremiumCodes(product, submittedValues);
+    const errorMapping = mapProductSaveErrors(nativeSaveState.errors, formData, nextAmazonLinks, nextPremiumCodes);
+
+    setLocale(errorMapping.locale ?? parseLocale(submittedValue(submittedValues, "editorLocale", "en")));
+    setTranslations(buildTranslations(product, submittedValues));
+    setAssets(nextAssets);
+    setDraftProductId(submittedValue(submittedValues, "id", product?.id ?? createClientId()));
+    setProductSlug(submittedValue(submittedValues, "slug", product?.slug ?? ""));
+    setProductStatus(parseProductStatus(submittedValue(submittedValues, "status", product?.status ?? "draft")));
+    setAmazonLinks(nextAmazonLinks);
+    setPremiumCodes(nextPremiumCodes);
+    setSaveErrorCodes(nativeSaveState.errors);
+    setFieldErrors(errorMapping.fieldErrors);
+    setPremiumErrors(errorMapping.premiumErrors);
+    setSaveStatus("error");
+    savedFormSignatureRef.current = "";
+    isDirtyRef.current = true;
+    setIsDirty(true);
+  }, [nativeSaveState, product, submittedValues]);
 
   useEffect(() => {
     if (createdProductHref) {
@@ -249,7 +303,7 @@ export function ProductEditor({
     };
 
     const confirmInternalNavigation = (event: MouseEvent) => {
-      if (!isDirtyRef.current || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       if (!(event.target instanceof Element)) return;
 
       const link = event.target.closest<HTMLAnchorElement>("a[href]");
@@ -258,7 +312,22 @@ export function ProductEditor({
       const destination = new URL(link.href, window.location.href);
       if (destination.origin !== window.location.origin || destination.href === window.location.href) return;
 
-      if (window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) return;
+      if (!isDirtyRef.current) {
+        const owner = currentEditorUrlRef.current;
+        const currentGuard = readProductEditorHistoryGuard(window.history.state);
+        if (!navigationApiAvailableRef.current && owner === window.location.href && currentGuard?.owner === owner) {
+          const nextGuard = { owner, role: currentGuard.role, forwardHref: destination.href } satisfies ProductEditorHistoryGuard;
+          window.history.replaceState(withProductEditorHistoryGuard(window.history.state, nextGuard), "", owner);
+          knownForwardHrefRef.current = destination.href;
+        }
+        return;
+      }
+
+      if (window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) {
+        isDirtyRef.current = false;
+        setIsDirty(false);
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
@@ -268,51 +337,50 @@ export function ProductEditor({
       const owner = currentEditorUrlRef.current;
       if (!owner) return;
 
-      if (acceptedHistoryTraversalRef.current) {
-        if (window.location.href === owner) {
-          window.history.back();
-          return;
-        }
-        acceptedHistoryTraversalRef.current = false;
-        return;
-      }
-
       const destinationGuard = readProductEditorHistoryGuard(event.state);
-      const isSameEditorGuardEntry = window.location.href === owner && destinationGuard?.owner === owner;
-      if (isSameEditorGuardEntry && destinationGuard?.role === "guard") return;
+      const isSameEditorEntry = window.location.href === owner && destinationGuard?.owner === owner;
 
-      const isGuardBoundary = isSameEditorGuardEntry && destinationGuard?.role === "base";
-      if (!isGuardBoundary) {
-        if (!isDirtyRef.current || window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) return;
-
-        event.stopImmediatePropagation();
-        window.history.pushState(
-          withProductEditorHistoryGuard(window.history.state, { owner, role: "guard" }),
-          "",
-          owner,
-        );
-        return;
+      if (historyRollbackRef.current) {
+        historyRollbackRef.current = false;
+        if (isSameEditorEntry) return;
       }
 
-      const createdProductHref = pendingCreatedProductHrefRef.current;
-      if (createdProductHref) {
+      if (pendingCreatedProductHrefRef.current && isSameEditorEntry && destinationGuard?.role === "base") {
+        const createdProductHref = pendingCreatedProductHrefRef.current;
         pendingCreatedProductHrefRef.current = null;
         setCreatedProductHref(createdProductHref);
         return;
       }
 
+      if (isSameEditorEntry && destinationGuard?.role === "guard") return;
+
+      if (isSameEditorEntry && destinationGuard?.role === "base") {
+        if (!isDirtyRef.current) return;
+
+        if (window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) {
+          isDirtyRef.current = false;
+          setIsDirty(false);
+          window.history.back();
+          return;
+        }
+
+        event.stopImmediatePropagation();
+        historyRollbackRef.current = true;
+        window.history.forward();
+        return;
+      }
+
       if (!isDirtyRef.current || window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) {
-        acceptedHistoryTraversalRef.current = true;
-        window.history.back();
+        isDirtyRef.current = false;
+        setIsDirty(false);
         return;
       }
 
       event.stopImmediatePropagation();
-      window.history.pushState(
-        withProductEditorHistoryGuard(window.history.state, { owner, role: "guard" }),
-        "",
-        owner,
-      );
+      const isKnownForwardTraversal = knownForwardHrefRef.current === window.location.href;
+      historyRollbackRef.current = true;
+      if (isKnownForwardTraversal) window.history.back();
+      else window.history.forward();
     };
 
     const navigationApi = (window as ProductEditorWindow).navigation;
@@ -329,15 +397,13 @@ export function ProductEditor({
     if (navigationApi) {
       navigationApi.addEventListener("navigate", confirmHistoryApiNavigation);
     } else {
-      window.addEventListener("popstate", confirmHistoryNavigation, true);
+      registerProductEditorPopStateGuard(confirmHistoryNavigation);
     }
     document.addEventListener("click", confirmInternalNavigation, true);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       if (navigationApi) {
         navigationApi.removeEventListener("navigate", confirmHistoryApiNavigation);
-      } else {
-        window.removeEventListener("popstate", confirmHistoryNavigation, true);
       }
       document.removeEventListener("click", confirmInternalNavigation, true);
     };
@@ -794,8 +860,9 @@ export function ProductEditor({
 
   return (
     <div className="min-w-0 pb-28">
-      <form ref={formRef} id="product-editor-form" action={saveFormAction} onSubmit={handleSave} onChangeCapture={markDirty} className="grid gap-6">
+      <form ref={formRef} id="product-editor-form" action={saveFormAction ? nativeSaveFormAction : undefined} onSubmit={handleSave} onChangeCapture={markDirty} className="grid gap-6">
         <input type="hidden" name="id" value={draftProductId} />
+        <input type="hidden" name="editorLocale" value={locale} />
         <input type="hidden" name="coverAssetId" value={coverAsset?.id ?? ""} />
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
         <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
@@ -817,6 +884,14 @@ export function ProductEditor({
           subtitle={product ? `ID: ${product.id}` : "Nowy produkt zaczyna jako szkic."}
           status={<Badge className={statusClass(productStatus)}>{statusLabels[productStatus]}</Badge>}
         />
+
+        <noscript>
+          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-white/95 px-4 pt-3 shadow-[0_-8px_30px_rgba(47,35,29,0.08)] sm:px-6 lg:left-64 lg:px-8" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
+            <div className="mx-auto flex max-w-6xl justify-end">
+              <button type="submit" className={buttonClassName({ className: "w-fit" })}>Zapisz produkt</button>
+            </div>
+          </div>
+        </noscript>
 
         {hasActiveMediaUpload ? <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Zapis produktu będzie dostępny po zakończeniu przesyłania plików.</p> : null}
         {feedback && showRouteFeedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
@@ -898,11 +973,11 @@ export function ProductEditor({
                 <p className="text-xs leading-5 text-[var(--color-muted)]">Zostaw puste, aby utworzyć adres z angielskiego tytułu. {productSlug ? `/products/${productSlug}` : "Adres zostanie pokazany po zapisaniu."}</p>
               </Field>
               <Field label="Pozycja w katalogu" htmlFor="product-sort-order">
-                <Input id="product-sort-order" name="sortOrder" type="number" defaultValue={product?.sortOrder ?? 100} />
+                <Input id="product-sort-order" name="sortOrder" type="number" defaultValue={submittedValue(submittedValues, "sortOrder", String(product?.sortOrder ?? 100))} />
                 <p className="text-xs leading-5 text-[var(--color-muted)]">Niższa liczba wyświetla produkt wcześniej.</p>
               </Field>
               <Field label="Przypomnienie o opinii po (dniach)" htmlFor="product-review-delay">
-                <Input id="product-review-delay" name="reviewDelayDays" type="number" min={1} defaultValue={product?.reviewDelayDays ?? 14} />
+                <Input id="product-review-delay" name="reviewDelayDays" type="number" min={1} defaultValue={submittedValue(submittedValues, "reviewDelayDays", String(product?.reviewDelayDays ?? 14))} />
                 <p className="text-xs leading-5 text-[var(--color-muted)]">Liczba dni od odblokowania produktu do przypomnienia.</p>
               </Field>
               </div>
@@ -910,10 +985,10 @@ export function ProductEditor({
 
             <AdminEditorSection title="Organizacja">
               <div className="grid gap-4">
-                <Field label="Segment" htmlFor="product-audience"><select id="product-audience" name="audience" defaultValue={product?.audience ?? "kids"} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="kids">Dzieci</option><option value="adults">Dorośli</option></select></Field>
-                <Field label="Typ produktu" htmlFor="product-type"><select id="product-type" name="productType" defaultValue={product?.productType ?? "coloring-book"} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{product?.productType && !productTypes.includes(product.productType) ? <option value={product.productType}>{formatProductType(product.productType)}</option> : null}{productTypes.map((type) => <option key={type} value={type}>{formatProductType(type)}</option>)}</select></Field>
-                <CheckboxGroup label="Kategorie" name="categoryIds" values={categories.map((category) => ({ id: category.id, label: taxonomyLabel(category.translations, category.slug) }))} selected={product?.categoryIds ?? []} />
-                <CheckboxGroup label="Tagi" name="tagIds" values={tags.map((tag) => ({ id: tag.id, label: taxonomyLabel(tag.translations, tag.slug) }))} selected={product?.tagIds ?? []} />
+                <Field label="Segment" htmlFor="product-audience"><select id="product-audience" name="audience" defaultValue={submittedValue(submittedValues, "audience", product?.audience ?? "kids")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="kids">Dzieci</option><option value="adults">Dorośli</option></select></Field>
+                <Field label="Typ produktu" htmlFor="product-type"><select id="product-type" name="productType" defaultValue={submittedValue(submittedValues, "productType", product?.productType ?? "coloring-book")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{product?.productType && !productTypes.includes(product.productType) ? <option value={product.productType}>{formatProductType(product.productType)}</option> : null}{productTypes.map((type) => <option key={type} value={type}>{formatProductType(type)}</option>)}</select></Field>
+                <CheckboxGroup label="Kategorie" name="categoryIds" values={categories.map((category) => ({ id: category.id, label: taxonomyLabel(category.translations, category.slug) }))} selected={submittedValuesFor(submittedValues, "categoryIds", product?.categoryIds ?? [])} />
+                <CheckboxGroup label="Tagi" name="tagIds" values={tags.map((tag) => ({ id: tag.id, label: taxonomyLabel(tag.translations, tag.slug) }))} selected={submittedValuesFor(submittedValues, "tagIds", product?.tagIds ?? [])} />
               </div>
             </AdminEditorSection>
           </aside>
@@ -1131,6 +1206,7 @@ function hiddenAssetFields(asset: AssetDraft, removed = false) {
   const path = asset.storagePath || asset.path;
   if (!asset.id || !path) return null;
   return <span className="hidden" aria-hidden>
+    <input type="hidden" name="assetClientId" value={asset.clientId} />
     <input type="hidden" name="assetId" value={asset.id} />
     <input type="hidden" name="assetKind" value={asset.kind} />
     <input type="hidden" name="assetBucket" value={asset.bucket} />
@@ -1142,7 +1218,7 @@ function hiddenAssetFields(asset: AssetDraft, removed = false) {
     <input type="hidden" name="assetTitle" value={asset.title || asset.filename} />
     <input type="hidden" name="assetSortOrder" value={asset.sortOrder} />
     <input type="hidden" name="assetUploaded" value={asset.uploaded ? "1" : "0"} />
-    {removed ? <input type="hidden" name="assetRemove" value={asset.id} /> : null}
+    {removed ? <><input type="hidden" name="assetRemove" value={asset.id} /><input type="hidden" name="assetRemoveClientId" value={asset.clientId} /></> : null}
   </span>;
 }
 
@@ -1172,10 +1248,10 @@ function AmazonEditor({
   onUndo: () => void;
 }) {
   if (link.removed) {
-    return <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900"><span>Rynek {link.market} zostanie usunięty.</span><><input type="hidden" name="amazonId" value={link.id} /><input type="hidden" name="amazonMarket" value={link.market} /><input type="hidden" name="amazonUrl" value={link.url} /><input type="hidden" name="amazonRemove" value={link.id} /><Button type="button" variant="ghost" size="sm" onClick={onUndo}><Undo2 className="size-4" aria-hidden />Cofnij</Button></></div>;
+    return <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900"><span>Rynek {link.market} zostanie usunięty.</span><><input type="hidden" name="amazonClientId" value={link.clientId} /><input type="hidden" name="amazonId" value={link.id} /><input type="hidden" name="amazonMarket" value={link.market} /><input type="hidden" name="amazonUrl" value={link.url} /><input type="hidden" name="amazonRemove" value={link.id} /><input type="hidden" name="amazonRemoveClientId" value={link.clientId} /><Button type="button" variant="ghost" size="sm" onClick={onUndo}><Undo2 className="size-4" aria-hidden />Cofnij</Button></></div>;
   }
   const primaryValue = link.id || `new-${index}`;
-  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[10rem_minmax(0,1fr)_auto_auto]"><input type="hidden" name="amazonId" value={link.id} /><Field label="Rynek" htmlFor={`amazon-market-${link.clientId}`}><select id={`amazon-market-${link.clientId}`} name="amazonMarket" value={link.market} onChange={(event) => onChange(link.clientId, "market", event.target.value as AmazonDraft["market"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{availableMarkets.map((market) => <option key={market.value} value={market.value}>{market.label}</option>)}</select></Field><Field label="Link" htmlFor={`amazon-url-${link.clientId}`}><Input id={`amazon-url-${link.clientId}`} name="amazonUrl" value={link.url} onChange={(event) => onChange(link.clientId, "url", event.target.value)} placeholder="https://www.amazon.com/..." /></Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="radio" name="amazonPrimary" value={primaryValue} checked={link.isPrimary} onChange={() => onPrimary(link.clientId)} /><Star className="size-4" aria-hidden />Domyślny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(link)} className="self-end text-red-800">Usuń</Button></div>;
+  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[10rem_minmax(0,1fr)_auto_auto]"><input type="hidden" name="amazonClientId" value={link.clientId} /><input type="hidden" name="amazonId" value={link.id} /><Field label="Rynek" htmlFor={`amazon-market-${link.clientId}`}><select id={`amazon-market-${link.clientId}`} name="amazonMarket" value={link.market} onChange={(event) => onChange(link.clientId, "market", event.target.value as AmazonDraft["market"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{availableMarkets.map((market) => <option key={market.value} value={market.value}>{market.label}</option>)}</select></Field><Field label="Link" htmlFor={`amazon-url-${link.clientId}`}><Input id={`amazon-url-${link.clientId}`} name="amazonUrl" value={link.url} onChange={(event) => onChange(link.clientId, "url", event.target.value)} placeholder="https://www.amazon.com/..." /></Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="radio" name="amazonPrimary" value={primaryValue} checked={link.isPrimary} onChange={() => onPrimary(link.clientId)} /><Star className="size-4" aria-hidden />Domyślny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(link)} className="self-end text-red-800">Usuń</Button></div>;
 }
 
 function PremiumEditor({
@@ -1194,12 +1270,12 @@ function PremiumEditor({
   onUndo: () => void;
 }) {
   if (code.removed) {
-    return <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900"><span>Kod {code.code || "(pusty)"} zostanie usunięty.</span><><input type="hidden" name="premiumCodeId" value={code.id} /><input type="hidden" name="premiumCode" value={code.code} /><input type="hidden" name="premiumCodeRemove" value={code.id} /><Button type="button" variant="ghost" size="sm" onClick={onUndo}><Undo2 className="size-4" aria-hidden />Cofnij</Button></></div>;
+    return <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900"><span>Kod {code.code || "(pusty)"} zostanie usunięty.</span><><input type="hidden" name="premiumCodeClientId" value={code.clientId} /><input type="hidden" name="premiumCodeId" value={code.id} /><input type="hidden" name="premiumCode" value={code.code} /><input type="hidden" name="premiumCodeRemove" value={code.id} /><input type="hidden" name="premiumCodeRemoveClientId" value={code.clientId} /><Button type="button" variant="ghost" size="sm" onClick={onUndo}><Undo2 className="size-4" aria-hidden />Cofnij</Button></></div>;
   }
   const activeValue = code.id || `new-${index}`;
   const inputId = `premium-code-${code.clientId}`;
   const errorId = `${inputId}-error`;
-  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={inputId}><Input id={inputId} name="premiumCode" value={code.code} maxLength={MAX_PREMIUM_CODE_LENGTH} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />{error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}</Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button></div>;
+  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeClientId" value={code.clientId} /><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={inputId}><Input id={inputId} name="premiumCode" value={code.code} maxLength={MAX_PREMIUM_CODE_LENGTH} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />{error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}</Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button></div>;
 }
 
 function CheckboxGroup({ label, name, values, selected }: { label: string; name: string; values: Array<{ id: string; label: string }>; selected: string[] }) {
@@ -1351,16 +1427,18 @@ function mapProductSaveErrors(
 }
 
 function formSignature(form: HTMLFormElement) {
-  return formDataSignature(new FormData(form));
+  const formData = new FormData(form);
+  formData.delete("editorLocale");
+  return formDataSignature(formData);
 }
 
 function readProductEditorHistoryGuard(state: unknown): ProductEditorHistoryGuard | null {
   if (!state || typeof state !== "object") return null;
   const guard = (state as Record<string, unknown>)[productEditorHistoryGuardKey];
   if (!guard || typeof guard !== "object") return null;
-  const { owner, role } = guard as Record<string, unknown>;
+  const { owner, role, forwardHref } = guard as Record<string, unknown>;
   if (typeof owner !== "string" || (role !== "base" && role !== "guard")) return null;
-  return { owner, role };
+  return { owner, role, forwardHref: typeof forwardHref === "string" ? forwardHref : undefined };
 }
 
 function withProductEditorHistoryGuard(state: unknown, guard: ProductEditorHistoryGuard) {
@@ -1407,24 +1485,131 @@ function focusFirstError(targetId?: string) {
   focusable?.focus({ preventScroll: true });
 }
 
-function buildTranslations(product?: Product): Record<Locale, TranslationDraft> {
+function submittedValue(values: ProductSaveFormState["values"], name: string, fallback: string) {
+  const entries = values?.[name];
+  return entries?.[entries.length - 1] ?? fallback;
+}
+
+function submittedValuesFor(values: ProductSaveFormState["values"], name: string, fallback: string[]) {
+  return values ? values[name] ?? [] : fallback;
+}
+
+function formDataFromProductSaveValues(values: NonNullable<ProductSaveFormState["values"]>) {
+  const formData = new FormData();
+  for (const [name, entries] of Object.entries(values)) {
+    for (const value of entries) formData.append(name, value);
+  }
+  return formData;
+}
+
+function parseLocale(value: string): Locale {
+  return routing.locales.includes(value as Locale) ? value as Locale : "en";
+}
+
+function parseProductStatus(value: string): Product["status"] {
+  return value === "published" || value === "archived" ? value : "draft";
+}
+
+function buildTranslations(
+  product?: Product,
+  values?: ProductSaveFormState["values"],
+): Record<Locale, TranslationDraft> {
   return Object.fromEntries(routing.locales.map((locale) => {
     const translation = product?.translations.find((item) => item.locale === locale);
-    return [locale, { title: translation?.title ?? "", shortDescription: translation?.shortDescription ?? "", longDescription: translation?.longDescription ?? "", seoTitle: translation?.seoTitle ?? "", seoDescription: translation?.seoDescription ?? "" }];
+    return [locale, {
+      title: submittedValue(values ?? null, `title_${locale}`, translation?.title ?? ""),
+      shortDescription: submittedValue(values ?? null, `shortDescription_${locale}`, translation?.shortDescription ?? ""),
+      longDescription: submittedValue(values ?? null, `longDescription_${locale}`, translation?.longDescription ?? ""),
+      seoTitle: submittedValue(values ?? null, `seoTitle_${locale}`, translation?.seoTitle ?? ""),
+      seoDescription: submittedValue(values ?? null, `seoDescription_${locale}`, translation?.seoDescription ?? ""),
+    }];
   })) as Record<Locale, TranslationDraft>;
 }
 
-function buildAssets(product?: Product): AssetDraft[] {
+function buildAssets(
+  product?: Product,
+  values?: ProductSaveFormState["values"],
+): AssetDraft[] {
+  if (values) {
+    const ids = values.assetId ?? [];
+    const removedClientIds = new Set(values.assetRemoveClientId ?? []);
+    const removedIds = new Set(values.assetRemove ?? []);
+    return ids.map((id, index) => {
+      const itemValue = (name: string, fallback = "") => values[ name ]?.[index] ?? fallback;
+      const clientId = itemValue("assetClientId", `submitted-asset-${index}-${id}`);
+      const sizeBytes = Number(itemValue("assetSizeBytes"));
+      const kind = itemValue("assetKind", "gallery") as ProductAsset["kind"];
+      const path = itemValue("assetPath");
+      return {
+        clientId,
+        id,
+        kind,
+        bucket: itemValue("assetBucket"),
+        path,
+        filename: itemValue("assetFilename"),
+        contentType: itemValue("assetContentType"),
+        sizeBytes: Number.isFinite(sizeBytes) && sizeBytes > 0 ? sizeBytes : undefined,
+        locale: itemValue("assetLocale") as Locale | "",
+        title: itemValue("assetTitle"),
+        sortOrder: Number(itemValue("assetSortOrder", String(index + 1))) || index + 1,
+        removed: removedClientIds.has(clientId) || removedIds.has(id),
+        status: "uploaded" as const,
+        uploaded: itemValue("assetUploaded") === "1",
+      };
+    });
+  }
+
   return (product?.assets ?? [])
     .filter((asset) => asset.isActive !== false)
     .map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, storagePath: asset.storagePath, filename: asset.filename, contentType: asset.contentType, sizeBytes: asset.sizeBytes, locale: asset.locale ?? "", title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false, status: "uploaded" as const, uploaded: false }));
 }
 
-function buildAmazonLinks(product?: Product): AmazonDraft[] {
+function buildAmazonLinks(
+  product?: Product,
+  values?: ProductSaveFormState["values"],
+): AmazonDraft[] {
+  if (values) {
+    const ids = values.amazonId ?? [];
+    const primary = values.amazonPrimary?.[0];
+    const removedClientIds = new Set(values.amazonRemoveClientId ?? []);
+    const removedIds = new Set(values.amazonRemove ?? []);
+    return ids.map((id, index) => {
+      const clientId = values.amazonClientId?.[index] || (id ? `existing-amazon-${id}` : `submitted-amazon-${index}`);
+      return {
+        clientId,
+        id,
+        market: values.amazonMarket?.[index] === "amazon.de" ? "amazon.de" : "amazon.com",
+        url: values.amazonUrl?.[index] ?? "",
+        isPrimary: primary === (id || `new-${index}`),
+        removed: removedClientIds.has(clientId) || (Boolean(id) && removedIds.has(id)),
+      };
+    });
+  }
+
   return (product?.amazonLinks ?? []).map((link) => ({ clientId: `existing-amazon-${link.id}`, id: link.id, market: link.market, url: link.url, isPrimary: link.isPrimary, removed: false }));
 }
 
-function buildPremiumCodes(product?: Product): PremiumDraft[] {
+function buildPremiumCodes(
+  product?: Product,
+  values?: ProductSaveFormState["values"],
+): PremiumDraft[] {
+  if (values) {
+    const ids = values.premiumCodeId ?? [];
+    const activeValues = new Set(values.premiumCodeActive ?? []);
+    const removedClientIds = new Set(values.premiumCodeRemoveClientId ?? []);
+    const removedIds = new Set(values.premiumCodeRemove ?? []);
+    return ids.map((id, index) => {
+      const clientId = values.premiumCodeClientId?.[index] || (id ? `existing-code-${id}` : `submitted-code-${index}`);
+      return {
+        clientId,
+        id,
+        code: values.premiumCode?.[index] ?? "",
+        active: activeValues.has(id || `new-${index}`),
+        removed: removedClientIds.has(clientId) || (Boolean(id) && removedIds.has(id)),
+      };
+    });
+  }
+
   return (product?.premiumCodes ?? []).map((code) => ({ clientId: `existing-code-${code.id}`, id: code.id, code: code.code, active: code.active, removed: false }));
 }
 

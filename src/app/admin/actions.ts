@@ -24,6 +24,7 @@ import {
   type AdminErrorCode,
   type AdminMutationResult,
 } from "@/lib/admin-errors";
+import { captureProductSaveFormValues, type ProductSaveFormState } from "@/lib/product-save-form-state";
 
 export async function saveProductAction(formData: FormData): Promise<AdminMutationResult> {
   await assertAdmin();
@@ -37,22 +38,27 @@ export async function saveProductAction(formData: FormData): Promise<AdminMutati
   return result;
 }
 
-export async function saveNewProductFormAction(formData: FormData): Promise<void> {
+export async function saveNewProductFormAction(
+  _previousState: ProductSaveFormState,
+  formData: FormData,
+): Promise<ProductSaveFormState> {
   const result = await saveProductAction(formData);
 
   if (!result.ok) {
-    redirect(withAdminError("/admin/products/new", result.errors));
+    return { errors: result.errors, values: captureProductSaveFormValues(formData) };
   }
 
   redirect(`/admin/products/${result.id}?saved=1`);
 }
 
-export async function saveExistingProductFormAction(formData: FormData): Promise<void> {
-  const productId = String(formData.get("id") ?? "");
+export async function saveExistingProductFormAction(
+  _previousState: ProductSaveFormState,
+  formData: FormData,
+): Promise<ProductSaveFormState> {
   const result = await saveProductAction(formData);
 
   if (!result.ok) {
-    redirect(withAdminError(`/admin/products/${productId}`, result.errors));
+    return { errors: result.errors, values: captureProductSaveFormValues(formData) };
   }
 
   redirect(`/admin/products/${result.id}?saved=1`);

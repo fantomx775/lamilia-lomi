@@ -195,9 +195,57 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         const form = noJsPage.locator("#product-editor-form");
         await form.waitFor({ state: "attached" });
         await expect(form).toHaveAttribute("method", "POST");
-        await expect(form.locator('input[name^="$ACTION_ID_"]')).toHaveCount(1);
       } finally {
         await noJsContext.close();
+      }
+
+      const legacyContext = await browser.newContext({ baseURL: new URL(page.url()).origin });
+      try {
+        await legacyContext.addCookies(await page.context().cookies());
+        await legacyContext.addInitScript(() => {
+          Object.defineProperty(window, "navigation", { configurable: true, value: undefined });
+        });
+        const legacyPage = await legacyContext.newPage();
+        await legacyPage.goto(productPath);
+        await legacyPage.locator('a[href="/admin/products"]').last().click();
+        await expect(legacyPage).toHaveURL(/\/admin\/products$/);
+        await legacyPage.goBack();
+        await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+        await legacyPage.getByLabel("Pozycja w katalogu").fill("41");
+
+        const cancelLegacyForwardPromise = legacyPage.waitForEvent("dialog", { timeout: 5_000 });
+        void legacyPage.goForward().catch(() => null);
+        const cancelLegacyForwardDialog = await cancelLegacyForwardPromise;
+        expect(cancelLegacyForwardDialog.type()).toBe("confirm");
+        await cancelLegacyForwardDialog.dismiss();
+        await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+        await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("41");
+
+        const acceptLegacyForwardPromise = legacyPage.waitForEvent("dialog", { timeout: 5_000 });
+        void legacyPage.goForward().catch(() => null);
+        const acceptLegacyForwardDialog = await acceptLegacyForwardPromise;
+        expect(acceptLegacyForwardDialog.type()).toBe("confirm");
+        await acceptLegacyForwardDialog.accept();
+        await expect(legacyPage).toHaveURL(/\/admin\/products$/);
+        await legacyPage.getByRole("link", { name: titleText, exact: false }).click();
+        await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+        await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
+
+        await legacyPage.getByLabel("Pozycja w katalogu").fill("41");
+        await expect(legacyPage.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
+        await legacyPage.getByLabel("Pozycja w katalogu").fill("40");
+        await expect(legacyPage.getByTestId("product-save-bar")).not.toContainText("Niezapisane zmiany");
+        await legacyPage.getByLabel("Pozycja w katalogu").fill("42");
+        await expect(legacyPage.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
+        const cancelLegacyBackPromise = legacyPage.waitForEvent("dialog", { timeout: 5_000 });
+        void legacyPage.goBack().catch(() => null);
+        const cancelLegacyBackDialog = await cancelLegacyBackPromise;
+        expect(cancelLegacyBackDialog.type()).toBe("confirm");
+        await cancelLegacyBackDialog.dismiss();
+        await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+        await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("42");
+      } finally {
+        await legacyContext.close();
       }
     }
   } finally {
@@ -225,6 +273,53 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         page.off("dialog", acceptDialogs);
       }
     }
+  }
+});
+
+test("product editor keeps submitted values after a no-JavaScript save error", async ({ page, browser }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium", "The no-JavaScript form fallback is checked in Chromium.");
+  test.setTimeout(60_000);
+
+  await signInAsAdmin(page);
+  const context = await browser.newContext({
+    baseURL: new URL(page.url()).origin,
+    javaScriptEnabled: false,
+    storageState: await page.context().storageState(),
+  });
+
+  try {
+    const noJsPage = await context.newPage();
+    await noJsPage.goto("/admin/products/new", { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await expect(noJsPage.locator("#product-editor-form")).toBeVisible({ timeout: 15_000 });
+    const titleInput = noJsPage.getByLabel("Tytuł");
+    const title = `No JS retained ${Date.now()}`;
+    const description = "Submitted values survive a server validation error without JavaScript.";
+    await titleInput.fill(title, { timeout: 10_000 });
+    await noJsPage.getByLabel("Krótki opis").fill(description, { timeout: 10_000 });
+    await noJsPage.getByLabel("Adres produktu").fill(`no-js-retained-${Date.now()}`, { timeout: 10_000 });
+    await noJsPage.getByLabel("Pozycja w katalogu").fill("73", { timeout: 10_000 });
+    await noJsPage.getByLabel("Status").selectOption("published", { timeout: 10_000 });
+
+    const saveButton = noJsPage.getByRole("button", { name: /Zapisz produkt/ });
+    await expect(saveButton).toBeVisible();
+    const saveButtonBox = await saveButton.boundingBox();
+    const viewport = noJsPage.viewportSize();
+    expect(saveButtonBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(saveButtonBox!.y + saveButtonBox!.height).toBeLessThanOrEqual(viewport!.height + 1);
+
+    const responsePromise = noJsPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20_000 });
+    await saveButton.click({ timeout: 10_000 });
+    const response = await responsePromise;
+    expect(response?.ok()).toBe(true);
+    await expect(noJsPage.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeVisible();
+    await expect(noJsPage.getByLabel("Tytuł")).toHaveValue(title);
+    await expect(noJsPage.getByLabel("Krótki opis")).toHaveValue(description);
+    await expect(noJsPage.getByLabel("Adres produktu")).toHaveValue(/no-js-retained-/);
+    await expect(noJsPage.getByLabel("Pozycja w katalogu")).toHaveValue("73");
+    await expect(noJsPage.getByLabel("Status")).toHaveValue("published");
+  } finally {
+    await context.close();
   }
 });
 

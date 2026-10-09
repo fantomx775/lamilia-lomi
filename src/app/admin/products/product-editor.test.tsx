@@ -29,6 +29,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { ProductEditor } from "./product-editor";
+import { AdminProductEditorHistoryGuard } from "@/app/admin/admin-product-editor-history-guard";
 import { buildProductFromFormData } from "@/lib/admin-content";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 import { getSeedContentSnapshot } from "@/lib/content-store";
@@ -276,12 +277,14 @@ describe("ProductEditor V2", () => {
     });
     const user = userEvent.setup();
     const view = render(
-      <ProductEditor
-        title="Nowy produkt"
-        categories={snapshot.categories}
-        tags={snapshot.tags}
-        saveAction={saveAction}
-      />,
+      <AdminProductEditorHistoryGuard>
+        <ProductEditor
+          title="Nowy produkt"
+          categories={snapshot.categories}
+          tags={snapshot.tags}
+          saveAction={saveAction}
+        />
+      </AdminProductEditorHistoryGuard>,
     );
 
     const title = view.container.querySelector<HTMLInputElement>("#product-title-en");
