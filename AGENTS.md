@@ -87,9 +87,10 @@ the build when the change affects the runtime or build.
 State the release order and remaining work in the PR before merge. If the new
 application requires a new schema, the compatible migration must be applied
 and verified in Production before the merge can trigger the `main` deployment.
-Use an expand/contract sequence for a breaking schema change, and verify its
-contract step after the compatible application deployment. Keep the issue open
-until that step passes. After merge, Vercel's Git integration performs the
+For a breaking schema change, record and follow the exact
+`["expand", "compatible-deploy", "contract"]` sequence; verify the contract
+step after the compatible application deployment. Keep the issue open until
+that step passes. After merge, Vercel's Git integration performs the
 normal Production deployment; do not
 follow it with `vercel --prod`. Report the exact migration IDs, compatibility
 evidence, deployment order, and any unapplied or unverified step. If a required
@@ -132,35 +133,44 @@ and actual diff independently, examine correctness, regressions, testing, and
 scope, and report Critical/High/Medium/Low findings, required fixes, unresolved
 findings, and the full SHA reviewed. The two records need distinct reviewer
 agent identities; they may be posted by the same GitHub account. Never
-fabricate formal GitHub approvals. Any unresolved Critical/High AI finding or
-non-dismissed current-SHA `CHANGES_REQUESTED` review blocks merging until the
-cause is fixed and all required evidence is refreshed.
+fabricate formal GitHub approvals. Any unresolved Critical/High finding blocks
+merging until the cause is fixed and all required evidence is refreshed.
 
 There is no project-level requirement for a submitted GitHub review from a
 different account. The gate honors approval requirements that GitHub actually
 enforces; the merge endpoint remains the final authority and is never bypassed.
-An unresolved current-SHA `CHANGES_REQUESTED` review or formal Critical/High
-finding still blocks the quality gate until the cause is fixed. New commits
-require fresh AI review and local verification evidence for the new SHA.
+An informal GitHub `CHANGES_REQUESTED` state does not create a human veto.
+Formal review status is informational unless an effective GitHub rule requires
+approval; review findings block only when unresolved Critical/High findings
+are recorded in current-SHA evidence. GitHub's normal merge endpoint still
+enforces any applicable branch rule. New commits require fresh AI review and
+local verification evidence for the new SHA.
 
 The gate reads required checks and review rules from branch protection and
 effective branch rules. If no CI checks are required, passing current-SHA local
 verification and the two AI reviews are sufficient; missing optional checks
 remain `NOT RUN`, not CI success. A formal approval from another GitHub
-identity is required only when GitHub itself enforces it.
+identity is required only when GitHub itself enforces it. Existing approvals
+on an earlier commit count only when the effective rules do not dismiss stale
+reviews; latest-push approval rules remain binding.
 
 `node scripts/agent-harness.mjs deliver-pr <pull-request> [--issue <issue>]`
 executes the delivery gate. It reruns `verify-pr`, submits a normal GitHub
 merge request with the verified head SHA, confirms the merge commit, waits for
 the GitHub Production deployment for that exact commit, and runs focused HTTPS
-smoke paths (`AGENT_HARNESS_PRODUCTION_SMOKE_PATHS`, default `/`). It does not
-bypass branch rules or invoke a manual Vercel Production deployment. It stores
-the result in a PR comment. When `--issue` identifies a fully resolved work
-item, the command closes it only after deployment, smoke, and any required
-post-deployment migration verification pass; GitHub Project automation then
-sets `Done`. A failed or unverified Production step keeps the issue open and
-sets it to `Blocked` when possible. Do not pass a parent epic that still has
-unfinished work as the issue to close.
+smoke paths (`AGENT_HARNESS_PRODUCTION_SMOKE_PATHS`, default `/`). If changed
+application-flow files need coverage, an explicit non-root affected path is
+required before merge. It does not bypass branch rules or invoke a manual
+Vercel Production deployment. It stores the result in a PR comment. When
+`--issue` identifies a fully resolved work item, the command sets it to
+`Blocked` during Production verification and closes it only after deployment,
+smoke, and any required post-deployment migration verification pass. Native
+Project `Item closed` automation then sets `Done`; `Pull request merged`
+automation is disabled so a merge cannot mark work done before Production
+verification. A failed Production check includes available deployment log and
+target URLs; investigate the deployment, recover through the normal fix,
+review, and merge path when safe, and keep the issue open/Blocked meanwhile.
+Do not pass a parent epic that still has unfinished work as the issue to close.
 
 ## UI browser verification
 

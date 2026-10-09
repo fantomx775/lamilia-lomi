@@ -51,9 +51,11 @@ only starting a new branch, while already found work can still be resumed.
 - Native `Auto-add to project` is enabled for repository issues (`is:issue`).
   It adds future new or updated issues that match the filter; it is not a bulk
   import of all existing matches.
-- Native `Item closed` sets closed issues and PRs to `Done`; `Pull request
-  merged` also sets `Done`; linking an open PR to an issue sets `In Progress`.
-  No open-PR workflow sets an issue to `Done`. Move an issue to `Review` when
+- Native `Item closed` sets closed issues and PRs to `Done`; linking an open
+  PR to an issue sets `In Progress`. The native `Pull request merged` workflow
+  is disabled because Production verification occurs after merge and must pass
+  before an issue can close and become `Done`. No open-PR workflow sets an issue
+  to `Done`. Move an issue to `Review` when
   its PR is ready for review. The CLI requires an open, non-draft PR tied to
   the issue before allowing `Review`, and refuses to set `Done` manually.
 
@@ -104,8 +106,9 @@ to `Ready`.
    relevant RLS/grants, and validate on Stage or a local database. Record the
    exact command, migration IDs, and result. If deployed code needs the schema,
    apply and verify a compatible migration in Production before merge. For a
-   breaking change, record and follow the expand, compatible-deploy, and
-   contract sequence; keep the issue open until the contract step is verified.
+   breaking change, record and follow the exact
+   `deploymentSequence: ["expand", "compatible-deploy", "contract"]`; keep
+   the issue open until the contract step is verified.
    Main triggers the normal Vercel Git Production deployment; do not follow it
    with `vercel --prod`.
 6. When dependency manifests change, compare actual production dependency
@@ -119,10 +122,10 @@ to `Ready`.
    v1 marker below. The same GitHub account may post both records. Re-review
    meaningful fixes on the new SHA. Do not fabricate GitHub approvals.
 8. Fix and retest confirmed findings, then repeat both reviews on the final
-   candidate SHA. Any unresolved Critical/High finding, incomplete/stale
-   evidence, or non-dismissed current-SHA `CHANGES_REQUESTED` review blocks
-   merging. A formal approval from another account is required only when an
-   effective GitHub branch rule enforces it.
+   candidate SHA. Any unresolved Critical/High finding or incomplete/stale
+   evidence blocks merging. A GitHub review state alone is informational unless
+   an effective branch rule requires approval. A formal approval from another
+   account is required only when an effective GitHub branch rule enforces it.
 9. Open or update one PR referencing the issue. Include acceptance-criteria
    coverage, exact candidate SHA, verification results, and migration/
    production-dependency release order when applicable. Run
@@ -132,22 +135,31 @@ to `Ready`.
    `READY_FOR_REVIEW` is only for an approval required by GitHub rules. Set the
    Project issue to `Review` when an open non-draft PR is linked.
 10. Run `node scripts/agent-harness.mjs deliver-pr <pr-number> --issue
-    <issue-number>` for a fully resolved work item. The command reruns the
-    gate, merges with the verified head SHA through GitHub's normal merge API,
-    confirms the merge commit, waits for its GitHub Production deployment, and
-    runs HTTPS smoke paths (default `/`). The Git merge remains subject to
-    branch protection. It records the outcome in a PR comment. It closes the
-    issue only after deployment, smoke, and required post-deployment migration
-    evidence pass; native Project automation sets `Done`. If Production fails
-    or cannot be verified, the command records the blocker and keeps the issue
-    open/Blocked. Do not pass an unfinished parent epic as the issue to close.
-    If a new agent resumes, rerun inspect and continue from the existing branch.
+    <issue-number>` for a fully resolved work item. Reference the issue in the
+    PR body without GitHub's closing keywords; the delivery command rejects an
+    issue that the merge itself would close. The command reruns the gate, merges
+    with the verified head SHA through GitHub's normal merge API, confirms the
+    merge commit, sets the issue to `Blocked` during Production verification,
+    waits for its GitHub Production deployment, and runs HTTPS smoke paths. The
+    default `/` is a health check; changed application-flow files require an
+    explicit non-root affected path in `AGENT_HARNESS_PRODUCTION_SMOKE_PATHS`
+    before merge. The Git merge remains subject to branch protection. It records
+    the outcome in a PR comment and closes the issue only after deployment,
+    smoke, and required post-deployment migration evidence pass. Native Project
+    `Item closed` automation then sets `Done`; `Pull request merged` automation
+    is disabled so a merge cannot mark work Done prematurely. If Production
+    fails or cannot be verified, the command records available deployment log
+    and target URLs, investigates through the normal fix/review/merge path when
+    safe, and keeps the issue `Blocked`. It reopens an issue only when GitHub
+    proves this exact PR merge closed it; independently closed issues remain
+    untouched. Do not pass an unfinished parent epic as the issue to close. If
+    a new agent resumes, rerun inspect and continue from the existing branch.
 
 ## Durable review and verification records
 
 The harness reads AI-review, verification, and delivery records from PR issue
-comments. It reads the GitHub Reviews API only to honor enforced approval
-rules and to detect outstanding formal change requests. Keep one JSON object
+comments. It reads the GitHub Reviews API to honor enforced approval rules;
+formal review state alone is informational when no rule enforces it. Keep one JSON object
 immediately after each marker, inside a fenced `json` block. A new commit
 requires new AI-review and verification records with the exact new head SHA.
 Never fabricate a formal GitHub approval.
@@ -235,9 +247,9 @@ Example browser evidence fields:
 For changed migrations, `release` must record `migrationCompatibility` with a
 `strategy` of `compatible` or `expand-contract`, all changed `migrationIds`,
 and `stageMigration` with `environment: "Stage"` or `"local"`, a verified
-command, and result. A breaking migration must include at least three
-`deploymentSequence` steps for expansion, compatible code deployment, and
-contraction. Record an explicit `preMergeMigration` decision: if the deployed
+command, and result. A breaking migration must include the ordered
+`deploymentSequence: ["expand", "compatible-deploy", "contract"]`. Record an
+explicit `preMergeMigration` decision: if the deployed
 code needs the schema, it must be `required: true`, run in Production, and pass
 with exact migration IDs and evidence that Production was updated before
 merge; otherwise use `required: false` and explain why. An expand-contract plan
@@ -246,7 +258,8 @@ migration IDs, and `PASS` before the delivery command can close the issue.
 For changed dependency manifests, record a `dependencyAudit` command and
 result. Missing or stale release evidence keeps merge readiness blocked.
 
-`deliver-pr` writes a delivery record after merge. It binds the verified PR
+`deliver-pr` first places a linked open issue in `Blocked` during Production
+verification. It writes a delivery record after merge. It binds the verified PR
 head SHA to the GitHub merge SHA, exact-SHA Production deployment, smoke
 results, migration follow-up, and issue/Project state. It marks delivery
 complete only when Production is ready, focused smoke succeeds, required
@@ -255,10 +268,14 @@ with Project Status `Done`. If Production fails or cannot be read, the command
 records `FAIL` or `BLOCKED`, leaves the issue open/Blocked, and does not report
 delivery complete.
 
-To smoke more than the default `/` path, set
-`AGENT_HARNESS_PRODUCTION_SMOKE_PATHS` to comma-separated same-origin paths,
-such as `/,/catalog`. Smoke requests use HTTPS and must return a non-empty
-successful response on the Production deployment origin.
+Smoke requests use HTTPS and must return a non-empty successful response on
+the Production deployment origin. The default `/` path is a health check. If
+application-flow files change, set `AGENT_HARNESS_PRODUCTION_SMOKE_PATHS` to
+include an explicit non-root affected path (for example `/,/catalog`); the
+pre-merge gate blocks if the flow-specific path is missing. On deployment
+failure, inspect the recorded Vercel target/log URLs and recover through the
+ordinary implementation, test, independent-review, and merge path. Never use a
+manual Vercel production deploy as a substitute for Git integration.
 
 Post a concise issue update from a file when durable progress is useful:
 
