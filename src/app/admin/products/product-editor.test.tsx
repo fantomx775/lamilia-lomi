@@ -197,6 +197,37 @@ describe("ProductEditor V2", () => {
     expect(view.getByText("Dodano wszystkie dostępne rynki.")).toBeInTheDocument();
   });
 
+  it("points the publish requirement at Amazon after removing the last link", async () => {
+    const saveAction = vi.fn().mockResolvedValue({
+      ok: false,
+      errors: [ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS],
+    });
+    const user = userEvent.setup();
+    const editorProduct = {
+      ...product,
+      status: "published" as const,
+      amazonLinks: product.amazonLinks.slice(0, 1),
+    };
+    const view = render(
+      <ProductEditor
+        title="Edycja produktu"
+        product={editorProduct}
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+    const amazonSection = view.container.querySelector<HTMLElement>("#product-amazon-links");
+    expect(amazonSection).not.toBeNull();
+
+    await user.click(within(amazonSection!).getByRole("button", { name: "Usuń" }));
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+
+    await waitFor(() => expect(saveAction).toHaveBeenCalled());
+    expect(amazonSection).toHaveTextContent("Opublikowany produkt wymaga tytułu EN, krótkiego opisu, okładki i linku Amazon.");
+    expect(view.getByLabelText("Status")).not.toHaveAttribute("aria-invalid", "true");
+  });
+
   it("reveals and collapses SEO details without leaving the native disclosure open", async () => {
     const user = userEvent.setup();
     const view = render(
@@ -236,6 +267,13 @@ describe("ProductEditor V2", () => {
 
   it("submits current locale values through the provided server action", async () => {
     const saveAction = vi.fn().mockResolvedValue({ ok: true, id: product.id });
+    vi.spyOn(window.history, "back").mockImplementation(() => {
+      const state = {
+        __lamiliaProductEditorHistoryGuard: { owner: window.location.href, role: "base" },
+      };
+      window.history.replaceState(state, "", window.location.href);
+      window.dispatchEvent(new PopStateEvent("popstate", { state }));
+    });
     const user = userEvent.setup();
     const view = render(
       <ProductEditor
@@ -254,7 +292,7 @@ describe("ProductEditor V2", () => {
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
     const formData = saveAction.mock.calls[0][0] as FormData;
     expect(formData.get("title_en")).toBe("Ocean Calm");
-    expect(editorMocks.routerReplace).toHaveBeenCalledWith(`/admin/products/${product.id}?saved=1`);
+    await waitFor(() => expect(editorMocks.routerReplace).toHaveBeenCalledWith(`/admin/products/${product.id}?saved=1`));
   });
 
   it("keeps entered values and points to the title after a server validation error", async () => {

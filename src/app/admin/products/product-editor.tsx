@@ -85,6 +85,18 @@ type ProductEditorHistoryGuard = {
   role: "base" | "guard";
 };
 
+type ProductEditorNavigateEvent = Event & {
+  navigationType?: string;
+  destination?: { url?: string };
+};
+
+type ProductEditorNavigation = {
+  addEventListener(type: "navigate", listener: (event: ProductEditorNavigateEvent) => void): void;
+  removeEventListener(type: "navigate", listener: (event: ProductEditorNavigateEvent) => void): void;
+};
+
+type ProductEditorWindow = Window & { navigation?: ProductEditorNavigation };
+
 const productEditorHistoryGuardKey = "__lamiliaProductEditorHistoryGuard";
 
 const statusLabels = {
@@ -136,6 +148,7 @@ export function ProductEditor({
   const formRef = useRef<HTMLFormElement>(null);
   const savedFormSignatureRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
+  const navigationApiAvailableRef = useRef(false);
   const currentEditorUrlRef = useRef<string | null>(null);
   const acceptedHistoryTraversalRef = useRef(false);
   const pendingCreatedProductHrefRef = useRef<string | null>(null);
@@ -172,20 +185,24 @@ export function ProductEditor({
   const markDirty = useCallback(() => {
     if (!isDirtyRef.current) {
       const owner = window.location.href;
+      const hasNavigationApi = Boolean((window as ProductEditorWindow).navigation);
+      navigationApiAvailableRef.current = hasNavigationApi;
       currentEditorUrlRef.current = owner;
       const currentGuard = readProductEditorHistoryGuard(window.history.state);
-      if (currentGuard?.owner !== owner) {
+      if (!hasNavigationApi && currentGuard?.owner !== owner) {
         window.history.replaceState(
           withProductEditorHistoryGuard(window.history.state, { owner, role: "base" }),
           "",
           owner,
         );
       }
-      window.history.pushState(
-        withProductEditorHistoryGuard(window.history.state, { owner, role: "guard" }),
-        "",
-        owner,
-      );
+      if (!hasNavigationApi) {
+        window.history.pushState(
+          withProductEditorHistoryGuard(window.history.state, { owner, role: "guard" }),
+          "",
+          owner,
+        );
+      }
     }
     isDirtyRef.current = true;
     setIsDirty(true);
@@ -201,8 +218,10 @@ export function ProductEditor({
     const form = formRef.current;
     if (!form) return;
     currentEditorUrlRef.current = window.location.href;
+    const navigationApi = (window as ProductEditorWindow).navigation;
+    navigationApiAvailableRef.current = Boolean(navigationApi);
     const currentGuard = readProductEditorHistoryGuard(window.history.state);
-    if (currentGuard?.owner !== window.location.href) {
+    if (!navigationApi && currentGuard?.owner !== window.location.href) {
       window.history.replaceState(
         withProductEditorHistoryGuard(window.history.state, { owner: window.location.href, role: "base" }),
         "",
@@ -259,7 +278,10 @@ export function ProductEditor({
       }
 
       const destinationGuard = readProductEditorHistoryGuard(event.state);
-      const isGuardBoundary = window.location.href === owner && destinationGuard?.owner === owner;
+      const isSameEditorGuardEntry = window.location.href === owner && destinationGuard?.owner === owner;
+      if (isSameEditorGuardEntry && destinationGuard?.role === "guard") return;
+
+      const isGuardBoundary = isSameEditorGuardEntry && destinationGuard?.role === "base";
       if (!isGuardBoundary) {
         if (!isDirtyRef.current || window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) return;
 
@@ -293,12 +315,30 @@ export function ProductEditor({
       );
     };
 
+    const navigationApi = (window as ProductEditorWindow).navigation;
+    const confirmHistoryApiNavigation = (event: ProductEditorNavigateEvent) => {
+      if (event.navigationType !== "traverse" || !isDirtyRef.current) return;
+
+      const destination = event.destination?.url;
+      if (!destination || new URL(destination, window.location.href).href === window.location.href) return;
+
+      if (!window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) event.preventDefault();
+    };
+
     window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("popstate", confirmHistoryNavigation, true);
+    if (navigationApi) {
+      navigationApi.addEventListener("navigate", confirmHistoryApiNavigation);
+    } else {
+      window.addEventListener("popstate", confirmHistoryNavigation, true);
+    }
     document.addEventListener("click", confirmInternalNavigation, true);
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("popstate", confirmHistoryNavigation, true);
+      if (navigationApi) {
+        navigationApi.removeEventListener("navigate", confirmHistoryApiNavigation);
+      } else {
+        window.removeEventListener("popstate", confirmHistoryNavigation, true);
+      }
       document.removeEventListener("click", confirmInternalNavigation, true);
     };
   }, []);
@@ -736,7 +776,7 @@ export function ProductEditor({
           const href = `/admin/products/${result.id}?saved=1`;
           const owner = currentEditorUrlRef.current;
           const guard = readProductEditorHistoryGuard(window.history.state);
-          if (owner && guard?.owner === owner && guard.role === "guard") {
+          if (!navigationApiAvailableRef.current && owner && guard?.owner === owner && guard.role === "guard") {
             pendingCreatedProductHrefRef.current = href;
             window.history.back();
           } else {
@@ -1234,7 +1274,7 @@ function mapProductSaveErrors(
           addFieldError("media-section-cover", code);
           foundTarget = true;
         }
-        if (!formData.getAll("amazonUrl").some((value) => String(value).trim())) {
+        if (!amazonLinks.some((link) => !link.removed && link.url.trim())) {
           addFieldError("product-amazon-links", code);
           foundTarget = true;
         }

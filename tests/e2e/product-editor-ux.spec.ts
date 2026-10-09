@@ -126,16 +126,25 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await expect(page).toHaveURL(editorUrlRegex(productPath));
     await page.getByLabel("Pozycja w katalogu").fill("39");
     await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
-    await page.goForward({ timeout: 1_000 }).catch(() => null);
+
+    const cancelForwardPromise = page.waitForEvent("dialog");
+    void page.goForward().catch(() => null);
+    const cancelForwardDialog = await cancelForwardPromise;
+    expect(cancelForwardDialog.type()).toBe("confirm");
+    await cancelForwardDialog.dismiss();
     await expect(page).toHaveURL(editorUrlRegex(productPath));
     await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("39");
-    await page.getByRole("button", { name: /Zapisz/ }).click();
-    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
 
-    await page.locator('a[href="/admin/products"]').last().click();
+    const acceptForwardPromise = page.waitForEvent("dialog");
+    void page.goForward().catch(() => null);
+    const acceptForwardDialog = await acceptForwardPromise;
+    expect(acceptForwardDialog.type()).toBe("confirm");
+    await acceptForwardDialog.accept();
     await expect(page).toHaveURL(/\/admin\/products$/);
     await page.getByRole("link", { name: titleText, exact: false }).click();
     await expect(page).toHaveURL(editorUrlRegex(productPath));
+    await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
+
     await page.getByLabel("Pozycja w katalogu").fill("40");
     await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
     const backDialogPromise = page.waitForEvent("dialog", { timeout: 5_000 });
@@ -176,7 +185,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
 
     if (testInfo.project.name === "chromium") {
       const noJsContext = await browser.newContext({
-        baseURL: "http://127.0.0.1:3001",
+        baseURL: new URL(page.url()).origin,
         javaScriptEnabled: false,
       });
       try {
