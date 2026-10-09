@@ -57,6 +57,37 @@ test("registration required fields stop an empty submission in the browser", asy
   ).toBe(true);
 });
 
+test("registration form completes through its server action without JavaScript", async ({ browser }, testInfo) => {
+  const viewport = testInfo.project.name === "mobile"
+    ? { width: 393, height: 852 }
+    : { width: 1280, height: 800 };
+  const context = await browser.newContext({
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
+    javaScriptEnabled: false,
+    viewport,
+  });
+
+  try {
+    const page = await context.newPage();
+    await page.goto(`/en/register?returnTo=%2Fen%2Fproducts%2F${productSlug}`);
+    await page.getByLabel("Email").fill("issue-30-no-js@example.com");
+    await page.getByLabel("Password").fill("password123");
+    await page.getByRole("checkbox", { name: /Terms/ }).check();
+    await page.getByRole("button", { name: "Create account" }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+
+    await context.clearCookies();
+    await page.goto("/en/login?returnTo=%2Fen%2Faccount");
+    await expect(page.getByRole("heading", { name: "Log in" })).toBeVisible();
+    await expect(page.getByLabel("Email")).toHaveValue("demo@lamilialomi.test");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page).toHaveURL(/\/en\/account$/);
+  } finally {
+    await context.close();
+  }
+});
+
 test("local verification pending state offers the demo login path", async ({ page }, testInfo) => {
   await page.context().clearCookies();
   await page.goto(`/en/products/${productSlug}?step=verify#premium`);
