@@ -318,6 +318,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       contentType: "application/json",
     });
     console.log(`BROWSER_DIAGNOSTICS ${testInfo.project.name} ${JSON.stringify(browserDiagnostics)}`);
+    assertBrowserDiagnosticsClean(browserDiagnostics);
   }
 });
 
@@ -374,6 +375,7 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
       contentType: "application/json",
     });
     console.log(`BROWSER_DIAGNOSTICS no-js ${JSON.stringify(browserDiagnostics)}`);
+    assertBrowserDiagnosticsClean(browserDiagnostics);
   }
 });
 
@@ -421,20 +423,20 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
     const error = request.failure()?.errorText ?? null;
     const url = new URL(request.url());
     const sanitizedUrl = sanitizeRequestUrl(request.url());
-    if (error === "net::ERR_ABORTED") {
+    if (error === "net::ERR_ABORTED" && isVerifiedEditorNavigationRequest(request, url)) {
       diagnostics.failedRequests.push({
         method: request.method(),
         url: sanitizedUrl,
         error,
         disposition: "expected",
-        reason: "The browser canceled an in-flight request during navigation, reload, or history traversal; the destination and persisted values were asserted.",
+        reason: `The browser canceled a ${describeEditorNavigationRequest(request, url)} for a route exercised by this test; the destination and persisted values were asserted.`,
       });
     } else if (error === "csp" && url.pathname.includes("browser_dev_hmr-client")) {
       diagnostics.failedRequests.push({
         method: request.method(),
         url: sanitizedUrl,
         error,
-        disposition: "expected",
+        disposition: "unrelated",
         reason: "The local Next.js development HMR client is blocked by the app CSP; this development-only bundle is not used in Production.",
       });
     } else {
@@ -477,6 +479,34 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
       disposition: "unresolved",
     });
   });
+}
+
+function isVerifiedEditorNavigationRequest(request: import("@playwright/test").Request, url: URL) {
+  const isEditorFlowRoute = url.pathname === "/pl/login" && url.searchParams.get("redirectTo") === "/admin" ||
+    url.pathname === "/admin" ||
+    url.pathname === "/admin/products" ||
+    url.pathname === "/admin/products/new" ||
+    /^\/admin\/products\/[0-9a-f-]+$/i.test(url.pathname);
+  if (!isEditorFlowRoute) return false;
+
+  if (request.isNavigationRequest() && request.method() === "GET") return true;
+  if (request.resourceType() !== "fetch") return false;
+  if (request.method() === "GET" && url.searchParams.has("_rsc")) return true;
+  return request.method() === "POST" && Boolean(request.headers()["next-action"]);
+}
+
+function describeEditorNavigationRequest(request: import("@playwright/test").Request, url: URL) {
+  if (request.isNavigationRequest()) return "document navigation";
+  if (request.method() === "POST" && request.headers()["next-action"]) return "Server Action";
+  if (url.searchParams.has("_rsc")) return "Next.js route transition";
+  return "editor-flow navigation request";
+}
+
+function assertBrowserDiagnosticsClean(diagnostics: ReturnType<typeof createBrowserDiagnostics>) {
+  expect(diagnostics.consoleErrors.filter(({ disposition }) => disposition === "unresolved")).toEqual([]);
+  expect(diagnostics.pageErrors).toEqual([]);
+  expect(diagnostics.failedRequests.filter(({ disposition }) => disposition === "unresolved")).toEqual([]);
+  expect(diagnostics.failedResponses.filter(({ disposition }) => disposition === "unresolved")).toEqual([]);
 }
 
 function sanitizeRequestUrl(requestUrl: string) {
