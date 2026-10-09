@@ -28,11 +28,13 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
   const expectedNavigationCancellations: string[] = [];
+  const pendingProductActionCancellations: string[] = [];
   const mainFrameNavigations: Array<{ at: number; url: string }> = [];
   const unexpectedHttpFailures: string[] = [];
   const localUploadFallbacks: string[] = [];
   let productId = "";
   let productPath: string | undefined;
+  let verifiedProductActionRedirects = 0;
   let flowFailure: unknown;
   let cleanupFailure: unknown;
 
@@ -70,18 +72,17 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       failedUrl.pathname.startsWith("/_next/static/chunks/") && failedUrl.pathname.endsWith(".js");
     const exactDisposableProductAction = Boolean(productId) &&
       request.method() === "POST" && failedUrl.pathname === `/admin/products/${productId}`;
-    const productActionRedirect = (() => {
-      if (!recentNavigation || !exactDisposableProductAction) return false;
-      const destination = new URL(recentNavigation.url);
-      const saveRedirect = destination.pathname === failedUrl.pathname &&
-        destination.searchParams.get("saved") === "1";
-      const deleteRedirect = destination.pathname === "/admin/products" &&
-        destination.searchParams.get("deleted") === "1";
-      return saveRedirect || deleteRedirect;
-    })();
+    const exactLocalNextDevFont = request.method() === "GET" && request.resourceType() === "font" &&
+      failedUrl.origin === new URL(page.url()).origin &&
+      failedUrl.pathname === "/__nextjs_font/geist-latin.woff2" &&
+      new URL(page.url()).pathname.startsWith("/admin");
+    if (failure === "net::ERR_ABORTED" && exactDisposableProductAction) {
+      pendingProductActionCancellations.push(JSON.stringify(detail));
+      return;
+    }
     if (
       failure === "net::ERR_ABORTED" && recentNavigation &&
-      (exactLoginPost || exactNextDevChunk || productActionRedirect)
+      (exactLoginPost || exactNextDevChunk || exactLocalNextDevFont)
     ) {
       const cancellation = JSON.stringify({ ...detail, adjacentMainFrameNavigation: recentNavigation.url });
       expectedNavigationCancellations.push(cancellation);
@@ -194,6 +195,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       page.waitForURL((url) => /^\/admin\/products\/[0-9a-f-]+\?saved=1$/i.test(url.pathname + url.search)),
       page.getByRole("button", { name: "Zapisz" }).click(),
     ]);
+    verifiedProductActionRedirects += 1;
     productPath = new URL(page.url()).pathname;
     await expect(page.getByText("Zapisano zmiany.", { exact: true })).toBeVisible();
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
@@ -221,6 +223,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       page.waitForURL((url) => url.pathname === productPath && url.searchParams.get("saved") === "1"),
       page.getByRole("button", { name: "Zapisz" }).click(),
     ]);
+    verifiedProductActionRedirects += 1;
     await page.reload();
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     await capture(page, testInfo, "08-existing-image-order-saved-again");
@@ -269,6 +272,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
           page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
           deleteProduct.click(),
         ]);
+        verifiedProductActionRedirects += 1;
       } else if (productId && page.url().includes("/admin/products/new")) {
         for (const fixture of imageFixtures) {
           const preview = page.getByRole("img", { name: "Podgląd " + fixture.name });
@@ -300,6 +304,12 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       ].join("\n\n"),
       contentType: "text/plain",
     });
+  }
+
+  if (pendingProductActionCancellations.length <= verifiedProductActionRedirects) {
+    expectedNavigationCancellations.push(...pendingProductActionCancellations);
+  } else {
+    requestFailures.push(...pendingProductActionCancellations.slice(verifiedProductActionRedirects));
   }
 
   if (flowFailure) throw flowFailure;

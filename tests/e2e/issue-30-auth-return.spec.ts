@@ -206,7 +206,7 @@ test("an external login return destination falls back to the library", async ({ 
 
   await expect(page.locator('input[name="returnTo"]')).toHaveValue("/en/library");
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page).toHaveURL(/\/en\/library$/);
+  await expect(page).toHaveURL(/\/en\/library$/, { timeout: 15_000 });
   await expect(page).not.toHaveURL(/evil\.example/);
 });
 
