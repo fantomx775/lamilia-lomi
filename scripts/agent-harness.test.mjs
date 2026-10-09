@@ -2097,6 +2097,21 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   assert.equal(wrongMergedBase.decision, "BLOCKED");
   assert.match(wrongMergedBase.aiReview.details, /different or unrecorded base SHA/);
 
+  const mergedWithUnreadableParentClient = {
+    ...mergedClient,
+    request: async (path) => {
+      if (path === "/repos/example/repo/pulls/52") return mergedPullRequest;
+      if (path.endsWith("/commits/" + "d".repeat(40))) return { sha: "d".repeat(40), parents: [] };
+      return client.request(path);
+    },
+  };
+  const unreadableMergedBase = await verifyPullRequest(mergedWithUnreadableParentClient, 52, { allowMerged: true });
+  assert.equal(unreadableMergedBase.decision, "BLOCKED");
+  assert.equal(unreadableMergedBase.mergeBase.status, "BLOCKED");
+  assert.ok(unreadableMergedBase.fileScope);
+  assert.ok(unreadableMergedBase.productionSmokePlan);
+  assert.ok(unreadableMergedBase.reasons.some((reason) => /first parent/.test(reason)));
+
   const closingPrClient = {
     ...client,
     request: async (path) => path === "/repos/example/repo/pulls/52"
@@ -2774,6 +2789,49 @@ test("blocks delivery when the merge commit first parent differs from the review
   assert.equal(result.mergeBaseVerification.expectedSha, CURRENT_BASE_SHA);
   assert.equal(result.mergeBaseVerification.sha, "d".repeat(40));
   assert.equal(productionSmokeRan, true);
+  assert.equal(result.decision, "BLOCKED");
+  assert.equal(result.completed, false);
+  assert.equal(fixture.issueState, "open");
+  assert.notEqual(fixture.projectStatus, "Done");
+});
+
+test("merged recovery still collects Production signals when the merge base is unreadable", async () => {
+  const fixture = createDeliveryClient({
+    alreadyMerged: true,
+    mergeParentSha: null,
+  });
+  let deploymentChecks = 0;
+  let smokeChecks = 0;
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({
+      decision: "BLOCKED",
+      currentSha: CURRENT_SHA,
+      pullRequest: { baseSha: null },
+      mergeBase: { status: "BLOCKED", sha: null },
+      fileScope: { files: [], productionSmokePlan: { status: "PASS", required: false } },
+      productionSmokePlan: { status: "PASS", required: false },
+      reasons: ["The merge commit's reviewed base SHA could not be verified."],
+    }),
+    waitForDeployment: async (_client, mergeSha) => {
+      deploymentChecks += 1;
+      return {
+        status: "PASS",
+        deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
+        details: "Exact-SHA deployment was observed.",
+      };
+    },
+    smoke: async () => {
+      smokeChecks += 1;
+      return { status: "PASS", checks: [], details: "Production health smoke passed." };
+    },
+  });
+
+  assert.equal(deploymentChecks, 1);
+  assert.equal(smokeChecks, 1);
+  assert.equal(result.productionDeployment.status, "PASS");
+  assert.equal(result.productionSmoke.status, "PASS");
+  assert.equal(result.mergeBaseVerification.status, "BLOCKED");
   assert.equal(result.decision, "BLOCKED");
   assert.equal(result.completed, false);
   assert.equal(fixture.issueState, "open");

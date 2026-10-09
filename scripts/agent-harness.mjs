@@ -2409,19 +2409,14 @@ export async function verifyPullRequest(client, pullRequestNumber, {
       mergedBaseSha = parents[0].sha.toLowerCase();
     }
   }
-  if (validateAsMergedDelivery && !validSha(mergedBaseSha)) {
-    return {
-      decision: "BLOCKED",
-      currentSha: headSha || null,
-      pullRequest: assessmentPullRequest,
-      mergeBase: { status: "BLOCKED", sha: null },
-      reasons: ["The merged PR's reviewed base SHA could not be verified from the immutable merge commit's first parent."],
-    };
-  }
+  const mergedBaseUnavailable = validateAsMergedDelivery && !validSha(mergedBaseSha);
   const verificationPullRequest = validateAsMergedDelivery
     ? {
         ...assessmentPullRequest,
-        base: { ...assessmentPullRequest.base, sha: mergedBaseSha },
+        base: {
+          ...assessmentPullRequest.base,
+          sha: validSha(mergedBaseSha) ? mergedBaseSha : assessmentPullRequest.base?.sha,
+        },
         state: "open",
         merged: false,
         mergeable: true,
@@ -2452,10 +2447,22 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     allowAlreadyMerged: validateAsMergedDelivery,
     snapshotStable,
   });
+  if (mergedBaseUnavailable) {
+    return {
+      ...verification,
+      decision: "BLOCKED",
+      mergeBase: { status: "BLOCKED", sha: null },
+      reasons: [...new Set([
+        ...(verification.reasons || []),
+        "The merged PR's reviewed base SHA could not be verified from the immutable merge commit's first parent.",
+      ])],
+    };
+  }
   if (validateAsMergedDelivery && verification.decision === "READY_FOR_MERGE") {
     return {
       ...verification,
       decision: "VERIFIED_MERGE",
+      mergeBase: { status: "PASS", sha: mergedBaseSha },
       pullRequest: {
         ...verification.pullRequest,
         state: "closed",
@@ -2464,7 +2471,9 @@ export async function verifyPullRequest(client, pullRequestNumber, {
       },
     };
   }
-  return verification;
+  return validateAsMergedDelivery
+    ? { ...verification, mergeBase: { status: "PASS", sha: mergedBaseSha } }
+    : verification;
 }
 
 function delay(milliseconds) {
@@ -3188,6 +3197,8 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   let mergeBaseVerification = { status: "NOT RUN", sha: null, details: "Merge base has not been checked." };
   let mergeResult = { merged: Boolean(pullRequest.merged), alreadyMerged: Boolean(pullRequest.merged) };
   let verification = null;
+  let reviewGatesPassed = false;
+  let productionSmokePlanVerification = { status: "NOT RUN", details: "Production smoke plan has not been checked." };
   let issueBeforeMerge = null;
   let pullRequestCommitShas = new Set();
   const trackingPreparations = new Map();
@@ -3263,6 +3274,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
         reasons: verification.reasons || ["All merge gates must pass before the GitHub merge endpoint is called."],
       };
     }
+    reviewGatesPassed = true;
     candidateSha = verification.currentSha;
     verifiedBaseSha = validSha(verification.pullRequest?.baseSha)
       ? verification.pullRequest.baseSha.toLowerCase()
@@ -3278,6 +3290,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       };
     }
     const smokePlan = resolveSmokePlan(verification);
+    productionSmokePlanVerification = { status: smokePlan.status, details: smokePlan.details || "Production smoke plan is valid." };
     if (smokePlan.status !== "PASS") {
       return {
         status: "BLOCKED",
@@ -3427,36 +3440,22 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     }
   } else {
     verification = await verify(client, number, { allowMerged: true });
-    if (verification.decision !== "VERIFIED_MERGE") {
-      return {
-        status: "BLOCKED",
-        decision: "BLOCKED",
-        stage: "pre-merge-gates",
-        merged: true,
-        candidateSha: verification.currentSha || candidateSha,
-        mergeSha,
-        verification,
-        reasons: verification.reasons || ["The merged PR does not have current-SHA evidence proving that all delivery gates passed."],
-      };
-    }
-    candidateSha = verification.currentSha;
-    verifiedBaseSha = validSha(verification.pullRequest?.baseSha)
+    reviewGatesPassed = verification.decision === "VERIFIED_MERGE";
+    candidateSha = verification.currentSha || candidateSha;
+    verifiedBaseSha = verification.mergeBase?.status === "BLOCKED"
+      ? null
+      : validSha(verification.pullRequest?.baseSha)
       ? verification.pullRequest.baseSha.toLowerCase()
       : null;
     const smokePlan = resolveSmokePlan(verification);
-    if (smokePlan.status !== "PASS") {
-      return {
-        status: "BLOCKED",
-        decision: "BLOCKED",
-        stage: "production-smoke-plan",
-        merged: true,
-        candidateSha,
-        mergeSha,
-        reasons: [smokePlan.details],
-      };
+    productionSmokePlanVerification = {
+      status: smokePlan.status,
+      details: smokePlan.details || "Production smoke plan is valid.",
+    };
+    if (smokePlan.status === "PASS") {
+      effectiveSmokePaths = smokePlan.paths;
+      effectiveSmokeExpectations = smokePlan.expectations;
     }
-    effectiveSmokePaths = smokePlan.paths;
-    effectiveSmokeExpectations = smokePlan.expectations;
     if (!validSha(mergeSha)) {
       return {
         status: "BLOCKED",
@@ -3581,7 +3580,9 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     productionDeployment ||= { status: "BLOCKED", deployment: null, details: error.message };
   }
 
-  const postDeploymentPass = mergeBaseVerification.status === "PASS" &&
+  const postDeploymentPass = reviewGatesPassed &&
+    productionSmokePlanVerification.status === "PASS" &&
+    mergeBaseVerification.status === "PASS" &&
     productionDeployment?.status === "PASS" &&
     productionSmoke?.status === "PASS" &&
     postDeploymentMigration?.status === "PASS";
@@ -3592,6 +3593,9 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   const details = [
     "Candidate SHA: " + (candidateSha || "unknown"),
     "Merge SHA: " + mergeSha,
+    "Reviewed gates: " + (reviewGatesPassed ? "PASS" : "BLOCKED") +
+      (verification?.reasons?.length ? " — " + verification.reasons.join("; ") : ""),
+    "Production smoke plan: " + productionSmokePlanVerification.status + " — " + productionSmokePlanVerification.details,
     "Reviewed merge base: " + mergeBaseVerification.status + " — " + mergeBaseVerification.details,
     "Production deployment: " + (productionDeployment?.status || "NOT RUN") + " — " + (productionDeployment?.details || "not verified"),
     "Production smoke: " + (productionSmoke?.status || "NOT RUN") + " — " + (productionSmoke?.details || "not run"),
@@ -3657,6 +3661,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     productionDeployment: productionDeployment || { status: "NOT RUN" },
     productionSmoke: productionSmoke || { status: "NOT RUN" },
     postDeploymentMigration: postDeploymentMigration || { status: "NOT RUN" },
+    productionSmokePlan: productionSmokePlanVerification,
     mergeBaseVerification,
     issue: issueOutcome,
     completed,
@@ -3672,6 +3677,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     mergeSha,
     productionDeployment: record.productionDeployment,
     productionSmoke: record.productionSmoke,
+    productionSmokePlan: record.productionSmokePlan,
     postDeploymentMigration: record.postDeploymentMigration,
     mergeBaseVerification: record.mergeBaseVerification,
     trackingPreparation,
