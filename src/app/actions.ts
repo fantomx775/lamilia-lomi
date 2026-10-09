@@ -185,19 +185,29 @@ export async function loginDemoAction(formData: FormData) {
 
   if (getBackendMode() === "supabase") {
     const pendingResumeIntent = await readAuthResumeIntent();
+    const pendingResumeTargetsReturnTo = Boolean(
+      pendingResumeIntent && pendingResumeIntent.returnTo === returnTo,
+    );
     const pendingResumeMatchesEmail = Boolean(
-      pendingResumeIntent &&
-        pendingResumeIntent.returnTo === returnTo &&
+      pendingResumeTargetsReturnTo &&
+        pendingResumeIntent &&
         authResumeIntentMatchesEmail(pendingResumeIntent, email),
     );
+    const pendingResumeAccountMismatch =
+      pendingResumeTargetsReturnTo && !pendingResumeMatchesEmail;
     const retryingPendingResume = Boolean(
       pendingResumeMatchesEmail &&
         pendingResumeIntent?.productSlug &&
         pendingResumeIntent.code,
     );
+    if (pendingResumeAccountMismatch) {
+      await clearUnlockIntent();
+    }
     const code = retryingPendingResume
       ? pendingResumeIntent?.code ?? ""
-      : formCode;
+      : pendingResumeAccountMismatch
+        ? ""
+        : formCode;
     const intent = createAuthResumeIntent({
       locale,
       productSlug: returnProductSlug,
@@ -215,20 +225,24 @@ export async function loginDemoAction(formData: FormData) {
       }));
     } catch (authError) {
       logUnexpectedFailure("[auth] Sign-in failed unexpectedly.", authError);
-      if (!pendingResumeMatchesEmail || !pendingResumeIntent?.code) {
+      if (!pendingResumeAccountMismatch && (!pendingResumeMatchesEmail || !pendingResumeIntent?.code)) {
         await setAuthResumeIntent({ locale, returnTo, code, email });
       }
       redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
     if (error) {
-      if (!pendingResumeMatchesEmail || !pendingResumeIntent?.code) {
+      if (!pendingResumeAccountMismatch && (!pendingResumeMatchesEmail || !pendingResumeIntent?.code)) {
         await setAuthResumeIntent({ locale, returnTo, code, email });
       }
       const errorCode = isSupabaseEmailNotConfirmedError(error)
         ? "email_unverified"
         : "invalid_credentials";
       redirect(`/${locale}/login?error=${errorCode}&returnTo=${encodeURIComponent(intent.returnTo)}`);
+    }
+
+    if (pendingResumeAccountMismatch) {
+      await clearAuthResumeIntent();
     }
 
     if (
@@ -311,17 +325,22 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
   }
 
   const pendingResumeIntent = await readAuthResumeIntent();
+  const pendingResumeTargetsReturnTo = Boolean(
+    pendingResumeIntent && pendingResumeIntent.returnTo === returnTo,
+  );
   const pendingResumeMatchesEmail = Boolean(
-    pendingResumeIntent &&
-      pendingResumeIntent.returnTo === returnTo &&
+    pendingResumeTargetsReturnTo &&
+      pendingResumeIntent &&
       authResumeIntentMatchesEmail(pendingResumeIntent, email),
   );
+  const pendingResumeAccountMismatch =
+    pendingResumeTargetsReturnTo && !pendingResumeMatchesEmail;
   const retryingPendingResume = Boolean(
     pendingResumeMatchesEmail &&
       pendingResumeIntent?.productSlug &&
       pendingResumeIntent.code,
   );
-  if (retryingPendingResume) {
+  if (retryingPendingResume || pendingResumeAccountMismatch) {
     await clearUnlockIntent();
   }
   const intent = await setAuthResumeIntent({
@@ -332,7 +351,9 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     returnTo,
     code: retryingPendingResume
       ? pendingResumeIntent?.code
-      : code || (pendingResumeMatchesEmail ? pendingResumeIntent?.code : undefined),
+      : pendingResumeAccountMismatch
+        ? undefined
+        : code || (pendingResumeMatchesEmail ? pendingResumeIntent?.code : undefined),
     userId: pendingResumeMatchesEmail ? pendingResumeIntent?.userId : undefined,
     emailHash: pendingResumeMatchesEmail ? pendingResumeIntent?.emailHash : undefined,
     email: text(formData, "email"),

@@ -318,6 +318,46 @@ describe("registration auth action", () => {
     expect(actionMocks.clearAuthResumeIntent).not.toHaveBeenCalled();
   });
 
+  it("does not transfer a pending account's premium code to another login", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "first-reader-email-hash",
+      userId: "first-reader",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(false);
+    actionMocks.getUnlockIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    });
+    actionMocks.createClient.mockResolvedValue({
+      auth: { signInWithPassword: vi.fn().mockResolvedValue({ error: null }) },
+    });
+
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "second-reader@example.com",
+          "password123",
+          "/en/products/moon-garden-coloring-book",
+        ),
+      ),
+      "/en/products/moon-garden-coloring-book#premium",
+    );
+
+    expect(actionMocks.clearUnlockIntent).toHaveBeenCalled();
+    expect(actionMocks.clearAuthResumeIntent).toHaveBeenCalled();
+    expect(actionMocks.redeemAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "" }),
+    );
+  });
+
   it("keeps a local-mode product password-login return anchored to premium", async () => {
     await expectRedirect(
       loginDemoAction(
@@ -411,6 +451,43 @@ describe("registration auth action", () => {
       email: "reader@example.com",
     });
     expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not resend another account's pending premium code to a different email", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "first-reader-email-hash",
+      userId: "first-reader",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(false);
+    const formData = new FormData();
+    formData.set("locale", "en");
+    formData.set("email", "second-reader@example.com");
+    formData.set("returnTo", "/en/products/moon-garden-coloring-book");
+    formData.set("code", "LOMI-BOOK-2026");
+    actionMocks.createClient.mockResolvedValue({
+      auth: { resend: vi.fn().mockResolvedValue({ error: null }) },
+    });
+
+    await expectRedirect(
+      resendSupabaseVerificationEmailAction(formData),
+      "/en/login?error=verification_sent&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: undefined,
+        email: "second-reader@example.com",
+        userId: undefined,
+        emailHash: undefined,
+      }),
+    );
   });
 
   it("keeps an unlock registration on the product resume path", async () => {
