@@ -1587,6 +1587,46 @@ describe("premium unlock action", () => {
     expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);
   });
 
+  it("does not rebind a stale account-bound code to a different unverified user", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+      reviewDelayDays: 7,
+    });
+    actionMocks.getDemoSession.mockResolvedValue({
+      email: "account-b@example.com",
+      userId: "account-b",
+      emailVerified: false,
+      unlockedProductIds: [],
+    });
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "account-a-email-hash",
+      userId: "account-a",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesUser.mockReturnValue(false);
+
+    const formData = new FormData();
+    formData.set("locale", "en");
+    formData.set("productSlug", "moon-garden-coloring-book");
+    formData.set("code", "LOMI-BOOK-2026");
+
+    await expectRedirect(
+      unlockPremiumAction(formData),
+      "/en/login?error=verification_mismatch&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.setAuthResumeIntent).not.toHaveBeenCalled();
+    expect(actionMocks.redeemPremiumCodeForRequest).not.toHaveBeenCalled();
+    expect(actionMocks.clearAuthResumeIntent).toHaveBeenCalledTimes(1);
+    expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["matching account and product", "moon-garden-coloring-book", true, true],
     ["different product", "another-product", true, false],

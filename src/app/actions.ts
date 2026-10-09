@@ -759,18 +759,6 @@ export async function unlockPremiumAction(formData: FormData) {
     redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
-  if (!session.emailVerified) {
-    await preserveUnlockRecoveryIntent({
-      locale,
-      productSlug: product.slug,
-      returnTo,
-      code,
-      email: session.email,
-      userId: session.userId,
-    });
-    redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
-  }
-
   if (getBackendMode() === "supabase") {
     const pendingResumeIntent = await readAuthResumeIntent();
     const pendingResumeCode = normalizePremiumCodeForRequest(pendingResumeIntent?.code);
@@ -794,6 +782,18 @@ export async function unlockPremiumAction(formData: FormData) {
         `/${locale}/login?error=verification_mismatch&returnTo=${encodeURIComponent(returnTo)}`,
       );
     }
+  }
+
+  if (!session.emailVerified) {
+    await preserveUnlockRecoveryIntent({
+      locale,
+      productSlug: product.slug,
+      returnTo,
+      code,
+      email: session.email,
+      userId: session.userId,
+    });
+    redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
   }
 
   let result;
