@@ -88,9 +88,11 @@ State the release order and remaining work in the PR before merge. If the new
 application requires a new schema, the compatible migration must be applied
 and verified in Production before the merge can trigger the `main` deployment.
 For a breaking schema change, record and follow the exact
-`["expand", "compatible-deploy", "contract"]` sequence; verify the contract
-step after the compatible application deployment. Keep the issue open until
-that step passes. After merge, Vercel's Git integration performs the
+`["expand", "compatible-deploy", "contract"]` sequence. Name the exact
+`expandMigrationIds` and `contractMigrationIds`: validate every migration on
+Stage/local, apply only the expand IDs in Production before merge, deploy
+compatible application code, then apply and verify only the contract IDs.
+Keep the issue open until the contract step passes. After merge, Vercel's Git integration performs the
 normal Production deployment; do not
 follow it with `vercel --prod`. Report the exact migration IDs, compatibility
 evidence, deployment order, and any unapplied or unverified step. If a required
@@ -151,26 +153,32 @@ effective branch rules. If no CI checks are required, passing current-SHA local
 verification and the two AI reviews are sufficient; missing optional checks
 remain `NOT RUN`, not CI success. A formal approval from another GitHub
 identity is required only when GitHub itself enforces it. Existing approvals
-on an earlier commit count only when the effective rules do not dismiss stale
-reviews; latest-push approval rules remain binding.
+count only when they apply to the exact current head under the effective rules;
+latest-push approval rules are satisfied only by an approval of that head.
 
 `node scripts/agent-harness.mjs deliver-pr <pull-request> [--issue <issue>]`
 executes the delivery gate. It reruns `verify-pr`, submits a normal GitHub
 merge request with the verified head SHA, confirms the merge commit, waits for
 the GitHub Production deployment for that exact commit, and runs focused HTTPS
-smoke paths (`AGENT_HARNESS_PRODUCTION_SMOKE_PATHS`, default `/`). If changed
-application-flow files need coverage, an explicit non-root affected path is
-required before merge. It does not bypass branch rules or invoke a manual
-Vercel Production deployment. It stores the result in a PR comment. When
-`--issue` identifies a fully resolved work item, the command sets it to
-`Blocked` during Production verification and closes it only after deployment,
-smoke, and any required post-deployment migration verification pass. Native
-Project `Item closed` automation then sets `Done`; `Pull request merged`
-automation is disabled so a merge cannot mark work done before Production
-verification. A failed Production check includes available deployment log and
-target URLs; investigate the deployment, recover through the normal fix,
-review, and merge path when safe, and keep the issue open/Blocked meanwhile.
-Do not pass a parent epic that still has unfinished work as the issue to close.
+smoke paths (default `/`). Application-flow changes require a current-SHA
+`productionSmokePlan` that maps every changed flow file to its matching route
+and expected response text; the post-merge HTTPS smoke checks that text. UI
+changes also require browser E2E and screenshots. Any local-repository
+`Closes`, `Fixes`, or `Resolves` issue reference in the PR body blocks delivery,
+even if `--issue` is omitted, because GitHub could close it at merge before
+Production passes. Use a non-closing reference such as `Part of #<issue>`.
+The command does not bypass branch rules or invoke a manual Vercel Production
+deployment. It stores the result in a PR comment. When `--issue` identifies a
+fully resolved work item, the command sets it to `Blocked` during Production
+verification, records exact-SHA deployment/smoke/migration evidence, sets the
+Project status to `Done`, and then closes the issue only after every gate
+passes. Native Project `Pull request merged` automation must remain disabled;
+`Item closed` can mirror the final issue closure. A delayed Project update can
+be safely retried from its exact-SHA Production evidence. A failed Production
+check includes available deployment log and target URLs; investigate the
+deployment, recover through the normal fix, review, and merge path when safe,
+and keep the issue open/Blocked meanwhile. Do not pass a parent epic that still
+has unfinished work as the issue to close.
 
 ## UI browser verification
 

@@ -6,6 +6,7 @@ import {
   assessPullRequestVerification,
   closesIssueReference,
   deliverPullRequest,
+  findClosingIssueReferences,
   extractAcceptanceCriteria,
   findBranchCandidates,
   githubToken,
@@ -27,6 +28,7 @@ import {
   validateIndependentReview,
   validateLocalVerification,
   validateReleaseEvidence,
+  validateProductionSmokePlan,
   validatePostDeploymentMigrationEvidence,
   waitForProductionDeployment,
   verifyPullRequest,
@@ -73,7 +75,7 @@ function cleanAiReviewComments(headSha = CURRENT_SHA) {
   );
 }
 
-function cleanVerificationRecord({ headSha = CURRENT_SHA, uiBehavior = false, browser, release } = {}) {
+function cleanVerificationRecord({ headSha = CURRENT_SHA, uiBehavior = false, browser, release, productionSmokePlan } = {}) {
   return {
     schemaVersion: 1,
     headSha,
@@ -86,6 +88,7 @@ function cleanVerificationRecord({ headSha = CURRENT_SHA, uiBehavior = false, br
     })),
     ...(browser ? { browser } : {}),
     ...(release ? { release } : {}),
+    ...(productionSmokePlan ? { productionSmokePlan } : {}),
   };
 }
 
@@ -145,6 +148,7 @@ function createDeliveryClient({
   initialIssueState = "open",
   pullRequestBody = "Part of #7",
   closedByPullRequest = alreadyMerged,
+  projectUpdateDelayReads = 0,
 } = {}) {
   const mergeSha = "c".repeat(40);
   const issueId = "I_issue-7";
@@ -152,6 +156,10 @@ function createDeliveryClient({
   let merged = alreadyMerged;
   let issueState = initialIssueState;
   let projectStatus = initialIssueState === "closed" ? "Done" : "Review";
+  let delayedProjectStatus = null;
+  let remainingDelayedReads = 0;
+  let projectStatusDelayedOnce = false;
+  const issueComments = [];
   const client = {
     owner: "example",
     repo: "repo",
@@ -187,6 +195,12 @@ function createDeliveryClient({
       if (path === "/repos/example/repo/issues/7") {
         return { number: 7, node_id: issueId, state: issueState, title: "Delivery issue" };
       }
+      if (path.startsWith("/repos/example/repo/issues/7/comments") && method === "POST") {
+        const body = JSON.parse(options.body).body;
+        issueComments.push({ user: { login: "author" }, created_at: "2026-10-08T12:00:03Z", body });
+        return { id: calls.length, html_url: "https://github.com/example/repo/issues/7#issuecomment-" + calls.length };
+      }
+      if (path.startsWith("/repos/example/repo/issues/7/comments")) return issueComments;
       if (method === "POST" && (
         path.startsWith("/repos/example/repo/issues/52/comments") ||
         path.startsWith("/repos/example/repo/issues/7/comments")
@@ -197,7 +211,7 @@ function createDeliveryClient({
       if (path.startsWith("/repos/example/repo/issues/52/comments")) return [];
       throw new Error("Unexpected delivery API request: " + method + " " + path);
     },
-    graphql: async (query) => {
+    graphql: async (query, variables = {}) => {
       calls.push({ path: "graphql", method: "POST", body: query });
       if (query.includes("closedByPullRequestsReferences")) {
         return {
@@ -217,8 +231,25 @@ function createDeliveryClient({
         };
       }
       if (query.includes("UpdateProjectV2ItemFieldValueInput")) {
-        projectStatus = "Blocked";
+        const optionId = variables.input?.value?.singleSelectOptionId || "";
+        const nextStatus = optionId.replace(/^status-/, "");
+        delayedProjectStatus = null;
+        remainingDelayedReads = 0;
+        if (nextStatus === "Done" && projectUpdateDelayReads > 0 && !projectStatusDelayedOnce) {
+          delayedProjectStatus = "Done";
+          remainingDelayedReads = projectUpdateDelayReads;
+          projectStatusDelayedOnce = true;
+        } else {
+          projectStatus = nextStatus;
+        }
         return { updateProjectV2ItemFieldValue: { projectV2Item: { id: "item-7" } } };
+      }
+      const statusForRead = projectStatus;
+      if (delayedProjectStatus && remainingDelayedReads > 0) {
+        remainingDelayedReads -= 1;
+      } else if (delayedProjectStatus) {
+        projectStatus = delayedProjectStatus;
+        delayedProjectStatus = null;
       }
       return {
         user: {
@@ -239,7 +270,7 @@ function createDeliveryClient({
                 isArchived: false,
                 content: { __typename: "Issue", id: issueId },
                 fieldValues: {
-                  nodes: [{ name: projectStatus, field: { name: "Status" } }],
+                  nodes: [{ name: statusForRead, field: { name: "Status" } }],
                 },
               }],
               pageInfo: { hasNextPage: false, endCursor: null },
@@ -293,6 +324,15 @@ test("detects only GitHub closing keywords that target the exact issue", () => {
   assert.equal(closesIssueReference("Part of #29", 29, "example/repo"), false);
   assert.equal(closesIssueReference("Closes #290", 29, "example/repo"), false);
   assert.equal(closesIssueReference("Closes other/repo#29", 29, "example/repo"), false);
+});
+
+test("enumerates every local issue a delivery PR would auto-close", () => {
+  assert.deepEqual(findClosingIssueReferences(
+    "Closes #29 and resolves example/repo#31; fixes https://github.com/example/repo/issues/32",
+    "example/repo",
+  ), [29, 31, 32]);
+  assert.deepEqual(findClosingIssueReferences("Fixes other/repo#29", "example/repo"), []);
+  assert.deepEqual(findClosingIssueReferences("Part of #29", "example/repo"), []);
 });
 
 test("does not treat a foreign repository issue reference as a local PR link", () => {
@@ -1175,43 +1215,55 @@ test("keeps migration and dependency release obligations blocking until each is 
   assert.equal(missingStage.status, "BLOCKED");
   assert.equal(missingStage.stageMigration.status, "BLOCKED");
 
+  const breakingFiles = [
+    "supabase/migrations/20261008170639_catalog_expand.sql",
+    "supabase/migrations/20261009120000_catalog_contract.sql",
+  ];
+  const expandId = "20261008170639_catalog_expand";
+  const contractId = "20261009120000_catalog_contract";
   const breakingRelease = {
     ...release,
     migrationCompatibility: {
       ...release.migrationCompatibility,
       strategy: "expand-contract",
+      migrationIds: [expandId, contractId],
+      expandMigrationIds: [expandId],
+      contractMigrationIds: [contractId],
       deploymentSequence: ["expand", "compatible-deploy", "contract"],
     },
+    stageMigration: { ...release.stageMigration, migrationIds: [expandId, contractId] },
     preMergeMigration: {
       ...release.preMergeMigration,
       required: true,
       environment: "Production",
-      migrationIds: ["20261008170639_catalog"],
+      phase: "expand",
+      migrationIds: [expandId],
     },
   };
   assert.equal(validateReleaseEvidence({
-    files: ["supabase/migrations/20261008170639_catalog.sql"],
+    files: breakingFiles,
     localVerification: { record: { release: breakingRelease } },
   }).status, "PASS");
   assert.equal(validatePostDeploymentMigrationEvidence({
-    files: ["supabase/migrations/20261008170639_catalog.sql"],
+    files: breakingFiles,
     localVerification: { record: { release: breakingRelease } },
   }).status, "BLOCKED");
   assert.equal(validatePostDeploymentMigrationEvidence({
-    files: ["supabase/migrations/20261008170639_catalog.sql"],
+    files: breakingFiles,
     localVerification: { record: { release: {
       ...breakingRelease,
       postDeployMigration: {
         status: "PASS",
         environment: "Production",
-        migrationIds: ["20261008170639_catalog"],
+        phase: "contract",
+        migrationIds: [contractId],
         command: "supabase migration list --linked",
         details: "Contract migration is applied and the final schema is verified.",
       },
     } } },
   }).status, "PASS");
   const outOfOrderSequence = validateReleaseEvidence({
-    files: ["supabase/migrations/20261008170639_catalog.sql"],
+    files: breakingFiles,
     localVerification: { record: { release: {
       ...breakingRelease,
       migrationCompatibility: {
@@ -1222,6 +1274,31 @@ test("keeps migration and dependency release obligations blocking until each is 
   });
   assert.equal(outOfOrderSequence.status, "BLOCKED");
   assert.match(outOfOrderSequence.migrationCompatibility.details, /exact order/);
+
+  const earlyContract = validateReleaseEvidence({
+    files: breakingFiles,
+    localVerification: { record: { release: {
+      ...breakingRelease,
+      preMergeMigration: { ...breakingRelease.preMergeMigration, migrationIds: [expandId, contractId] },
+    } } },
+  });
+  assert.equal(earlyContract.preMergeMigration.status, "BLOCKED");
+
+  const missingContractPhase = validatePostDeploymentMigrationEvidence({
+    files: breakingFiles,
+    localVerification: { record: { release: {
+      ...breakingRelease,
+      postDeployMigration: {
+        status: "PASS",
+        environment: "Production",
+        phase: "contract",
+        migrationIds: [expandId],
+        command: "supabase migration list --linked",
+        details: "Wrong phase migration was applied.",
+      },
+    } } },
+  });
+  assert.equal(missingContractPhase.status, "BLOCKED");
 });
 
 test("reports configured required checks as missing, pending, failed, or green on the current SHA", () => {
@@ -1341,6 +1418,22 @@ test("two AI reviews and local evidence satisfy an unprotected branch without op
     reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "reviewer", state: "APPROVED" })],
   });
   assert.equal(enforcedApprovalPresent.decision, "READY_FOR_MERGE");
+
+  const lastPushApprovalPresent = assessPullRequestVerification({
+    ...input,
+    mergePolicy: cleanMergePolicy({ requiredApprovals: 1, requireLastPushApproval: true }),
+    reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "reviewer", state: "APPROVED" })],
+  });
+  assert.equal(lastPushApprovalPresent.decision, "READY_FOR_MERGE");
+  assert.equal(lastPushApprovalPresent.checks.branchReviewPolicy.approvalsPresent, 1);
+
+  const lastPushApprovalStale = assessPullRequestVerification({
+    ...input,
+    mergePolicy: cleanMergePolicy({ requiredApprovals: 1, requireLastPushApproval: true }),
+    reviews: [cleanGitHubReview({ headSha: "b".repeat(40), user: "reviewer", state: "APPROVED" })],
+  });
+  assert.equal(lastPushApprovalStale.decision, "READY_FOR_REVIEW");
+  assert.equal(lastPushApprovalStale.checks.branchReviewPolicy.approvalsPresent, 0);
 
   const nonEnforcedChangeRequest = assessPullRequestVerification({
     ...input,
@@ -1476,12 +1569,24 @@ test("blocks UI PR review readiness until the exact-SHA browser record is comple
     pullRequest: cleanPullRequest(),
     files,
     comments: [
-      structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ uiBehavior: true, browser })),
+      structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({
+        uiBehavior: true,
+        browser,
+        productionSmokePlan: {
+          status: "PASS",
+          flows: [{
+            name: "catalog page",
+            affectedFiles: ["src/app/catalog/page.tsx"],
+            paths: [{ path: "/catalog", expectedText: "Catalog" }],
+          }],
+        },
+      })),
       ...ai,
     ],
     mergePolicy: cleanMergePolicy(),
   });
   assert.equal(verified.browserVerification.status, "PASS");
+  assert.equal(verified.productionSmokePlan.status, "PASS");
   assert.equal(verified.decision, "READY_FOR_MERGE");
 
   for (const filename of ["src/lib/catalog-settings.ts", "tailwind.config.ts", "postcss.config.js"]) {
@@ -1497,6 +1602,76 @@ test("blocks UI PR review readiness until the exact-SHA browser record is comple
     assert.equal(helperOnly.fileScope.uiBehaviorRequired, true, filename);
     assert.equal(helperOnly.browserVerification.required, true, filename);
     assert.equal(helperOnly.decision, "BLOCKED", filename);
+  }
+});
+
+test("production smoke plans bind changed route files to valid paths and expected content", () => {
+  const files = ["src/app/[locale]/products/page.tsx", "src/components/ProductGrid.tsx"];
+  const plan = {
+    status: "PASS",
+    flows: [
+      {
+        name: "localized products page",
+        affectedFiles: ["src/app/[locale]/products/page.tsx"],
+        paths: [{ path: "/pl/products", expectedText: "Produkty" }],
+      },
+      {
+        name: "product grid",
+        affectedFiles: ["src/components/ProductGrid.tsx"],
+        routeFiles: ["src/app/[locale]/products/page.tsx"],
+        paths: [{ path: "/pl/products", expectedText: "Produkty" }],
+      },
+    ],
+  };
+  assert.equal(validateProductionSmokePlan({ files, localVerification: { record: { productionSmokePlan: plan } } }).status, "PASS");
+
+  const multipleRoutes = validateProductionSmokePlan({
+    files: ["src/app/products/page.tsx", "src/app/about/page.tsx"],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "catalog and about routes",
+        affectedFiles: ["src/app/products/page.tsx", "src/app/about/page.tsx"],
+        paths: [
+          { path: "/products", expectedText: "Products" },
+          { path: "/about", expectedText: "About" },
+        ],
+      }],
+    } } },
+  });
+  assert.equal(multipleRoutes.status, "PASS");
+  const missingSecondRoute = validateProductionSmokePlan({
+    files: ["src/app/products/page.tsx", "src/app/about/page.tsx"],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "catalog and about routes",
+        affectedFiles: ["src/app/products/page.tsx", "src/app/about/page.tsx"],
+        paths: [{ path: "/products", expectedText: "Products" }],
+      }],
+    } } },
+  });
+  assert.equal(missingSecondRoute.status, "BLOCKED");
+
+  const unrelatedComponentRoute = structuredClone(plan);
+  unrelatedComponentRoute.flows[1].paths[0].path = "/catalog";
+  assert.equal(validateProductionSmokePlan({
+    files,
+    localVerification: { record: { productionSmokePlan: unrelatedComponentRoute } },
+  }).status, "BLOCKED");
+
+  const wrongRoute = structuredClone(plan);
+  wrongRoute.flows[0].paths[0].path = "/catalog";
+  assert.equal(validateProductionSmokePlan({ files, localVerification: { record: { productionSmokePlan: wrongRoute } } }).status, "BLOCKED");
+
+  const uncovered = structuredClone(plan);
+  uncovered.flows[1].affectedFiles = [];
+  assert.equal(validateProductionSmokePlan({ files, localVerification: { record: { productionSmokePlan: uncovered } } }).status, "BLOCKED");
+
+  for (const path of ["products", "//elsewhere.test/products", "/"]) {
+    const invalidPath = structuredClone(plan);
+    invalidPath.flows[0].paths[0].path = path;
+    assert.equal(validateProductionSmokePlan({ files, localVerification: { record: { productionSmokePlan: invalidPath } } }).status, "BLOCKED", path);
   }
 });
 
@@ -1569,6 +1744,16 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   assert.equal(verifiedMerge.decision, "VERIFIED_MERGE");
   assert.equal(verifiedMerge.pullRequest.merged, true);
   assert.equal(verifiedMerge.currentSha, CURRENT_SHA);
+
+  const closingPrClient = {
+    ...client,
+    request: async (path) => path === "/repos/example/repo/pulls/52"
+      ? cleanPullRequest({ body: "Closes #29" })
+      : client.request(path),
+  };
+  const closingPr = await verifyPullRequest(closingPrClient, 52);
+  assert.equal(closingPr.decision, "BLOCKED");
+  assert.ok(closingPr.reasons.some((reason) => /auto-close issue references/.test(reason)));
 
   let prReads = 0;
   const unstableClient = {
@@ -1675,6 +1860,26 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   const staleRulesetApproval = await verifyPullRequest(staleRulesetApprovalClient, 52);
   assert.equal(staleRulesetApproval.decision, "READY_FOR_MERGE");
   assert.equal(staleRulesetApproval.checks.branchReviewPolicy.approvalsPresent, 1);
+
+  const lastPushApprovalPolicyClient = {
+    ...client,
+    request: async (path) => {
+      if (path.endsWith("/branches/main/protection")) {
+        return { required_pull_request_reviews: {
+          required_approving_review_count: 1,
+          dismiss_stale_reviews: false,
+          require_last_push_approval: true,
+        } };
+      }
+      if (path.endsWith("/pulls/52/reviews?per_page=100&page=1")) {
+        return [cleanGitHubReview({ headSha: CURRENT_SHA, user: "reviewer", state: "APPROVED" })];
+      }
+      return client.request(path);
+    },
+  };
+  const lastPushApprovalVerified = await verifyPullRequest(lastPushApprovalPolicyClient, 52);
+  assert.equal(lastPushApprovalVerified.decision, "READY_FOR_MERGE");
+  assert.equal(lastPushApprovalVerified.checks.branchReviewPolicy.approvalsPresent, 1);
 
   const appBoundPolicyClient = {
     ...client,
@@ -1921,6 +2126,34 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
   assert.equal(empty.status, "FAIL");
   assert.match(empty.details, /empty response/);
 
+  const expectedFlow = await runProductionSmoke("https://production.example.test", {
+    paths: ["/products"],
+    expectations: [{ path: "/products", expectedText: "Products" }],
+    fetchImpl: async (url) => ({
+      ok: true,
+      status: 200,
+      url: url.href,
+      headers: { get: () => "text/html" },
+      text: async () => "<main>Products</main>",
+    }),
+  });
+  assert.equal(expectedFlow.status, "PASS");
+  assert.equal(expectedFlow.checks[0].expectedTextMatched, true);
+
+  const wrongExpectedFlow = await runProductionSmoke("https://production.example.test", {
+    paths: ["/products"],
+    expectations: [{ path: "/products", expectedText: "Private admin console" }],
+    fetchImpl: async (url) => ({
+      ok: true,
+      status: 200,
+      url: url.href,
+      headers: { get: () => "text/html" },
+      text: async () => "<main>Products</main>",
+    }),
+  });
+  assert.equal(wrongExpectedFlow.status, "FAIL");
+  assert.match(wrongExpectedFlow.details, /expected content/);
+
   assert.equal((await runProductionSmoke("http://production.example.test")).status, "BLOCKED");
   assert.equal((await runProductionSmoke("https://production.example.test", { paths: ["//elsewhere.test"] })).status, "BLOCKED");
 });
@@ -1960,24 +2193,58 @@ test("automatically merges a fully green PR and updates its issue only after Pro
   ));
 });
 
+test("retries verified delivery when Project status propagation is delayed", async () => {
+  const fixture = createDeliveryClient({ projectUpdateDelayReads: 1 });
+  const verify = async (_client, _number, { allowMerged } = {}) => allowMerged
+    ? { decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }
+    : { decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, reasons: [] };
+  const waitForDeployment = async (_client, mergeSha) => ({
+    status: "PASS",
+    deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
+    details: "Exact-SHA deployment passed.",
+  });
+  const smoke = async () => ({ status: "PASS", checks: [], details: "Production smoke passed." });
+
+  const first = await deliverPullRequest(fixture.client, 52, { issueNumber: 7, verify, waitForDeployment, smoke });
+  assert.equal(first.decision, "BLOCKED");
+  assert.equal(fixture.issueState, "open");
+
+  const resumed = await deliverPullRequest(fixture.client, 52, { issueNumber: 7, verify, waitForDeployment, smoke });
+  assert.equal(resumed.decision, "DELIVERED", JSON.stringify(resumed));
+  assert.equal(fixture.issueState, "closed");
+  assert.equal(fixture.projectStatus, "Done");
+});
+
 test("application-flow delivery requires and runs an explicit affected Production smoke path", async () => {
   const missingPathFixture = createDeliveryClient();
-  const verification = async () => ({
+  const noPlanVerification = async () => ({
     decision: "READY_FOR_MERGE",
     currentSha: CURRENT_SHA,
     fileScope: { files: ["src/app/products/page.tsx"] },
     reasons: [],
   });
-  const missingPath = await deliverPullRequest(missingPathFixture.client, 52, { verify: verification });
+  const missingPath = await deliverPullRequest(missingPathFixture.client, 52, { verify: noPlanVerification });
   assert.equal(missingPath.stage, "production-smoke-plan");
   assert.equal(missingPath.merged, false);
   assert.equal(missingPathFixture.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
 
+  const verification = async () => ({
+    decision: "READY_FOR_MERGE",
+    currentSha: CURRENT_SHA,
+    fileScope: { files: ["src/app/products/page.tsx"] },
+    productionSmokePlan: {
+      status: "PASS",
+      required: true,
+      paths: ["/products"],
+      expectations: [{ path: "/products", expectedText: "Products" }],
+    },
+    reasons: [],
+  });
   const fixture = createDeliveryClient();
   let smokePaths = null;
+  let smokeExpectations = null;
   const delivered = await deliverPullRequest(fixture.client, 52, {
     verify: verification,
-    productionSmokePaths: ["/products"],
     waitForDeployment: async (_client, mergeSha) => ({
       status: "PASS",
       deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
@@ -1985,11 +2252,23 @@ test("application-flow delivery requires and runs an explicit affected Productio
     }),
     smoke: async (_url, options) => {
       smokePaths = options.paths;
+      smokeExpectations = options.expectations;
       return { status: "PASS", checks: [], details: "Affected product flow passed." };
     },
   });
   assert.equal(delivered.decision, "DELIVERED");
   assert.deepEqual(smokePaths, ["/products"]);
+  assert.deepEqual(smokeExpectations, [{ path: "/products", expectedText: "Products" }]);
+
+  for (const configuredPath of ["/catalog", "//elsewhere.test/catalog"]) {
+    const invalidFixture = createDeliveryClient();
+    const invalid = await deliverPullRequest(invalidFixture.client, 52, {
+      verify: verification,
+      productionSmokePaths: [configuredPath],
+    });
+    assert.equal(invalid.stage, "production-smoke-plan");
+    assert.equal(invalidFixture.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
+  }
 });
 
 test("failed Production verification is recorded and cannot close or complete a tracked issue", async () => {
@@ -2086,6 +2365,14 @@ test("delivery requires an exact PR-to-issue link and blocks GitHub closing keyw
   assert.equal(closingResult.stage, "issue-preflight");
   assert.equal(closing.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
   assert.equal(closing.projectStatus, "Review");
+
+  const untrackedClosing = createDeliveryClient({ pullRequestBody: "Closes #29" });
+  const untrackedClosingResult = await deliverPullRequest(untrackedClosing.client, 52, {
+    verify: async () => { verificationCalls += 1; return { decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA }; },
+  });
+  assert.equal(untrackedClosingResult.stage, "issue-preflight");
+  assert.equal(untrackedClosingResult.merged, false);
+  assert.equal(untrackedClosing.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
 });
 
 test("a blocked pre-merge gate prevents the merge API and Production side effects", async () => {

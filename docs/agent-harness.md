@@ -135,19 +135,25 @@ to `Ready`.
    `READY_FOR_REVIEW` is only for an approval required by GitHub rules. Set the
    Project issue to `Review` when an open non-draft PR is linked.
 10. Run `node scripts/agent-harness.mjs deliver-pr <pr-number> --issue
-    <issue-number>` for a fully resolved work item. Reference the issue in the
-    PR body without GitHub's closing keywords; the delivery command rejects an
-    issue that the merge itself would close. The command reruns the gate, merges
-    with the verified head SHA through GitHub's normal merge API, confirms the
-    merge commit, sets the issue to `Blocked` during Production verification,
-    waits for its GitHub Production deployment, and runs HTTPS smoke paths. The
-    default `/` is a health check; changed application-flow files require an
-    explicit non-root affected path in `AGENT_HARNESS_PRODUCTION_SMOKE_PATHS`
-    before merge. The Git merge remains subject to branch protection. It records
-    the outcome in a PR comment and closes the issue only after deployment,
-    smoke, and required post-deployment migration evidence pass. Native Project
-    `Item closed` automation then sets `Done`; `Pull request merged` automation
-    is disabled so a merge cannot mark work Done prematurely. If Production
+    <issue-number>` for a fully resolved work item. Use a non-closing issue
+    reference such as `Part of #29`: any local-repository `Closes`, `Fixes`, or
+    `Resolves` reference in the PR body blocks delivery, even without `--issue`,
+    because GitHub would close the issue at merge before Production is checked.
+    The command reruns the gate, merges with the verified head SHA through
+    GitHub's normal merge API, confirms the merge commit, sets the issue to
+    `Blocked` during Production verification, waits for its GitHub Production
+    deployment, and runs HTTPS smoke paths. The default `/` is a health check.
+    Application-flow changes require a current-SHA `productionSmokePlan` that
+    maps each changed flow file to its matching route and expected response
+    text; delivery requests those routes and checks the text in each response.
+    `AGENT_HARNESS_PRODUCTION_SMOKE_PATHS`, if set, must exactly match those
+    affected paths. UI changes also need browser E2E and screenshots. The Git
+    merge remains subject to branch protection. It records exact deployment,
+    smoke, and migration evidence in PR and issue comments, sets Project Status
+    to `Done`, and closes the issue only after all Production gates pass. Native
+    Project `Pull request merged` automation stays disabled; `Item closed` may
+    mirror the final issue closure. If Project propagation or issue closure is
+    delayed, exact-SHA evidence makes the operation safe to retry. If Production
     fails or cannot be verified, the command records available deployment log
     and target URLs, investigates through the normal fix/review/merge path when
     safe, and keeps the issue `Blocked`. It reopens an issue only when GitHub
@@ -201,6 +207,14 @@ migration or dependency manifest changes.
   "schemaVersion": 1,
   "headSha": "<full-current-40-character-sha>",
   "uiBehavior": false,
+  "productionSmokePlan": {
+    "status": "PASS",
+    "flows": [{
+      "name": "localized products page",
+      "affectedFiles": ["src/app/[locale]/products/page.tsx"],
+      "paths": [{"path": "/pl/products", "expectedText": "Produkty"}]
+    }]
+  },
   "checks": [
     {"kind": "diff", "status": "PASS", "command": "git diff --check", "result": "clean"},
     {"kind": "lint", "status": "PASS", "command": "npm run lint -- <changed-files>", "result": "clean"},
@@ -209,6 +223,13 @@ migration or dependency manifest changes.
 }
 ```
 ````
+
+If an affected component or helper has no changed route module in the PR, add
+`routeFiles` to that flow with the Next.js page or route module that renders or
+uses it. The harness checks that every flow path matches one of its route
+modules and that every listed route module has a matching expected response.
+The independent reviewers must confirm that the named route actually exercises
+the changed component or helper; a generic successful route is insufficient.
 
 For UI changes, the verification record's `browser` object must include
 `status: "PASS"`, the tool and affected flows, the exact `testedSha`, a
@@ -248,34 +269,44 @@ For changed migrations, `release` must record `migrationCompatibility` with a
 `strategy` of `compatible` or `expand-contract`, all changed `migrationIds`,
 and `stageMigration` with `environment: "Stage"` or `"local"`, a verified
 command, and result. A breaking migration must include the ordered
-`deploymentSequence: ["expand", "compatible-deploy", "contract"]`. Record an
-explicit `preMergeMigration` decision: if the deployed
-code needs the schema, it must be `required: true`, run in Production, and pass
-with exact migration IDs and evidence that Production was updated before
-merge; otherwise use `required: false` and explain why. An expand-contract plan
-also needs a `postDeployMigration` with `environment: "Production"`, exact
-migration IDs, and `PASS` before the delivery command can close the issue.
-For changed dependency manifests, record a `dependencyAudit` command and
-result. Missing or stale release evidence keeps merge readiness blocked.
+`deploymentSequence: ["expand", "compatible-deploy", "contract"]` and assign
+every changed migration ID exactly once across non-empty `expandMigrationIds`
+and `contractMigrationIds`. Record an explicit `preMergeMigration` decision:
+if deployed code needs a compatible migration's schema, apply that migration
+in Production before merge and record `required: true`, `status: "PASS"`, and
+the exact migration IDs. Otherwise record `required: false` and explain why.
+An expand-contract plan always requires its exact expansion IDs in Production with
+`phase: "expand"` before merge. After the compatible application deployment,
+apply and verify only the contract IDs; its `postDeployMigration` must name
+`environment: "Production"`, `phase: "contract"`, those exact contract IDs,
+and `PASS` before delivery is complete. Never treat the whole migration list
+as evidence that both phases ran. Record each command and result. For changed
+dependency manifests, record a `dependencyAudit` command and result. Missing
+or stale release evidence keeps merge readiness blocked.
 
 `deliver-pr` first places a linked open issue in `Blocked` during Production
 verification. It writes a delivery record after merge. It binds the verified PR
 head SHA to the GitHub merge SHA, exact-SHA Production deployment, smoke
-results, migration follow-up, and issue/Project state. It marks delivery
-complete only when Production is ready, focused smoke succeeds, required
-post-deployment migration evidence passes, and the requested issue is closed
-with Project Status `Done`. If Production fails or cannot be read, the command
-records `FAIL` or `BLOCKED`, leaves the issue open/Blocked, and does not report
-delivery complete.
+results, migration follow-up, and issue/Project state. It records an issue
+completion marker containing the same exact-SHA evidence, sets Project Status
+to `Done`, then closes the issue. It marks delivery complete only when
+Production is ready, focused smoke succeeds, required post-deployment migration
+evidence passes, and the issue is closed with Project Status `Done`. If
+Project or issue updates are delayed, the marker supports a safe retry without
+pretending an unverified deployment succeeded. If Production fails or cannot
+be read, the command records `FAIL` or `BLOCKED`, leaves the issue open/Blocked,
+and does not report delivery complete.
 
 Smoke requests use HTTPS and must return a non-empty successful response on
 the Production deployment origin. The default `/` path is a health check. If
-application-flow files change, set `AGENT_HARNESS_PRODUCTION_SMOKE_PATHS` to
-include an explicit non-root affected path (for example `/,/catalog`); the
-pre-merge gate blocks if the flow-specific path is missing. On deployment
-failure, inspect the recorded Vercel target/log URLs and recover through the
-ordinary implementation, test, independent-review, and merge path. Never use a
-manual Vercel production deploy as a substitute for Git integration.
+application-flow files change, the current-SHA `productionSmokePlan` must map
+each changed source file to its affected route and expected response content;
+the pre-merge gate blocks on a missing file, mismatched route, or absent text.
+If `AGENT_HARNESS_PRODUCTION_SMOKE_PATHS` is set, it must exactly match the
+plan's affected paths. On deployment failure, inspect the recorded Vercel
+target/log URLs and recover through the ordinary implementation, test,
+independent-review, and merge path. Never use a manual Vercel production deploy
+as a substitute for Git integration.
 
 Post a concise issue update from a file when durable progress is useful:
 

@@ -673,6 +673,7 @@ const REVIEW_SEVERITIES = Object.freeze(["Critical", "High", "Medium", "Low"]);
 const AI_REVIEW_MARKER = "<!-- agent-harness-ai-review:v1 -->";
 const VERIFICATION_MARKER = "<!-- agent-harness-verification:v1 -->";
 const DELIVERY_MARKER = "<!-- agent-harness-delivery:v1 -->";
+const ISSUE_DELIVERY_MARKER = "<!-- agent-harness-issue-delivery:v1 -->";
 const REQUIRED_LOCAL_CHECKS = Object.freeze(["diff", "lint", "tests"]);
 
 function reviewFields(body) {
@@ -1152,6 +1153,138 @@ function isUiBehaviorFile(filename) {
     /\.(?:css|scss|sass|less)$/i.test(filename);
 }
 
+function isApplicationFlowFile(filename) {
+  return /^(?:src\/(?:app|components|lib)|app|components|pages|lib)\//.test(filename) &&
+    !/\.(?:test|spec)\.[^.]+$/i.test(filename);
+}
+
+function isValidProductionSmokePath(path) {
+  if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) return false;
+  try {
+    const url = new URL(path, "https://agent-harness.invalid");
+    return url.origin === "https://agent-harness.invalid" && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function routePatternForFile(filename) {
+  const normalized = filename.replace(/^src\//, "");
+  const appMatch = normalized.match(/^app\/(?:(.*)\/)?(?:page|route)\.[^/]+$/i);
+  const pagesMatch = normalized.match(/^pages\/(.+)\.[^/]+$/i);
+  if (!appMatch && !pagesMatch) return null;
+  const route = appMatch ? (appMatch[1] || "") : pagesMatch[1].replace(/(?:^|\/)index$/i, "");
+  if (!appMatch && /(?:^|\/)_/.test(route)) return null;
+  const segments = route.split("/").filter(Boolean)
+    .filter((segment) => !(segment.startsWith("(") && segment.endsWith(")")) && !segment.startsWith("@"))
+    .map((segment) => {
+      if (/^\[\[\.\.\..+\]\]$/.test(segment)) return "(?:.+)?";
+      if (/^\[\.\.\..+\]$/.test(segment)) return ".+";
+      if (/^\[.+\]$/.test(segment)) return "[^/]+";
+      return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    });
+  return new RegExp("^/" + segments.join("/") + "/?$");
+}
+
+export function validateProductionSmokePlan({ files = [], localVerification }) {
+  const changedFiles = files.map((file) => typeof file === "string" ? file : file.filename).filter(Boolean);
+  const affectedFiles = changedFiles.filter(isApplicationFlowFile);
+  if (!affectedFiles.length) {
+    return {
+      status: "PASS",
+      required: false,
+      paths: [],
+      expectations: [],
+      flows: [],
+      details: "No application-flow files changed; the root Production health smoke is sufficient.",
+    };
+  }
+  const plan = localVerification?.record?.productionSmokePlan;
+  if (!plan || plan.status !== "PASS" || !Array.isArray(plan.flows) || !plan.flows.length) {
+    return {
+      status: "BLOCKED",
+      required: true,
+      paths: [],
+      expectations: [],
+      flows: [],
+      details: "Application-flow changes require a current-SHA Production smoke plan that maps each changed file to its affected route and expected response content.",
+    };
+  }
+  const affectedSet = new Set(affectedFiles);
+  const covered = new Set();
+  const paths = [];
+  const expectations = [];
+  const failures = [];
+  for (const flow of plan.flows) {
+    if (!flow || typeof flow.name !== "string" || !flow.name.trim() ||
+      !Array.isArray(flow.affectedFiles) || !flow.affectedFiles.length ||
+      !Array.isArray(flow.paths) || !flow.paths.length) {
+      failures.push("Each smoke flow needs a name, changed-file mapping, and at least one expected route response.");
+      continue;
+    }
+    const routePatterns = [];
+    const validPathNames = [];
+    for (const filename of flow.affectedFiles) {
+      if (typeof filename !== "string" || !affectedSet.has(filename)) {
+        failures.push("Smoke flow " + flow.name + " references a file that is not an application-flow change in this PR.");
+        continue;
+      }
+      covered.add(filename);
+      const routePattern = routePatternForFile(filename);
+      if (routePattern) routePatterns.push({ filename, routePattern });
+    }
+    if (flow.routeFiles !== undefined && !Array.isArray(flow.routeFiles)) {
+      failures.push("Smoke flow " + flow.name + " has an invalid routeFiles list.");
+    } else {
+      for (const filename of flow.routeFiles || []) {
+        if (typeof filename !== "string" || !routePatternForFile(filename)) {
+          failures.push("Smoke flow " + flow.name + " must map routeFiles to supported Next.js page or route modules.");
+          continue;
+        }
+        if (!routePatterns.some((route) => route.filename === filename)) {
+          routePatterns.push({ filename, routePattern: routePatternForFile(filename) });
+        }
+      }
+    }
+    if (!routePatterns.length) {
+      failures.push("Smoke flow " + flow.name + " must identify a matching route module in affectedFiles or routeFiles.");
+    }
+    for (const expectation of flow.paths) {
+      if (!expectation || !isValidProductionSmokePath(expectation.path) ||
+        typeof expectation.expectedText !== "string" || !expectation.expectedText.trim()) {
+        failures.push("Smoke flow " + flow.name + " has an invalid absolute path or missing expected response text.");
+        continue;
+      }
+      const pathName = new URL(expectation.path, "https://agent-harness.invalid").pathname;
+      if (!routePatterns.some(({ routePattern }) => routePattern.test(pathName))) {
+        failures.push("Smoke path " + expectation.path + " does not match the changed route file(s) in flow " + flow.name + ".");
+        continue;
+      }
+      validPathNames.push(pathName);
+      paths.push(expectation.path);
+      expectations.push({ path: expectation.path, expectedText: expectation.expectedText.trim(), flow: flow.name });
+    }
+    for (const { filename, routePattern } of routePatterns) {
+      if (!validPathNames.some((pathName) => routePattern.test(pathName))) {
+        failures.push("Smoke flow " + flow.name + " does not include an expected route response for " + filename + ".");
+      }
+    }
+  }
+  const uncovered = affectedFiles.filter((filename) => !covered.has(filename));
+  if (uncovered.length) failures.push("Smoke plan does not map changed file(s): " + uncovered.join(", ") + ".");
+  const uniquePaths = [...new Set(paths)];
+  return {
+    status: failures.length ? "BLOCKED" : "PASS",
+    required: true,
+    paths: uniquePaths,
+    expectations,
+    flows: plan.flows,
+    details: failures.length
+      ? failures.join(" ")
+      : affectedFiles.length + " changed application-flow file(s) map to " + uniquePaths.length + " Production route(s) with expected response content.",
+  };
+}
+
 function isVerificationScreenshot(filename) {
   return /^docs\/verification\/(?:issue-\d+|pr-\d+)\/.+\.(?:png|jpe?g|webp)$/i.test(filename);
 }
@@ -1271,7 +1404,15 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
   );
   const namesEveryMigration = (evidence) =>
     Array.isArray(evidence?.migrationIds) &&
+    evidence.migrationIds.length === migrationIds.length &&
+    new Set(evidence.migrationIds.map((recordedId) => typeof recordedId === "string" ? recordedId.toLowerCase() : "")).size === migrationIds.length &&
     migrationIds.every((migrationId) => evidence.migrationIds.some((recordedId) =>
+      typeof recordedId === "string" && recordedId.toLowerCase() === migrationId,
+    ));
+  const exactMigrationIds = (recordedIds, expectedIds) =>
+    Array.isArray(recordedIds) && recordedIds.length === expectedIds.length &&
+    new Set(recordedIds.map((recordedId) => typeof recordedId === "string" ? recordedId.toLowerCase() : "")).size === expectedIds.length &&
+    expectedIds.every((migrationId) => recordedIds.some((recordedId) =>
       typeof recordedId === "string" && recordedId.toLowerCase() === migrationId,
     ));
   const results = [];
@@ -1319,6 +1460,28 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
         details: "A breaking migration must record deploymentSequence in the exact order: expand, compatible-deploy, contract.",
       };
     }
+    const expandMigrationIds = record.migrationCompatibility?.expandMigrationIds;
+    const contractMigrationIds = record.migrationCompatibility?.contractMigrationIds;
+    if (migrationCompatibility.status === "PASS" && strategy === "expand-contract") {
+      const normalizedExpand = Array.isArray(expandMigrationIds)
+        ? expandMigrationIds.map((id) => typeof id === "string" ? id.toLowerCase() : "")
+        : [];
+      const normalizedContract = Array.isArray(contractMigrationIds)
+        ? contractMigrationIds.map((id) => typeof id === "string" ? id.toLowerCase() : "")
+        : [];
+      const phaseIds = [...normalizedExpand, ...normalizedContract];
+      const uniquePhaseIds = new Set(phaseIds);
+      if (!normalizedExpand.length || !normalizedContract.length ||
+        normalizedExpand.some((id) => !id) || normalizedContract.some((id) => !id) ||
+        uniquePhaseIds.size !== phaseIds.length || phaseIds.length !== migrationIds.length ||
+        migrationIds.some((id) => !uniquePhaseIds.has(id))) {
+        migrationCompatibility = {
+          ...migrationCompatibility,
+          status: "BLOCKED",
+          details: "Expand-contract evidence must assign every changed migration ID exactly once to non-empty expandMigrationIds and contractMigrationIds phases.",
+        };
+      }
+    }
     if (migrationCompatibility.status === "PASS" && !namesEveryMigration(migrationCompatibility)) {
       migrationCompatibility = {
         ...migrationCompatibility,
@@ -1355,19 +1518,29 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
       command: "pre-merge migration assessment",
       details: "The pre-merge migration requirement has not been explicitly assessed.",
     });
-    if (preMergeMigration.required === true && preMergeMigration.status !== "PASS") {
+    if (strategy === "expand-contract" && preMergeMigration.required !== true) {
+      preMergeMigration = {
+        ...preMergeMigration,
+        status: preMergeMigration.status === "FAIL" ? "FAIL" : "BLOCKED",
+        details: "Expand-contract delivery requires the Production expand phase to pass before merge.",
+      };
+    } else if (preMergeMigration.required === true && preMergeMigration.status !== "PASS") {
       preMergeMigration = {
         ...preMergeMigration,
         status: preMergeMigration.status === "FAIL" ? "FAIL" : "BLOCKED",
       };
     } else if (preMergeMigration.required === true && (
-      !namesEveryMigration(preMergeMigration) ||
-      String(preMergeMigration.environment || "").toLowerCase() !== "production"
+      String(preMergeMigration.environment || "").toLowerCase() !== "production" ||
+      (strategy === "expand-contract"
+        ? preMergeMigration.phase !== "expand" || !exactMigrationIds(preMergeMigration.migrationIds, expandMigrationIds)
+        : !namesEveryMigration(preMergeMigration))
     )) {
       preMergeMigration = {
         ...preMergeMigration,
         status: "BLOCKED",
-        details: "Required pre-merge migration evidence must confirm Production and list every changed migration ID.",
+        details: strategy === "expand-contract"
+          ? "Required pre-merge migration evidence must confirm the Production expand phase and list exactly the expansion migration IDs."
+          : "Required pre-merge migration evidence must confirm Production and list every changed migration ID.",
       };
     } else if (
       preMergeMigration.required === false &&
@@ -1415,19 +1588,28 @@ export function validatePostDeploymentMigrationEvidence({ files = [], filesAvail
   const migrationIds = requirements.migrationFiles.map((filename) =>
     filename.split("/").at(-1).replace(/\.sql$/i, "").toLowerCase(),
   );
-  const namesEveryMigration = Array.isArray(evidence?.migrationIds) &&
-    migrationIds.every((migrationId) => evidence.migrationIds.some((recordedId) =>
-      typeof recordedId === "string" && recordedId.toLowerCase() === migrationId,
-    ));
+  const contractIds = release.migrationCompatibility?.contractMigrationIds;
+  const normalizedContractIds = Array.isArray(contractIds)
+    ? contractIds.map((migrationId) => typeof migrationId === "string" ? migrationId.toLowerCase() : "")
+    : [];
+  const namesEveryMigration = normalizedContractIds.length > 0 &&
+    normalizedContractIds.every(Boolean) &&
+    Array.isArray(evidence?.migrationIds) && evidence.migrationIds.length === contractIds.length &&
+    new Set(evidence.migrationIds.map((recordedId) => typeof recordedId === "string" ? recordedId.toLowerCase() : "")).size === contractIds.length &&
+    normalizedContractIds.every((migrationId) => migrationIds.includes(migrationId) &&
+      evidence.migrationIds.some((recordedId) =>
+        typeof recordedId === "string" && recordedId.toLowerCase() === migrationId,
+      ));
   if (!evidence || evidence.status !== "PASS" ||
     typeof evidence.command !== "string" || !evidence.command.trim() ||
     typeof evidence.details !== "string" || !evidence.details.trim() ||
     String(evidence.environment || "").toLowerCase() !== "production" ||
+    evidence.phase !== "contract" ||
     !namesEveryMigration) {
     return {
       status: evidence?.status === "FAIL" ? "FAIL" : "BLOCKED",
       required: true,
-      details: "The expand-contract sequence requires verified post-deployment contract migration evidence.",
+      details: "The expand-contract sequence requires verified Production contract-phase evidence naming exactly the contract migration IDs.",
     };
   }
   return { status: "PASS", required: true, command: evidence.command, details: evidence.details };
@@ -1624,9 +1806,6 @@ async function readGitHubMergePolicy(client, baseRef) {
       : check.context + "\u0000" + (check.integration_id ?? check.app_id ?? "*"),
     check,
   ])).values()];
-  if (requireLastPushApproval && requiredApprovals > 0) {
-    unassessedRules.push("branch rules require approval after the latest push");
-  }
   return {
     available: true,
     requiredChecks: uniqueRequiredChecks,
@@ -1681,7 +1860,8 @@ export function summarizeBranchReviewPolicy({
   }
   const approvals = new Set([...latestReviewByUser.entries()]
     .filter(([, review]) => review.state === "APPROVED" && (
-      policy.dismissStaleReviews !== true || review.commit_id?.toLowerCase() === headSha.toLowerCase()
+      (policy.dismissStaleReviews !== true && policy.requireLastPushApproval !== true) ||
+      review.commit_id?.toLowerCase() === headSha.toLowerCase()
     ))
     .map(([login]) => login));
   const required = Number(policy.requiredApprovals || 0);
@@ -1719,6 +1899,7 @@ function verificationReviewBlocker(review) {
 
 export function assessPullRequestVerification({
   pullRequest,
+  repository = null,
   expectedBase = "main",
   files = [],
   reviews = [],
@@ -1741,6 +1922,10 @@ export function assessPullRequestVerification({
     comments,
     available: available.comments !== false,
   });
+  const productionSmokePlan = validateProductionSmokePlan({
+    files: fileList,
+    localVerification,
+  });
   const uiRequired = !filesAvailable || uiFiles.length > 0 || localVerification.uiBehavior === true;
   const browserVerification = validateBrowserVerification({
     uiRequired,
@@ -1750,6 +1935,7 @@ export function assessPullRequestVerification({
   const scopeMismatch = uiFiles.length > 0 && localVerification.uiBehavior === false;
   const implementationStatuses = [
     localVerification.status,
+    productionSmokePlan.status,
     uiRequired ? browserVerification.status : "PASS",
     scopeMismatch ? "FAIL" : "PASS",
     filesAvailable ? "PASS" : "BLOCKED",
@@ -1835,6 +2021,14 @@ export function assessPullRequestVerification({
     localVerification,
   });
   const prBlockers = [];
+  const closingIssueReferences = repository
+    ? findClosingIssueReferences(pullRequest?.body || "", repository)
+    : [];
+  if (closingIssueReferences.length) {
+    prBlockers.push("PR body uses GitHub auto-close issue references (" +
+      closingIssueReferences.map((issue) => "#" + issue).join(", ") +
+      "); use non-closing references so issues remain open until Production verification.");
+  }
   if (!pullRequest) prBlockers.push("Pull request could not be read.");
   else if (pullRequest.state !== "open") {
     prBlockers.push(pullRequest.merged
@@ -1854,6 +2048,7 @@ export function assessPullRequestVerification({
     reviewBlockers.push("Implementation verification is " + implementationStatus + ": " +
       [
         localVerification.details,
+        productionSmokePlan.required ? productionSmokePlan.details : "",
         uiRequired ? browserVerification.details : "",
         scopeMismatch ? "UI files were declared as non-UI behavior." : "",
       ].filter(Boolean).join(" "));
@@ -1937,11 +2132,13 @@ export function assessPullRequestVerification({
       files: fileNames,
       uiBehaviorRequired: uiRequired,
       uiFiles,
+      productionSmokePlan,
       migrationFiles: releaseRequirements.migrationFiles,
       dependencyManifests: releaseRequirements.dependencyManifests,
     },
     localVerification,
     browserVerification,
+    productionSmokePlan,
     aiReview,
     githubReview,
     mergeability,
@@ -1974,6 +2171,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
   } catch {
     return assessPullRequestVerification({
       pullRequest: null,
+      repository: client.owner + "/" + client.repo,
       expectedBase,
       available: {
         files: false,
@@ -2044,6 +2242,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     : assessmentPullRequest;
   const verification = assessPullRequestVerification({
     pullRequest: verificationPullRequest,
+    repository: client.owner + "/" + client.repo,
     expectedBase,
     files: filesResult.value || [],
     reviews: reviewsResult.value || [],
@@ -2180,6 +2379,7 @@ export async function waitForProductionDeployment(client, mergeSha, {
 export async function runProductionSmoke(environmentUrl, {
   paths = (process.env.AGENT_HARNESS_PRODUCTION_SMOKE_PATHS || "/")
     .split(",").map((path) => path.trim()).filter(Boolean),
+  expectations = [],
   fetchImpl = fetch,
   timeoutMs = 15_000,
 } = {}) {
@@ -2192,8 +2392,14 @@ export async function runProductionSmoke(environmentUrl, {
   if (baseUrl.protocol !== "https:") {
     return { status: "BLOCKED", checks: [], details: "Production smoke requires an HTTPS environment URL." };
   }
-  if (!paths.length || paths.some((path) => !path.startsWith("/") || path.startsWith("//"))) {
+  if (!paths.length || paths.some((path) => !isValidProductionSmokePath(path))) {
     return { status: "BLOCKED", checks: [], details: "Production smoke paths must be non-empty same-origin absolute paths." };
+  }
+  if (!Array.isArray(expectations) || expectations.some((expectation) =>
+    !expectation || !paths.includes(expectation.path) ||
+    typeof expectation.expectedText !== "string" || !expectation.expectedText.trim(),
+  )) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path and non-empty expected content." };
   }
   const checks = [];
   for (const path of paths) {
@@ -2217,14 +2423,21 @@ export async function runProductionSmoke(environmentUrl, {
         responseBytes: Buffer.byteLength(body),
         finalUrl: finalUrl.href,
       };
+      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
+      const expectedTextMatched = expectedForPath.every((expectation) => body.includes(expectation.expectedText));
+      if (expectedForPath.length) {
+        check.expectedText = expectedForPath.map((expectation) => expectation.expectedText);
+        check.expectedTextMatched = expectedTextMatched;
+      }
       checks.push(check);
-      if (!response.ok || finalUrl.origin !== baseUrl.origin || !body.trim()) {
+      if (!response.ok || finalUrl.origin !== baseUrl.origin || !body.trim() || !expectedTextMatched) {
         return {
           status: "FAIL",
           checks,
           details: "Production smoke failed for " + path + " (HTTP " + response.status +
             (finalUrl.origin !== baseUrl.origin ? ", redirected outside the deployment origin" : "") +
-            (!body.trim() ? ", empty response body" : "") + ").",
+            (!body.trim() ? ", empty response body" : "") +
+            (!expectedTextMatched ? ", expected content was not present" : "") + ").",
         };
       }
     } catch (error) {
@@ -2242,13 +2455,46 @@ function formatDeliveryComment(record) {
   return DELIVERY_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
 }
 
+function formatIssueDeliveryComment(record) {
+  return ISSUE_DELIVERY_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+}
+
+async function readVerifiedIssueDelivery(client, issueNumber, pullRequest) {
+  const mergeSha = pullRequest.merge_commit_sha?.toLowerCase();
+  const candidateSha = pullRequest.head?.sha?.toLowerCase();
+  if (!validSha(mergeSha) || !validSha(candidateSha)) return null;
+  const comments = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/issues/" + issueNumber + "/comments");
+  return parseMarkedRecords(comments, ISSUE_DELIVERY_MARKER)
+    .filter(({ record, error }) => !error && record && record.schemaVersion === 1 &&
+      record.status === "PASS" && record.issueNumber === issueNumber &&
+      record.pullRequestNumber === pullRequest.number &&
+      record.candidateSha?.toLowerCase?.() === candidateSha &&
+      record.mergeSha?.toLowerCase?.() === mergeSha &&
+      record.productionDeployment?.status === "PASS" &&
+      record.productionDeployment?.deployment?.sha?.toLowerCase?.() === mergeSha &&
+      record.productionSmoke?.status === "PASS" &&
+      record.postDeploymentMigration?.status === "PASS",
+    )
+    .sort((left, right) => (right.comment.created_at || "").localeCompare(left.comment.created_at || ""))[0]?.record || null;
+}
+
 export function closesIssueReference(text = "", issueNumber, repository) {
   const number = parseIssueNumber(issueNumber);
+  return findClosingIssueReferences(text, repository).includes(number);
+}
+
+export function findClosingIssueReferences(text = "", repository) {
   const [owner, repo] = (repository || "").split("/");
   if (!owner || !repo) throw new Error("A repository in owner/name form is required to match issue references.");
   const escapedRepository = `${owner}/${repo}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const reference = `(?:${escapedRepository}#${number}|#${number}|https?://github\\.com/${escapedRepository}/issues/${number}(?:[?#/.,;:]|$))`;
-  return new RegExp(`\\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\\s+${reference}(?=$|\\W)`, "i").test(text);
+  const reference = `(?:${escapedRepository}#(\\d+)|(?<![\\w/])#(\\d+)|https?://github\\.com/${escapedRepository}/issues/(\\d+)(?:[?#/.,;:]|$))`;
+  const matcher = new RegExp(`\\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\\s+${reference}(?=$|\\W)`, "gi");
+  const found = [];
+  for (const match of String(text).matchAll(matcher)) {
+    const number = Number(match[1] || match[2] || match[3]);
+    if (Number.isSafeInteger(number) && !found.includes(number)) found.push(number);
+  }
+  return found;
 }
 
 async function issueWasClosedByPullRequest(client, issueNumber, pullRequest) {
@@ -2291,6 +2537,26 @@ async function issueWasClosedByPullRequest(client, issueNumber, pullRequest) {
 async function prepareTrackedIssueForProduction(client, issueNumber, pullRequest) {
   let issue = await readIssue(client, issueNumber);
   if (issue.state === "closed") {
+    const previouslyVerified = await readVerifiedIssueDelivery(client, issueNumber, pullRequest).catch(() => null);
+    if (previouslyVerified) {
+      const projectContext = await readProjectItem(client, issue);
+      const projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
+      if (!projectContext.item || projectContext.item.isArchived) {
+        return {
+          status: "BLOCKED",
+          state: issue.state,
+          projectStatus,
+          details: "A prior Production verification exists, but the active Project card could not be verified for retry.",
+        };
+      }
+      return {
+        status: "PASS",
+        state: issue.state,
+        projectStatus,
+        previouslyVerified: true,
+        details: "The closed issue has exact-merge-SHA Production evidence; delivery tracking can safely resume.",
+      };
+    }
     let closedByPullRequest = false;
     try {
       closedByPullRequest = await issueWasClosedByPullRequest(client, issueNumber, pullRequest);
@@ -2317,11 +2583,34 @@ async function prepareTrackedIssueForProduction(client, issueNumber, pullRequest
   if (issue.state !== "open") {
     return { status: "BLOCKED", state: issue.state, details: "The tracked issue is not open for Production verification." };
   }
-  try {
-    await setSingleSelectField(client, issueNumber, STATUS_FIELD, "Blocked");
+  const previouslyVerified = await readVerifiedIssueDelivery(client, issueNumber, pullRequest);
+  if (previouslyVerified) {
     const projectContext = await readProjectItem(client, issue);
     const projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
-    if (!projectContext.item || projectContext.item.isArchived || projectStatus !== "Blocked") {
+    if (!projectContext.item || projectContext.item.isArchived) {
+      return {
+        status: "BLOCKED",
+        state: issue.state,
+        projectStatus,
+        details: "Prior exact-SHA Production evidence exists, but the active Project card could not be verified for retry.",
+      };
+    }
+    if (projectStatus === DONE_STATUS) {
+      return {
+        status: "PASS",
+        state: issue.state,
+        projectStatus,
+        previouslyVerified: true,
+        details: "The open issue has exact-merge-SHA Production evidence and Project is Done; delivery tracking can safely resume.",
+      };
+    }
+  }
+  try {
+    if (issue.state === "open") await setSingleSelectField(client, issueNumber, STATUS_FIELD, "Blocked");
+    const projectContext = await readProjectItem(client, issue);
+    const projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
+    if (!projectContext.item || projectContext.item.isArchived ||
+      (issue.state === "open" && projectStatus !== "Blocked")) {
       return {
         status: "BLOCKED",
         state: issue.state,
@@ -2339,8 +2628,10 @@ async function prepareTrackedIssueForProduction(client, issueNumber, pullRequest
   return {
     status: "PASS",
     state: issue.state,
-    projectStatus: "Blocked",
-    details: "The linked issue remains open and the Project card stays Blocked until Production verification finishes.",
+    projectStatus: issue.state === "open" ? "Blocked" : "Done",
+    details: issue.state === "open"
+      ? "The linked issue remains open and the Project card stays Blocked until Production verification finishes."
+      : "The closed, previously verified issue remains closed while the exact Production result is rechecked.",
   };
 }
 
@@ -2349,6 +2640,7 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
   details,
   trackingPrepared,
   pullRequest,
+  deliveryEvidence,
 }) {
   if (!issueNumber) return { status: "NOT RUN", issue: null, details: "No issue number was provided." };
   if (trackingPrepared?.status !== "PASS") {
@@ -2361,13 +2653,21 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
   }
   let issue = await readIssue(client, issueNumber);
   if (issue.state === "closed") {
-    let closedByPullRequest = false;
+    let previouslyVerified;
     try {
-      closedByPullRequest = await issueWasClosedByPullRequest(client, issueNumber, pullRequest);
+      previouslyVerified = await readVerifiedIssueDelivery(client, issueNumber, pullRequest);
     } catch (error) {
-      return { status: "BLOCKED", issue: issueNumber, state: issue.state, details: "The tracked issue was closed during Production verification and its closure source is unknown: " + error.message };
+      return { status: "BLOCKED", issue: issueNumber, state: issue.state, details: "The closed issue's prior Production evidence could not be read: " + error.message };
     }
-    if (!closedByPullRequest) {
+    let closedByPullRequest = false;
+    if (!previouslyVerified) {
+      try {
+        closedByPullRequest = await issueWasClosedByPullRequest(client, issueNumber, pullRequest);
+      } catch (error) {
+        return { status: "BLOCKED", issue: issueNumber, state: issue.state, details: "The tracked issue was closed during Production verification and its closure source is unknown: " + error.message };
+      }
+    }
+    if (!previouslyVerified && !closedByPullRequest) {
       return { status: "BLOCKED", issue: issueNumber, state: issue.state, details: "The tracked issue was closed independently during Production verification; no issue or Project state was changed." };
     }
     if (status !== "PASS") {
@@ -2379,36 +2679,75 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
     }
   }
   if (status === "PASS") {
-    await postIssueComment(client, issueNumber, "Production delivery verified.\n\n" + details);
+    const currentVerified = await readVerifiedIssueDelivery(client, issueNumber, pullRequest);
+    const deliveryRecord = currentVerified || {
+      schemaVersion: 1,
+      status: "PASS",
+      issueNumber,
+      pullRequestNumber: pullRequest.number,
+      candidateSha: deliveryEvidence?.candidateSha || pullRequest.head?.sha,
+      mergeSha: deliveryEvidence?.mergeSha || pullRequest.merge_commit_sha,
+      productionDeployment: deliveryEvidence?.productionDeployment || { status: "NOT RUN" },
+      productionSmoke: deliveryEvidence?.productionSmoke || { status: "NOT RUN" },
+      postDeploymentMigration: deliveryEvidence?.postDeploymentMigration || { status: "NOT RUN" },
+      recordedAt: new Date().toISOString(),
+    };
+    const exactProductionEvidence = deliveryRecord.status === "PASS" &&
+      deliveryRecord.issueNumber === issueNumber &&
+      deliveryRecord.pullRequestNumber === pullRequest.number &&
+      deliveryRecord.candidateSha?.toLowerCase?.() === pullRequest.head?.sha?.toLowerCase?.() &&
+      deliveryRecord.mergeSha?.toLowerCase?.() === pullRequest.merge_commit_sha?.toLowerCase?.() &&
+      deliveryRecord.productionDeployment?.status === "PASS" &&
+      deliveryRecord.productionDeployment?.deployment?.sha?.toLowerCase?.() === pullRequest.merge_commit_sha?.toLowerCase?.() &&
+      deliveryRecord.productionSmoke?.status === "PASS" &&
+      deliveryRecord.postDeploymentMigration?.status === "PASS";
+    if (!exactProductionEvidence) {
+      return { status: "BLOCKED", issue: issueNumber, state: issue.state, details: "Production passed, but exact-merge-SHA deployment, smoke, or migration evidence is incomplete; the issue was not marked Done." };
+    }
+    if (!currentVerified) {
+      await postIssueComment(client, issueNumber,
+        "Production delivery verified.\n\n" + details + "\n\n" + formatIssueDeliveryComment(deliveryRecord));
+    }
+    await setSingleSelectField(client, issueNumber, STATUS_FIELD, DONE_STATUS, {
+      productionVerified: true,
+      allowClosed: true,
+    });
+    let projectContext = await readProjectItem(client, await readIssue(client, issueNumber));
+    let projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
+    if (!projectContext.item || projectContext.item.isArchived || projectStatus !== DONE_STATUS) {
+      return {
+        status: "BLOCKED",
+        issue: issueNumber,
+        state: issue.state,
+        projectStatus,
+        details: "Production passed and exact evidence is recorded, but Project Status did not reach Done; delivery can be retried safely.",
+      };
+    }
     if (issue.state === "open") {
-      await client.request("/repos/" + client.owner + "/" + client.repo + "/issues/" + issueNumber, {
-        method: "PATCH",
-        body: JSON.stringify({ state: "closed", state_reason: "completed" }),
-      });
+      try {
+        await client.request("/repos/" + client.owner + "/" + client.repo + "/issues/" + issueNumber, {
+          method: "PATCH",
+          body: JSON.stringify({ state: "closed", state_reason: "completed" }),
+        });
+      } catch (error) {
+        const stillOpen = await readIssue(client, issueNumber);
+        if (stillOpen.state === "open") {
+          await setSingleSelectField(client, issueNumber, STATUS_FIELD, "Blocked").catch(() => {});
+        }
+        return { status: "BLOCKED", issue: issueNumber, state: stillOpen.state, projectStatus, details: "Production passed and Project is Done, but GitHub did not close the issue: " + error.message };
+      }
     }
     const closed = await readIssue(client, issueNumber);
-    if (closed.state !== "closed") {
-      return { status: "BLOCKED", issue: issueNumber, state: closed.state, details: "Production passed, but GitHub did not close the tracked issue." };
-    }
-    const projectDeadline = Date.now() + 15_000;
-    let projectStatus = null;
-    do {
-      const projectContext = await readProjectItem(client, closed);
-      if (!projectContext.item || projectContext.item.isArchived) {
-        return { status: "BLOCKED", issue: issueNumber, state: closed.state, projectStatus: null, details: "Issue closed after Production verification, but its active Project card could not be verified." };
-      }
-      projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
-      if (projectStatus === DONE_STATUS || Date.now() >= projectDeadline) break;
-      await delay(1_000);
-    } while (Date.now() < projectDeadline);
+    projectContext = await readProjectItem(client, closed);
+    projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
     return {
-      status: projectStatus === DONE_STATUS ? "PASS" : "BLOCKED",
+      status: closed.state === "closed" && projectStatus === DONE_STATUS ? "PASS" : "BLOCKED",
       issue: issueNumber,
       state: closed.state,
       projectStatus,
-      details: projectStatus === DONE_STATUS
-        ? "The verified issue is closed and Project automation set its status to Done."
-        : "Production passed and the issue is closed, but Project automation has not set Status to Done.",
+      details: closed.state === "closed" && projectStatus === DONE_STATUS
+        ? "Production was verified; the issue is closed and its Project status is Done."
+        : "Production passed, but issue closure or Project Done could not be verified; exact-SHA evidence was recorded for a safe retry.",
     };
   }
 
@@ -2459,14 +2798,37 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     ? (process.env.AGENT_HARNESS_PRODUCTION_SMOKE_PATHS || "").split(",").map((path) => path.trim()).filter(Boolean)
     : (Array.isArray(productionSmokePaths) ? productionSmokePaths : String(productionSmokePaths))
         .flatMap((value) => String(value).split(",")).map((path) => path.trim()).filter(Boolean);
-  const effectiveSmokePaths = configuredSmokePaths.length ? configuredSmokePaths : ["/"];
-  const needsAffectedProductionSmoke = (verification) => {
+  let effectiveSmokePaths = ["/"];
+  let effectiveSmokeExpectations = [];
+  const resolveSmokePlan = (verification) => {
     const changedFiles = verification?.fileScope?.files || [];
-    const affectedApplicationFiles = changedFiles.filter((filename) =>
-      /^(?:src\/app|src\/components|src\/lib|app|components|pages|lib)\//.test(filename) &&
-      !/\.(?:test|spec)\.[^.]+$/i.test(filename),
-    );
-    return affectedApplicationFiles.length > 0 && !effectiveSmokePaths.some((path) => path !== "/");
+    const plan = verification?.productionSmokePlan || verification?.fileScope?.productionSmokePlan ||
+      validateProductionSmokePlan({
+        files: changedFiles,
+        localVerification: { record: verification?.localVerification?.record },
+      });
+    if (plan.status !== "PASS") return { status: "BLOCKED", details: plan.details || "Production smoke plan is not passing." };
+    const paths = plan.required ? plan.paths : configuredSmokePaths.length ? configuredSmokePaths : ["/"];
+    const expectations = plan.required ? plan.expectations : [];
+    if (!Array.isArray(paths) || !paths.length || paths.some((path) => !isValidProductionSmokePath(path))) {
+      return { status: "BLOCKED", details: "Production smoke plan contains an invalid same-origin absolute path." };
+    }
+    if (plan.required && (!Array.isArray(expectations) || !expectations.length)) {
+      return { status: "BLOCKED", details: "Application-flow Production smoke plan must include expected response content." };
+    }
+    if (plan.required && configuredSmokePaths.length && (
+      new Set(configuredSmokePaths).size !== new Set(paths).size ||
+      configuredSmokePaths.some((path) => !paths.includes(path))
+    )) {
+      return { status: "BLOCKED", details: "AGENT_HARNESS_PRODUCTION_SMOKE_PATHS must exactly match the current-SHA affected-flow smoke plan." };
+    }
+    if (expectations.some((expectation) =>
+      !expectation || !paths.includes(expectation.path) ||
+      typeof expectation.expectedText !== "string" || !expectation.expectedText.trim(),
+    )) {
+      return { status: "BLOCKED", details: "Production smoke expectations must name an included path and non-empty expected content." };
+    }
+    return { status: "PASS", paths, expectations, details: plan.details };
   };
   const pullRequestPath = "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number;
   let pullRequest = await client.request(pullRequestPath);
@@ -2478,6 +2840,22 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   let trackingPreparation = issue === null
     ? { status: "NOT RUN", state: null, details: "No issue number was provided." }
     : null;
+
+  const closingIssues = findClosingIssueReferences(
+    pullRequest.body || "",
+    client.owner + "/" + client.repo,
+  );
+  if (closingIssues.length) {
+    return {
+      status: "BLOCKED",
+      decision: "BLOCKED",
+      stage: "issue-preflight",
+      merged: Boolean(pullRequest.merged),
+      candidateSha,
+      mergeSha,
+      reasons: ["PR body would auto-close issue(s) " + closingIssues.map((value) => "#" + value).join(", ") + "; use non-closing references until Production verification passes."],
+    };
+  }
 
   if (issue !== null && !referencesIssue(
     pullRequest.body || "",
@@ -2509,16 +2887,19 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       };
     }
     candidateSha = verification.currentSha;
-    if (needsAffectedProductionSmoke(verification)) {
+    const smokePlan = resolveSmokePlan(verification);
+    if (smokePlan.status !== "PASS") {
       return {
         status: "BLOCKED",
         decision: "BLOCKED",
         stage: "production-smoke-plan",
         merged: false,
         candidateSha,
-        reasons: ["Application-flow changes require an explicit affected-flow Production smoke path in AGENT_HARNESS_PRODUCTION_SMOKE_PATHS."],
+        reasons: [smokePlan.details],
       };
     }
+    effectiveSmokePaths = smokePlan.paths;
+    effectiveSmokeExpectations = smokePlan.expectations;
     pullRequest = await client.request(pullRequestPath);
     if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft ||
       pullRequest.base?.ref !== "main" || pullRequest.head?.sha !== candidateSha) {
@@ -2531,18 +2912,18 @@ export async function deliverPullRequest(client, pullRequestNumber, {
         reasons: ["PR state, draft status, base, or head changed after gate verification; no merge was attempted."],
       };
     }
-    if (issue !== null && closesIssueReference(
+    const freshClosingIssues = findClosingIssueReferences(
       pullRequest.body || "",
-      issue,
       client.owner + "/" + client.repo,
-    )) {
+    );
+    if (freshClosingIssues.length) {
       return {
         status: "BLOCKED",
         decision: "BLOCKED",
         stage: "issue-preflight",
         merged: false,
         candidateSha,
-        reasons: ["Use a non-closing PR reference for --issue; the harness closes the issue only after Production verification."],
+        reasons: ["PR body would auto-close issue(s) " + freshClosingIssues.map((value) => "#" + value).join(", ") + "; use non-closing references until Production verification passes."],
       };
     }
     if (issue !== null) {
@@ -2612,7 +2993,8 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       };
     }
     candidateSha = verification.currentSha;
-    if (needsAffectedProductionSmoke(verification)) {
+    const smokePlan = resolveSmokePlan(verification);
+    if (smokePlan.status !== "PASS") {
       return {
         status: "BLOCKED",
         decision: "BLOCKED",
@@ -2620,9 +3002,11 @@ export async function deliverPullRequest(client, pullRequestNumber, {
         merged: true,
         candidateSha,
         mergeSha,
-        reasons: ["Application-flow changes require an explicit affected-flow Production smoke path in AGENT_HARNESS_PRODUCTION_SMOKE_PATHS."],
+        reasons: [smokePlan.details],
       };
     }
+    effectiveSmokePaths = smokePlan.paths;
+    effectiveSmokeExpectations = smokePlan.expectations;
     if (!validSha(mergeSha)) {
       return {
         status: "BLOCKED",
@@ -2653,7 +3037,10 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   try {
     productionDeployment = await waitForDeployment(client, mergeSha);
     if (productionDeployment.status === "PASS") {
-      productionSmoke = await smoke(productionDeployment.deployment.environmentUrl, { paths: effectiveSmokePaths });
+      productionSmoke = await smoke(productionDeployment.deployment.environmentUrl, {
+        paths: effectiveSmokePaths,
+        expectations: effectiveSmokeExpectations,
+      });
       if (productionSmoke.status === "PASS") {
         const files = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number + "/files");
         const comments = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/issues/" + number + "/comments");
@@ -2691,6 +3078,13 @@ export async function deliverPullRequest(client, pullRequestNumber, {
         details,
         trackingPrepared: trackingPreparation,
         pullRequest,
+        deliveryEvidence: {
+          candidateSha,
+          mergeSha,
+          productionDeployment,
+          productionSmoke,
+          postDeploymentMigration,
+        },
       });
     } catch (error) {
       issueOutcome = { status: "BLOCKED", issue, details: "Issue/Project tracking update failed: " + error.message };
@@ -3029,8 +3423,11 @@ export async function inspectIssue(client, issueNumber) {
   };
 }
 
-async function setSingleSelectField(client, issueNumber, fieldName, optionName) {
-  if (fieldName === STATUS_FIELD && optionName === DONE_STATUS) {
+async function setSingleSelectField(client, issueNumber, fieldName, optionName, {
+  productionVerified = false,
+  allowClosed = false,
+} = {}) {
+  if (fieldName === STATUS_FIELD && optionName === DONE_STATUS && !productionVerified) {
     throw new Error("Do not set Done manually; issue closure or PR merge owns this transition.");
   }
   if (fieldName === STATUS_FIELD && ["Ready", "In Progress", "Review"].includes(optionName)) {
@@ -3048,7 +3445,9 @@ async function setSingleSelectField(client, issueNumber, fieldName, optionName) 
   }
   const issue = await readIssue(client, issueNumber);
   const projectContext = await readProjectItem(client, issue);
-  if (issue.state !== "open") throw new Error(`Issue #${issueNumber} is closed.`);
+  if (issue.state !== "open" && !(allowClosed && issue.state === "closed")) {
+    throw new Error(`Issue #${issueNumber} is closed.`);
+  }
   const { project, fields, item } = projectContext;
   if (!item) throw new Error(`Issue #${issueNumber} is not on Project #${client.projectNumber}; run the add command first.`);
   if (item.isArchived) throw new Error(`Issue #${issueNumber} is archived on the Project; run add ${issueNumber} to restore its card first.`);
