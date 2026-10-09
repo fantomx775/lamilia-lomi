@@ -8,7 +8,6 @@ import path from "node:path";
 const productSlug = "moon-garden-coloring-book";
 const productId = "11111111-1111-4111-8111-111111111111";
 const premiumAssetId = "11111111-1111-4111-8111-111111111105";
-const mailpitUrl = process.env.ISSUE_30_MAILPIT_URL ?? "http://127.0.0.1:56324";
 const appLogPath = process.env.ISSUE_30_APP_LOG_PATH;
 const evidenceFolder = path.resolve(
   process.cwd(),
@@ -32,6 +31,11 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       "Run only against the explicitly configured isolated local Supabase stack.",
     );
 
+    const mailpitUrl = requireLoopbackUrl(
+      process.env.ISSUE_30_MAILPIT_URL ?? "http://127.0.0.1:56324",
+      56324,
+      "Mailpit",
+    );
     const appUrl = requireLoopbackUrl(process.env.PLAYWRIGHT_BASE_URL, 3030, "application");
     const supabaseUrl = requireLoopbackUrl(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -164,7 +168,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       await expect(page.locator('a[href*="error=verification_required"]')).toBeVisible();
       completed.confirmationRequired = true;
 
-      const userOneLink = await readConfirmationLink(userOne.email);
+      const userOneLink = await readConfirmationLink(userOne.email, mailpitUrl);
       rememberSensitiveLink(userOneLink, sensitiveValues);
       const userOneResumeToken = getResumeToken(userOneLink.href);
       const userOneCallback = new URL(userOneLink.href);
@@ -306,7 +310,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         query: { step: "verify" },
         hash: "#premium",
       });
-      const userTwoLink = await readConfirmationLink(userTwo.email);
+      const userTwoLink = await readConfirmationLink(userTwo.email, mailpitUrl);
       rememberSensitiveLink(userTwoLink, sensitiveValues);
 
       const wrongAccountContext = await createContext();
@@ -381,7 +385,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         query: { step: "verify" },
         hash: "#premium",
       });
-      const userThreeLink = await readConfirmationLink(userThree.email);
+      const userThreeLink = await readConfirmationLink(userThree.email, mailpitUrl);
       rememberSensitiveLink(userThreeLink, sensitiveValues);
       const tamperedCallback = new URL(userThreeLink.href);
       tamperedCallback.searchParams.set(
@@ -433,7 +437,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         throw new Error("Local GoTrue did not send the synthetic expired-token confirmation.");
       }
       completed.expiredConfirmationEmailRequested = true;
-      const expiredLink = await readConfirmationLink(userFour.email);
+      const expiredLink = await readConfirmationLink(userFour.email, mailpitUrl);
       rememberSensitiveLink(expiredLink, sensitiveValues);
       completed.expiredConfirmationEmailRetrieved = true;
       ageLocalSignupConfirmation(expiredUserId);
@@ -542,7 +546,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         applicationBackend: "supabase",
         appOrigin: appUrl.origin,
         supabaseOrigin: supabaseUrl.origin,
-        mailpitOrigin: new URL(mailpitUrl).origin,
+        mailpitOrigin: mailpitUrl.origin,
         completed,
         applicationLogScanCompleted: applicationLogWasSafe !== undefined,
         applicationLogsContainTestSecrets: applicationLogWasSafe === false,
@@ -708,12 +712,12 @@ async function navigateSensitive(page: Page, url: string) {
   }
 }
 
-async function readConfirmationLink(email: string) {
+async function readConfirmationLink(email: string, mailpitUrl: URL) {
   const query = encodeURIComponent(`to:${email}`);
   let messageId: string | undefined;
 
   for (let attempt = 0; attempt < 30 && !messageId; attempt += 1) {
-    const response = await fetch(`${mailpitUrl}/api/v1/search?query=${query}`);
+    const response = await fetch(`${mailpitUrl.origin}/api/v1/search?query=${query}`);
     if (!response.ok) {
       throw new Error("Local Mailpit could not be queried for a confirmation email.");
     }
@@ -731,7 +735,7 @@ async function readConfirmationLink(email: string) {
   }
 
   const detailResponse = await fetch(
-    `${mailpitUrl}/api/v1/message/${encodeURIComponent(messageId)}`,
+    `${mailpitUrl.origin}/api/v1/message/${encodeURIComponent(messageId)}`,
   );
   if (!detailResponse.ok) {
     throw new Error("The local confirmation email could not be opened.");
