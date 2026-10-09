@@ -2,17 +2,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { isLoopbackPlaywrightTarget } from "./local-target";
+import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
 
 // This suite asserts local demo behavior and uses fixed synthetic demo emails.
 // It must never submit those forms to a hosted Supabase project via baseURL.
 test.describe("Issue 30 local demo auth-return coverage", () => {
-  test.beforeEach(({}, testInfo) => {
+  test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
-      !isLoopbackPlaywrightTarget(testInfo.project.use.baseURL),
-      "Issue 30 auth-return browser coverage uses fixed demo data and requires a loopback baseURL.",
+      !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+      "Issue 30 auth-return browser coverage uses fixed demo data and requires a loopback app running the local demo backend.",
     );
   });
 

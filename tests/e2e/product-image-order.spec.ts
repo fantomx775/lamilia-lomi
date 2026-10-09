@@ -2,7 +2,7 @@ import { expect, test, type Page, type Request, type TestInfo } from "@playwrigh
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
-import { isLoopbackPlaywrightTarget } from "./local-target";
+import { isLocalDemoAppTarget } from "./local-target";
 
 test.setTimeout(300_000);
 
@@ -16,8 +16,8 @@ const imageFixtures = [
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
-    !isLoopbackPlaywrightTarget(testInfo.project.use.baseURL),
-    "Gallery ordering E2E uses fixed demo admin credentials and requires a loopback baseURL.",
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "Gallery ordering E2E uses fixed demo admin credentials and requires a loopback app running the local demo backend.",
   );
   await page.addInitScript(() => {
     window.localStorage.setItem(
