@@ -2192,6 +2192,35 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   assert.equal(strictPolicySatisfied.decision, "READY_FOR_MERGE", JSON.stringify(strictPolicySatisfied));
   assert.equal(strictPolicySatisfied.checks.branchReviewPolicy.status, "PASS");
 
+  const strictPolicyBehindWithApprovalClient = {
+    ...strictPolicySatisfiedClient,
+    request: async (path) => path === "/repos/example/repo/pulls/52"
+      ? cleanPullRequest({ mergeable_state: "behind" })
+      : path.endsWith("/branches/main/protection")
+        ? {
+            required_status_checks: { contexts: ["build"], checks: [], strict: true },
+            required_pull_request_reviews: {
+              required_approving_review_count: 1,
+              dismiss_stale_reviews: false,
+              require_last_push_approval: false,
+            },
+          }
+        : path.endsWith("/pulls/52/reviews?per_page=100&page=1")
+          ? [cleanGitHubReview({ headSha: CURRENT_SHA, user: "reviewer", state: "APPROVED" })]
+          : path.endsWith("/check-runs?per_page=100&page=1")
+            ? { total_count: 1, check_runs: [{
+                name: "build",
+                head_sha: CURRENT_SHA,
+                status: "completed",
+                conclusion: "success",
+              }] }
+            : client.request(path),
+  };
+  const strictBehindWithApproval = await verifyPullRequest(strictPolicyBehindWithApprovalClient, 52);
+  assert.equal(strictBehindWithApproval.decision, "BLOCKED");
+  assert.equal(strictBehindWithApproval.stages.waitingForEnforcedApproval, false);
+  assert.match(strictBehindWithApproval.checks.branchReviewPolicy.details, /behind its base/);
+
   const oldApproval = cleanGitHubReview({
     headSha: "b".repeat(40),
     user: "reviewer",

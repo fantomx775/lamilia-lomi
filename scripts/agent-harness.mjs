@@ -1926,6 +1926,7 @@ export function summarizeBranchReviewPolicy({
       status: "BLOCKED",
       approvalsRequired: policy?.requiredApprovals ?? null,
       approvalsPresent: null,
+      waitingForApproval: false,
       unassessedRules: policy?.unassessedRules || [],
       details: "Branch review requirements or current-SHA reviews could not be verified.",
     };
@@ -1935,6 +1936,7 @@ export function summarizeBranchReviewPolicy({
       status: "BLOCKED",
       approvalsRequired: policy.requiredApprovals,
       approvalsPresent: null,
+      waitingForApproval: false,
       unassessedRules: policy.unassessedRules,
       details: "Additional mandatory branch rules are not evaluated: " + policy.unassessedRules.join("; ") + ".",
     };
@@ -1946,6 +1948,7 @@ export function summarizeBranchReviewPolicy({
       status: "BLOCKED",
       approvalsRequired: policy.requiredApprovals,
       approvalsPresent: null,
+      waitingForApproval: false,
       unassessedRules: [],
       details: behind
         ? "GitHub reports that the PR branch is behind its base and the enforced up-to-date requirement is not satisfied."
@@ -1976,6 +1979,7 @@ export function summarizeBranchReviewPolicy({
     status: enough && latestPushApproved ? "PASS" : "BLOCKED",
     approvalsRequired: required,
     approvalsPresent: approvals.size,
+    waitingForApproval: !enough || !latestPushApproved,
     latestPushApprovalRequired: policy.requireLastPushApproval === true,
     latestPushReviewDecision: latestPushReviewDecisionAvailable ? latestPushReviewDecision : null,
     unassessedRules: [],
@@ -2223,7 +2227,7 @@ export function assessPullRequestVerification({
     branchReviewPolicy.status === "PASS";
   const waitingForEnforcedApproval = mergeReadyExceptRequiredApproval &&
     branchReviewPolicy.status === "BLOCKED" &&
-    branchReviewPolicy.approvalsRequired > 0;
+    branchReviewPolicy.waitingForApproval === true;
   const decision = readyForMerge
     ? "READY_FOR_MERGE"
     : waitingForEnforcedApproval
