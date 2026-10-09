@@ -1,7 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
+import { isLoopbackPlaywrightTarget } from "./local-target";
 
 test("admin catalog preference persists and stays responsive", async ({ page }, testInfo) => {
-  test.skip(!process.env.PLAYWRIGHT_LOCAL_DEMO, "Uses the local demo admin session only");
+  test.skip(
+    !process.env.PLAYWRIGHT_LOCAL_DEMO || !isLoopbackPlaywrightTarget(testInfo.project.use.baseURL),
+    "Uses the local demo admin session and requires a loopback baseURL.",
+  );
   test.skip(testInfo.project.name !== "chromium", "Checks all viewport sizes in one Chromium session");
   test.setTimeout(90_000);
 

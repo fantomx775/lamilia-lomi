@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { isLoopbackPlaywrightTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
 const premiumAssetId = "asset-moon-premium-pdf";
@@ -14,10 +15,12 @@ const localeOptionNames = {
 // This suite exercises local demo accounts and fixed email addresses. Keep it
 // away from externally configured Playwright targets.
 test.describe("Local demo unlock funnel", () => {
-  test.skip(
-    Boolean(process.env.PLAYWRIGHT_BASE_URL),
-    "The unlock-funnel suite is restricted to the local demo app.",
-  );
+  test.beforeEach(({}, testInfo) => {
+    test.skip(
+      !isLoopbackPlaywrightTarget(testInfo.project.use.baseURL),
+      "The unlock-funnel suite uses fixed demo data and requires a loopback baseURL.",
+    );
+  });
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {

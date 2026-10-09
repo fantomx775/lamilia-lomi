@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { isLoopbackPlaywrightTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
 
@@ -88,7 +89,10 @@ test("tablet header navigation is visible and fits the viewport", async ({ page 
 });
 
 test("admin sidebar navigation reaches the main resource pages with immediate active feedback", async ({ page }, testInfo) => {
-  test.skip(!process.env.PLAYWRIGHT_LOCAL_DEMO, "Uses the local demo admin session only");
+  test.skip(
+    !process.env.PLAYWRIGHT_LOCAL_DEMO || !isLoopbackPlaywrightTarget(testInfo.project.use.baseURL),
+    "Uses the local demo admin session and requires a loopback baseURL.",
+  );
   test.skip(testInfo.project.name !== "chromium", "Admin sidebar navigation is verified at desktop width");
 
   await page.setViewportSize({ width: 1440, height: 900 });

@@ -2,6 +2,7 @@ import { expect, test, type Page, type Request, type TestInfo } from "@playwrigh
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
+import { isLoopbackPlaywrightTarget } from "./local-target";
 
 test.setTimeout(300_000);
 
@@ -13,7 +14,11 @@ const imageFixtures = [
   { name: "05-purple.png", rgb: [175, 45, 190] },
 ] as const;
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  test.skip(
+    !isLoopbackPlaywrightTarget(testInfo.project.use.baseURL),
+    "Gallery ordering E2E uses fixed demo admin credentials and requires a loopback baseURL.",
+  );
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "ll_cookie_consent",
@@ -23,11 +28,6 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("admin reorders gallery previews through upload, save, reload, and edit", async ({ page }, testInfo) => {
-  test.skip(
-    Boolean(process.env.PLAYWRIGHT_BASE_URL),
-    "Gallery ordering E2E uses fixed demo admin credentials and is restricted to the local app.",
-  );
-
   page.setDefaultNavigationTimeout(180_000);
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
