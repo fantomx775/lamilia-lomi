@@ -178,7 +178,8 @@ export async function loginDemoAction(formData: FormData) {
     await clearUnlockIntent();
   }
 
-  const formCode = text(formData, "code") || currentIntent?.code || "";
+  const submittedCode = text(formData, "code");
+  const formCode = submittedCode || currentIntent?.code || "";
 
   if (!email || !isValidEmail(email) || !password) {
     redirect(`/${locale}/login?error=invalid_input&returnTo=${encodeURIComponent(returnTo)}`);
@@ -204,11 +205,13 @@ export async function loginDemoAction(formData: FormData) {
         pendingResumeIntent?.productSlug &&
         pendingResumeIntent.code,
     );
-    const code = retryingPendingResume
-      ? pendingResumeIntent?.code ?? ""
-      : pendingResumeAccountMismatch
-        ? ""
-        : formCode;
+    const pendingResumeIntentForRetry =
+      retryingPendingResume && pendingResumeIntent
+        ? { ...pendingResumeIntent, code: submittedCode || pendingResumeIntent.code }
+        : null;
+    const code = pendingResumeAccountMismatch
+      ? ""
+      : pendingResumeIntentForRetry?.code ?? formCode;
     const intent = createAuthResumeIntent({
       locale,
       productSlug: returnProductSlug,
@@ -250,9 +253,8 @@ export async function loginDemoAction(formData: FormData) {
     }
 
     if (
-      retryingPendingResume &&
-      pendingResumeIntent?.productSlug &&
-      pendingResumeIntent.code
+      pendingResumeIntentForRetry?.productSlug &&
+      pendingResumeIntentForRetry.code
     ) {
       let pendingUser: Awaited<ReturnType<typeof supabase.auth.getUser>> | null = null;
       try {
@@ -274,7 +276,7 @@ export async function loginDemoAction(formData: FormData) {
         );
       }
 
-      if (!authResumeIntentMatchesUser(pendingResumeIntent, pendingUser.data.user)) {
+      if (!authResumeIntentMatchesUser(pendingResumeIntentForRetry, pendingUser.data.user)) {
         await clearAuthResumeIntent();
         await clearUnlockIntent();
         redirect(
@@ -283,8 +285,8 @@ export async function loginDemoAction(formData: FormData) {
       }
 
       await completeSupabaseAuthResume(
-        pendingResumeIntent,
-        pendingResumeIntent.code,
+        pendingResumeIntentForRetry,
+        code,
       );
     }
 

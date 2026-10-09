@@ -168,13 +168,16 @@ function registrationForm(
   return formData;
 }
 
-function loginForm(email: string, password: string, returnTo?: string) {
+function loginForm(email: string, password: string, returnTo?: string, code?: string) {
   const formData = new FormData();
   formData.set("locale", "en");
   formData.set("email", email);
   formData.set("password", password);
   if (returnTo) {
     formData.set("returnTo", returnTo);
+  }
+  if (code) {
+    formData.set("code", code);
   }
   return formData;
 }
@@ -283,6 +286,65 @@ describe("registration auth action", () => {
     expect(actionMocks.clearUnlockIntent).toHaveBeenCalled();
     expect(actionMocks.redeemAuthResumeIntent).toHaveBeenCalledWith(
       pendingResumeIntent,
+    );
+  });
+
+  it("prefers a newly submitted premium code when retrying a same-account resume", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    const pendingResumeIntent = {
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "SAVED-CODE",
+      emailHash: "reader-email-hash",
+      userId: "reader-user",
+      createdAt: Date.now(),
+    };
+    actionMocks.readAuthResumeIntent.mockResolvedValue(pendingResumeIntent);
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(true);
+    actionMocks.authResumeIntentMatchesUser.mockReturnValue(true);
+    actionMocks.redeemAuthResumeIntent.mockResolvedValue({
+      ok: true,
+      status: "success",
+    });
+    const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
+    const getUser = vi.fn().mockResolvedValue({
+      data: {
+        user: {
+          id: "reader-user",
+          email: "reader@example.com",
+          email_confirmed_at: "2026-10-09T10:00:00.000Z",
+        },
+      },
+      error: null,
+    });
+    actionMocks.createClient.mockResolvedValue({
+      auth: { signInWithPassword, getUser },
+    });
+
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "reader@example.com",
+          "password123",
+          "/en/products/moon-garden-coloring-book",
+          "REPLACEMENT-CODE",
+        ),
+      ),
+      "/en/products/moon-garden-coloring-book?unlocked=1#premium",
+    );
+
+    expect(actionMocks.redeemAuthResumeIntent).toHaveBeenCalledTimes(1);
+    expect(actionMocks.redeemAuthResumeIntent).toHaveBeenCalledWith({
+      ...pendingResumeIntent,
+      code: "REPLACEMENT-CODE",
+    });
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "REPLACEMENT-CODE",
+        emailHash: "reader-email-hash",
+        userId: "reader-user",
+      }),
     );
   });
 
