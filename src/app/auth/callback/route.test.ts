@@ -152,7 +152,6 @@ describe("Supabase auth callback", () => {
       locale: "en",
       productSlug: "moon-garden-coloring-book",
       returnTo: "/en/products/moon-garden-coloring-book",
-      code: "LOMI-BOOK-2026",
     });
     expect(response.headers.get("location")).toContain(
       "/en/products/moon-garden-coloring-book?unlock=unexpected#premium",
@@ -166,6 +165,9 @@ describe("Supabase auth callback", () => {
       userId: undefined,
       emailHash: "reader-email-hash",
     });
+    expect(resume.clearUnlock.mock.invocationCallOrder[0]).toBeLessThan(
+      resume.redeem.mock.invocationCallOrder[0],
+    );
     expect(resume.clear).not.toHaveBeenCalled();
   });
 
@@ -199,7 +201,6 @@ describe("Supabase auth callback", () => {
       locale: "en",
       productSlug: "moon-garden-coloring-book",
       returnTo: "/en/products/moon-garden-coloring-book",
-      code: "LOMI-BOOK-2026",
     });
     expect(resume.setAuthResume).toHaveBeenCalledWith({
       locale: "en",
@@ -209,6 +210,9 @@ describe("Supabase auth callback", () => {
       userId: undefined,
       emailHash: "reader-email-hash",
     });
+    expect(resume.clearUnlock.mock.invocationCallOrder[0]).toBeLessThan(
+      resume.redeem.mock.invocationCallOrder[0],
+    );
     expect(resume.clear).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toContain("unlock=auth_required");
     expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
@@ -447,7 +451,6 @@ describe("Supabase auth callback", () => {
       locale: "en",
       productSlug: "moon-garden-coloring-book",
       returnTo: "/en/products/moon-garden-coloring-book",
-      code: "LOMI-BOOK-2026",
     });
     expect(response.headers.get("location")).toContain(
       "/en/products/moon-garden-coloring-book?unlock=invalid_code#premium",

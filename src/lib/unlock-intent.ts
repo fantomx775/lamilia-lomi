@@ -27,7 +27,8 @@ export async function getUnlockIntent(): Promise<UnlockIntent | null> {
   }
 
   try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<UnlockIntent>;
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as
+      Partial<UnlockIntent> & { codeSource?: unknown };
     const locale = normalizeLocale(parsed.locale);
     const createdAt = typeof parsed.createdAt === "number" ? parsed.createdAt : 0;
 
@@ -56,9 +57,12 @@ export async function getUnlockIntent(): Promise<UnlockIntent | null> {
       locale,
       productSlug,
       returnTo,
-      code: normalizePremiumCodeForRequest(
-        typeof parsed.code === "string" ? parsed.code : undefined,
-      ) || undefined,
+      code:
+        parsed.codeSource === "guest"
+          ? normalizePremiumCodeForRequest(
+              typeof parsed.code === "string" ? parsed.code : undefined,
+            ) || undefined
+          : undefined,
       createdAt,
     };
   } catch {
@@ -85,14 +89,19 @@ export async function setUnlockIntent(input: {
     locale,
     `/${locale}/products/${productSlug}`,
   );
+  const code = normalizePremiumCodeForRequest(input.code) || undefined;
   const payload: UnlockIntent = {
     locale,
     productSlug,
     returnTo,
-    code: normalizePremiumCodeForRequest(input.code) || undefined,
+    code,
     createdAt: Date.now(),
   };
-  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const encodedPayload = {
+    ...payload,
+    codeSource: code ? "guest" : undefined,
+  };
+  const encoded = Buffer.from(JSON.stringify(encodedPayload), "utf8").toString("base64url");
   const cookieStore = await cookies();
 
   cookieStore.set(unlockIntentCookie, encoded, {

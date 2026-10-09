@@ -130,8 +130,12 @@ export async function GET(request: Request) {
     if (cookieIntent) {
       await clearAuthResumeIntent();
     }
-    await clearUnlockIntent();
   }
+
+  // The signed auth resume carries the code's account binding. Remove any
+  // older guest code before redemption so it cannot survive a failed attempt
+  // and later be applied to a different account.
+  await clearUnlockIntent();
 
   let redemption;
 
@@ -204,7 +208,6 @@ async function persistUnlockIntent(
     locale: string;
     productSlug?: string;
     returnTo: string;
-    code?: string;
   } | null,
 ) {
   if (!intent?.productSlug || !intent.code) {
@@ -215,7 +218,6 @@ async function persistUnlockIntent(
     locale: intent.locale,
     productSlug: intent.productSlug,
     returnTo: intent.returnTo,
-    code: intent.code,
   });
 }
 
