@@ -953,6 +953,53 @@ describe("registration auth action", () => {
     );
   });
 
+  it("does not rebind a pending account's code when registration targets another product", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "other-product-id",
+      slug: "another-product",
+    });
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "first-reader-email-hash",
+      userId: "first-reader",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(false);
+    actionMocks.isUnlockRegistrationContext.mockReturnValue(false);
+    const signUp = vi.fn().mockResolvedValue({
+      data: { user: { id: "second-reader" }, session: null },
+      error: null,
+    });
+    actionMocks.createClient.mockResolvedValue({ auth: { signUp } });
+
+    await expectRedirect(
+      registerDemoAction(
+        registrationForm(
+          "/en/products/another-product",
+          "LOMI-BOOK-2026",
+          "second-reader@example.com",
+        ),
+      ),
+      "/en/login?error=verification_sent&returnTo=%2Fen%2Fproducts%2Fanother-product",
+    );
+
+    expect(actionMocks.buildSupabaseAuthCallbackUrl).toHaveBeenCalledWith(
+      "en",
+      "/en/products/another-product",
+      expect.objectContaining({ code: "" }),
+    );
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "",
+        email: "second-reader@example.com",
+      }),
+    );
+  });
+
   it("recovers a matching account's saved code when registration is retried", async () => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     actionMocks.getProductBySlugForRequest.mockResolvedValue({
@@ -1622,6 +1669,45 @@ describe("premium unlock action", () => {
     );
 
     expect(actionMocks.setAuthResumeIntent).not.toHaveBeenCalled();
+    expect(actionMocks.redeemPremiumCodeForRequest).not.toHaveBeenCalled();
+    expect(actionMocks.clearAuthResumeIntent).toHaveBeenCalledTimes(1);
+    expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not rebind a stale account-bound code when redemption targets another product", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "other-product-id",
+      slug: "another-product",
+      reviewDelayDays: 7,
+    });
+    actionMocks.getDemoSession.mockResolvedValue({
+      email: "account-b@example.com",
+      userId: "account-b",
+      emailVerified: true,
+      unlockedProductIds: [],
+    });
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "account-a-email-hash",
+      userId: "account-a",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesUser.mockReturnValue(false);
+
+    const formData = new FormData();
+    formData.set("locale", "en");
+    formData.set("productSlug", "another-product");
+    formData.set("code", "LOMI-BOOK-2026");
+
+    await expectRedirect(
+      unlockPremiumAction(formData),
+      "/en/login?error=verification_mismatch&returnTo=%2Fen%2Fproducts%2Fanother-product",
+    );
+
     expect(actionMocks.redeemPremiumCodeForRequest).not.toHaveBeenCalled();
     expect(actionMocks.clearAuthResumeIntent).toHaveBeenCalledTimes(1);
     expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);

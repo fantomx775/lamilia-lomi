@@ -506,8 +506,7 @@ export async function registerDemoAction(formData: FormData) {
         authResumeIntentMatchesEmail(pendingResumeIntent, result.value.email),
     );
     const pendingResumeHasDifferentAccount = Boolean(
-      pendingResumeTargetsReturnTo &&
-        pendingResumeIntent &&
+      pendingResumeIntent &&
         pendingResumeIntent.userId &&
         pendingResumeIntent?.code &&
         !pendingResumeMatchesAccount,
@@ -767,7 +766,6 @@ export async function unlockPremiumAction(formData: FormData) {
       pendingResumeIntent?.userId &&
         pendingResumeCode &&
         submittedCode &&
-        pendingResumeIntent.productSlug === product.slug &&
         pendingResumeCode === submittedCode &&
         !authResumeIntentMatchesUser(pendingResumeIntent, {
           id: session.userId,
