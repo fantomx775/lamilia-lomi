@@ -904,6 +904,24 @@ async function preserveUnlockRecoveryIntent(input: {
   await clearUnlockIntent();
 
   if (input.email && input.userId && input.code) {
+    const existingResumeIntent = await readAuthResumeIntent();
+    const existingResumeCode = normalizePremiumCodeForRequest(existingResumeIntent?.code);
+    const requestedCode = normalizePremiumCodeForRequest(input.code);
+    const sameAccount = authResumeIntentMatchesUser(existingResumeIntent, {
+      id: input.userId,
+      email: input.email,
+    });
+
+    if (
+      existingResumeIntent &&
+      existingResumeCode &&
+      existingResumeCode === requestedCode &&
+      existingResumeIntent.productSlug !== input.productSlug &&
+      sameAccount
+    ) {
+      return;
+    }
+
     await setAuthResumeIntent({
       locale: input.locale,
       productSlug: input.productSlug,

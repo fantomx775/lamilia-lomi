@@ -1566,6 +1566,63 @@ describe("premium unlock action", () => {
     });
   });
 
+  it.each([
+    ["returns wrong_product", "wrong_product", "/en/products/another-product?unlock=wrong_product#premium"],
+    ["throws during redemption", null, "/en/products/another-product?unlock=unexpected#premium"],
+  ] as const)(
+    "does not rebind the same account's saved code to another product when redemption %s",
+    async (_caseName, status, location) => {
+      actionMocks.getBackendMode.mockReturnValue("supabase");
+      actionMocks.getProductBySlugForRequest.mockResolvedValue({
+        id: "another-product-id",
+        slug: "another-product",
+        reviewDelayDays: 7,
+      });
+      actionMocks.getDemoSession.mockResolvedValue({
+        email: "reader@example.com",
+        userId: "reader-user",
+        emailVerified: true,
+        unlockedProductIds: [],
+      });
+      actionMocks.readAuthResumeIntent.mockResolvedValue({
+        locale: "en",
+        productSlug: "saved-product",
+        returnTo: "/en/products/saved-product",
+        code: "LOMI-BOOK-2026",
+        emailHash: "reader-email-hash",
+        userId: "reader-user",
+        createdAt: Date.now(),
+      });
+      actionMocks.authResumeIntentMatchesUser.mockReturnValue(true);
+      if (status === null) {
+        actionMocks.redeemPremiumCodeForRequest.mockRejectedValue(
+          new Error("temporary redemption failure"),
+        );
+      } else {
+        actionMocks.redeemPremiumCodeForRequest.mockResolvedValue({
+          ok: false,
+          status,
+        });
+      }
+
+      const formData = new FormData();
+      formData.set("locale", "en");
+      formData.set("productSlug", "another-product");
+      formData.set("code", "LOMI-BOOK-2026");
+
+      await expectRedirect(unlockPremiumAction(formData), location);
+
+      expect(actionMocks.setAuthResumeIntent).not.toHaveBeenCalled();
+      expect(actionMocks.clearAuthResumeIntent).not.toHaveBeenCalled();
+      expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);
+      expect(actionMocks.redeemPremiumCodeForRequest).toHaveBeenCalledWith({
+        productSlug: "another-product",
+        productId: "another-product-id",
+        code: "LOMI-BOOK-2026",
+      });
+    },
+  );
+
   it("maps an unexpected redemption failure to a safe product error", async () => {
     actionMocks.getProductBySlugForRequest.mockResolvedValue({
       id: "product-id",
