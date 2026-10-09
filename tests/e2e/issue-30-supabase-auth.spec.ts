@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -24,7 +25,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
     page,
     browser,
   }, testInfo) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
 
     test.skip(
       process.env.RUN_ISSUE_30_SUPABASE_E2E !== "1",
@@ -48,8 +49,17 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
     if (!serviceRoleKey) {
       throw new Error("The isolated Supabase service role key is unavailable to the test process.");
     }
+    const publishableKey =
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!publishableKey) {
+      throw new Error("The isolated Supabase publishable key is unavailable to the test process.");
+    }
 
     const admin = createAdminClient(supabaseUrl.href, serviceRoleKey);
+    const verifier = createClient(supabaseUrl.href, publishableKey, {
+      auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+    });
     const sensitiveValues = new Set<string>();
     const createdEmails = new Set<string>();
     const completed: Record<string, string | number | boolean> = {};
@@ -118,15 +128,19 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       const userOne = createTestCredentials();
       const userTwo = createTestCredentials();
       const userThree = createTestCredentials();
+      const userFour = createTestCredentials();
       createdEmails.add(userOne.email);
       createdEmails.add(userTwo.email);
       createdEmails.add(userThree.email);
+      createdEmails.add(userFour.email);
       sensitiveValues.add(userOne.email);
       sensitiveValues.add(userOne.password);
       sensitiveValues.add(userTwo.email);
       sensitiveValues.add(userTwo.password);
       sensitiveValues.add(userThree.email);
       sensitiveValues.add(userThree.password);
+      sensitiveValues.add(userFour.email);
+      sensitiveValues.add(userFour.password);
 
       // Scenario A begins in browser context A and requests a real GoTrue confirmation email.
       await page.goto(`/en/products/${productSlug}#premium`);
@@ -176,11 +190,8 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         pathname: "/en/login",
         query: { error: "email_unverified" },
       });
-      const unverifiedLoginRejected = await unverifiedPage
-        .locator("#login-error")
-        .isVisible();
-      expect(unverifiedLoginRejected).toBe(true);
-      completed.unverifiedLoginRejected = unverifiedLoginRejected;
+      await expect(unverifiedPage.locator("#login-error")).toBeVisible();
+      completed.unverifiedLoginRejected = true;
       completed.unverifiedAccountHasNoEntitlement = !(await hasUnlock(admin, userOne.email));
       expect(completed.unverifiedAccountHasNoEntitlement).toBe(true);
 
@@ -399,6 +410,59 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       expect(invalidDownload.status).toBe(401);
       completed.invalidConfirmationLinkRejected = invalidDownload.status === 401;
 
+      // Age a real confirmation sent by local GoTrue so expiry is tested by
+      // the Auth service itself, without waiting for the production TTL.
+      const expiredUserResult = await admin.auth.admin.createUser({
+        email: userFour.email,
+        password: userFour.password,
+        email_confirm: false,
+      });
+      const expiredUserId = expiredUserResult.data.user?.id;
+      if (expiredUserResult.error || !expiredUserId) {
+        throw new Error("Could not create the synthetic account for the expired-token check.");
+      }
+      completed.expiredSyntheticAccountCreated = true;
+      const expiredRedirect = new URL("/auth/callback", appUrl.origin);
+      expiredRedirect.searchParams.set("locale", "en");
+      const expiredEmailResult = await admin.auth.resend({
+        type: "signup",
+        email: userFour.email,
+        options: { emailRedirectTo: expiredRedirect.href },
+      });
+      if (expiredEmailResult.error) {
+        throw new Error("Local GoTrue did not send the synthetic expired-token confirmation.");
+      }
+      completed.expiredConfirmationEmailRequested = true;
+      const expiredLink = await readConfirmationLink(userFour.email);
+      rememberSensitiveLink(expiredLink, sensitiveValues);
+      completed.expiredConfirmationEmailRetrieved = true;
+      ageLocalSignupConfirmation(expiredUserId);
+      completed.expiredConfirmationTimestampAged = true;
+      const expiredTokenHash = new URL(expiredLink.href).searchParams.get("token_hash");
+      if (!expiredTokenHash) {
+        throw new Error("The local expired-token email did not contain a confirmation token hash.");
+      }
+      const expiredVerification = await verifier.auth.verifyOtp({
+        token_hash: expiredTokenHash,
+        type: "email",
+      });
+      completed.expiredTokenRejectedByGoTrue = expiredVerification.error?.code === "otp_expired";
+      expect(completed.expiredTokenRejectedByGoTrue).toBe(true);
+
+      const expiredContext = await createContext();
+      const expiredPage = await expiredContext.newPage();
+      await navigateSensitive(expiredPage, expiredLink.href);
+      await waitForLocation(expiredPage, {
+        pathname: "/en/login",
+        query: { error: "verification_failed" },
+      });
+      const expiredDownload = await requestProtectedDownload(expiredContext);
+      completed.expiredConfirmationLinkRejected =
+        expiredDownload.status === 401 &&
+        !(await isConfirmedUser(admin, userFour.email)) &&
+        !(await hasUnlock(admin, userFour.email));
+      expect(completed.expiredConfirmationLinkRejected).toBe(true);
+
       // Both auth page and callback reject external return destinations.
       const redirectContext = await createContext();
       const redirectPage = await redirectContext.newPage();
@@ -526,6 +590,53 @@ function createAdminClient(url: string, serviceRoleKey: string) {
   return createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+}
+
+function ageLocalSignupConfirmation(userId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+    throw new Error("The synthetic Auth user ID was invalid for the local expiry check.");
+  }
+
+  const query = `
+    with updated as (
+      update auth.users
+      set confirmation_sent_at = now() - interval '2 hours'
+      where id = '${userId}'::uuid
+        and email_confirmed_at is null
+        and confirmation_sent_at is not null
+      returning id
+    )
+    select count(*)::int as updated_count from updated
+  `;
+  let result = "";
+  try {
+    const isWindows = process.platform === "win32";
+    result = execFileSync(
+      isWindows ? "powershell.exe" : "supabase",
+      isWindows
+        ? [
+            "-NoLogo",
+            "-NoProfile",
+            "-Command",
+            "supabase db query --local --output-format json $env:ISSUE_30_CONFIRMATION_AGE_SQL",
+          ]
+        : ["db", "query", "--local", "--output-format", "json", query],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 30_000,
+        windowsHide: true,
+        env: { ...process.env, ISSUE_30_CONFIRMATION_AGE_SQL: query },
+      },
+    );
+  } catch {
+    throw new Error("Could not age the synthetic confirmation in the local Supabase database.");
+  }
+
+  if (!/"updated_count"\s*:\s*"?1"?/.test(result)) {
+    throw new Error("The local Supabase expiry fixture did not update exactly one pending account.");
+  }
 }
 
 async function submitRegistration(page: Page, email: string, password: string) {

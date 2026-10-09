@@ -68,7 +68,21 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       failedUrl.search === "?redirectTo=/admin";
     const exactNextDevChunk = request.method() === "GET" && request.resourceType() === "script" &&
       failedUrl.pathname.startsWith("/_next/static/chunks/") && failedUrl.pathname.endsWith(".js");
-    if (failure === "net::ERR_ABORTED" && recentNavigation && (exactLoginPost || exactNextDevChunk)) {
+    const exactDisposableProductAction = Boolean(productId) &&
+      request.method() === "POST" && failedUrl.pathname === `/admin/products/${productId}`;
+    const productActionRedirect = (() => {
+      if (!recentNavigation || !exactDisposableProductAction) return false;
+      const destination = new URL(recentNavigation.url);
+      const saveRedirect = destination.pathname === failedUrl.pathname &&
+        destination.searchParams.get("saved") === "1";
+      const deleteRedirect = destination.pathname === "/admin/products" &&
+        destination.searchParams.get("deleted") === "1";
+      return saveRedirect || deleteRedirect;
+    })();
+    if (
+      failure === "net::ERR_ABORTED" && recentNavigation &&
+      (exactLoginPost || exactNextDevChunk || productActionRedirect)
+    ) {
       const cancellation = JSON.stringify({ ...detail, adjacentMainFrameNavigation: recentNavigation.url });
       expectedNavigationCancellations.push(cancellation);
       console.log("Expected navigation cancellation: " + cancellation);

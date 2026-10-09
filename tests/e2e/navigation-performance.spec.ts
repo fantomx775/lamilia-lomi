@@ -253,7 +253,12 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("requestfailed", (request) => {
     if (appOrigin && new URL(request.url()).origin === appOrigin) {
-      sameOriginFailures.push(`${request.method()} ${request.url()}`);
+      const failure = request.failure()?.errorText ?? "request failed";
+      // The browser cancels an in-flight route request when a later navigation
+      // replaces it. Route and heading assertions below verify each destination.
+      if (failure !== "net::ERR_ABORTED") {
+        sameOriginFailures.push(`${request.method()} ${failure} ${request.url()}`);
+      }
     }
   });
   page.on("response", (response) => {
