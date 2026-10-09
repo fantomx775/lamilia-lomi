@@ -169,7 +169,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       await expect(page.locator('a[href*="error=verification_required"]')).toBeVisible();
       completed.confirmationRequired = true;
 
-      const userOneLink = await readConfirmationLink(userOne.email, mailpitUrl);
+      const userOneLink = await readConfirmationLink(userOne.email, localMailpitUrl);
       rememberSensitiveLink(userOneLink, sensitiveValues);
       const userOneResumeToken = getResumeToken(userOneLink.href);
       const userOneCallback = new URL(userOneLink.href);
@@ -311,7 +311,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         query: { step: "verify" },
         hash: "#premium",
       });
-      const userTwoLink = await readConfirmationLink(userTwo.email, mailpitUrl);
+      const userTwoLink = await readConfirmationLink(userTwo.email, localMailpitUrl);
       rememberSensitiveLink(userTwoLink, sensitiveValues);
 
       const wrongAccountContext = await createContext();
@@ -386,7 +386,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         query: { step: "verify" },
         hash: "#premium",
       });
-      const userThreeLink = await readConfirmationLink(userThree.email, mailpitUrl);
+      const userThreeLink = await readConfirmationLink(userThree.email, localMailpitUrl);
       rememberSensitiveLink(userThreeLink, sensitiveValues);
       const tamperedCallback = new URL(userThreeLink.href);
       tamperedCallback.searchParams.set(
@@ -438,7 +438,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         throw new Error("Local GoTrue did not send the synthetic expired-token confirmation.");
       }
       completed.expiredConfirmationEmailRequested = true;
-      const expiredLink = await readConfirmationLink(userFour.email, mailpitUrl);
+      const expiredLink = await readConfirmationLink(userFour.email, localMailpitUrl);
       rememberSensitiveLink(expiredLink, sensitiveValues);
       completed.expiredConfirmationEmailRetrieved = true;
       ageLocalSignupConfirmation(expiredUserId);
