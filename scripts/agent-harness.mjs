@@ -2471,7 +2471,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
         status: "BLOCKED",
         sha: null,
         reviewedBaseSha: verification.aiReview?.reviewedBaseSha || null,
-        reviewedBaseShaVerified: verification.aiReview?.reviewedBaseShaVerified === true,
+        reviewedBaseShaVerified: false,
         details: "The merged PR's first parent could not be verified against current-SHA AI review evidence.",
       },
       reasons: [...new Set([

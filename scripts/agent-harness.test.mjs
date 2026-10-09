@@ -2881,6 +2881,51 @@ test("merged recovery reports a blocked merge base when review evidence names a 
   assert.notEqual(fixture.projectStatus, "Done");
 });
 
+test("merged recovery does not trust PR base fallback after its first-parent read fails", async () => {
+  const fixture = createDeliveryClient({ alreadyMerged: true });
+  const request = fixture.client.request;
+  let mergeCommitReads = 0;
+  fixture.client.request = async (path, options) => {
+    if (path === "/repos/example/repo/commits/" + fixture.mergeSha) {
+      mergeCommitReads += 1;
+      return mergeCommitReads === 1
+        ? { sha: fixture.mergeSha, parents: [] }
+        : { sha: fixture.mergeSha, parents: [{ sha: CURRENT_BASE_SHA }, { sha: CURRENT_SHA }] };
+    }
+    return request(path, options);
+  };
+  let deploymentChecks = 0;
+  let smokeChecks = 0;
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: verifyPullRequest,
+    waitForDeployment: async (_client, mergeSha) => {
+      deploymentChecks += 1;
+      return {
+        status: "PASS",
+        deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
+        details: "Exact-SHA deployment was observed.",
+      };
+    },
+    smoke: async () => {
+      smokeChecks += 1;
+      return { status: "PASS", checks: [], details: "Production health smoke passed." };
+    },
+  });
+
+  assert.ok(mergeCommitReads >= 2);
+  assert.equal(deploymentChecks, 1);
+  assert.equal(smokeChecks, 1);
+  assert.equal(result.productionDeployment.status, "PASS");
+  assert.equal(result.productionSmoke.status, "PASS");
+  assert.equal(result.mergeBaseVerification.status, "BLOCKED");
+  assert.equal(result.mergeBaseVerification.sha, CURRENT_BASE_SHA);
+  assert.equal(result.mergeBaseVerification.expectedSha, null);
+  assert.equal(result.decision, "BLOCKED");
+  assert.equal(result.completed, false);
+  assert.notEqual(fixture.projectStatus, "Done");
+});
+
 test("does not mark an issue Done when GitHub did not record a trusted delivery comment", async () => {
   const fixture = createDeliveryClient({ issueCommentActor: "different-account" });
   const result = await deliverPullRequest(fixture.client, 52, {
