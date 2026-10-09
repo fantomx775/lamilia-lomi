@@ -1154,7 +1154,9 @@ function isUiBehaviorFile(filename) {
 }
 
 function isApplicationFlowFile(filename) {
-  return /^(?:src\/(?:app|components|lib)|app|components|pages|lib)\//.test(filename) &&
+  return (/^(?:src\/(?:app|components|lib)|app|components|pages|lib)\//.test(filename) ||
+      /^(?:src\/)?(?:middleware|proxy)\.[cm]?[jt]sx?$/i.test(filename) ||
+      /^next\.config\.[cm]?[jt]sx?$/i.test(filename)) &&
     !/\.(?:test|spec)\.[^.]+$/i.test(filename);
 }
 
@@ -1904,10 +1906,12 @@ export function assessPullRequestVerification({
   files = [],
   reviews = [],
   comments = [],
+  commitMessages = [],
   checkRuns = [],
   statuses = [],
   mergePolicy = { available: false, requiredChecks: null, requiredApprovals: null, unassessedRules: [] },
   available = {},
+  allowAlreadyMerged = false,
   snapshotStable = true,
 }) {
   const number = pullRequest?.number || null;
@@ -2021,13 +2025,24 @@ export function assessPullRequestVerification({
     localVerification,
   });
   const prBlockers = [];
-  const closingIssueReferences = repository
+  const closingIssueReferences = repository && !allowAlreadyMerged
     ? findClosingIssueReferences(pullRequest?.body || "", repository)
     : [];
+  const closingCommitReferences = repository && !allowAlreadyMerged
+    ? [...new Set(commitMessages.flatMap((message) => findClosingIssueReferences(message, repository)))]
+    : [];
+  if (!allowAlreadyMerged && available.commits === false) {
+    prBlockers.push("PR commit history could not be read, so GitHub auto-close issue references could not be ruled out.");
+  }
   if (closingIssueReferences.length) {
     prBlockers.push("PR body uses GitHub auto-close issue references (" +
       closingIssueReferences.map((issue) => "#" + issue).join(", ") +
       "); use non-closing references so issues remain open until Production verification.");
+  }
+  if (closingCommitReferences.length) {
+    prBlockers.push("PR commit message(s) use GitHub auto-close issue references (" +
+      closingCommitReferences.map((issue) => "#" + issue).join(", ") +
+      "); rewrite the messages or squash them with non-closing wording before merge.");
   }
   if (!pullRequest) prBlockers.push("Pull request could not be read.");
   else if (pullRequest.state !== "open") {
@@ -2177,6 +2192,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
         files: false,
         reviews: false,
         comments: false,
+        commits: false,
         checkRuns: false,
         statuses: false,
       },
@@ -2193,6 +2209,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     reviewsResult,
     filesResult,
     commentsResult,
+    commitsResult,
     checkRunsResult,
     statusesResult,
     mergePolicyResult,
@@ -2200,6 +2217,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     result(pagedRest(client, pullRequestPath + "/reviews")),
     result(pagedRest(client, pullRequestPath + "/files")),
     result(pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/issues/" + number + "/comments")),
+    result(readPullRequestCommitMessages(client, number)),
     checksPath
       ? result(readAllCheckRuns(client, checksPath))
       : Promise.resolve({ error: new Error("Current PR head SHA is unavailable.") }),
@@ -2247,6 +2265,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     files: filesResult.value || [],
     reviews: reviewsResult.value || [],
     comments: commentsResult.value || [],
+    commitMessages: commitsResult.value || [],
     checkRuns: checkRunsResult.value || [],
     statuses: statusesResult.value || [],
     mergePolicy,
@@ -2254,9 +2273,11 @@ export async function verifyPullRequest(client, pullRequestNumber, {
       files: !filesResult.error,
       reviews: !reviewsResult.error,
       comments: !commentsResult.error,
+      commits: !commitsResult.error,
       checkRuns: !checkRunsResult.error,
       statuses: !statusesResult.error,
     },
+    allowAlreadyMerged: validateAsMergedDelivery,
     snapshotStable,
   });
   if (validateAsMergedDelivery && verification.decision === "READY_FOR_MERGE") {
@@ -2497,6 +2518,21 @@ export function findClosingIssueReferences(text = "", repository) {
   return found;
 }
 
+async function readPullRequestCommitMessages(client, pullRequestNumber) {
+  const commits = await pagedRest(
+    client,
+    "/repos/" + client.owner + "/" + client.repo + "/pulls/" + pullRequestNumber + "/commits",
+  );
+  if (!Array.isArray(commits) || !commits.length) {
+    throw new Error("GitHub returned no pull-request commits to validate.");
+  }
+  const messages = commits.map((commit) => commit?.commit?.message);
+  if (messages.some((message) => typeof message !== "string")) {
+    throw new Error("GitHub returned an incomplete pull-request commit message list.");
+  }
+  return messages;
+}
+
 async function issueWasClosedByPullRequest(client, issueNumber, pullRequest) {
   let after = null;
   let issue;
@@ -2658,6 +2694,22 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
       previouslyVerified = await readVerifiedIssueDelivery(client, issueNumber, pullRequest);
     } catch (error) {
       return { status: "BLOCKED", issue: issueNumber, state: issue.state, details: "The closed issue's prior Production evidence could not be read: " + error.message };
+    }
+    if (previouslyVerified && status !== "PASS") {
+      let projectStatus = null;
+      try {
+        const projectContext = await readProjectItem(client, issue);
+        projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
+      } catch {
+        // Keep the closed issue untouched if Project state cannot be re-read.
+      }
+      return {
+        status: "BLOCKED",
+        issue: issueNumber,
+        state: issue.state,
+        projectStatus,
+        details: "A prior exact-merge-SHA Production pass is recorded; this failed retry did not reopen or downgrade the completed issue.",
+      };
     }
     let closedByPullRequest = false;
     if (!previouslyVerified) {
@@ -2845,7 +2897,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     pullRequest.body || "",
     client.owner + "/" + client.repo,
   );
-  if (closingIssues.length) {
+  if (!pullRequest.merged && closingIssues.length) {
     return {
       status: "BLOCKED",
       decision: "BLOCKED",
@@ -2924,6 +2976,32 @@ export async function deliverPullRequest(client, pullRequestNumber, {
         merged: false,
         candidateSha,
         reasons: ["PR body would auto-close issue(s) " + freshClosingIssues.map((value) => "#" + value).join(", ") + "; use non-closing references until Production verification passes."],
+      };
+    }
+    let freshCommitMessages;
+    try {
+      freshCommitMessages = await readPullRequestCommitMessages(client, number);
+    } catch (error) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "commit-history",
+        merged: false,
+        candidateSha,
+        reasons: ["PR commit history could not be read immediately before merge: " + error.message],
+      };
+    }
+    const freshCommitClosers = [...new Set(freshCommitMessages.flatMap((message) =>
+      findClosingIssueReferences(message, client.owner + "/" + client.repo),
+    ))];
+    if (freshCommitClosers.length) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "commit-history",
+        merged: false,
+        candidateSha,
+        reasons: ["PR commit message(s) would auto-close issue(s) " + freshCommitClosers.map((value) => "#" + value).join(", ") + "; rewrite or squash with non-closing wording before merge."],
       };
     }
     if (issue !== null) {

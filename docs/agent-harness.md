@@ -137,8 +137,10 @@ to `Ready`.
 10. Run `node scripts/agent-harness.mjs deliver-pr <pr-number> --issue
     <issue-number>` for a fully resolved work item. Use a non-closing issue
     reference such as `Part of #29`: any local-repository `Closes`, `Fixes`, or
-    `Resolves` reference in the PR body blocks delivery, even without `--issue`,
-    because GitHub would close the issue at merge before Production is checked.
+    `Resolves` reference in the PR body or a PR commit message blocks delivery,
+    even without `--issue`, because GitHub can close the issue at merge before
+    Production is checked. Unreadable or incomplete PR commit history fails
+    closed; rewrite or squash closing messages before merging.
     The command reruns the gate, merges with the verified head SHA through
     GitHub's normal merge API, confirms the merge commit, sets the issue to
     `Blocked` during Production verification, waits for its GitHub Production
@@ -146,6 +148,8 @@ to `Ready`.
     Application-flow changes require a current-SHA `productionSmokePlan` that
     maps each changed flow file to its matching route and expected response
     text; delivery requests those routes and checks the text in each response.
+    Include route-affecting `middleware`, `proxy`, and `next.config.*` changes
+    in that plan, with `routeFiles` identifying every affected route module.
     `AGENT_HARNESS_PRODUCTION_SMOKE_PATHS`, if set, must exactly match those
     affected paths. UI changes also need browser E2E and screenshots. The Git
     merge remains subject to branch protection. It records exact deployment,
@@ -153,7 +157,8 @@ to `Ready`.
     to `Done`, and closes the issue only after all Production gates pass. Native
     Project `Pull request merged` automation stays disabled; `Item closed` may
     mirror the final issue closure. If Project propagation or issue closure is
-    delayed, exact-SHA evidence makes the operation safe to retry. If Production
+    delayed, exact-SHA evidence makes the operation safe to retry. A previously
+    completed exact-SHA delivery stays closed if a later recheck fails. If Production
     fails or cannot be verified, the command records available deployment log
     and target URLs, investigates through the normal fix/review/merge path when
     safe, and keeps the issue `Blocked`. It reopens an issue only when GitHub
@@ -228,6 +233,8 @@ If an affected component or helper has no changed route module in the PR, add
 `routeFiles` to that flow with the Next.js page or route module that renders or
 uses it. The harness checks that every flow path matches one of its route
 modules and that every listed route module has a matching expected response.
+Routing controls such as `middleware.*`, `proxy.*`, and `next.config.*` also
+require one or more affected `routeFiles`.
 The independent reviewers must confirm that the named route actually exercises
 the changed component or helper; a generic successful route is insufficient.
 
@@ -293,7 +300,9 @@ to `Done`, then closes the issue. It marks delivery complete only when
 Production is ready, focused smoke succeeds, required post-deployment migration
 evidence passes, and the issue is closed with Project Status `Done`. If
 Project or issue updates are delayed, the marker supports a safe retry without
-pretending an unverified deployment succeeded. If Production fails or cannot
+pretending an unverified deployment succeeded. A failed retry will not reopen
+or downgrade an issue that already has exact-SHA successful Production evidence.
+If Production fails or cannot
 be read, the command records `FAIL` or `BLOCKED`, leaves the issue open/Blocked,
 and does not report delivery complete.
 
@@ -344,8 +353,9 @@ the check.
 and has a stable current head, base, and PR state across the assessment. It
 requires GitHub to report `mergeable: true` before `READY_FOR_MERGE`; a
 conflict or unknown mergeability blocks merge readiness. It reads changed
-  files, exact-SHA AI review evidence, issue comments, check runs/statuses, classic
-branch protection, and every page of effective branch rules. Required checks
+files, commit messages, exact-SHA AI review evidence, issue comments,
+check runs/statuses, classic branch protection,
+and every page of effective branch rules. Required checks
 retain any configured GitHub App or integration identity; an explicit
 "any app" setting remains provider-agnostic. Unsupported, incomplete, or
 unreadable active rules block the merge decision. If no
@@ -356,4 +366,6 @@ unreadable active rules block the merge decision. If no
   an approval. The absence of CI is never reported as green CI. It prints structured
 JSON and exits successfully only for `READY_FOR_MERGE`; both
 `READY_FOR_REVIEW` and `BLOCKED` return a nonzero exit code so a shell gate
-cannot mistake them for merge approval.
+cannot mistake them for merge approval. A local-repository GitHub closing
+reference in the PR body or any PR commit message blocks delivery; unreadable
+commit history also blocks until it can be verified.

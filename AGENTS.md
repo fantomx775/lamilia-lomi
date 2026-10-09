@@ -164,9 +164,11 @@ smoke paths (default `/`). Application-flow changes require a current-SHA
 `productionSmokePlan` that maps every changed flow file to its matching route
 and expected response text; the post-merge HTTPS smoke checks that text. UI
 changes also require browser E2E and screenshots. Any local-repository
-`Closes`, `Fixes`, or `Resolves` issue reference in the PR body blocks delivery,
-even if `--issue` is omitted, because GitHub could close it at merge before
-Production passes. Use a non-closing reference such as `Part of #<issue>`.
+`Closes`, `Fixes`, or `Resolves` issue reference in the PR body or any commit
+message blocks delivery, even if `--issue` is omitted, because GitHub could
+close it at merge before Production passes. Unreadable PR commit history also
+blocks merge. Use a non-closing reference such as `Part of #<issue>` and
+rewrite or squash commit messages that contain closing keywords.
 The command does not bypass branch rules or invoke a manual Vercel Production
 deployment. It stores the result in a PR comment. When `--issue` identifies a
 fully resolved work item, the command sets it to `Blocked` during Production
@@ -174,7 +176,8 @@ verification, records exact-SHA deployment/smoke/migration evidence, sets the
 Project status to `Done`, and then closes the issue only after every gate
 passes. Native Project `Pull request merged` automation must remain disabled;
 `Item closed` can mirror the final issue closure. A delayed Project update can
-be safely retried from its exact-SHA Production evidence. A failed Production
+be safely retried from its exact-SHA Production evidence. A previously
+completed exact-SHA delivery stays closed if a later recheck fails. A failed Production
 check includes available deployment log and target URLs; investigate the
 deployment, recover through the normal fix, review, and merge path when safe,
 and keep the issue open/Blocked meanwhile. Do not pass a parent epic that still
