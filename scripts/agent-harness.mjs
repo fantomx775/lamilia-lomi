@@ -10,7 +10,6 @@ const PROJECT_OWNER = process.env.AGENT_HARNESS_PROJECT_OWNER;
 const STATUS_FIELD = "Status";
 const DONE_STATUS = "Done";
 const VERCEL_DEPLOYMENT_BOT = "vercel[bot]";
-const VERCEL_PROJECT_ALIAS = "lamilia-lomi.vercel.app";
 const VERCEL_PROJECT_DEPLOYMENT_HOST = /^lamilia-lomi-[a-z0-9]{9}-fantomxs-projects\.vercel\.app$/i;
 
 function isVercelActor(actor) {
@@ -23,8 +22,7 @@ function isExpectedVercelProductionUrl(value) {
     const url = new URL(value);
     return url.protocol === "https:" && !url.username && !url.password &&
       url.pathname === "/" && !url.search && !url.hash &&
-      (url.hostname.toLowerCase() === VERCEL_PROJECT_ALIAS ||
-        VERCEL_PROJECT_DEPLOYMENT_HOST.test(url.hostname));
+      VERCEL_PROJECT_DEPLOYMENT_HOST.test(url.hostname);
   } catch {
     return false;
   }
@@ -3001,6 +2999,15 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
     if (!currentVerified) {
       await postIssueComment(client, issueNumber,
         "Production delivery verified.\n\n" + details + "\n\n" + formatIssueDeliveryComment(deliveryRecord));
+      const recordedDelivery = await readVerifiedIssueDelivery(client, issueNumber, pullRequest);
+      if (!recordedDelivery) {
+        return {
+          status: "BLOCKED",
+          issue: issueNumber,
+          state: issue.state,
+          details: "Production passed, but GitHub did not confirm a trusted exact-SHA issue-delivery record; the issue and Project were not marked Done.",
+        };
+      }
     }
     await setSingleSelectField(client, issueNumber, STATUS_FIELD, DONE_STATUS, {
       productionVerified: true,
@@ -3297,6 +3304,36 @@ export async function deliverPullRequest(client, pullRequestNumber, {
           reasons: ["The tracked issue is already closed; merge was not attempted."],
         };
       }
+    }
+    // The GitHub merge endpoint can pin the PR head SHA but has no base-SHA
+    // precondition. Re-read the PR immediately before merge to minimize the
+    // remaining race window and refuse any drift observed at that point.
+    pullRequest = await client.request(pullRequestPath);
+    if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft ||
+      pullRequest.base?.ref !== "main" || pullRequest.base?.sha?.toLowerCase() !== verifiedBaseSha ||
+      pullRequest.head?.sha !== candidateSha) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "final-merge-snapshot",
+        merged: false,
+        candidateSha,
+        reasons: ["PR state, draft status, base ref/SHA, or head changed immediately before merge; no merge was attempted."],
+      };
+    }
+    const finalClosingIssues = findClosingIssueReferences(
+      pullRequest.body || "",
+      client.owner + "/" + client.repo,
+    );
+    if (finalClosingIssues.length) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "final-merge-snapshot",
+        merged: false,
+        candidateSha,
+        reasons: ["PR body now contains closing reference(s) " + finalClosingIssues.map((value) => "#" + value).join(", ") + "; no merge was attempted."],
+      };
     }
     try {
       mergeResult = await client.request(pullRequestPath + "/merge", {

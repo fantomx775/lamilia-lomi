@@ -179,6 +179,7 @@ function createDeliveryClient({
   closedByCommitInPullRequest = false,
   laterIndependentClosure = false,
   issueCommentsReadError = false,
+  issueCommentActor = "author",
   projectUpdateDelayReads = 0,
   previouslyVerifiedDelivery = false,
   previouslyVerifiedDeliveryAuthor = "author",
@@ -219,7 +220,7 @@ function createDeliveryClient({
       calls.push({ path, method, body: options.body || null });
       if (path === "/repos/example/repo/pulls/52") {
         pullRequestReads += 1;
-        const baseSha = baseShaOnPreMerge && !merged && pullRequestReads >= 2
+        const baseSha = baseShaOnPreMerge && !merged && pullRequestReads >= 3
           ? baseShaOnPreMerge
           : CURRENT_BASE_SHA;
         return merged
@@ -257,7 +258,7 @@ function createDeliveryClient({
       }
       if (path.startsWith("/repos/example/repo/issues/7/comments") && method === "POST") {
         const body = JSON.parse(options.body).body;
-        issueComments.push({ user: { login: "author" }, created_at: "2026-10-08T12:00:03Z", body });
+        issueComments.push({ user: { login: issueCommentActor }, created_at: "2026-10-08T12:00:03Z", body });
         return { id: calls.length, html_url: "https://github.com/example/repo/issues/7#issuecomment-" + calls.length };
       }
       if (path.startsWith("/repos/example/repo/issues/7/comments")) {
@@ -2477,6 +2478,23 @@ test("Production deployment verification requires Vercel provenance and this pro
   assert.equal(untrusted.status, "BLOCKED");
   assert.match(untrusted.details, /none are verifiable as a Vercel Git deployment/);
 
+  const mutableAlias = await waitForProductionDeployment({
+    owner: "example",
+    repo: "repo",
+    request: async (path) => path.includes("/deployments?sha=")
+      ? [{
+          id: 61,
+          sha: mergeSha,
+          ref: mergeSha,
+          task: "deploy",
+          creator: { login: "vercel[bot]" },
+          environment: "Production",
+        }]
+      : [{ state: "success", environment_url: "https://lamilia-lomi.vercel.app", creator: { login: "vercel[bot]" } }],
+  }, mergeSha, { timeoutMs: 0 });
+  assert.equal(mutableAlias.status, "BLOCKED");
+  assert.match(mutableAlias.details, /expected Production project/);
+
   const wrongOrigin = await waitForProductionDeployment({
     owner: "example",
     repo: "repo",
@@ -2624,8 +2642,31 @@ test("blocks merge when the base SHA changes after verification", async () => {
   });
 
   assert.equal(result.decision, "BLOCKED");
-  assert.equal(result.stage, "pre-merge-snapshot");
+  assert.equal(result.stage, "final-merge-snapshot");
   assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
+});
+
+test("does not mark an issue Done when GitHub did not record a trusted delivery comment", async () => {
+  const fixture = createDeliveryClient({ issueCommentActor: "different-account" });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async (_client, mergeSha) => ({
+      status: "PASS",
+      deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
+      details: "Exact-SHA deployment passed.",
+    }),
+    smoke: async () => ({ status: "PASS", checks: [], details: "Production smoke passed." }),
+  });
+
+  assert.equal(result.decision, "BLOCKED");
+  assert.equal(result.completed, false);
+  assert.equal(result.issue.status, "BLOCKED");
+  assert.equal(fixture.issueState, "open");
+  assert.equal(fixture.projectStatus, "Blocked");
+  assert.equal(fixture.calls.some(({ path, method, body }) =>
+    path.endsWith("/issues/7") && method === "PATCH" && JSON.parse(body).state === "closed",
+  ), false);
 });
 
 test("automatically merges a fully green PR and updates its issue only after Production passes", async () => {

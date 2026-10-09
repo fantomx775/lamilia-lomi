@@ -183,7 +183,11 @@ distinct `reviewerAgent` values containing the actual independent agent task
 IDs, both must state that each agent was tasked independently and read the
 actual diff, and both must name the same full head SHA and base SHA. Check the
 records against the two real orchestration reports before posting them. The
-GitHub identity that posts the comments may be the same.
+GitHub identity that posts the comments may be the same. The harness validates
+distinct task IDs and record contents; the Codex orchestrator must source those
+IDs from the actual independent task results before posting. GitHub does not
+expose Codex task provenance, so comment fields alone do not prove that a task
+ran.
 Each finding object needs a `summary` and `requiredFix`. Empty arrays mean no
 findings at that severity.
 
