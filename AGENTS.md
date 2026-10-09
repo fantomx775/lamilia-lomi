@@ -77,17 +77,20 @@ CLI for the normal `main` release path.
 Before merging a PR that changes database migrations or production dependency
 manifests, identify the exact files and assess only the release risks they
 introduce. For migrations, check that the SQL is compatible with the deployed
-application and existing data, review relevant access policies, and run the
-focused local migration/database tests when the tooling is available. For
-dependency changes, compare `dependencies` with `devDependencies`, confirm the
+application and existing data, review relevant access policies, and validate
+the migration on Stage or a local database. Record exact migration IDs and
+commands with the result. For dependency changes, compare `dependencies` with
+`devDependencies`, confirm the
 lockfile and runtime/framework compatibility, and run the focused tests plus
 the build when the change affects the runtime or build.
 
 State the release order and remaining work in the PR before merge. If the new
 application requires a new schema, the compatible migration must be applied
-and verified before the merge can trigger the `main` Production deployment.
-Use an expand/contract sequence for a breaking schema change. After merge,
-Vercel's Git integration performs the normal Production deployment; do not
+and verified in Production before the merge can trigger the `main` deployment.
+Use an expand/contract sequence for a breaking schema change, and verify its
+contract step after the compatible application deployment. Keep the issue open
+until that step passes. After merge, Vercel's Git integration performs the
+normal Production deployment; do not
 follow it with `vercel --prod`. Report the exact migration IDs, compatibility
 evidence, deployment order, and any unapplied or unverified step. If a required
 Production database action is not authorized or cannot be verified, mark it
@@ -107,44 +110,57 @@ result or limitation. An absent GitHub check is `NOT RUN`; never describe
 missing checks as passing. Include focused local checks and relevant remote
 check status separately.
 
-Run `node scripts/agent-harness.mjs verify-pr <pull-request>` before reporting
-merge readiness. The command is read-only: it does not merge or deploy.
-It exits successfully only for `READY_FOR_MERGE`; review-ready and blocked
-results retain structured JSON output but return a nonzero exit code.
-`READY_FOR_REVIEW` means current-SHA local checks and an internal independent
-AI review are complete, so external review can proceed. `READY_FOR_MERGE`
-requires every mandatory check, formal GitHub review, browser requirement, and
-release obligation to pass, and GitHub must report the PR as mergeable. The
-verifier rereads the PR and blocks if its state, draft status, base, or head
-changed during assessment. It reads every page of effective branch rules.
-`BLOCKED` means the PR or implementation evidence is incomplete or a review
-finding requires a fix. The output reports
-implementation completion, internal review, external-review readiness, and
-merge readiness separately.
+Run `node scripts/agent-harness.mjs verify-pr <pull-request>` before merging.
+The command is read-only and exits successfully only for `READY_FOR_MERGE`.
+It requires current-SHA implementation evidence, browser evidence for UI
+changes, two distinct independently tasked AI reviews, no unresolved Critical
+or High findings, applicable migration/dependency evidence, required GitHub
+checks, and GitHub mergeability. Missing optional CI is reported as `NOT RUN`
+and does not block when no checks are required. A different GitHub identity,
+repository-owner approval, and formal GitHub review are not project gates.
+GitHub's actual enforced branch protection and effective rules remain binding:
+required approvals, checks, or other active restrictions must pass, and the
+merge API is never bypassed. `READY_FOR_REVIEW` is reserved for the case where
+all other gates pass but GitHub rules require an approval that is not present.
+The verifier rereads the PR and blocks if its state, draft status, base, or
+head changed during assessment.
 
-Keep exact-SHA local verification and AI review records in PR comments using
-the v1 JSON markers documented in `docs/agent-harness.md`. A new commit makes
-older records stale. An AI sub-agent review must receive the task goal and
-actual diff, be tasked independently, examine correctness, regressions,
-testing, and scope, and report Critical/High/Medium/Low findings, required
-fixes, unresolved findings, and the full SHA reviewed. Label and persist it as
-an AI/sub-agent review; it is not a GitHub review and does not satisfy the
-formal GitHub-review requirement.
+Keep exact-SHA local verification and two independent AI review records in PR
+comments using the v1 JSON markers documented in `docs/agent-harness.md`. A
+new commit makes older records stale. Each reviewer must receive the task goal
+and actual diff independently, examine correctness, regressions, testing, and
+scope, and report Critical/High/Medium/Low findings, required fixes, unresolved
+findings, and the full SHA reviewed. The two records need distinct reviewer
+agent identities; they may be posted by the same GitHub account. Never
+fabricate formal GitHub approvals. Any unresolved Critical/High AI finding or
+non-dismissed current-SHA `CHANGES_REQUESTED` review blocks merging until the
+cause is fixed and all required evidence is refreshed.
 
-Every implementation PR also needs a submitted GitHub review from a user
-different from the PR author on the current head SHA. Use the review body
-summary format in `docs/agent-harness.md`. An author self-review does not
-count. If no independent GitHub identity is available, record formal review as
-`NOT RUN` or `BLOCKED` and keep the PR ready for external review; do not
-impersonate another account. Any non-dismissed `CHANGES_REQUESTED` review on
-the current SHA blocks merge readiness, even if another reviewer later submits
-a clean review; dismiss the change request to clear it. New commits require
-fresh AI and GitHub review evidence for the new SHA.
+There is no project-level requirement for a submitted GitHub review from a
+different account. The gate honors approval requirements that GitHub actually
+enforces; the merge endpoint remains the final authority and is never bypassed.
+An unresolved current-SHA `CHANGES_REQUESTED` review or formal Critical/High
+finding still blocks the quality gate until the cause is fixed. New commits
+require fresh AI review and local verification evidence for the new SHA.
 
-The gate reads required checks from branch protection and effective branch
-rules. If none are configured, it reports that no CI checks are required and
-uses current-SHA local verification plus the formal external GitHub review as
-the manual fallback. Missing checks remain `NOT RUN`, never CI success.
+The gate reads required checks and review rules from branch protection and
+effective branch rules. If no CI checks are required, passing current-SHA local
+verification and the two AI reviews are sufficient; missing optional checks
+remain `NOT RUN`, not CI success. A formal approval from another GitHub
+identity is required only when GitHub itself enforces it.
+
+`node scripts/agent-harness.mjs deliver-pr <pull-request> [--issue <issue>]`
+executes the delivery gate. It reruns `verify-pr`, submits a normal GitHub
+merge request with the verified head SHA, confirms the merge commit, waits for
+the GitHub Production deployment for that exact commit, and runs focused HTTPS
+smoke paths (`AGENT_HARNESS_PRODUCTION_SMOKE_PATHS`, default `/`). It does not
+bypass branch rules or invoke a manual Vercel Production deployment. It stores
+the result in a PR comment. When `--issue` identifies a fully resolved work
+item, the command closes it only after deployment, smoke, and any required
+post-deployment migration verification pass; GitHub Project automation then
+sets `Done`. A failed or unverified Production step keeps the issue open and
+sets it to `Blocked` when possible. Do not pass a parent epic that still has
+unfinished work as the issue to close.
 
 ## UI browser verification
 

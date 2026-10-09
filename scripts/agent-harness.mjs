@@ -672,6 +672,7 @@ export function buildReleaseRequirements(files, { available = true } = {}) {
 const REVIEW_SEVERITIES = Object.freeze(["Critical", "High", "Medium", "Low"]);
 const AI_REVIEW_MARKER = "<!-- agent-harness-ai-review:v1 -->";
 const VERIFICATION_MARKER = "<!-- agent-harness-verification:v1 -->";
+const DELIVERY_MARKER = "<!-- agent-harness-delivery:v1 -->";
 const REQUIRED_LOCAL_CHECKS = Object.freeze(["diff", "lint", "tests"]);
 
 function reviewFields(body) {
@@ -990,9 +991,20 @@ export function validateAiReview({ headSha, comments = [], available = true }) {
   ]));
   const unresolvedHighOrCritical =
     unresolvedFindings.Critical.length > 0 || unresolvedFindings.High.length > 0;
+  const reviewerAgents = current.map(({ record }) => record.reviewerAgent.trim().toLowerCase());
+  const distinctReviewerAgents = new Set(reviewerAgents);
+  const duplicateReviewerAgents = distinctReviewerAgents.size !== reviewerAgents.length;
+  const enoughIndependentReviews = distinctReviewerAgents.size >= 2;
+  const status = unresolvedHighOrCritical || duplicateReviewerAgents
+    ? "FAIL"
+    : enoughIndependentReviews
+      ? "PASS"
+      : "BLOCKED";
   return {
-    status: unresolvedHighOrCritical ? "FAIL" : "PASS",
+    status,
     reviewedSha: headSha,
+    requiredReviewCount: 2,
+    independentReviewCount: distinctReviewerAgents.size,
     reviewers: current.map(({ record, comment }) => ({
       reviewerAgent: record.reviewerAgent,
       recordedBy: comment.user?.login || null,
@@ -1001,7 +1013,11 @@ export function validateAiReview({ headSha, comments = [], available = true }) {
     unresolvedFindings,
     details: unresolvedHighOrCritical
       ? "AI sub-agent review reports unresolved Critical or High findings."
-      : current.length + " independently tasked AI sub-agent review record(s) cover the current head SHA.",
+      : duplicateReviewerAgents
+        ? "AI review records reuse a reviewer-agent identity; two distinct independent agents are required."
+        : !enoughIndependentReviews
+          ? distinctReviewerAgents.size + " of 2 required independent AI sub-agent reviews cover the current head SHA."
+          : distinctReviewerAgents.size + " distinct independently tasked AI sub-agent reviews cover the current head SHA.",
   };
 }
 
@@ -1250,6 +1266,14 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
     };
   }
   const record = localVerification?.record?.release || {};
+  const migrationIds = requirements.migrationFiles.map((filename) =>
+    filename.split("/").at(-1).replace(/\.sql$/i, "").toLowerCase(),
+  );
+  const namesEveryMigration = (evidence) =>
+    Array.isArray(evidence?.migrationIds) &&
+    migrationIds.every((migrationId) => evidence.migrationIds.some((recordedId) =>
+      typeof recordedId === "string" && recordedId.toLowerCase() === migrationId,
+    ));
   const results = [];
   const normalize = (evidence, fallback) => {
     if (!evidence) return fallback;
@@ -1267,6 +1291,7 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
     return evidence;
   };
   let migrationCompatibility = { status: "PASS", details: "No database migration changed." };
+  let stageMigration = { status: "PASS", required: false, details: "No Stage/local migration validation is required." };
   let preMergeMigration = { status: "PASS", required: false, details: "No pre-merge migration action is required." };
   let dependencyAudit = { status: "PASS", details: "No dependency manifest changed." };
   if (requirements.migrationFiles.length) {
@@ -1275,6 +1300,54 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
       command: "migration compatibility review",
       details: "Migration compatibility evidence is missing for the current SHA.",
     });
+    const strategy = record.migrationCompatibility?.strategy;
+    const sequence = record.migrationCompatibility?.deploymentSequence;
+    if (!["compatible", "expand-contract"].includes(strategy)) {
+      migrationCompatibility = {
+        ...migrationCompatibility,
+        status: migrationCompatibility.status === "FAIL" ? "FAIL" : "BLOCKED",
+        details: "Migration strategy must explicitly be compatible or expand-contract.",
+      };
+    } else if (strategy === "expand-contract" && (
+      !Array.isArray(sequence) || sequence.length < 3 ||
+      sequence.some((step) => typeof step !== "string" || !step.trim())
+    )) {
+      migrationCompatibility = {
+        ...migrationCompatibility,
+        status: migrationCompatibility.status === "FAIL" ? "FAIL" : "BLOCKED",
+        details: "A breaking migration must record its expand, compatible deployment, and contract sequence.",
+      };
+    }
+    if (migrationCompatibility.status === "PASS" && !namesEveryMigration(migrationCompatibility)) {
+      migrationCompatibility = {
+        ...migrationCompatibility,
+        status: "BLOCKED",
+        details: "Migration compatibility evidence must list the exact changed migration IDs.",
+      };
+    }
+    stageMigration = normalize(record.stageMigration, {
+      status: "BLOCKED",
+      required: true,
+      command: "Stage/local database migration validation",
+      details: "Stage/local migration validation evidence is missing for the current SHA.",
+    });
+    if (stageMigration.status === "PASS" && stageMigration.required !== true) {
+      stageMigration = {
+        ...stageMigration,
+        status: "BLOCKED",
+        details: "Stage/local migration validation cannot be marked optional for a changed migration.",
+      };
+    }
+    if (stageMigration.status === "PASS" && (
+      !namesEveryMigration(stageMigration) ||
+      !["stage", "local"].includes(String(stageMigration.environment || "").toLowerCase())
+    )) {
+      stageMigration = {
+        ...stageMigration,
+        status: "BLOCKED",
+        details: "Stage/local migration evidence must name its environment and every changed migration ID.",
+      };
+    }
     preMergeMigration = normalize(record.preMergeMigration, {
       status: "BLOCKED",
       required: null,
@@ -1285,6 +1358,15 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
       preMergeMigration = {
         ...preMergeMigration,
         status: preMergeMigration.status === "FAIL" ? "FAIL" : "BLOCKED",
+      };
+    } else if (preMergeMigration.required === true && (
+      !namesEveryMigration(preMergeMigration) ||
+      String(preMergeMigration.environment || "").toLowerCase() !== "production"
+    )) {
+      preMergeMigration = {
+        ...preMergeMigration,
+        status: "BLOCKED",
+        details: "Required pre-merge migration evidence must confirm Production and list every changed migration ID.",
       };
     } else if (
       preMergeMigration.required === false &&
@@ -1297,7 +1379,7 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
     } else if (preMergeMigration.required !== true && preMergeMigration.required !== false) {
       preMergeMigration = { ...preMergeMigration, status: "BLOCKED" };
     }
-    results.push(migrationCompatibility.status, preMergeMigration.status);
+    results.push(migrationCompatibility.status, stageMigration.status, preMergeMigration.status);
   }
   if (requirements.dependencyManifests.length) {
     dependencyAudit = normalize(record.dependencyAudit, {
@@ -1311,9 +1393,43 @@ export function validateReleaseEvidence({ files = [], filesAvailable = true, loc
     ...requirements,
     status: combineEvidenceStatuses(results),
     migrationCompatibility,
+    stageMigration,
     preMergeMigration,
     dependencyAudit,
   };
+}
+
+export function validatePostDeploymentMigrationEvidence({ files = [], filesAvailable = true, localVerification }) {
+  const requirements = buildReleaseRequirements(files, { available: filesAvailable });
+  if (!filesAvailable) return { status: "BLOCKED", required: null, details: "Changed files could not be read after deployment." };
+  if (!requirements.migrationFiles.length) {
+    return { status: "PASS", required: false, details: "No database migration changed." };
+  }
+  const release = localVerification?.record?.release || {};
+  const strategy = release.migrationCompatibility?.strategy;
+  if (strategy !== "expand-contract") {
+    return { status: "PASS", required: false, details: "No post-deployment contract migration is required." };
+  }
+  const evidence = release.postDeployMigration;
+  const migrationIds = requirements.migrationFiles.map((filename) =>
+    filename.split("/").at(-1).replace(/\.sql$/i, "").toLowerCase(),
+  );
+  const namesEveryMigration = Array.isArray(evidence?.migrationIds) &&
+    migrationIds.every((migrationId) => evidence.migrationIds.some((recordedId) =>
+      typeof recordedId === "string" && recordedId.toLowerCase() === migrationId,
+    ));
+  if (!evidence || evidence.status !== "PASS" ||
+    typeof evidence.command !== "string" || !evidence.command.trim() ||
+    typeof evidence.details !== "string" || !evidence.details.trim() ||
+    String(evidence.environment || "").toLowerCase() !== "production" ||
+    !namesEveryMigration) {
+    return {
+      status: evidence?.status === "FAIL" ? "FAIL" : "BLOCKED",
+      required: true,
+      details: "The expand-contract sequence requires verified post-deployment contract migration evidence.",
+    };
+  }
+  return { status: "PASS", required: true, command: evidence.command, details: evidence.details };
 }
 
 function legacyVerificationSummary(pullRequest, headSha, files) {
@@ -1550,7 +1666,7 @@ export function summarizeBranchReviewPolicy({
     unassessedRules: [],
     details: required
       ? approvals.size + " of " + required + " required current-SHA external approval(s) are present."
-      : "No additional approval-count rule is configured; the separate project policy still requires an external GitHub review.",
+      : "No enforced external GitHub approval-count requirement is configured.",
   };
 }
 
@@ -1666,34 +1782,25 @@ export function assessPullRequestVerification({
         : "Required check policy could not be read.",
     };
   } else if (mergePolicy.requiredChecks?.length) {
-    const observedBlock = ["FAIL", "BLOCKED"].includes(observedChecks.status);
-    const status = observedBlock
-      ? observedChecks.status
-      : requiredChecks.status;
+    const status = requiredChecks.status;
     ciPolicy = {
       status,
       details: status === "PASS"
         ? "All configured required checks are green on the current SHA."
         : requiredChecks.details,
     };
-  } else if (["FAIL", "BLOCKED"].includes(observedChecks.status)) {
-    ciPolicy = {
-      status: observedChecks.status,
-      details: "A published current-SHA GitHub check is failing or pending.",
-    };
   } else if (
     localVerification.status === "PASS" &&
-    githubReview.status === "PASS" &&
-    branchReviewPolicy.status === "PASS"
+    aiReview.status === "PASS"
   ) {
     ciPolicy = {
       status: "PASS",
-      details: "No required checks are configured; current-SHA local verification and formal external GitHub review satisfy the documented manual fallback.",
+      details: "No required checks are configured; current-SHA local verification and two independent AI reviews satisfy the CI fallback. Optional GitHub checks are informational.",
     };
   } else {
     ciPolicy = {
       status: "BLOCKED",
-      details: "No required checks are configured. Local verification and formal external GitHub review must both pass before the manual fallback is satisfied.",
+      details: "No required checks are configured; current-SHA local verification and two independent AI reviews must pass.",
     };
   }
   const releaseRequirements = validateReleaseEvidence({
@@ -1731,13 +1838,10 @@ export function assessPullRequestVerification({
   if (verificationReviewBlocker(githubReview)) {
     reviewBlockers.push("The current formal GitHub review has unresolved high-severity findings or requests changes.");
   }
-  const readyForExternalReview =
+  const qualityGatesComplete =
     prBlockers.length === 0 &&
     reviewBlockers.length === 0;
   const mergeBlockers = [...prBlockers, ...reviewBlockers];
-  if (githubReview.status !== "PASS") {
-    mergeBlockers.push("Formal GitHub review is " + githubReview.status + ": " + githubReview.details);
-  }
   if (branchReviewPolicy.status !== "PASS") {
     mergeBlockers.push("Branch review policy is " + branchReviewPolicy.status + ": " + branchReviewPolicy.details);
   }
@@ -1759,15 +1863,18 @@ export function assessPullRequestVerification({
   if (mergeability.status !== "PASS") {
     mergeBlockers.push("GitHub mergeability is " + mergeability.status + ": " + mergeability.details);
   }
-  const readyForMerge = readyForExternalReview &&
+  const mergeReadyExceptRequiredApproval = qualityGatesComplete &&
     mergeability.status === "PASS" &&
-    githubReview.status === "PASS" &&
-    branchReviewPolicy.status === "PASS" &&
     ciPolicy.status === "PASS" &&
     releaseRequirements.status === "PASS";
+  const readyForMerge = mergeReadyExceptRequiredApproval &&
+    branchReviewPolicy.status === "PASS";
+  const waitingForEnforcedApproval = mergeReadyExceptRequiredApproval &&
+    branchReviewPolicy.status === "BLOCKED" &&
+    branchReviewPolicy.approvalsRequired > 0;
   const decision = readyForMerge
     ? "READY_FOR_MERGE"
-    : readyForExternalReview
+    : waitingForEnforcedApproval
       ? "READY_FOR_REVIEW"
       : "BLOCKED";
   return {
@@ -1796,7 +1903,8 @@ export function assessPullRequestVerification({
       implementationComplete: implementationStatus === "PASS",
       implementationStatus,
       internalReviewComplete: aiReview.status === "PASS",
-      readyForExternalReview,
+      qualityGatesComplete,
+      waitingForEnforcedApproval,
       readyForMerge,
     },
     fileScope: {
@@ -1823,11 +1931,14 @@ export function assessPullRequestVerification({
       status: readyForMerge ? "PASS" : "BLOCKED",
       blockers: readyForMerge ? [] : [...new Set(mergeBlockers)],
     },
-    reasons: readyForMerge ? [] : [...new Set(readyForExternalReview ? mergeBlockers : [...prBlockers, ...reviewBlockers])],
+    reasons: readyForMerge ? [] : [...new Set(mergeBlockers)],
   };
 }
 
-export async function verifyPullRequest(client, pullRequestNumber, { expectedBase = "main" } = {}) {
+export async function verifyPullRequest(client, pullRequestNumber, {
+  expectedBase = "main",
+  allowMerged = false,
+} = {}) {
   const number = parseIssueNumber(pullRequestNumber);
   const pullRequestPath = "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number;
   let pullRequest;
@@ -1894,8 +2005,18 @@ export async function verifyPullRequest(client, pullRequestNumber, { expectedBas
     details: "GitHub merge policy could not be read.",
     error: mergePolicyResult.error?.message || latestPullRequestResult.error?.message || null,
   };
-  return assessPullRequestVerification({
-    pullRequest: assessmentPullRequest,
+  const validateAsMergedDelivery = allowMerged && Boolean(assessmentPullRequest?.merged);
+  const verificationPullRequest = validateAsMergedDelivery
+    ? {
+        ...assessmentPullRequest,
+        state: "open",
+        merged: false,
+        mergeable: true,
+        mergeable_state: "clean",
+      }
+    : assessmentPullRequest;
+  const verification = assessPullRequestVerification({
+    pullRequest: verificationPullRequest,
     expectedBase,
     files: filesResult.value || [],
     reviews: reviewsResult.value || [],
@@ -1912,6 +2033,466 @@ export async function verifyPullRequest(client, pullRequestNumber, { expectedBas
     },
     snapshotStable,
   });
+  if (validateAsMergedDelivery && verification.decision === "READY_FOR_MERGE") {
+    return {
+      ...verification,
+      decision: "VERIFIED_MERGE",
+      pullRequest: {
+        ...verification.pullRequest,
+        state: "closed",
+        merged: true,
+        mergeCommitSha: assessmentPullRequest.merge_commit_sha || null,
+      },
+    };
+  }
+  return verification;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+}
+
+export async function waitForProductionDeployment(client, mergeSha, {
+  timeoutMs = 10 * 60 * 1000,
+  pollIntervalMs = 15 * 1000,
+  sleep = delay,
+  now = Date.now,
+} = {}) {
+  if (!validSha(mergeSha)) {
+    return { status: "BLOCKED", deployment: null, details: "The verified merge commit SHA is missing or invalid." };
+  }
+  const deploymentsPath = "/repos/" + client.owner + "/" + client.repo +
+    "/deployments?sha=" + encodeURIComponent(mergeSha) + "&environment=Production";
+  const deadline = now() + timeoutMs;
+  let lastObserved = null;
+  do {
+    let deployments;
+    try {
+      deployments = await pagedRest(client, deploymentsPath);
+    } catch (error) {
+      return {
+        status: "BLOCKED",
+        deployment: null,
+        details: "GitHub Production deployment records could not be read: " + error.message,
+      };
+    }
+    const exactShaDeployments = deployments
+      .filter((deployment) =>
+        deployment?.sha?.toLowerCase() === mergeSha.toLowerCase() &&
+        deployment.environment?.toLowerCase() === "production",
+      )
+      .sort((left, right) => (right.created_at || "").localeCompare(left.created_at || ""));
+    if (exactShaDeployments.length) {
+      const deployment = exactShaDeployments[0];
+      let statuses;
+      try {
+        statuses = await pagedRest(
+          client,
+          "/repos/" + client.owner + "/" + client.repo + "/deployments/" + deployment.id + "/statuses",
+        );
+      } catch (error) {
+        return {
+          status: "BLOCKED",
+          deployment: { id: deployment.id, sha: deployment.sha, environment: deployment.environment },
+          details: "The Production deployment exists, but its readiness status could not be read: " + error.message,
+        };
+      }
+      const latest = [...statuses].sort((left, right) =>
+        (right.created_at || "").localeCompare(left.created_at || ""),
+      )[0];
+      lastObserved = {
+        id: deployment.id,
+        sha: deployment.sha,
+        ref: deployment.ref,
+        environment: deployment.environment,
+        createdAt: deployment.created_at || null,
+        state: latest?.state?.toLowerCase() || "pending",
+        environmentUrl: latest?.environment_url || null,
+        statusUrl: latest?.target_url || null,
+        description: latest?.description || null,
+      };
+      if (lastObserved.state === "success") {
+        if (!lastObserved.environmentUrl) {
+          return {
+            status: "BLOCKED",
+            deployment: lastObserved,
+            details: "GitHub reports the deployment ready but did not provide its Production environment URL.",
+          };
+        }
+        return {
+          status: "PASS",
+          deployment: lastObserved,
+          details: "GitHub reports a successful Production deployment for the exact merge SHA.",
+        };
+      }
+      if (["failure", "error", "inactive"].includes(lastObserved.state)) {
+        return {
+          status: "FAIL",
+          deployment: lastObserved,
+          details: "The exact-SHA Production deployment ended in state " + lastObserved.state +
+            (lastObserved.description ? ": " + lastObserved.description : "."),
+        };
+      }
+    }
+    if (now() >= deadline) break;
+    await sleep(Math.min(pollIntervalMs, Math.max(0, deadline - now())));
+  } while (now() <= deadline);
+  return {
+    status: "BLOCKED",
+    deployment: lastObserved,
+    details: lastObserved
+      ? "Timed out waiting for the exact-SHA Production deployment; latest state is " + lastObserved.state + "."
+      : "No Production deployment for the exact merge SHA appeared before the wait timed out.",
+  };
+}
+
+export async function runProductionSmoke(environmentUrl, {
+  paths = (process.env.AGENT_HARNESS_PRODUCTION_SMOKE_PATHS || "/")
+    .split(",").map((path) => path.trim()).filter(Boolean),
+  fetchImpl = fetch,
+  timeoutMs = 15_000,
+} = {}) {
+  let baseUrl;
+  try {
+    baseUrl = new URL(environmentUrl);
+  } catch {
+    return { status: "BLOCKED", checks: [], details: "Production environment URL is missing or invalid." };
+  }
+  if (baseUrl.protocol !== "https:") {
+    return { status: "BLOCKED", checks: [], details: "Production smoke requires an HTTPS environment URL." };
+  }
+  if (!paths.length || paths.some((path) => !path.startsWith("/") || path.startsWith("//"))) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke paths must be non-empty same-origin absolute paths." };
+  }
+  const checks = [];
+  for (const path of paths) {
+    const url = new URL(path, baseUrl);
+    if (url.origin !== baseUrl.origin) {
+      return { status: "BLOCKED", checks, details: "Production smoke paths must stay on the deployed environment origin." };
+    }
+    try {
+      const response = await fetchImpl(url, {
+        method: "GET",
+        cache: "no-store",
+        redirect: "follow",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const body = await response.text();
+      const finalUrl = new URL(response.url || url.href);
+      const check = {
+        path,
+        statusCode: response.status,
+        contentType: response.headers?.get?.("content-type") || null,
+        responseBytes: Buffer.byteLength(body),
+        finalUrl: finalUrl.href,
+      };
+      checks.push(check);
+      if (!response.ok || finalUrl.origin !== baseUrl.origin || !body.trim()) {
+        return {
+          status: "FAIL",
+          checks,
+          details: "Production smoke failed for " + path + " (HTTP " + response.status +
+            (finalUrl.origin !== baseUrl.origin ? ", redirected outside the deployment origin" : "") +
+            (!body.trim() ? ", empty response body" : "") + ").",
+        };
+      }
+    } catch (error) {
+      return {
+        status: "FAIL",
+        checks,
+        details: "Production smoke request failed for " + path + ": " + error.message,
+      };
+    }
+  }
+  return { status: "PASS", checks, details: checks.length + " focused Production smoke path(s) returned non-empty successful responses." };
+}
+
+function formatDeliveryComment(record) {
+  return DELIVERY_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+}
+
+async function updateTrackedIssueAfterDelivery(client, issueNumber, {
+  status,
+  details,
+  wasOpenBeforeMerge = false,
+}) {
+  if (!issueNumber) return { status: "NOT RUN", issue: null, details: "No issue number was provided." };
+  const issue = await readIssue(client, issueNumber);
+  if (status === "PASS") {
+    await postIssueComment(client, issueNumber, "Production delivery verified.\n\n" + details);
+    if (issue.state === "open") {
+      await client.request("/repos/" + client.owner + "/" + client.repo + "/issues/" + issueNumber, {
+        method: "PATCH",
+        body: JSON.stringify({ state: "closed", state_reason: "completed" }),
+      });
+    }
+    const closed = await readIssue(client, issueNumber);
+    if (closed.state !== "closed") {
+      return { status: "BLOCKED", issue: issueNumber, state: closed.state, details: "Production passed, but GitHub did not close the tracked issue." };
+    }
+    const projectDeadline = Date.now() + 15_000;
+    let projectStatus = null;
+    do {
+      const projectContext = await readProjectItem(client, closed);
+      if (!projectContext.item || projectContext.item.isArchived) {
+        return { status: "BLOCKED", issue: issueNumber, state: closed.state, projectStatus: null, details: "Issue closed after Production verification, but its active Project card could not be verified." };
+      }
+      projectStatus = projectItemFields(projectContext.item)[STATUS_FIELD] || null;
+      if (projectStatus === DONE_STATUS || Date.now() >= projectDeadline) break;
+      await delay(1_000);
+    } while (Date.now() < projectDeadline);
+    return {
+      status: projectStatus === DONE_STATUS ? "PASS" : "BLOCKED",
+      issue: issueNumber,
+      state: closed.state,
+      projectStatus,
+      details: projectStatus === DONE_STATUS
+        ? "The verified issue is closed and Project automation set its status to Done."
+        : "Production passed and the issue is closed, but Project automation has not set Status to Done.",
+    };
+  }
+
+  await postIssueComment(client, issueNumber, "Production delivery is not complete.\n\n" + details);
+  let currentIssue = issue;
+  if (issue.state === "open") currentIssue = await readIssue(client, issueNumber);
+  if (currentIssue.state === "closed" && wasOpenBeforeMerge) {
+    await client.request("/repos/" + client.owner + "/" + client.repo + "/issues/" + issueNumber, {
+      method: "PATCH",
+      body: JSON.stringify({ state: "open" }),
+    });
+    currentIssue = await readIssue(client, issueNumber);
+  }
+  if (currentIssue.state === "open") {
+    try {
+      await setSingleSelectField(client, issueNumber, STATUS_FIELD, "Blocked");
+      const projectContext = await readProjectItem(client, currentIssue);
+      if (projectItemFields(projectContext.item)[STATUS_FIELD] !== "Blocked") {
+        return {
+          status: "BLOCKED",
+          issue: issueNumber,
+          state: currentIssue.state,
+          details: "Production failed; the issue remains open but Project Status did not reach Blocked.",
+        };
+      }
+    } catch (error) {
+      return {
+        status: "BLOCKED",
+        issue: issueNumber,
+        state: currentIssue.state,
+        details: "Production failed; the issue remains open. Project Status could not be set to Blocked: " + error.message,
+      };
+    }
+  }
+  return {
+    status: "PASS",
+    issue: issueNumber,
+    state: currentIssue.state,
+    projectStatus: currentIssue.state === "open" ? "Blocked" : null,
+    details: currentIssue.state === "open"
+      ? "Production did not pass; the issue remains open and Project Status is Blocked."
+      : "Production did not pass; the issue was not marked complete.",
+  };
+}
+
+export async function deliverPullRequest(client, pullRequestNumber, {
+  issueNumber = null,
+  verify = verifyPullRequest,
+  waitForDeployment = waitForProductionDeployment,
+  smoke = runProductionSmoke,
+} = {}) {
+  const number = parseIssueNumber(pullRequestNumber);
+  const issue = issueNumber === null ? null : parseIssueNumber(issueNumber);
+  const pullRequestPath = "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number;
+  let pullRequest = await client.request(pullRequestPath);
+  let candidateSha = pullRequest.head?.sha || null;
+  let mergeSha = pullRequest.merge_commit_sha || null;
+  let mergeResult = { merged: Boolean(pullRequest.merged), alreadyMerged: Boolean(pullRequest.merged) };
+  let verification = null;
+  let issueBeforeMerge = null;
+
+  if (!pullRequest.merged) {
+    verification = await verify(client, number);
+    if (verification.decision !== "READY_FOR_MERGE") {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "pre-merge-gates",
+        merged: false,
+        candidateSha: verification.currentSha || candidateSha,
+        verification,
+        reasons: verification.reasons || ["All merge gates must pass before the GitHub merge endpoint is called."],
+      };
+    }
+    candidateSha = verification.currentSha;
+    pullRequest = await client.request(pullRequestPath);
+    if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft ||
+      pullRequest.base?.ref !== "main" || pullRequest.head?.sha !== candidateSha) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "pre-merge-snapshot",
+        merged: false,
+        candidateSha,
+        reasons: ["PR state, draft status, base, or head changed after gate verification; no merge was attempted."],
+      };
+    }
+    if (issue !== null) {
+      issueBeforeMerge = await readIssue(client, issue);
+      if (issueBeforeMerge.state !== "open") {
+        return {
+          status: "BLOCKED",
+          decision: "BLOCKED",
+          stage: "issue-preflight",
+          merged: false,
+          candidateSha,
+          reasons: ["The tracked issue is already closed; merge was not attempted."],
+        };
+      }
+    }
+    try {
+      mergeResult = await client.request(pullRequestPath + "/merge", {
+        method: "PUT",
+        body: JSON.stringify({ sha: candidateSha }),
+      });
+    } catch (error) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "merge",
+        merged: false,
+        candidateSha,
+        reasons: ["GitHub rejected the normal merge request; no protection bypass was attempted: " + error.message],
+      };
+    }
+    if (mergeResult?.merged !== true || !validSha(mergeResult.sha)) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "merge",
+        merged: false,
+        candidateSha,
+        mergeResult,
+        reasons: ["GitHub did not confirm a successful merge commit."],
+      };
+    }
+    mergeSha = mergeResult.sha;
+    pullRequest = await client.request(pullRequestPath);
+    if (!pullRequest.merged || pullRequest.merge_commit_sha?.toLowerCase() !== mergeSha.toLowerCase()) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "merge-confirmation",
+        merged: true,
+        candidateSha,
+        mergeSha,
+        reasons: ["GitHub accepted the merge request but the PR merge commit could not be confirmed."],
+      };
+    }
+  } else {
+    verification = await verify(client, number, { allowMerged: true });
+    if (verification.decision !== "VERIFIED_MERGE") {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "pre-merge-gates",
+        merged: true,
+        candidateSha: verification.currentSha || candidateSha,
+        mergeSha,
+        verification,
+        reasons: verification.reasons || ["The merged PR does not have current-SHA evidence proving that all delivery gates passed."],
+      };
+    }
+    candidateSha = verification.currentSha;
+    if (!validSha(mergeSha)) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "merge-confirmation",
+        merged: true,
+        candidateSha,
+        reasons: ["The already-merged PR does not expose a valid merge commit SHA."],
+      };
+    }
+  }
+
+  let productionDeployment;
+  let productionSmoke;
+  let postDeploymentMigration;
+  try {
+    productionDeployment = await waitForDeployment(client, mergeSha);
+    if (productionDeployment.status === "PASS") {
+      productionSmoke = await smoke(productionDeployment.deployment.environmentUrl);
+      if (productionSmoke.status === "PASS") {
+        const files = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number + "/files");
+        const comments = await pagedRest(client, "/repos/" + client.owner + "/" + client.repo + "/issues/" + number + "/comments");
+        const localVerification = validateLocalVerification({ headSha: candidateSha, comments });
+        postDeploymentMigration = validatePostDeploymentMigrationEvidence({
+          files,
+          filesAvailable: true,
+          localVerification,
+        });
+      }
+    }
+  } catch (error) {
+    productionDeployment ||= { status: "BLOCKED", deployment: null, details: error.message };
+  }
+
+  const postDeploymentPass = productionDeployment?.status === "PASS" &&
+    productionSmoke?.status === "PASS" &&
+    postDeploymentMigration?.status === "PASS";
+  const status = postDeploymentPass ? "PASS" :
+    productionDeployment?.status === "FAIL" || productionSmoke?.status === "FAIL" || postDeploymentMigration?.status === "FAIL"
+      ? "FAIL"
+      : "BLOCKED";
+  const details = [
+    "Candidate SHA: " + (candidateSha || "unknown"),
+    "Merge SHA: " + mergeSha,
+    "Production deployment: " + (productionDeployment?.status || "NOT RUN") + " — " + (productionDeployment?.details || "not verified"),
+    "Production smoke: " + (productionSmoke?.status || "NOT RUN") + " — " + (productionSmoke?.details || "not run"),
+    "Post-deployment migration: " + (postDeploymentMigration?.status || "NOT RUN") + " — " + (postDeploymentMigration?.details || "not run"),
+  ].join("\n");
+  let issueOutcome = { status: "NOT RUN", issue: null, details: "No issue number was provided." };
+  if (issue !== null) {
+    try {
+      issueOutcome = await updateTrackedIssueAfterDelivery(client, issue, {
+        status,
+        details,
+        wasOpenBeforeMerge: issueBeforeMerge?.state === "open",
+      });
+    } catch (error) {
+      issueOutcome = { status: "BLOCKED", issue, details: "Issue/Project tracking update failed: " + error.message };
+    }
+  }
+  const completed = status === "PASS" && (issue === null || issueOutcome.status === "PASS");
+  const record = {
+    schemaVersion: 1,
+    status: completed ? "PASS" : status === "PASS" ? "BLOCKED" : status,
+    candidateSha,
+    mergeSha,
+    merged: true,
+    productionDeployment: productionDeployment || { status: "NOT RUN" },
+    productionSmoke: productionSmoke || { status: "NOT RUN" },
+    postDeploymentMigration: postDeploymentMigration || { status: "NOT RUN" },
+    issue: issueOutcome,
+    completed,
+    recordedAt: new Date().toISOString(),
+  };
+  const comment = await postIssueComment(client, number, formatDeliveryComment(record));
+  return {
+    status: record.status,
+    decision: completed ? "DELIVERED" : status === "PASS" ? "BLOCKED" : status === "FAIL" ? "DELIVERY_FAILED" : "BLOCKED",
+    stage: completed ? "complete" : "post-merge-verification",
+    merged: true,
+    candidateSha,
+    mergeSha,
+    productionDeployment: record.productionDeployment,
+    productionSmoke: record.productionSmoke,
+    postDeploymentMigration: record.postDeploymentMigration,
+    issue: issueOutcome,
+    deliveryComment: comment.url,
+    completed,
+    reasons: completed ? [] : [details, ...(issueOutcome.status === "BLOCKED" ? [issueOutcome.details] : [])],
+  };
 }
 
 export function statusTransitionBlockers(status, readiness, pullRequests = [], recoveryPlan = null) {
@@ -2294,6 +2875,7 @@ function printUsage() {
   console.log(`Usage:
   node scripts/agent-harness.mjs inspect <issue>
   node scripts/agent-harness.mjs verify-pr <pull-request>
+  node scripts/agent-harness.mjs deliver-pr <pull-request> [--issue <issue>]
   node scripts/agent-harness.mjs add <issue>
   node scripts/agent-harness.mjs status <issue> <Backlog|Ready|In Progress|Review|Blocked>
   node scripts/agent-harness.mjs field <issue> <Priority|Area> <value>
@@ -2315,6 +2897,20 @@ async function main(args) {
     const verification = await verifyPullRequest(client, issueNumber);
     console.log(JSON.stringify(verification, null, 2));
     if (verification.decision !== "READY_FOR_MERGE") process.exitCode = 1;
+    return;
+  }
+  if (command === "deliver-pr") {
+    const trackedIssueNumber = fieldOrStatus === "--issue" && value && !extra.length
+      ? parseIssueNumber(value)
+      : null;
+    if ((fieldOrStatus && trackedIssueNumber === null) || (!fieldOrStatus && value) || extra.length) {
+      throw new Error("Use deliver-pr <pull-request> [--issue <issue>].");
+    }
+    const delivery = await deliverPullRequest(client, issueNumber, {
+      issueNumber: trackedIssueNumber,
+    });
+    console.log(JSON.stringify(delivery, null, 2));
+    if (!delivery.completed) process.exitCode = 1;
     return;
   }
   if (command === "inspect") {

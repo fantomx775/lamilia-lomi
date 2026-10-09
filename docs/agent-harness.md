@@ -99,61 +99,65 @@ to `Ready`.
 4. Plan from the acceptance criteria. Implement only the requested issue. Run
    changed-file lint and focused tests where supported, plus conditional
    typecheck/build/browser checks from AGENTS.md.
-5. When supabase/migrations files change, identify the exact migration, check
+5. When `supabase/migrations` files change, identify each migration, check
    compatibility with the deployed application and existing data, inspect
-   relevant RLS/grants, and run focused migration tests when available. Use
-   supabase migration list --linked and supabase db push --dry-run --linked
-   when access is available. State the release order and remaining work before
-   merge. When the app requires new schema, apply and verify the compatible
-   migration before merge; main then triggers the normal Vercel Git
-   Production deployment. Use expand/contract for breaking changes and do
-   not follow the automatic deployment with vercel --prod.
+   relevant RLS/grants, and validate on Stage or a local database. Record the
+   exact command, migration IDs, and result. If deployed code needs the schema,
+   apply and verify a compatible migration in Production before merge. For a
+   breaking change, record and follow the expand, compatible-deploy, and
+   contract sequence; keep the issue open until the contract step is verified.
+   Main triggers the normal Vercel Git Production deployment; do not follow it
+   with `vercel --prod`.
 6. When dependency manifests change, compare actual production dependency
    changes in dependencies (not only devDependencies), verify runtime/framework
    compatibility and lockfile alignment, and run focused checks/build as
    needed. Do not add unrelated full-release checks to an ordinary PR.
-7. Ask an independently tasked AI sub-agent to read the actual diff and task
-   goal, review correctness, regressions, tests, and scope, and report findings
-   by severity, required fixes, and the exact 40-character SHA. Persist it as
-   an explicitly labeled AI review comment using the v1 record below. Re-review
-   meaningful fixes on the new SHA. AI review is internal evidence, not a
-   GitHub review.
-8. Request a submitted GitHub review from a different account than the PR
-   author when an independent identity is available. Its body must include:
-   `Reviewer`, `Reviewed SHA`, `Critical`, `High`, `Medium`, `Low`, `Fixes
-   applied`, and `Unresolved findings`. Use `none` for an empty category and
-   identify findings by severity. The submitted review commit and stated SHA
-   must both match the current head. An author self-review does not count. If
-   another GitHub identity is unavailable, report formal review as `NOT RUN`
-   and continue preparing the PR for external review; never impersonate a
-   reviewer. A High or Critical unresolved finding, any non-dismissed
-   current-SHA `CHANGES_REQUESTED` review, or incomplete current-SHA evidence
-   blocks merge readiness. A later review by another reviewer does not clear
-   an outstanding change request; dismiss that review before merge readiness.
+7. Have two independently tasked AI sub-agents each read the task goal and
+   actual diff, review correctness, regressions, tests, and scope, and report
+   severity, required fixes, unresolved findings, and the full 40-character
+   SHA. Persist two records with distinct reviewer-agent identities using the
+   v1 marker below. The same GitHub account may post both records. Re-review
+   meaningful fixes on the new SHA. Do not fabricate GitHub approvals.
+8. Fix and retest confirmed findings, then repeat both reviews on the final
+   candidate SHA. Any unresolved Critical/High finding, incomplete/stale
+   evidence, or non-dismissed current-SHA `CHANGES_REQUESTED` review blocks
+   merging. A formal approval from another account is required only when an
+   effective GitHub branch rule enforces it.
 9. Open or update one PR referencing the issue. Include acceptance-criteria
    coverage, exact candidate SHA, verification results, and migration/
-   production-dependency release order and remaining work when applicable.
-   Run `node scripts/agent-harness.mjs verify-pr <pr-number>` and use its
-   structured decision. `READY_FOR_REVIEW` requires complete current-SHA local
-   checks and AI review; `READY_FOR_MERGE` additionally requires the formal
-   GitHub review, configured branch checks/rules, and applicable release
-   obligations. The verifier only assesses state; it never merges or deploys.
-   Set the issue to `Review` once a legitimate open, non-draft PR is linked;
-   merge readiness is not required for that Project transition.
-10. Keep progress and blockers in issue comments. If a new agent resumes, rerun
-   inspect, read the latest comments and PR state, and continue from the
-   existing branch and exact candidate.
+   production-dependency release order when applicable. Run
+   `node scripts/agent-harness.mjs verify-pr <pr-number>`. `READY_FOR_MERGE`
+   means every quality gate, enforced GitHub rule, and release obligation
+   passes; missing optional CI does not block when no checks are required.
+   `READY_FOR_REVIEW` is only for an approval required by GitHub rules. Set the
+   Project issue to `Review` when an open non-draft PR is linked.
+10. Run `node scripts/agent-harness.mjs deliver-pr <pr-number> --issue
+    <issue-number>` for a fully resolved work item. The command reruns the
+    gate, merges with the verified head SHA through GitHub's normal merge API,
+    confirms the merge commit, waits for its GitHub Production deployment, and
+    runs HTTPS smoke paths (default `/`). The Git merge remains subject to
+    branch protection. It records the outcome in a PR comment. It closes the
+    issue only after deployment, smoke, and required post-deployment migration
+    evidence pass; native Project automation sets `Done`. If Production fails
+    or cannot be verified, the command records the blocker and keeps the issue
+    open/Blocked. Do not pass an unfinished parent epic as the issue to close.
+    If a new agent resumes, rerun inspect and continue from the existing branch.
 
 ## Durable review and verification records
 
-The harness reads records from PR issue comments, while formal GitHub reviews
-remain in the PR Reviews API. Keep one JSON object immediately after each
-marker, inside a fenced `json` block. A new commit requires new records with
-the new exact head SHA. The harness ignores author-written review summaries
-when checking formal reviewer identity.
+The harness reads AI-review, verification, and delivery records from PR issue
+comments. It reads the GitHub Reviews API only to honor enforced approval
+rules and to detect outstanding formal change requests. Keep one JSON object
+immediately after each marker, inside a fenced `json` block. A new commit
+requires new AI-review and verification records with the exact new head SHA.
+Never fabricate a formal GitHub approval.
 
-An AI review record has this shape; each finding object needs a `summary` and
-`requiredFix`. Empty arrays mean no findings at that severity.
+Each PR needs two genuinely independent AI reviews. The records must use
+distinct `reviewerAgent` values, both must state that each agent was tasked
+independently and read the actual diff, and both must name the same full
+current SHA. The GitHub identity that posts the comments may be the same.
+Each finding object needs a `summary` and `requiredFix`. Empty arrays mean no
+findings at that severity.
 
 ````text
 <!-- agent-harness-ai-review:v1 -->
@@ -228,12 +232,33 @@ Example browser evidence fields:
 }
 ```
 
-For changed migrations, `release` must record `migrationCompatibility` and an
-explicit `preMergeMigration` decision. If pre-merge application is required,
-it must be `PASS` with the command and result; if not required, record
-`required: false` and the reason. For changed dependency manifests, record a
-`dependencyAudit` command and result. Missing or stale release evidence keeps
-merge readiness blocked.
+For changed migrations, `release` must record `migrationCompatibility` with a
+`strategy` of `compatible` or `expand-contract`, all changed `migrationIds`,
+and `stageMigration` with `environment: "Stage"` or `"local"`, a verified
+command, and result. A breaking migration must include at least three
+`deploymentSequence` steps for expansion, compatible code deployment, and
+contraction. Record an explicit `preMergeMigration` decision: if the deployed
+code needs the schema, it must be `required: true`, run in Production, and pass
+with exact migration IDs and evidence that Production was updated before
+merge; otherwise use `required: false` and explain why. An expand-contract plan
+also needs a `postDeployMigration` with `environment: "Production"`, exact
+migration IDs, and `PASS` before the delivery command can close the issue.
+For changed dependency manifests, record a `dependencyAudit` command and
+result. Missing or stale release evidence keeps merge readiness blocked.
+
+`deliver-pr` writes a delivery record after merge. It binds the verified PR
+head SHA to the GitHub merge SHA, exact-SHA Production deployment, smoke
+results, migration follow-up, and issue/Project state. It marks delivery
+complete only when Production is ready, focused smoke succeeds, required
+post-deployment migration evidence passes, and the requested issue is closed
+with Project Status `Done`. If Production fails or cannot be read, the command
+records `FAIL` or `BLOCKED`, leaves the issue open/Blocked, and does not report
+delivery complete.
+
+To smoke more than the default `/` path, set
+`AGENT_HARNESS_PRODUCTION_SMOKE_PATHS` to comma-separated same-origin paths,
+such as `/,/catalog`. Smoke requests use HTTPS and must return a non-empty
+successful response on the Production deployment origin.
 
 Post a concise issue update from a file when durable progress is useful:
 
@@ -251,8 +276,10 @@ npm test -- scripts/agent-harness.test.mjs --maxWorkers=1
 
 They cover GitHub authentication fallback, exact repository-to-card matching,
 acceptance criteria, issue references, readiness and recovery, migration-aware
-release ordering, AI and GitHub review identity/SHA semantics, required and
-missing checks, UI browser evidence, migration obligations, and the PR gate.
+release ordering, two distinct AI reviewers, actual branch approval rules,
+optional and required CI, exact-SHA evidence, UI browser evidence, migration
+obligations, automatic merge, Production readiness/smoke, and issue completion
+only after successful Production verification.
 Do not use a requested live issue as a temporary test fixture. Prefer unit tests;
 when live transition coverage is essential, use a dedicated test issue and
 restore every changed Project field before finishing.
@@ -269,14 +296,16 @@ the check.
 and has a stable current head, base, and PR state across the assessment. It
 requires GitHub to report `mergeable: true` before `READY_FOR_MERGE`; a
 conflict or unknown mergeability blocks merge readiness. It reads changed
-files, exact-SHA GitHub reviews, issue comments, check runs/statuses, classic
+  files, exact-SHA AI review evidence, issue comments, check runs/statuses, classic
 branch protection, and every page of effective branch rules. Required checks
 retain any configured GitHub App or integration identity; an explicit
 "any app" setting remains provider-agnostic. Unsupported, incomplete, or
 unreadable active rules block the merge decision. If no
-required status checks are configured, the output says so and uses
-current-SHA local evidence plus an external formal GitHub review as the manual
-fallback. This absence is never reported as green CI. It prints structured
+  required status checks are configured, the output says so and uses passing
+  current-SHA local evidence plus two independent AI reviews as the fallback.
+  Optional CI may be missing and remains `NOT RUN`; it does not block delivery.
+  A different GitHub account is required only when enforced branch rules demand
+  an approval. The absence of CI is never reported as green CI. It prints structured
 JSON and exits successfully only for `READY_FOR_MERGE`; both
 `READY_FOR_REVIEW` and `BLOCKED` return a nonzero exit code so a shell gate
 cannot mistake them for merge approval.

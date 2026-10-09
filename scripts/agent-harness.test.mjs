@@ -4,6 +4,7 @@ import {
   buildReleaseRequirements,
   buildReadiness,
   assessPullRequestVerification,
+  deliverPullRequest,
   extractAcceptanceCriteria,
   findBranchCandidates,
   githubToken,
@@ -17,6 +18,7 @@ import {
   repositoryFromRemote,
   summarizeGitHubChecks,
   summarizeRequiredGitHubChecks,
+  runProductionSmoke,
   statusTransitionBlockers,
   validateAiReview,
   validateBrowserVerification,
@@ -24,6 +26,8 @@ import {
   validateIndependentReview,
   validateLocalVerification,
   validateReleaseEvidence,
+  validatePostDeploymentMigrationEvidence,
+  waitForProductionDeployment,
   verifyPullRequest,
   verificationEvidence,
 } from "./agent-harness.mjs";
@@ -55,6 +59,17 @@ function cleanAiReviewRecord(headSha = CURRENT_SHA, reviewerAgent = "reviewer-A"
     unresolvedFindings: structuredClone(noFindings),
     fixesApplied: [],
   };
+}
+
+function cleanAiReviewComments(headSha = CURRENT_SHA) {
+  return ["reviewer-A", "reviewer-B"].map((reviewerAgent, index) =>
+    structuredComment(
+      AI_REVIEW_MARKER,
+      cleanAiReviewRecord(headSha, reviewerAgent),
+      "author",
+      "2026-10-08T12:0" + index + ":00Z",
+    ),
+  );
 }
 
 function cleanVerificationRecord({ headSha = CURRENT_SHA, uiBehavior = false, browser, release } = {}) {
@@ -118,6 +133,90 @@ function cleanMergePolicy(overrides = {}) {
     sources: ["no classic branch protection", "effective branch rules"],
     ...overrides,
   };
+}
+
+function createDeliveryClient() {
+  const mergeSha = "c".repeat(40);
+  const issueId = "I_issue-7";
+  const calls = [];
+  let merged = false;
+  let issueState = "open";
+  let projectStatus = "Review";
+  const client = {
+    owner: "example",
+    repo: "repo",
+    projectOwner: "owner",
+    projectNumber: 1,
+    calls,
+    request: async (path, options = {}) => {
+      const method = options.method || "GET";
+      calls.push({ path, method, body: options.body || null });
+      if (path === "/repos/example/repo/pulls/52") {
+        return merged
+          ? cleanPullRequest({ state: "closed", merged: true, merge_commit_sha: mergeSha })
+          : cleanPullRequest();
+      }
+      if (path === "/repos/example/repo/pulls/52/merge" && method === "PUT") {
+        const body = JSON.parse(options.body);
+        assert.equal(body.sha, CURRENT_SHA);
+        merged = true;
+        return { merged: true, sha: mergeSha, message: "Pull Request successfully merged" };
+      }
+      if (path === "/repos/example/repo/issues/7" && method === "PATCH") {
+        const body = JSON.parse(options.body);
+        issueState = body.state;
+        if (body.state === "closed") projectStatus = "Done";
+        return { number: 7, node_id: issueId, state: issueState };
+      }
+      if (path === "/repos/example/repo/issues/7") {
+        return { number: 7, node_id: issueId, state: issueState, title: "Delivery issue" };
+      }
+      if (method === "POST" && (
+        path.startsWith("/repos/example/repo/issues/52/comments") ||
+        path.startsWith("/repos/example/repo/issues/7/comments")
+      )) {
+        return { id: calls.length, html_url: "https://github.com/example/repo/issues/52#issuecomment-" + calls.length };
+      }
+      if (path.startsWith("/repos/example/repo/pulls/52/files")) return [];
+      if (path.startsWith("/repos/example/repo/issues/52/comments")) return [];
+      throw new Error("Unexpected delivery API request: " + method + " " + path);
+    },
+    graphql: async (query) => {
+      calls.push({ path: "graphql", method: "POST", body: query });
+      if (query.includes("UpdateProjectV2ItemFieldValueInput")) {
+        projectStatus = "Blocked";
+        return { updateProjectV2ItemFieldValue: { projectV2Item: { id: "item-7" } } };
+      }
+      return {
+        user: {
+          projectV2: {
+            id: "project-1",
+            title: "Project",
+            url: "https://github.com/users/owner/projects/1",
+            fields: {
+              nodes: [{
+                id: "status-field",
+                name: "Status",
+                options: ["Backlog", "Review", "Blocked", "Done"].map((name) => ({ id: "status-" + name, name })),
+              }],
+            },
+            items: {
+              nodes: [{
+                id: "item-7",
+                isArchived: false,
+                content: { __typename: "Issue", id: issueId },
+                fieldValues: {
+                  nodes: [{ name: projectStatus, field: { name: "Status" } }],
+                },
+              }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      };
+    },
+  };
+  return { client, calls, mergeSha, get issueState() { return issueState; }, get projectStatus() { return projectStatus; } };
 }
 
 test("reads GitHub HTTPS and SSH repository remotes", () => {
@@ -770,12 +869,14 @@ test("reports missing CI as NOT RUN and never as PASS", () => {
   );
 });
 
-test("records an independently tasked AI review even when it shares the author's GitHub identity", () => {
+test("requires two distinct independently tasked AI reviews and allows them to share the author's GitHub identity", () => {
   const record = cleanAiReviewRecord();
   const comment = structuredComment(AI_REVIEW_MARKER, record, "author");
   const ai = validateAiReview({ headSha: CURRENT_SHA, comments: [comment] });
 
-  assert.equal(ai.status, "PASS");
+  assert.equal(ai.status, "BLOCKED");
+  assert.equal(ai.requiredReviewCount, 2);
+  assert.equal(ai.independentReviewCount, 1);
   assert.equal(ai.reviewers[0].reviewerAgent, "reviewer-A");
   assert.equal(ai.reviewers[0].recordedBy, "author");
   assert.equal(validateGitHubReview({
@@ -783,6 +884,22 @@ test("records an independently tasked AI review even when it shares the author's
     headSha: CURRENT_SHA,
     reviews: [],
   }).status, "NOT RUN");
+
+  const twoReviews = validateAiReview({
+    headSha: CURRENT_SHA,
+    comments: cleanAiReviewComments(),
+  });
+  assert.equal(twoReviews.status, "PASS");
+  assert.equal(twoReviews.independentReviewCount, 2);
+  assert.deepEqual(twoReviews.reviewers.map(({ recordedBy }) => recordedBy), ["author", "author"]);
+
+  assert.equal(validateAiReview({
+    headSha: CURRENT_SHA,
+    comments: [
+      structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord(CURRENT_SHA, "reviewer-A"), "author"),
+      structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord(CURRENT_SHA, "REVIEWER-a"), "author"),
+    ],
+  }).status, "FAIL");
 
   const stale = structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord("b".repeat(40)));
   assert.equal(validateAiReview({ headSha: CURRENT_SHA, comments: [stale] }).status, "BLOCKED");
@@ -792,8 +909,24 @@ test("records an independently tasked AI review even when it shares the author's
   unresolved.unresolvedFindings.High.push({ summary: "High-risk regression", requiredFix: "Correct the state check." });
   assert.equal(validateAiReview({
     headSha: CURRENT_SHA,
-    comments: [structuredComment(AI_REVIEW_MARKER, unresolved)],
+    comments: [
+      structuredComment(AI_REVIEW_MARKER, unresolved),
+      ...cleanAiReviewComments().slice(1),
+    ],
   }).status, "FAIL");
+
+  for (const severity of ["Critical", "High"]) {
+    const finding = cleanAiReviewRecord(CURRENT_SHA, "reviewer-A");
+    finding.findings[severity].push({ summary: severity + " issue", requiredFix: "Fix it." });
+    finding.unresolvedFindings[severity].push({ summary: severity + " issue", requiredFix: "Fix it." });
+    assert.equal(validateAiReview({
+      headSha: CURRENT_SHA,
+      comments: [
+        structuredComment(AI_REVIEW_MARKER, finding),
+        structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord(CURRENT_SHA, "reviewer-B")),
+      ],
+    }).status, "FAIL");
+  }
 
   const malformed = structuredComment(AI_REVIEW_MARKER, null);
   assert.doesNotThrow(() => validateAiReview({ headSha: CURRENT_SHA, comments: [malformed] }));
@@ -922,12 +1055,33 @@ test("keeps migration and dependency release obligations blocking until each is 
   ];
   const missing = validateReleaseEvidence({ files, localVerification: { record: null } });
   assert.equal(missing.status, "BLOCKED");
+  const missingMigrationGate = assessPullRequestVerification({
+    pullRequest: cleanPullRequest(),
+    files: [files[0]],
+    comments: [
+      structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
+      ...cleanAiReviewComments(),
+    ],
+    mergePolicy: cleanMergePolicy(),
+  });
+  assert.equal(missingMigrationGate.releaseRequirements.status, "BLOCKED");
+  assert.equal(missingMigrationGate.decision, "BLOCKED");
 
   const release = {
     migrationCompatibility: {
       status: "PASS",
       command: "review migration compatibility",
       details: "Additive migration is backward compatible.",
+      strategy: "compatible",
+      migrationIds: ["20261008170639_catalog"],
+    },
+    stageMigration: {
+      status: "PASS",
+      required: true,
+      environment: "Stage",
+      migrationIds: ["20261008170639_catalog"],
+      command: "supabase db push --dry-run --linked; apply to local Stage database",
+      details: "Migration applied and verified against Stage; affected query passed.",
     },
     preMergeMigration: {
       status: "PASS",
@@ -961,10 +1115,63 @@ test("keeps migration and dependency release obligations blocking until each is 
     files,
     localVerification: { record: { release: {
       ...release,
-      preMergeMigration: { ...release.preMergeMigration, required: true, status: "PASS" },
+      preMergeMigration: {
+        ...release.preMergeMigration,
+        required: true,
+        status: "PASS",
+        environment: "Production",
+        migrationIds: ["20261008170639_catalog"],
+      },
     } } },
   });
   assert.equal(appliedBeforeMerge.status, "PASS");
+
+  const missingStage = validateReleaseEvidence({
+    files,
+    localVerification: { record: { release: { ...release, stageMigration: undefined } } },
+  });
+  assert.equal(missingStage.status, "BLOCKED");
+  assert.equal(missingStage.stageMigration.status, "BLOCKED");
+
+  const breakingRelease = {
+    ...release,
+    migrationCompatibility: {
+      ...release.migrationCompatibility,
+      strategy: "expand-contract",
+      deploymentSequence: [
+        "Apply additive expand migration before the compatible app deployment.",
+        "Deploy and smoke-test code that supports both schemas.",
+        "Apply the contract migration after old code is no longer running.",
+      ],
+    },
+    preMergeMigration: {
+      ...release.preMergeMigration,
+      required: true,
+      environment: "Production",
+      migrationIds: ["20261008170639_catalog"],
+    },
+  };
+  assert.equal(validateReleaseEvidence({
+    files: ["supabase/migrations/20261008170639_catalog.sql"],
+    localVerification: { record: { release: breakingRelease } },
+  }).status, "PASS");
+  assert.equal(validatePostDeploymentMigrationEvidence({
+    files: ["supabase/migrations/20261008170639_catalog.sql"],
+    localVerification: { record: { release: breakingRelease } },
+  }).status, "BLOCKED");
+  assert.equal(validatePostDeploymentMigrationEvidence({
+    files: ["supabase/migrations/20261008170639_catalog.sql"],
+    localVerification: { record: { release: {
+      ...breakingRelease,
+      postDeployMigration: {
+        status: "PASS",
+        environment: "Production",
+        migrationIds: ["20261008170639_catalog"],
+        command: "supabase migration list --linked",
+        details: "Contract migration is applied and the final schema is verified.",
+      },
+    } } },
+  }).status, "PASS");
 });
 
 test("reports configured required checks as missing, pending, failed, or green on the current SHA", () => {
@@ -1025,10 +1232,10 @@ test("reports configured required checks as missing, pending, failed, or green o
   }).status, "PASS");
 });
 
-test("separates review readiness from merge readiness and applies the manual no-CI fallback", () => {
+test("two AI reviews and local evidence satisfy an unprotected branch without optional CI or owner approval", () => {
   const comments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
-    structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord()),
+    ...cleanAiReviewComments(),
   ];
   const input = {
     pullRequest: cleanPullRequest(),
@@ -1036,46 +1243,80 @@ test("separates review readiness from merge readiness and applies the manual no-
     comments,
     mergePolicy: cleanMergePolicy(),
   };
-  const reviewReady = assessPullRequestVerification(input);
-  assert.equal(reviewReady.decision, "READY_FOR_REVIEW");
-  assert.equal(reviewReady.stages.implementationComplete, true);
-  assert.equal(reviewReady.stages.internalReviewComplete, true);
-  assert.equal(reviewReady.stages.readyForExternalReview, true);
-  assert.equal(reviewReady.githubReview.status, "NOT RUN");
-  assert.equal(reviewReady.checks.required.status, "NOT RUN");
-  assert.equal(reviewReady.checks.policy.status, "BLOCKED");
-  assert.equal(reviewReady.mergeReadiness.status, "BLOCKED");
-
-  const mergeReady = assessPullRequestVerification({
-    ...input,
-    reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "independent" })],
-  });
+  const mergeReady = assessPullRequestVerification(input);
   assert.equal(mergeReady.decision, "READY_FOR_MERGE");
-  assert.equal(mergeReady.checks.policy.status, "PASS");
+  assert.equal(mergeReady.stages.implementationComplete, true);
+  assert.equal(mergeReady.stages.internalReviewComplete, true);
+  assert.equal(mergeReady.stages.qualityGatesComplete, true);
+  assert.equal(mergeReady.githubReview.status, "NOT RUN");
   assert.equal(mergeReady.checks.required.status, "NOT RUN");
+  assert.equal(mergeReady.checks.policy.status, "PASS");
+  assert.equal(mergeReady.checks.branchReviewPolicy.status, "PASS");
+  assert.equal(mergeReady.mergeReadiness.status, "PASS");
+  assert.equal(mergeReady.checks.policy.details.includes("Optional GitHub checks are informational"), true);
+
+  const optionalMissing = assessPullRequestVerification({
+    ...input,
+    checkRuns: [],
+    statuses: [],
+  });
+  assert.equal(optionalMissing.checks.observed.status, "NOT RUN");
+  assert.equal(optionalMissing.checks.policy.status, "PASS");
+  assert.equal(optionalMissing.decision, "READY_FOR_MERGE");
+
+  const optionalFailure = assessPullRequestVerification({
+    ...input,
+    checkRuns: [{
+      name: "optional-preview",
+      head_sha: CURRENT_SHA,
+      status: "completed",
+      conclusion: "failure",
+    }],
+  });
+  assert.equal(optionalFailure.checks.observed.status, "FAIL");
+  assert.equal(optionalFailure.checks.policy.status, "PASS");
+  assert.equal(optionalFailure.decision, "READY_FOR_MERGE");
+
+  const enforcedApprovalMissing = assessPullRequestVerification({
+    ...input,
+    mergePolicy: cleanMergePolicy({ requiredApprovals: 1 }),
+  });
+  assert.equal(enforcedApprovalMissing.decision, "READY_FOR_REVIEW");
+  assert.equal(enforcedApprovalMissing.stages.waitingForEnforcedApproval, true);
+  assert.equal(enforcedApprovalMissing.mergeReadiness.status, "BLOCKED");
+
+  const enforcedApprovalPresent = assessPullRequestVerification({
+    ...input,
+    mergePolicy: cleanMergePolicy({ requiredApprovals: 1 }),
+    reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "reviewer", state: "APPROVED" })],
+  });
+  assert.equal(enforcedApprovalPresent.decision, "READY_FOR_MERGE");
 
   const failedReview = assessPullRequestVerification({
     ...input,
-    reviews: [cleanGitHubReview({
-      headSha: CURRENT_SHA,
-      user: "independent",
-      unresolved: "High bug remains",
-    })],
+    comments: [
+      structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
+      structuredComment(AI_REVIEW_MARKER, {
+        ...cleanAiReviewRecord(CURRENT_SHA, "reviewer-A"),
+        findings: { Critical: [], High: [{ summary: "High bug", requiredFix: "Fix it." }], Medium: [], Low: [] },
+        unresolvedFindings: { Critical: [], High: [{ summary: "High bug", requiredFix: "Fix it." }], Medium: [], Low: [] },
+      }),
+      ...cleanAiReviewComments().slice(1),
+    ],
   });
   assert.equal(failedReview.decision, "BLOCKED");
   assert.equal(failedReview.mergeReadiness.status, "BLOCKED");
 
   const requiredCheckMissing = assessPullRequestVerification({
     ...input,
-    reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "independent" })],
     mergePolicy: cleanMergePolicy({ requiredChecks: ["build"] }),
   });
   assert.equal(requiredCheckMissing.checks.required.status, "BLOCKED");
-  assert.equal(requiredCheckMissing.decision, "READY_FOR_REVIEW");
+  assert.equal(requiredCheckMissing.checks.policy.status, "BLOCKED");
+  assert.equal(requiredCheckMissing.decision, "BLOCKED");
 
   const requiredCheckSuccess = assessPullRequestVerification({
     ...input,
-    reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "independent" })],
     mergePolicy: cleanMergePolicy({ requiredChecks: ["build"] }),
     checkRuns: [{
       name: "build",
@@ -1088,13 +1329,35 @@ test("separates review readiness from merge readiness and applies the manual no-
   assert.equal(requiredCheckSuccess.checks.policy.status, "PASS");
   assert.equal(requiredCheckSuccess.decision, "READY_FOR_MERGE");
 
+  const requiredCheckFailure = assessPullRequestVerification({
+    ...input,
+    mergePolicy: cleanMergePolicy({ requiredChecks: ["build"] }),
+    checkRuns: [{
+      name: "build",
+      head_sha: CURRENT_SHA,
+      status: "completed",
+      conclusion: "failure",
+    }],
+  });
+  assert.equal(requiredCheckFailure.checks.required.status, "FAIL");
+  assert.equal(requiredCheckFailure.decision, "BLOCKED");
+
+  const staleEvidence = assessPullRequestVerification({
+    ...input,
+    comments: [
+      structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ headSha: "b".repeat(40) })),
+      ...cleanAiReviewComments(),
+    ],
+  });
+  assert.equal(staleEvidence.localVerification.status, "BLOCKED");
+  assert.equal(staleEvidence.decision, "BLOCKED");
+
   for (const mergeable of [false, null]) {
     const mergeabilityBlocked = assessPullRequestVerification({
       ...input,
       pullRequest: cleanPullRequest({ mergeable }),
-      reviews: [cleanGitHubReview({ headSha: CURRENT_SHA, user: "independent" })],
     });
-    assert.equal(mergeabilityBlocked.decision, "READY_FOR_REVIEW");
+    assert.equal(mergeabilityBlocked.decision, "BLOCKED");
     assert.equal(mergeabilityBlocked.mergeReadiness.status, "BLOCKED");
     assert.notEqual(mergeabilityBlocked.mergeability.status, "PASS");
   }
@@ -1117,13 +1380,13 @@ test("blocks UI PR review readiness until the exact-SHA browser record is comple
     consoleErrors: [],
     failedNetworkRequests: [],
   };
-  const ai = structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord());
+  const ai = cleanAiReviewComments();
   const missingBrowser = assessPullRequestVerification({
     pullRequest: cleanPullRequest(),
     files,
     comments: [
       structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ uiBehavior: true })),
-      ai,
+      ...ai,
     ],
     mergePolicy: cleanMergePolicy(),
   });
@@ -1136,12 +1399,12 @@ test("blocks UI PR review readiness until the exact-SHA browser record is comple
     files,
     comments: [
       structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ uiBehavior: true, browser })),
-      ai,
+      ...ai,
     ],
     mergePolicy: cleanMergePolicy(),
   });
   assert.equal(verified.browserVerification.status, "PASS");
-  assert.equal(verified.decision, "READY_FOR_REVIEW");
+  assert.equal(verified.decision, "READY_FOR_MERGE");
 
   for (const filename of ["src/lib/catalog-settings.ts", "tailwind.config.ts", "postcss.config.js"]) {
     const helperOnly = assessPullRequestVerification({
@@ -1149,7 +1412,7 @@ test("blocks UI PR review readiness until the exact-SHA browser record is comple
       files: [filename],
       comments: [
         structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ uiBehavior: false })),
-        ai,
+        ...ai,
       ],
       mergePolicy: cleanMergePolicy(),
     });
@@ -1185,7 +1448,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   const pullRequest = cleanPullRequest();
   const comments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
-    structuredComment(AI_REVIEW_MARKER, cleanAiReviewRecord()),
+    ...cleanAiReviewComments(),
   ];
   const calls = [];
   const client = {
@@ -1207,10 +1470,27 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
     },
   };
   const result = await verifyPullRequest(client, 52);
-  assert.equal(result.decision, "READY_FOR_REVIEW");
+  assert.equal(result.decision, "READY_FOR_MERGE");
   assert.equal(result.currentSha, CURRENT_SHA);
   assert.ok(calls.some((path) => path.endsWith("/statuses?per_page=100&page=1")));
   assert.ok(calls.every((path) => !/\/merges(?:\?|$)|\/deployments(?:\?|$)/.test(path)));
+
+  const mergedPullRequest = cleanPullRequest({
+    state: "closed",
+    merged: true,
+    merge_commit_sha: "d".repeat(40),
+    mergeable: null,
+  });
+  const mergedClient = {
+    ...client,
+    request: async (path) => path === "/repos/example/repo/pulls/52"
+      ? mergedPullRequest
+      : client.request(path),
+  };
+  const verifiedMerge = await verifyPullRequest(mergedClient, 52, { allowMerged: true });
+  assert.equal(verifiedMerge.decision, "VERIFIED_MERGE");
+  assert.equal(verifiedMerge.pullRequest.merged, true);
+  assert.equal(verifiedMerge.currentSha, CURRENT_SHA);
 
   let prReads = 0;
   const unstableClient = {
@@ -1257,7 +1537,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
       : client.request(path),
   };
   const strictPolicy = await verifyPullRequest(strictPolicyClient, 52);
-  assert.equal(strictPolicy.decision, "READY_FOR_REVIEW");
+  assert.equal(strictPolicy.decision, "BLOCKED");
   assert.equal(strictPolicy.mergeReadiness.status, "BLOCKED");
   assert.ok(strictPolicy.checks.branchReviewPolicy.unassessedRules.some((rule) => /up to date/.test(rule)));
 
@@ -1374,4 +1654,163 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   };
   const paginatedRules = await verifyPullRequest(paginatedRulesClient, 52);
   assert.equal(paginatedRules.checks.required.status, "PASS");
+});
+
+test("waits for a successful Production deployment of the exact merge SHA", async () => {
+  const mergeSha = "c".repeat(40);
+  const calls = [];
+  const client = {
+    owner: "example",
+    repo: "repo",
+    request: async (path) => {
+      calls.push(path);
+      if (path.includes("/deployments?sha=")) {
+        return [
+          { id: 1, sha: "b".repeat(40), environment: "Production", created_at: "2026-10-08T11:00:00Z" },
+          { id: 2, sha: mergeSha, environment: "Production", created_at: "2026-10-08T12:00:00Z" },
+        ];
+      }
+      if (path.endsWith("/deployments/2/statuses?per_page=100&page=1")) {
+        return [{
+          id: 9,
+          state: "success",
+          environment_url: "https://production.example.test",
+          created_at: "2026-10-08T12:05:00Z",
+        }];
+      }
+      throw new Error("Unexpected deployment request: " + path);
+    },
+  };
+  const ready = await waitForProductionDeployment(client, mergeSha, { timeoutMs: 0 });
+  assert.equal(ready.status, "PASS");
+  assert.equal(ready.deployment.sha, mergeSha);
+  assert.equal(ready.deployment.environmentUrl, "https://production.example.test");
+  assert.equal(calls.length, 2);
+
+  const missing = await waitForProductionDeployment({
+    owner: "example",
+    repo: "repo",
+    request: async () => [{ id: 3, sha: "d".repeat(40), environment: "Production" }],
+  }, mergeSha, { timeoutMs: 0 });
+  assert.equal(missing.status, "BLOCKED");
+  assert.match(missing.details, /No Production deployment for the exact merge SHA/);
+});
+
+test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty responses", async () => {
+  const paths = ["/", "/catalog"];
+  const calls = [];
+  const success = await runProductionSmoke("https://production.example.test", {
+    paths,
+    fetchImpl: async (url) => {
+      calls.push(url.href);
+      return {
+        ok: true,
+        status: 200,
+        url: url.href,
+        headers: { get: () => "text/html" },
+        text: async () => "<html>ok</html>",
+      };
+    },
+  });
+  assert.equal(success.status, "PASS");
+  assert.deepEqual(calls, [
+    "https://production.example.test/",
+    "https://production.example.test/catalog",
+  ]);
+
+  const failed = await runProductionSmoke("https://production.example.test", {
+    paths: ["/"],
+    fetchImpl: async (url) => ({
+      ok: false,
+      status: 503,
+      url: url.href,
+      headers: { get: () => "text/html" },
+      text: async () => "Unavailable",
+    }),
+  });
+  assert.equal(failed.status, "FAIL");
+  assert.match(failed.details, /HTTP 503/);
+
+  assert.equal((await runProductionSmoke("http://production.example.test")).status, "BLOCKED");
+  assert.equal((await runProductionSmoke("https://production.example.test", { paths: ["//elsewhere.test"] })).status, "BLOCKED");
+});
+
+test("automatically merges a fully green PR and updates its issue only after Production passes", async () => {
+  const fixture = createDeliveryClient();
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async (_client, mergeSha) => {
+      assert.equal(mergeSha, fixture.mergeSha);
+      return {
+        status: "PASS",
+        deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
+        details: "Deployment READY for the exact merge SHA.",
+      };
+    },
+    smoke: async (url) => ({
+      status: "PASS",
+      checks: [{ path: "/", statusCode: 200, finalUrl: url + "/" }],
+      details: "Production root returned HTTP 200.",
+    }),
+  });
+
+  assert.equal(result.decision, "DELIVERED");
+  assert.equal(result.status, "PASS");
+  assert.equal(result.candidateSha, CURRENT_SHA);
+  assert.equal(result.mergeSha, fixture.mergeSha);
+  assert.equal(result.completed, true);
+  assert.equal(fixture.issueState, "closed");
+  assert.equal(fixture.projectStatus, "Done");
+  assert.ok(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"));
+  const closeCall = fixture.calls.find(({ path, method }) => path.endsWith("/issues/7") && method === "PATCH");
+  assert.equal(JSON.parse(closeCall.body).state, "closed");
+  assert.ok(fixture.calls.some(({ path, method, body }) =>
+    path.startsWith("/repos/example/repo/issues/52/comments") && method === "POST" && body.includes("agent-harness-delivery:v1"),
+  ));
+});
+
+test("failed Production verification is recorded and cannot close or complete a tracked issue", async () => {
+  const fixture = createDeliveryClient();
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => ({
+      status: "FAIL",
+      deployment: { id: 14, sha: fixture.mergeSha, state: "failure" },
+      details: "Vercel deployment failed during build.",
+    }),
+    smoke: async () => {
+      throw new Error("Smoke must not run after a failed deployment.");
+    },
+  });
+
+  assert.equal(result.decision, "DELIVERY_FAILED");
+  assert.equal(result.status, "FAIL");
+  assert.equal(result.completed, false);
+  assert.equal(fixture.issueState, "open");
+  assert.equal(fixture.projectStatus, "Blocked");
+  assert.equal(fixture.calls.some(({ path, method, body }) =>
+    path.endsWith("/issues/7") && method === "PATCH" && JSON.parse(body).state === "closed",
+  ), false);
+  assert.ok(fixture.calls.some(({ path, method }) => path.startsWith("/repos/example/repo/issues/7/comments") && method === "POST"));
+  assert.ok(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"));
+});
+
+test("a blocked pre-merge gate prevents the merge API and Production side effects", async () => {
+  const fixture = createDeliveryClient();
+  let productionChecks = 0;
+  const result = await deliverPullRequest(fixture.client, 52, {
+    verify: async () => ({
+      decision: "BLOCKED",
+      currentSha: CURRENT_SHA,
+      reasons: ["Two independent reviews are required."],
+    }),
+    waitForDeployment: async () => { productionChecks += 1; return { status: "PASS" }; },
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.stage, "pre-merge-gates");
+  assert.equal(result.merged, false);
+  assert.equal(productionChecks, 0);
+  assert.equal(fixture.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
 });
