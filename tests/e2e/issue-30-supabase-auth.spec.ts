@@ -46,7 +46,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       56321,
       "Supabase",
     );
-    const localMailpitUrl = requireLoopbackUrl(mailpitUrl, 56324, "Mailpit");
+    const localMailpitUrl = requireLoopbackUrl(mailpitUrl.href, 56324, "Mailpit");
     if (process.env.LAMILIA_BACKEND !== "supabase") {
       throw new Error("The app must be explicitly configured for Supabase mode.");
     }
