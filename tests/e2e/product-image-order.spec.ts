@@ -23,6 +23,11 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("admin reorders gallery previews through upload, save, reload, and edit", async ({ page }, testInfo) => {
+  test.skip(
+    Boolean(process.env.PLAYWRIGHT_BASE_URL),
+    "Gallery ordering E2E uses fixed demo admin credentials and is restricted to the local app.",
+  );
+
   page.setDefaultNavigationTimeout(180_000);
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
