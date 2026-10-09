@@ -145,10 +145,14 @@ beforeEach(() => {
   actionMocks.redeemAuthResumeIntent.mockReset();
 });
 
-function registrationForm(returnTo?: string, code?: string) {
+function registrationForm(
+  returnTo?: string,
+  code?: string,
+  email = "reader@example.com",
+) {
   const formData = new FormData();
   formData.set("locale", "en");
-  formData.set("email", "reader@example.com");
+  formData.set("email", email);
   formData.set("password", "password123");
   formData.set("termsAccepted", "on");
 
@@ -345,10 +349,10 @@ describe("registration auth action", () => {
         loginForm(
           "second-reader@example.com",
           "password123",
-          "/en/products/moon-garden-coloring-book",
+          "/en/products/moon-garden-coloring-book?source=retry",
         ),
       ),
-      "/en/products/moon-garden-coloring-book#premium",
+      "/en/products/moon-garden-coloring-book?source=retry#premium",
     );
 
     expect(actionMocks.clearUnlockIntent).toHaveBeenCalled();
@@ -430,7 +434,10 @@ describe("registration auth action", () => {
     const formData = new FormData();
     formData.set("locale", "en");
     formData.set("email", "reader@example.com");
-    formData.set("returnTo", "/en/products/moon-garden-coloring-book");
+    formData.set(
+      "returnTo",
+      "/en/products/moon-garden-coloring-book?source=retry",
+    );
     formData.set("code", "STALE-UNBOUND-CODE");
     actionMocks.createClient.mockResolvedValue({
       auth: { resend: vi.fn().mockResolvedValue({ error: null }) },
@@ -438,13 +445,13 @@ describe("registration auth action", () => {
 
     await expectRedirect(
       resendSupabaseVerificationEmailAction(formData),
-      "/en/login?error=verification_sent&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+      "/en/login?error=verification_sent&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book%3Fsource%3Dretry",
     );
 
     expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith({
       locale: "en",
       productSlug: "moon-garden-coloring-book",
-      returnTo: "/en/products/moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book?source=retry",
       code: "LOMI-BOOK-2026",
       userId: "reader-user",
       emailHash: "reader-email-hash",
@@ -468,7 +475,10 @@ describe("registration auth action", () => {
     const formData = new FormData();
     formData.set("locale", "en");
     formData.set("email", "second-reader@example.com");
-    formData.set("returnTo", "/en/products/moon-garden-coloring-book");
+    formData.set(
+      "returnTo",
+      "/en/products/moon-garden-coloring-book?source=retry",
+    );
     formData.set("code", "LOMI-BOOK-2026");
     actionMocks.createClient.mockResolvedValue({
       auth: { resend: vi.fn().mockResolvedValue({ error: null }) },
@@ -476,7 +486,7 @@ describe("registration auth action", () => {
 
     await expectRedirect(
       resendSupabaseVerificationEmailAction(formData),
-      "/en/login?error=verification_sent&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+      "/en/login?error=verification_sent&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book%3Fsource%3Dretry",
     );
 
     expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);
@@ -507,6 +517,49 @@ describe("registration auth action", () => {
       expect.objectContaining({
         productSlug: "moon-garden-coloring-book",
         returnTo: "/en/products/moon-garden-coloring-book",
+      }),
+    );
+  });
+
+  it("does not transfer a pending account's code into another registration", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+    });
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "first-reader-email-hash",
+      userId: "first-reader",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(false);
+    actionMocks.isUnlockRegistrationContext.mockReturnValue(false);
+    const signUp = vi.fn().mockResolvedValue({
+      data: { user: { id: "second-reader" }, session: null },
+      error: null,
+    });
+    actionMocks.createClient.mockResolvedValue({ auth: { signUp } });
+
+    await expectRedirect(
+      registerDemoAction(
+        registrationForm(
+          "/en/products/moon-garden-coloring-book?source=retry",
+          "LOMI-BOOK-2026",
+          "second-reader@example.com",
+        ),
+      ),
+      "/en/login?error=verification_sent&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book%3Fsource%3Dretry",
+    );
+
+    expect(actionMocks.clearUnlockIntent).toHaveBeenCalled();
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "",
+        email: "second-reader@example.com",
       }),
     );
   });

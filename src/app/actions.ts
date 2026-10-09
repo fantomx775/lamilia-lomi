@@ -28,6 +28,7 @@ import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.
 import { scheduleReviewReminder } from "@/lib/reminders";
 import { createClient } from "@/lib/supabase/server";
 import { getProductBySlugForRequest } from "@/lib/products-request";
+import { normalizePremiumCodeForRequest } from "@/lib/premium-code";
 import {
   clearUnlockIntent,
   getUnlockIntent,
@@ -186,7 +187,10 @@ export async function loginDemoAction(formData: FormData) {
   if (getBackendMode() === "supabase") {
     const pendingResumeIntent = await readAuthResumeIntent();
     const pendingResumeTargetsReturnTo = Boolean(
-      pendingResumeIntent && pendingResumeIntent.returnTo === returnTo,
+      pendingResumeIntent &&
+        (pendingResumeIntent.returnTo === returnTo ||
+          (returnProductSlug &&
+            pendingResumeIntent.productSlug === returnProductSlug)),
     );
     const pendingResumeMatchesEmail = Boolean(
       pendingResumeTargetsReturnTo &&
@@ -311,6 +315,7 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     text(formData, "returnTo") || text(formData, "redirectTo"),
     locale,
   );
+  const returnProductSlug = productSlugFromReturnTo(returnTo, locale);
   const code = text(formData, "code");
   const email = text(formData, "email");
 
@@ -326,7 +331,10 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
 
   const pendingResumeIntent = await readAuthResumeIntent();
   const pendingResumeTargetsReturnTo = Boolean(
-    pendingResumeIntent && pendingResumeIntent.returnTo === returnTo,
+    pendingResumeIntent &&
+      (pendingResumeIntent.returnTo === returnTo ||
+        (returnProductSlug &&
+          pendingResumeIntent.productSlug === returnProductSlug)),
   );
   const pendingResumeMatchesEmail = Boolean(
     pendingResumeTargetsReturnTo &&
@@ -347,7 +355,7 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     locale,
     productSlug: retryingPendingResume
       ? pendingResumeIntent?.productSlug
-      : productSlugFromReturnTo(returnTo, locale),
+      : returnProductSlug,
     returnTo,
     code: retryingPendingResume
       ? pendingResumeIntent?.code
@@ -391,7 +399,7 @@ export async function registerDemoAction(formData: FormData) {
     locale,
     `/${locale}/account`,
   );
-  const code = text(formData, "code");
+  let code = text(formData, "code");
   const isUnlockContext = isUnlockRegistrationContext({ locale, redirectTo: returnTo });
 
   await preserveUnlockIntent({ locale, returnTo, code });
@@ -409,6 +417,32 @@ export async function registerDemoAction(formData: FormData) {
   }
 
   if (getBackendMode() === "supabase") {
+    const pendingResumeIntent = await readAuthResumeIntent();
+    const returnProductSlug = productSlugFromReturnTo(returnTo, locale);
+    const pendingResumeTargetsReturnTo = Boolean(
+      pendingResumeIntent &&
+        (pendingResumeIntent.returnTo === returnTo ||
+          (returnProductSlug &&
+            pendingResumeIntent.productSlug === returnProductSlug)),
+    );
+    const pendingResumeHasDifferentAccount = Boolean(
+      pendingResumeTargetsReturnTo &&
+        pendingResumeIntent &&
+        pendingResumeIntent?.code &&
+        !authResumeIntentMatchesEmail(pendingResumeIntent, result.value.email),
+    );
+    const normalizedCode = normalizePremiumCodeForRequest(code);
+    const normalizedPendingCode = normalizePremiumCodeForRequest(
+      pendingResumeIntent?.code,
+    );
+    const submittedPendingCode = Boolean(
+      normalizedCode && normalizedCode === normalizedPendingCode,
+    );
+    if (pendingResumeHasDifferentAccount && submittedPendingCode) {
+      code = "";
+      await clearUnlockIntent();
+    }
+
     let intent = createAuthResumeIntent({
       locale,
       returnTo,
