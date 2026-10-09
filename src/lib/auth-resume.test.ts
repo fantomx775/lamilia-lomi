@@ -160,7 +160,7 @@ describe("Supabase auth resume contract", () => {
     expect(authResumeIntentMatchesUser({ userId: undefined, emailHash: undefined }, { id: "user-123" })).toBe(false);
   });
 
-  it("only returns a saved code to the matching account and product", () => {
+  it("returns a saved code to the matching account and product across locales", () => {
     const intent = createAuthResumeIntent({
       locale: "en",
       returnTo: "/en/products/moon-garden-coloring-book",
@@ -192,7 +192,7 @@ describe("Supabase auth resume contract", () => {
         "pl",
         "moon-garden-coloring-book",
       ),
-    ).toBeUndefined();
+    ).toBe("LOMI-BOOK-2026");
     expect(
       getAccountBoundResumeCode(
         intent,

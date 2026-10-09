@@ -517,6 +517,46 @@ describe("Supabase auth callback", () => {
     expect(response.headers.get("location")).toContain("error=verification_failed");
   });
 
+  it.each(["returns an error", "throws"] as const)(
+    "preserves the account-bound cross-device intent when token verification $0",
+    async (failureMode) => {
+      resume.callbackIntent = {
+        locale: "en",
+        emailHash: "reader-email-hash",
+        returnTo: "/en/products/moon-garden-coloring-book",
+        productSlug: "moon-garden-coloring-book",
+        code: "LOMI-BOOK-2026",
+      };
+      if (failureMode === "throws") {
+        auth.verifyOtp.mockRejectedValue(new Error("temporary verification failure"));
+      } else {
+        auth.verifyOtp.mockResolvedValue({
+          error: new Error("temporary verification failure"),
+        });
+      }
+
+      const response = await GET(
+        new Request(
+          "https://app.example/auth/callback?token_hash=actual-token-hash&type=email&locale=en&resume=opaque-resume",
+        ),
+      );
+
+      expect(resume.setAuthResume).toHaveBeenCalledWith({
+        locale: "en",
+        productSlug: "moon-garden-coloring-book",
+        returnTo: "/en/products/moon-garden-coloring-book",
+        code: "LOMI-BOOK-2026",
+        userId: undefined,
+        emailHash: "reader-email-hash",
+      });
+      expect(resume.redeem).not.toHaveBeenCalled();
+      expect(response.headers.get("location")).toContain("error=verification_failed");
+      expect(response.headers.get("location")).toContain(
+        "returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book%23premium",
+      );
+    },
+  );
+
   it("rejects a callback for a different user and clears stale unlock state", async () => {
     resume.intent = {
       locale: "en",

@@ -97,6 +97,39 @@ describe("getAccountSessionForRequest", () => {
   });
 });
 
+describe("getSupabaseAuthContext", () => {
+  const originalBackendMode = process.env.LAMILIA_BACKEND;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    process.env.LAMILIA_BACKEND = "supabase";
+    mocks.cookies.mockResolvedValue({
+      getAll: () => [{ name: "sb-project-auth-token", value: "token" }],
+    });
+    mocks.hasSupabaseAuthCookie.mockReturnValue(true);
+    mocks.createClient.mockReturnValue(mocks.supabase);
+    mocks.supabase.auth.getUser.mockRejectedValue(new Error("temporary auth lookup failure"));
+  });
+
+  afterEach(() => {
+    if (originalBackendMode === undefined) {
+      delete process.env.LAMILIA_BACKEND;
+    } else {
+      process.env.LAMILIA_BACKEND = originalBackendMode;
+    }
+  });
+
+  it("falls back to an anonymous context when the user lookup throws", async () => {
+    const { getSupabaseAuthContext } = await import("./session.server");
+
+    await expect(getSupabaseAuthContext()).resolves.toEqual({
+      supabase: null,
+      user: null,
+    });
+  });
+});
+
 describe("getProductDetailAccessForRequest", () => {
   const originalBackendMode = process.env.LAMILIA_BACKEND;
 

@@ -220,12 +220,16 @@ export async function getSupabaseAuthContext() {
     return { supabase: null, user: null } as const;
   }
 
-  const context = await getSupabaseUserContextForRequest();
+  try {
+    const context = await getSupabaseUserContextForRequest();
 
-  return {
-    supabase: context?.supabase ?? null,
-    user: context?.user ?? null,
-  } as const;
+    return {
+      supabase: context?.supabase ?? null,
+      user: context?.user ?? null,
+    } as const;
+  } catch {
+    return { supabase: null, user: null } as const;
+  }
 }
 
 export async function setDemoSession(session: DemoSession) {

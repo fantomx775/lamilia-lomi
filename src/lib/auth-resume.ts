@@ -10,7 +10,7 @@ import {
 } from "node:crypto";
 import { cookies } from "next/headers";
 
-import { normalizeLocale } from "./locale";
+import { isSupportedLocale, normalizeLocale } from "./locale";
 import { getCanonicalAppUrl } from "./config";
 import { redeemPremiumCodeForRequest } from "./premium-request";
 import { getProductBySlugForRequest } from "./products-request";
@@ -172,7 +172,7 @@ export function getAccountBoundResumeCode(
   if (
     !intent?.code ||
     !user ||
-    intent.locale !== locale ||
+    !isSupportedLocale(locale) ||
     intent.productSlug !== productSlug ||
     !authResumeIntentMatchesUser(intent, user)
   ) {

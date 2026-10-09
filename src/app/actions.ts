@@ -417,7 +417,6 @@ export async function registerDemoAction(formData: FormData) {
     const returnProductSlug = productSlugFromReturnTo(returnTo, locale);
     const pendingResumeTargetsReturnTo = Boolean(
       pendingResumeIntent &&
-        pendingResumeIntent.locale === locale &&
         (pendingResumeIntent.returnTo === returnTo ||
           (returnProductSlug &&
             pendingResumeIntent.productSlug === returnProductSlug)),
@@ -653,7 +652,13 @@ export async function unlockPremiumAction(formData: FormData) {
   }
 
   if (!session.emailVerified) {
-    await preserveUnlockRecoveryIntent({ locale, productSlug: product.slug, returnTo, code });
+    await preserveUnlockRecoveryIntent({
+      locale,
+      productSlug: product.slug,
+      returnTo,
+      code,
+      email: session.email,
+    });
     redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
   }
 
@@ -666,26 +671,59 @@ export async function unlockPremiumAction(formData: FormData) {
     });
   } catch (error) {
     logUnexpectedFailure("[premium-unlock] Redemption failed unexpectedly.", error);
-    await preserveUnlockRecoveryIntent({ locale, productSlug: product.slug, returnTo, code });
+    await preserveUnlockRecoveryIntent({
+      locale,
+      productSlug: product.slug,
+      returnTo,
+      code,
+      email: session.email,
+    });
     redirect(appendQueryPath(premiumReturnTo, "unlock", "unexpected"));
   }
 
   if (!result.ok) {
     if (result.status === "auth_required") {
-      await preserveUnlockRecoveryIntent({ locale, productSlug: product.slug, returnTo, code });
+      await preserveUnlockRecoveryIntent({
+        locale,
+        productSlug: product.slug,
+        returnTo,
+        code,
+        email: session.email,
+      });
       redirect(`/${locale}/login?returnTo=${encodeURIComponent(returnTo)}`);
     }
 
     if (result.status === "email_unverified") {
-      await preserveUnlockRecoveryIntent({ locale, productSlug: product.slug, returnTo, code });
+      await preserveUnlockRecoveryIntent({
+        locale,
+        productSlug: product.slug,
+        returnTo,
+        code,
+        email: session.email,
+      });
       redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
     }
 
-    await preserveUnlockRecoveryIntent({ locale, productSlug: product.slug, returnTo, code });
+    await preserveUnlockRecoveryIntent({
+      locale,
+      productSlug: product.slug,
+      returnTo,
+      code,
+      email: session.email,
+    });
     redirect(appendQueryPath(premiumReturnTo, "unlock", result.status));
   }
 
   await clearUnlockIntent();
+  if (getBackendMode() === "supabase") {
+    const pendingResumeIntent = await readAuthResumeIntent();
+    if (
+      pendingResumeIntent?.productSlug === product.slug &&
+      authResumeIntentMatchesEmail(pendingResumeIntent, session.email)
+    ) {
+      await clearAuthResumeIntent();
+    }
+  }
   if (result.status === "success") {
     scheduleReviewReminder({ unlockedAt: new Date(), delayDays: product.reviewDelayDays });
   }
@@ -703,37 +741,28 @@ async function preserveUnlockRecoveryIntent(input: {
   productSlug: string;
   returnTo: string;
   code: string;
+  email?: string;
 }) {
   if (getBackendMode() !== "supabase") {
-    await setUnlockIntent(input);
+    await setUnlockIntent({
+      locale: input.locale,
+      productSlug: input.productSlug,
+      returnTo: input.returnTo,
+      code: input.code,
+    });
     return;
   }
 
   await clearUnlockIntent();
 
-  let user: { id: string; email?: string | null } | null = null;
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase.auth.getUser();
-    user = error ? null : data.user;
-  } catch (error) {
-    logUnexpectedFailure(
-      "[premium-unlock] Current user lookup failed unexpectedly.",
-      error,
-    );
-  }
-
-  if (user && input.code) {
+  if (input.email && input.code) {
     await setAuthResumeIntent({
       locale: input.locale,
       productSlug: input.productSlug,
       returnTo: input.returnTo,
       code: input.code,
-      userId: user.id,
-      email: user.email,
+      email: input.email,
     });
-  } else if (input.code) {
-    await clearAuthResumeIntent();
   }
 
   await setUnlockIntent({

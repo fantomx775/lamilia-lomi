@@ -149,9 +149,10 @@ function registrationForm(
   returnTo?: string,
   code?: string,
   email = "reader@example.com",
+  locale = "en",
 ) {
   const formData = new FormData();
-  formData.set("locale", "en");
+  formData.set("locale", locale);
   formData.set("email", email);
   formData.set("password", "password123");
   formData.set("termsAccepted", "on");
@@ -737,6 +738,99 @@ describe("registration auth action", () => {
     );
   });
 
+  it("recovers a matching account's saved code after switching the product locale", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+    });
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "reader-email-hash",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(true);
+    actionMocks.createClient.mockResolvedValue({
+      auth: {
+        signUp: vi.fn().mockResolvedValue({
+          data: { user: null, session: null },
+          error: { message: "Signup temporarily unavailable." },
+        }),
+      },
+    });
+
+    await expectRedirect(
+      registerDemoAction(
+        registrationForm(
+          "/pl/products/moon-garden-coloring-book",
+          undefined,
+          "reader@example.com",
+          "pl",
+        ),
+      ),
+      "/pl/register?error=auth&returnTo=%2Fpl%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locale: "pl",
+        returnTo: "/pl/products/moon-garden-coloring-book",
+        code: "LOMI-BOOK-2026",
+        email: "reader@example.com",
+      }),
+    );
+  });
+
+  it("does not transfer another account's saved code after switching product locale", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+    });
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "first-reader-email-hash",
+      userId: "first-reader",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(false);
+    actionMocks.createClient.mockResolvedValue({
+      auth: {
+        signUp: vi.fn().mockResolvedValue({
+          data: { user: null, session: null },
+          error: { message: "Signup temporarily unavailable." },
+        }),
+      },
+    });
+
+    await expectRedirect(
+      registerDemoAction(
+        registrationForm(
+          "/pl/products/moon-garden-coloring-book",
+          undefined,
+          "second-reader@example.com",
+          "pl",
+        ),
+      ),
+      "/pl/register?error=auth&returnTo=%2Fpl%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locale: "pl",
+        returnTo: "/pl/products/moon-garden-coloring-book",
+        code: "",
+        email: "second-reader@example.com",
+      }),
+    );
+  });
+
   it("clears a pending account's stale unlock code when another registration omits the code", async () => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     actionMocks.getProductBySlugForRequest.mockResolvedValue({
@@ -968,14 +1062,9 @@ describe("premium unlock action", () => {
         emailVerified: true,
         unlockedProductIds: [],
       });
-      actionMocks.createClient.mockResolvedValue({
-        auth: {
-          getUser: vi.fn().mockResolvedValue({
-            data: { user: { id: "reader-user", email: "reader@example.com" } },
-            error: null,
-          }),
-        },
-      });
+      actionMocks.createClient.mockRejectedValue(
+        new Error("the retry helper must reuse the validated session email"),
+      );
       if (status === null) {
         actionMocks.redeemPremiumCodeForRequest.mockRejectedValue(
           new Error("temporary redemption failure"),
@@ -999,9 +1088,9 @@ describe("premium unlock action", () => {
         productSlug: "moon-garden-coloring-book",
         returnTo: "/en/products/moon-garden-coloring-book",
         code: "LOMI-BOOK-2026",
-        userId: "reader-user",
         email: "reader@example.com",
       });
+      expect(actionMocks.createClient).not.toHaveBeenCalled();
       expect(actionMocks.setUnlockIntent).toHaveBeenCalledWith({
         locale: "en",
         productSlug: "moon-garden-coloring-book",
@@ -1049,7 +1138,6 @@ describe("premium unlock action", () => {
       productSlug: "moon-garden-coloring-book",
       returnTo: "/en/products/moon-garden-coloring-book",
       code: "LOMI-BOOK-2026",
-      userId: "reader-user",
       email: "reader@example.com",
     });
     expect(actionMocks.setUnlockIntent).toHaveBeenCalledWith({
@@ -1123,4 +1211,54 @@ describe("premium unlock action", () => {
 
     await expectRedirect(unlockPremiumAction(formData), location);
   });
+
+  it.each([
+    ["matching account and product", "moon-garden-coloring-book", true, true],
+    ["different account", "moon-garden-coloring-book", false, false],
+    ["different product", "another-product", true, false],
+  ] as const)(
+    "clears a saved retry intent after success only for the %s",
+    async (_caseName, intentProductSlug, matchesAccount, shouldClear) => {
+      actionMocks.getBackendMode.mockReturnValue("supabase");
+      actionMocks.getProductBySlugForRequest.mockResolvedValue({
+        id: "product-id",
+        slug: "moon-garden-coloring-book",
+        reviewDelayDays: 7,
+      });
+      actionMocks.getDemoSession.mockResolvedValue({
+        email: "reader@example.com",
+        emailVerified: true,
+        unlockedProductIds: [],
+      });
+      actionMocks.readAuthResumeIntent.mockResolvedValue({
+        locale: "en",
+        productSlug: intentProductSlug,
+        returnTo: `/en/products/${intentProductSlug}`,
+        code: "LOMI-BOOK-2026",
+        emailHash: "reader-email-hash",
+        createdAt: Date.now(),
+      });
+      actionMocks.authResumeIntentMatchesEmail.mockReturnValue(matchesAccount);
+      actionMocks.redeemPremiumCodeForRequest.mockResolvedValue({
+        ok: true,
+        status: "success",
+      });
+
+      const formData = new FormData();
+      formData.set("locale", "pl");
+      formData.set("productSlug", "moon-garden-coloring-book");
+      formData.set("code", "LOMI-BOOK-2026");
+
+      await expectRedirect(
+        unlockPremiumAction(formData),
+        "/pl/products/moon-garden-coloring-book?unlocked=1#premium",
+      );
+
+      if (shouldClear) {
+        expect(actionMocks.clearAuthResumeIntent).toHaveBeenCalledTimes(1);
+      } else {
+        expect(actionMocks.clearAuthResumeIntent).not.toHaveBeenCalled();
+      }
+    },
+  );
 });

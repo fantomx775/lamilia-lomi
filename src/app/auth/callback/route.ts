@@ -75,6 +75,7 @@ export async function GET(request: Request) {
     console.error("[auth-callback] Code exchange failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,
     });
+    await persistAuthResumeIntent(intent);
     return failureResponse(locale, intent, callbackReturnTo);
   }
 
@@ -82,6 +83,7 @@ export async function GET(request: Request) {
     // A reused callback may still return a confirmed user, but it cannot
     // redeem a pending intent because this request did not establish a session.
     if (intent) {
+      await persistAuthResumeIntent(intent);
       return failureResponse(locale, intent, callbackReturnTo);
     }
 
