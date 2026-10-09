@@ -37,8 +37,17 @@ export async function GET(request: Request) {
 
   const supabase = await createClient();
   const callbackCode = requestUrl.searchParams.get("code");
+  const callbackTokenHash = requestUrl.searchParams.get("token_hash");
+  const callbackType = requestUrl.searchParams.get("type");
 
-  if (!callbackCode) {
+  if (
+    (callbackCode && callbackTokenHash) ||
+    (callbackTokenHash && callbackType !== "email")
+  ) {
+    return failureResponse(locale, intent, callbackReturnTo);
+  }
+
+  if (!callbackCode && !callbackTokenHash) {
     if (intent) {
       return failureResponse(locale, intent, callbackReturnTo);
     }
@@ -53,7 +62,14 @@ export async function GET(request: Request) {
 
   let exchangeError;
   try {
-    ({ error: exchangeError } = await supabase.auth.exchangeCodeForSession(callbackCode));
+    if (callbackTokenHash) {
+      ({ error: exchangeError } = await supabase.auth.verifyOtp({
+        token_hash: callbackTokenHash,
+        type: "email",
+      }));
+    } else {
+      ({ error: exchangeError } = await supabase.auth.exchangeCodeForSession(callbackCode!));
+    }
   } catch (error) {
     console.error("[auth-callback] Code exchange failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,

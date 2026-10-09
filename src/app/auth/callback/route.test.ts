@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 const auth = {
   exchangeCodeForSession: vi.fn(),
+  verifyOtp: vi.fn(),
   getUser: vi.fn(),
 };
 const resume = vi.hoisted(() => ({
@@ -49,6 +50,7 @@ import { GET } from "./route";
 describe("Supabase auth callback", () => {
   beforeEach(() => {
     auth.exchangeCodeForSession.mockReset();
+    auth.verifyOtp.mockReset();
     auth.getUser.mockReset();
     resume.intent = null;
     resume.callbackIntent = null;
@@ -72,6 +74,78 @@ describe("Supabase auth callback", () => {
       "https://canonical.lamilialomi.example/en/account",
     );
     expect(response.headers.get("location")).not.toContain("valid");
+  });
+
+  it("verifies an email token hash and resumes its encrypted intent on another device", async () => {
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      productSlug: "moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    };
+    auth.verifyOtp.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "new-device-user",
+          email: "reader@example.com",
+          email_confirmed_at: "2026-08-16T10:00:00.000Z",
+        },
+      },
+    });
+    resume.redeem.mockResolvedValue({ ok: true, status: "success" });
+
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?token_hash=actual-token-hash&type=email&locale=en&resume=opaque-resume",
+      ),
+    );
+
+    expect(auth.verifyOtp).toHaveBeenCalledWith({
+      token_hash: "actual-token-hash",
+      type: "email",
+    });
+    expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(resume.redeem).toHaveBeenCalledWith(resume.callbackIntent);
+    expect(response.headers.get("location")).toBe(
+      "https://canonical.lamilialomi.example/en/products/moon-garden-coloring-book?unlocked=1#premium",
+    );
+    expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
+  });
+
+  it("rejects a token hash with an unsupported OTP type", async () => {
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      productSlug: "moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    };
+
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?token_hash=actual-token-hash&type=recovery&locale=en&resume=opaque-resume",
+      ),
+    );
+
+    expect(auth.verifyOtp).not.toHaveBeenCalled();
+    expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(resume.redeem).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toContain("error=verification_failed");
+  });
+
+  it("rejects callback URLs that mix a code and a token hash", async () => {
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?code=auth-code&token_hash=actual-token-hash&type=email&locale=en",
+      ),
+    );
+
+    expect(auth.verifyOtp).not.toHaveBeenCalled();
+    expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(resume.redeem).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toContain("error=verification_failed");
   });
 
   it("returns a controlled failure for a missing callback parameter", async () => {
