@@ -151,8 +151,11 @@ describe("Supabase auth callback", () => {
       returnTo: "/en/products/moon-garden-coloring-book",
       code: "LOMI-BOOK-2026",
     });
-    expect(response.headers.get("location")).toContain("/en/login?error=verification_failed");
+    expect(response.headers.get("location")).toContain(
+      "/en/products/moon-garden-coloring-book?unlock=unexpected#premium",
+    );
     expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
+    expect(resume.clear).toHaveBeenCalledTimes(1);
   });
 
   it("retains the premium code on another device when redemption returns a failure", async () => {
@@ -397,6 +400,36 @@ describe("Supabase auth callback", () => {
       "/en/products/moon-garden-coloring-book?unlock=invalid_code#premium",
     );
     expect(response.headers.get("location")).not.toContain("OTHER-CODE");
+  });
+
+  it("clears stale unlock state when a callback intent arrives without a resume cookie", async () => {
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/account",
+    };
+    auth.verifyOtp.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({
+      data: {
+        user: {
+          id: "reader-user",
+          email: "reader@example.com",
+          email_confirmed_at: "2026-08-16T10:00:00.000Z",
+        },
+      },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?token_hash=actual-token-hash&type=email&locale=en&resume=opaque-resume",
+      ),
+    );
+
+    expect(resume.clear).toHaveBeenCalledTimes(1);
+    expect(resume.clearUnlock).toHaveBeenCalledTimes(1);
+    expect(response.headers.get("location")).toBe(
+      "https://canonical.lamilialomi.example/en/account",
+    );
   });
 
   it("does not redeem callback resume state if the email code exchange fails", async () => {

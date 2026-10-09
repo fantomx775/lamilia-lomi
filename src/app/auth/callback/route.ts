@@ -106,10 +106,11 @@ export async function GET(request: Request) {
 
   if (
     callbackIntent &&
-    cookieIntent &&
-    !authResumeIntentMatchesUser(cookieIntent, user)
+    (!cookieIntent || !authResumeIntentMatchesUser(cookieIntent, user))
   ) {
-    await clearAuthResumeIntent();
+    if (cookieIntent) {
+      await clearAuthResumeIntent();
+    }
     await clearUnlockIntent();
   }
 
@@ -121,7 +122,14 @@ export async function GET(request: Request) {
     console.error("[auth-callback] Auth resume redemption failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,
     });
+    await clearAuthResumeIntent();
     await persistUnlockIntent(intent);
+    if (intent?.productSlug && intent.code) {
+      return successResponse(
+        appendQuery(getAuthResumeRedirect(intent, locale), "unlock", "unexpected"),
+      );
+    }
+
     return failureResponse(locale, intent, callbackReturnTo);
   }
   await clearAuthResumeIntent();

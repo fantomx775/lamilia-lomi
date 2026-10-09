@@ -5,6 +5,14 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 const productSlug = "moon-garden-coloring-book";
 
+// This suite asserts local demo behavior and uses fixed synthetic demo emails.
+// It must never submit those forms to a hosted Supabase project via baseURL.
+test.describe("Issue 30 local demo auth-return coverage", () => {
+  test.skip(
+    Boolean(process.env.PLAYWRIGHT_BASE_URL),
+    "Issue 30 auth-return browser coverage is restricted to the local demo app.",
+  );
+
 test("auth pages explain errors and preserve a product return path", async ({ page }, testInfo) => {
   await page.goto(
     `/en/login?error=invalid_credentials&returnTo=%2Fen%2Fproducts%2F${productSlug}`,
@@ -353,6 +361,7 @@ test("guest browser download returns to login with its product context", async (
   await expect(page.locator('input[name="returnTo"]')).toHaveValue(
     `/en/products/${productSlug}`,
   );
+});
 });
 
 async function saveEvidenceScreenshot(
