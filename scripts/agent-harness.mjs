@@ -973,11 +973,17 @@ export function validateAiReview({
   const currentForSha = currentForHead.filter(({ record }) =>
     !validSha(baseSha) || record.reviewedBaseSha?.toLowerCase?.() === baseSha.toLowerCase(),
   );
+  const observedReviewedBaseShas = [...new Set(currentForHead
+    .map(({ record }) => validSha(record.reviewedBaseSha) ? record.reviewedBaseSha.toLowerCase() : null)
+    .filter(Boolean))];
+  const observedReviewedBaseSha = observedReviewedBaseShas.length === 1 ? observedReviewedBaseShas[0] : null;
   const current = currentForSha.filter(({ comment }) => commentAuthoredBy(comment, expectedAuthor));
   if (!current.length && currentForHead.length && validSha(baseSha) && !currentForSha.length) {
     return {
       status: "BLOCKED",
       reviewedSha: headSha,
+      reviewedBaseSha: observedReviewedBaseSha,
+      reviewedBaseShaVerified: false,
       reviewers: [],
       findings: null,
       unresolvedFindings: null,
@@ -988,6 +994,8 @@ export function validateAiReview({
     return {
       status: "BLOCKED",
       reviewedSha: headSha,
+      reviewedBaseSha: observedReviewedBaseSha,
+      reviewedBaseShaVerified: false,
       reviewers: [],
       findings: null,
       unresolvedFindings: null,
@@ -1003,6 +1011,8 @@ export function validateAiReview({
       return {
         status: "FAIL",
         reviewedSha: null,
+        reviewedBaseSha: observedReviewedBaseSha,
+        reviewedBaseShaVerified: false,
         reviewers: [],
         findings: null,
         unresolvedFindings: null,
@@ -1012,6 +1022,8 @@ export function validateAiReview({
     return {
       status: "BLOCKED",
       reviewedSha: marked.at(-1)?.record?.reviewedSha || null,
+      reviewedBaseSha: observedReviewedBaseSha,
+      reviewedBaseShaVerified: false,
       reviewers: [],
       findings: null,
       unresolvedFindings: null,
@@ -1039,6 +1051,8 @@ export function validateAiReview({
     return {
       status: "FAIL",
       reviewedSha: headSha,
+      reviewedBaseSha: observedReviewedBaseSha,
+      reviewedBaseShaVerified: false,
       reviewers: current.map(({ record, comment }) => ({
         reviewerAgent: record.reviewerAgent || null,
         recordedBy: comment.user?.login || null,
@@ -1070,6 +1084,8 @@ export function validateAiReview({
   return {
     status,
     reviewedSha: headSha,
+    reviewedBaseSha: validSha(baseSha) ? baseSha.toLowerCase() : null,
+    reviewedBaseShaVerified: validSha(baseSha),
     requiredReviewCount: 2,
     independentReviewCount: distinctReviewerAgents.size,
     reviewers: current.map(({ record, comment }) => ({
@@ -2451,18 +2467,33 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     return {
       ...verification,
       decision: "BLOCKED",
-      mergeBase: { status: "BLOCKED", sha: null },
+      mergeBase: {
+        status: "BLOCKED",
+        sha: null,
+        reviewedBaseSha: verification.aiReview?.reviewedBaseSha || null,
+        details: "The merged PR's first parent could not be verified against current-SHA AI review evidence.",
+      },
       reasons: [...new Set([
         ...(verification.reasons || []),
         "The merged PR's reviewed base SHA could not be verified from the immutable merge commit's first parent.",
       ])],
     };
   }
+  const mergeBaseMatchesReview = verification.aiReview?.reviewedBaseShaVerified === true &&
+    verification.aiReview.reviewedBaseSha?.toLowerCase() === mergedBaseSha;
+  const mergeBaseEvidence = {
+    status: mergeBaseMatchesReview ? "PASS" : "BLOCKED",
+    sha: mergedBaseSha,
+    reviewedBaseSha: verification.aiReview?.reviewedBaseSha || null,
+    details: mergeBaseMatchesReview
+      ? "The immutable first parent matches the base SHA bound to valid current-SHA AI reviews."
+      : "Current-SHA AI review evidence does not verify the immutable first parent as its reviewed base.",
+  };
   if (validateAsMergedDelivery && verification.decision === "READY_FOR_MERGE") {
     return {
       ...verification,
       decision: "VERIFIED_MERGE",
-      mergeBase: { status: "PASS", sha: mergedBaseSha },
+      mergeBase: mergeBaseEvidence,
       pullRequest: {
         ...verification.pullRequest,
         state: "closed",
@@ -2472,7 +2503,7 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     };
   }
   return validateAsMergedDelivery
-    ? { ...verification, mergeBase: { status: "PASS", sha: mergedBaseSha } }
+    ? { ...verification, mergeBase: mergeBaseEvidence }
     : verification;
 }
 
@@ -3442,11 +3473,15 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     verification = await verify(client, number, { allowMerged: true });
     reviewGatesPassed = verification.decision === "VERIFIED_MERGE";
     candidateSha = verification.currentSha || candidateSha;
-    verifiedBaseSha = verification.mergeBase?.status === "BLOCKED"
-      ? null
-      : validSha(verification.pullRequest?.baseSha)
-      ? verification.pullRequest.baseSha.toLowerCase()
-      : null;
+    if (validSha(verification.mergeBase?.reviewedBaseSha)) {
+      verifiedBaseSha = verification.mergeBase.reviewedBaseSha.toLowerCase();
+    } else if (verification.mergeBase?.status === "BLOCKED") {
+      verifiedBaseSha = null;
+    } else {
+      verifiedBaseSha = validSha(verification.pullRequest?.baseSha)
+        ? verification.pullRequest.baseSha.toLowerCase()
+        : null;
+    }
     const smokePlan = resolveSmokePlan(verification);
     productionSmokePlanVerification = {
       status: smokePlan.status,
