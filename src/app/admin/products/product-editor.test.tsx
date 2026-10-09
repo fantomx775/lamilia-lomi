@@ -398,7 +398,6 @@ describe("ProductEditor V2", () => {
 
     const titles = view.container.querySelectorAll<HTMLInputElement>("#product-title-en");
     expect(titles).toHaveLength(2);
-    fireEvent.change(titles[0], { target: { value: "Older editor" } });
     fireEvent.change(titles[1], { target: { value: "Newer editor" } });
     view.rerender(
       <AdminProductEditorHistoryGuard>
