@@ -1270,6 +1270,13 @@ function isValidProductionSmokePath(path) {
   }
 }
 
+function isSupportedProductionSmokeStatus(status, path) {
+  if (!Number.isInteger(status)) return false;
+  if (status >= 200 && status < 300) return true;
+  if (![401, 403].includes(status) || !isValidProductionSmokePath(path)) return false;
+  return new URL(path, "https://agent-harness.invalid").pathname.startsWith("/api/");
+}
+
 function routePatternForFile(filename) {
   const normalized = filename.replace(/^src\//, "");
   const appMatch = normalized.match(/^app\/(?:(.*)\/)?(?:page|route)\.[^/]+$/i);
@@ -1353,8 +1360,9 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
     }
     for (const expectation of flow.paths) {
       if (!expectation || !isValidProductionSmokePath(expectation.path) ||
-        typeof expectation.expectedText !== "string" || !expectation.expectedText.trim()) {
-        failures.push("Smoke flow " + flow.name + " has an invalid absolute path or missing expected response text.");
+        typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+        (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path))) {
+        failures.push("Smoke flow " + flow.name + " has an invalid absolute path, expected response text, or supported HTTP status.");
         continue;
       }
       const pathName = new URL(expectation.path, "https://agent-harness.invalid").pathname;
@@ -1364,7 +1372,12 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       }
       validPathNames.push(pathName);
       paths.push(expectation.path);
-      expectations.push({ path: expectation.path, expectedText: expectation.expectedText.trim(), flow: flow.name });
+      expectations.push({
+        path: expectation.path,
+        expectedText: expectation.expectedText.trim(),
+        ...(expectation.expectedStatus !== undefined ? { expectedStatus: expectation.expectedStatus } : {}),
+        flow: flow.name,
+      });
     }
     for (const { filename, routePattern } of routePatterns) {
       if (!validPathNames.some((pathName) => routePattern.test(pathName))) {
@@ -1375,6 +1388,13 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
   const uncovered = affectedFiles.filter((filename) => !covered.has(filename));
   if (uncovered.length) failures.push("Smoke plan does not map changed file(s): " + uncovered.join(", ") + ".");
   const uniquePaths = [...new Set(paths)];
+  const conflictingStatuses = uniquePaths.some((path) => {
+    const statuses = new Set(expectations
+      .filter((expectation) => expectation.path === path && expectation.expectedStatus !== undefined)
+      .map((expectation) => expectation.expectedStatus));
+    return statuses.size > 1;
+  });
+  if (conflictingStatuses) failures.push("Smoke plan has conflicting expected HTTP statuses for one path.");
   return {
     status: failures.length ? "BLOCKED" : "PASS",
     required: true,
@@ -2663,9 +2683,19 @@ export async function runProductionSmoke(environmentUrl, {
   }
   if (!Array.isArray(expectations) || expectations.some((expectation) =>
     !expectation || !paths.includes(expectation.path) ||
-    typeof expectation.expectedText !== "string" || !expectation.expectedText.trim(),
+    typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+    (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)),
   )) {
     return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path and non-empty expected content." };
+  }
+  const conflictingStatuses = paths.some((path) => {
+    const statuses = new Set(expectations
+      .filter((expectation) => expectation.path === path && expectation.expectedStatus !== undefined)
+      .map((expectation) => expectation.expectedStatus));
+    return statuses.size > 1;
+  });
+  if (conflictingStatuses) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke expectations cannot require conflicting HTTP statuses for one path." };
   }
   const checks = [];
   for (const path of paths) {
@@ -2691,16 +2721,24 @@ export async function runProductionSmoke(environmentUrl, {
       };
       const expectedForPath = expectations.filter((expectation) => expectation.path === path);
       const expectedTextMatched = expectedForPath.every((expectation) => body.includes(expectation.expectedText));
+      const expectedStatus = expectedForPath.find((expectation) => expectation.expectedStatus !== undefined)?.expectedStatus;
+      const expectedStatusMatched = expectedStatus === undefined || response.status === expectedStatus;
+      const responseStatusPassed = expectedStatus === undefined ? response.ok : expectedStatusMatched;
       if (expectedForPath.length) {
         check.expectedText = expectedForPath.map((expectation) => expectation.expectedText);
         check.expectedTextMatched = expectedTextMatched;
       }
+      if (expectedStatus !== undefined) {
+        check.expectedStatus = expectedStatus;
+        check.expectedStatusMatched = expectedStatusMatched;
+      }
       checks.push(check);
-      if (!response.ok || finalUrl.origin !== baseUrl.origin || !body.trim() || !expectedTextMatched) {
+      if (!responseStatusPassed || finalUrl.origin !== baseUrl.origin || !body.trim() || !expectedTextMatched) {
         return {
           status: "FAIL",
           checks,
           details: "Production smoke failed for " + path + " (HTTP " + response.status +
+            (expectedStatus !== undefined && !expectedStatusMatched ? ", expected HTTP " + expectedStatus : "") +
             (finalUrl.origin !== baseUrl.origin ? ", redirected outside the deployment origin" : "") +
             (!body.trim() ? ", empty response body" : "") +
             (!expectedTextMatched ? ", expected content was not present" : "") + ").",
@@ -2714,7 +2752,7 @@ export async function runProductionSmoke(environmentUrl, {
       };
     }
   }
-  return { status: "PASS", checks, details: checks.length + " focused Production smoke path(s) returned non-empty successful responses." };
+  return { status: "PASS", checks, details: checks.length + " focused Production smoke path(s) returned the expected status and content." };
 }
 
 function formatDeliveryComment(record) {
@@ -3607,9 +3645,10 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     }
     if (expectations.some((expectation) =>
       !expectation || !paths.includes(expectation.path) ||
-      typeof expectation.expectedText !== "string" || !expectation.expectedText.trim(),
+      typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+      (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)),
     )) {
-      return { status: "BLOCKED", details: "Production smoke expectations must name an included path and non-empty expected content." };
+      return { status: "BLOCKED", details: "Production smoke expectations must name an included path, expected content, and a supported HTTP status." };
     }
     return { status: "PASS", paths, expectations, details: plan.details };
   };

@@ -1923,6 +1923,55 @@ test("production smoke plans bind changed route files to valid paths and expecte
   };
   assert.equal(validateProductionSmokePlan({ files, localVerification: { record: { productionSmokePlan: plan } } }).status, "PASS");
 
+  const protectedDownloadPlan = validateProductionSmokePlan({
+    files: ["src/app/api/downloads/[assetId]/route.ts"],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "guest download is denied",
+        affectedFiles: ["src/app/api/downloads/[assetId]/route.ts"],
+        paths: [{
+          path: "/api/downloads/known-asset",
+          expectedText: "guest",
+          expectedStatus: 401,
+        }],
+      }],
+    } } },
+  });
+  assert.equal(protectedDownloadPlan.status, "PASS");
+  assert.deepEqual(protectedDownloadPlan.expectations, [{
+    path: "/api/downloads/known-asset",
+    expectedText: "guest",
+    expectedStatus: 401,
+    flow: "guest download is denied",
+  }]);
+
+  const unauthorizedPageStatus = validateProductionSmokePlan({
+    files: ["src/app/products/page.tsx"],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "unexpectedly denied page",
+        affectedFiles: ["src/app/products/page.tsx"],
+        paths: [{ path: "/products", expectedText: "guest", expectedStatus: 401 }],
+      }],
+    } } },
+  });
+  assert.equal(unauthorizedPageStatus.status, "BLOCKED");
+
+  const unsupportedSmokeStatus = validateProductionSmokePlan({
+    files: ["src/app/api/downloads/[assetId]/route.ts"],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "unsupported status",
+        affectedFiles: ["src/app/api/downloads/[assetId]/route.ts"],
+        paths: [{ path: "/api/downloads/known-asset", expectedText: "guest", expectedStatus: 500 }],
+      }],
+    } } },
+  });
+  assert.equal(unsupportedSmokeStatus.status, "BLOCKED");
+
   const multipleRoutes = validateProductionSmokePlan({
     files: ["src/app/products/page.tsx", "src/app/about/page.tsx"],
     localVerification: { record: { productionSmokePlan: {
@@ -2782,6 +2831,57 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
   assert.equal(wrongExpectedFlow.status, "FAIL");
   assert.match(wrongExpectedFlow.details, /expected content/);
 
+  const expectedAuthorizationDenial = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/downloads/known-asset"],
+    expectations: [{
+      path: "/api/downloads/known-asset",
+      expectedText: "guest",
+      expectedStatus: 401,
+    }],
+    fetchImpl: async (url) => ({
+      ok: false,
+      status: 401,
+      url: url.href,
+      headers: { get: () => "application/json" },
+      text: async () => '{"ok":false,"reason":"guest"}',
+    }),
+  });
+  assert.equal(expectedAuthorizationDenial.status, "PASS");
+  assert.equal(expectedAuthorizationDenial.checks[0].expectedStatusMatched, true);
+
+  const unexpectedAuthorizationDenial = await runProductionSmoke("https://production.example.test", {
+    paths: ["/products"],
+    fetchImpl: async (url) => ({
+      ok: false,
+      status: 401,
+      url: url.href,
+      headers: { get: () => "application/json" },
+      text: async () => '{"ok":false,"reason":"guest"}',
+    }),
+  });
+  assert.equal(unexpectedAuthorizationDenial.status, "FAIL");
+
+  const invalidExpectedSmokeStatus = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/downloads/known-asset"],
+    expectations: [{ path: "/api/downloads/known-asset", expectedText: "guest", expectedStatus: 500 }],
+  });
+  assert.equal(invalidExpectedSmokeStatus.status, "BLOCKED");
+
+  const unauthorizedPageSmoke = await runProductionSmoke("https://production.example.test", {
+    paths: ["/products"],
+    expectations: [{ path: "/products", expectedText: "guest", expectedStatus: 401 }],
+  });
+  assert.equal(unauthorizedPageSmoke.status, "BLOCKED");
+
+  const conflictingExpectedStatuses = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/downloads/known-asset"],
+    expectations: [
+      { path: "/api/downloads/known-asset", expectedText: "guest", expectedStatus: 401 },
+      { path: "/api/downloads/known-asset", expectedText: "locked", expectedStatus: 403 },
+    ],
+  });
+  assert.equal(conflictingExpectedStatuses.status, "BLOCKED");
+
   assert.equal((await runProductionSmoke("http://production.example.test")).status, "BLOCKED");
   assert.equal((await runProductionSmoke("https://production.example.test", { paths: ["//elsewhere.test"] })).status, "BLOCKED");
 });
@@ -3397,7 +3497,7 @@ test("application-flow delivery requires and runs an explicit affected Productio
   const noPlanVerification = async () => ({
     decision: "READY_FOR_MERGE",
     currentSha: CURRENT_SHA,
-    fileScope: { files: ["src/app/products/page.tsx"] },
+    fileScope: { files: ["src/app/api/downloads/[assetId]/route.ts"] },
     reasons: [],
   });
   const missingPath = await deliverPullRequest(missingPathFixture.client, 52, { verify: noPlanVerification });
@@ -3408,12 +3508,16 @@ test("application-flow delivery requires and runs an explicit affected Productio
   const verification = async () => ({
     decision: "READY_FOR_MERGE",
     currentSha: CURRENT_SHA,
-    fileScope: { files: ["src/app/products/page.tsx"] },
+    fileScope: { files: ["src/app/api/downloads/[assetId]/route.ts"] },
     productionSmokePlan: {
       status: "PASS",
       required: true,
-      paths: ["/products"],
-      expectations: [{ path: "/products", expectedText: "Products" }],
+      paths: ["/api/downloads/known-asset"],
+      expectations: [{
+        path: "/api/downloads/known-asset",
+        expectedText: "guest",
+        expectedStatus: 401,
+      }],
     },
     reasons: [],
   });
@@ -3434,8 +3538,12 @@ test("application-flow delivery requires and runs an explicit affected Productio
     },
   });
   assert.equal(delivered.decision, "DELIVERED");
-  assert.deepEqual(smokePaths, ["/products"]);
-  assert.deepEqual(smokeExpectations, [{ path: "/products", expectedText: "Products" }]);
+  assert.deepEqual(smokePaths, ["/api/downloads/known-asset"]);
+  assert.deepEqual(smokeExpectations, [{
+    path: "/api/downloads/known-asset",
+    expectedText: "guest",
+    expectedStatus: 401,
+  }]);
 
   for (const configuredPath of ["/catalog", "//elsewhere.test/catalog"]) {
     const invalidFixture = createDeliveryClient();
