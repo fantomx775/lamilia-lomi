@@ -231,6 +231,26 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
         await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
 
+        await legacyPage.getByLabel("Pozycja w katalogu").fill("43");
+        const acceptDirtyInternalNavigationPromise = legacyPage.waitForEvent("dialog", { timeout: 5_000 });
+        void legacyPage.locator('a[href="/admin/products"]').last().click().catch(() => null);
+        const acceptDirtyInternalNavigationDialog = await acceptDirtyInternalNavigationPromise;
+        expect(acceptDirtyInternalNavigationDialog.type()).toBe("confirm");
+        await acceptDirtyInternalNavigationDialog.accept();
+        await expect(legacyPage).toHaveURL(/\/admin\/products$/);
+        await legacyPage.goBack();
+        await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+        await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
+        await legacyPage.getByLabel("Pozycja w katalogu").fill("44");
+
+        const cancelDirtyLegacyForwardPromise = legacyPage.waitForEvent("dialog", { timeout: 5_000 });
+        void legacyPage.goForward().catch(() => null);
+        const cancelDirtyLegacyForwardDialog = await cancelDirtyLegacyForwardPromise;
+        expect(cancelDirtyLegacyForwardDialog.type()).toBe("confirm");
+        await cancelDirtyLegacyForwardDialog.dismiss();
+        await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+        await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("44");
+
         await legacyPage.getByLabel("Pozycja w katalogu").fill("41");
         await expect(legacyPage.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
         await legacyPage.getByLabel("Pozycja w katalogu").fill("40");
@@ -315,6 +335,8 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
     await expect(noJsPage.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeVisible();
     await expect(noJsPage.getByLabel("Tytuł")).toHaveValue(title);
     await expect(noJsPage.getByLabel("Krótki opis")).toHaveValue(description);
+    await expect(noJsPage.locator("#product-title-en")).not.toHaveAttribute("aria-invalid", "true");
+    await expect(noJsPage.locator("#product-short-description-en")).not.toHaveAttribute("aria-invalid", "true");
     await expect(noJsPage.getByLabel("Adres produktu")).toHaveValue(/no-js-retained-/);
     await expect(noJsPage.getByLabel("Pozycja w katalogu")).toHaveValue("73");
     await expect(noJsPage.getByLabel("Status")).toHaveValue("published");

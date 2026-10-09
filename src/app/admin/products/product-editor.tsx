@@ -312,7 +312,7 @@ export function ProductEditor({
       const destination = new URL(link.href, window.location.href);
       if (destination.origin !== window.location.origin || destination.href === window.location.href) return;
 
-      if (!isDirtyRef.current) {
+      const rememberForwardDestination = () => {
         const owner = currentEditorUrlRef.current;
         const currentGuard = readProductEditorHistoryGuard(window.history.state);
         if (!navigationApiAvailableRef.current && owner === window.location.href && currentGuard?.owner === owner) {
@@ -320,12 +320,17 @@ export function ProductEditor({
           window.history.replaceState(withProductEditorHistoryGuard(window.history.state, nextGuard), "", owner);
           knownForwardHrefRef.current = destination.href;
         }
+      };
+
+      if (!isDirtyRef.current) {
+        rememberForwardDestination();
         return;
       }
 
       if (window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?")) {
         isDirtyRef.current = false;
         setIsDirty(false);
+        rememberForwardDestination();
         return;
       }
       event.preventDefault();
@@ -1336,12 +1341,12 @@ function mapProductSaveErrors(
         break;
       case ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS: {
         let foundTarget = false;
-        if (!String(formData.get("title_en") ?? "").trim()) {
+        if (!String(formData.getAll("title_en").at(-1) ?? "").trim()) {
           addFieldError("product-title-en", code);
           locale = "en";
           foundTarget = true;
         }
-        if (!String(formData.get("shortDescription_en") ?? "").trim()) {
+        if (!String(formData.getAll("shortDescription_en").at(-1) ?? "").trim()) {
           addFieldError("product-short-description-en", code);
           locale = "en";
           foundTarget = true;
