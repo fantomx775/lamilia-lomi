@@ -209,6 +209,14 @@ export async function loginDemoAction(formData: FormData) {
       retryingPendingResume && pendingResumeIntent
         ? { ...pendingResumeIntent, code: submittedCode || pendingResumeIntent.code }
         : null;
+    if (
+      pendingResumeIntentForRetry &&
+      submittedCode &&
+      submittedCode !== pendingResumeIntent?.code
+    ) {
+      // Keep a replacement code in the same account-bound intent if login or lookup fails.
+      await setAuthResumeIntent(pendingResumeIntentForRetry);
+    }
     const code = pendingResumeAccountMismatch
       ? ""
       : pendingResumeIntentForRetry?.code ?? formCode;

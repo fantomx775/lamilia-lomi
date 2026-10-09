@@ -376,6 +376,7 @@ describe("registration auth action", () => {
           "reader@example.com",
           "password123",
           "/en/products/moon-garden-coloring-book",
+          "REPLACEMENT-CODE",
         ),
       ),
       "/en/login?error=verification_unavailable&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
@@ -383,7 +384,59 @@ describe("registration auth action", () => {
 
     expect(actionMocks.redeemAuthResumeIntent).not.toHaveBeenCalled();
     expect(actionMocks.clearAuthResumeIntent).not.toHaveBeenCalled();
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "REPLACEMENT-CODE",
+        emailHash: "reader-email-hash",
+        userId: "reader-user",
+      }),
+    );
   });
+
+  it.each(["throws", "returns an error"] as const)(
+    "keeps a replacement code in the same account-bound intent when sign-in $errorMode",
+    async (errorMode) => {
+      actionMocks.getBackendMode.mockReturnValue("supabase");
+      const pendingResumeIntent = {
+        locale: "en",
+        productSlug: "moon-garden-coloring-book",
+        returnTo: "/en/products/moon-garden-coloring-book",
+        code: "SAVED-CODE",
+        emailHash: "reader-email-hash",
+        userId: "reader-user",
+        createdAt: Date.now(),
+      };
+      actionMocks.readAuthResumeIntent.mockResolvedValue(pendingResumeIntent);
+      actionMocks.authResumeIntentMatchesEmail.mockReturnValue(true);
+      const signInWithPassword = errorMode === "throws"
+        ? vi.fn().mockRejectedValue(new Error("temporary sign-in failure"))
+        : vi.fn().mockResolvedValue({ error: new Error("invalid login") });
+      actionMocks.createClient.mockResolvedValue({
+        auth: { signInWithPassword },
+      });
+
+      await expectRedirect(
+        loginDemoAction(
+          loginForm(
+            "reader@example.com",
+            "password123",
+            "/en/products/moon-garden-coloring-book",
+            "REPLACEMENT-CODE",
+          ),
+        ),
+        "/en/login?error=invalid_credentials&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+      );
+
+      expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          code: "REPLACEMENT-CODE",
+          emailHash: "reader-email-hash",
+          userId: "reader-user",
+        }),
+      );
+      expect(actionMocks.redeemAuthResumeIntent).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     { failureMode: "throws", resumeState: "preserved" },
