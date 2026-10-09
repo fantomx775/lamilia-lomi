@@ -224,6 +224,20 @@ export async function loginDemoAction(formData: FormData) {
     const code = pendingResumeAccountMismatch
       ? ""
       : pendingResumeIntentForRetry?.code ?? formCode;
+    const preservePendingResumeRetry = async () => {
+      if (!pendingResumeIntentForRetry?.userId || !pendingResumeIntentForRetry.code) {
+        return;
+      }
+
+      await setAuthResumeIntent({
+        locale: pendingResumeIntentForRetry.locale,
+        productSlug: pendingResumeIntentForRetry.productSlug,
+        returnTo: pendingResumeIntentForRetry.returnTo,
+        code: pendingResumeIntentForRetry.code,
+        userId: pendingResumeIntentForRetry.userId,
+        emailHash: pendingResumeIntentForRetry.emailHash,
+      });
+    };
     let intent = createAuthResumeIntent({
       locale,
       productSlug: returnProductSlug,
@@ -244,6 +258,7 @@ export async function loginDemoAction(formData: FormData) {
       }));
     } catch (authError) {
       logUnexpectedFailure("[auth] Sign-in failed unexpectedly.", authError);
+      await preservePendingResumeRetry();
       redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
@@ -251,6 +266,7 @@ export async function loginDemoAction(formData: FormData) {
       const errorCode = isSupabaseEmailNotConfirmedError(error)
         ? "email_unverified"
         : "invalid_credentials";
+      await preservePendingResumeRetry();
       redirect(`/${locale}/login?error=${errorCode}&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
@@ -277,6 +293,7 @@ export async function loginDemoAction(formData: FormData) {
         pendingUser.error ||
         !pendingUser.data.user?.email_confirmed_at
       ) {
+        await preservePendingResumeRetry();
         redirect(
           `/${locale}/login?error=verification_unavailable&returnTo=${encodeURIComponent(returnTo)}`,
         );
@@ -752,6 +769,31 @@ export async function unlockPremiumAction(formData: FormData) {
       userId: session.userId,
     });
     redirect(appendQueryPath(premiumReturnTo, "step", "verify"));
+  }
+
+  if (getBackendMode() === "supabase") {
+    const pendingResumeIntent = await readAuthResumeIntent();
+    const pendingResumeCode = normalizePremiumCodeForRequest(pendingResumeIntent?.code);
+    const submittedCode = normalizePremiumCodeForRequest(code);
+    const submittedCodeMatchesOtherAccount = Boolean(
+      pendingResumeIntent?.userId &&
+        pendingResumeCode &&
+        submittedCode &&
+        pendingResumeIntent.productSlug === product.slug &&
+        pendingResumeCode === submittedCode &&
+        !authResumeIntentMatchesUser(pendingResumeIntent, {
+          id: session.userId,
+          email: session.email,
+        }),
+    );
+
+    if (submittedCodeMatchesOtherAccount) {
+      await clearAuthResumeIntent();
+      await clearUnlockIntent();
+      redirect(
+        `/${locale}/login?error=verification_mismatch&returnTo=${encodeURIComponent(returnTo)}`,
+      );
+    }
   }
 
   let result;

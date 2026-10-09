@@ -386,7 +386,14 @@ describe("registration auth action", () => {
 
     expect(actionMocks.redeemAuthResumeIntent).not.toHaveBeenCalled();
     expect(actionMocks.clearAuthResumeIntent).not.toHaveBeenCalled();
-    expect(actionMocks.setAuthResumeIntent).not.toHaveBeenCalled();
+    expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "REPLACEMENT-CODE",
+      userId: "reader-user",
+      emailHash: "reader-email-hash",
+    });
   });
 
   it("does not auto-reuse a premium code from an email-only login intent", async () => {
@@ -511,7 +518,7 @@ describe("registration auth action", () => {
   });
 
   it.each(["throws", "returns an error"] as const)(
-    "does not save a replacement code before sign-in succeeds when it $errorMode",
+    "preserves a replacement code under its original account binding when sign-in $errorMode",
     async (errorMode) => {
       actionMocks.getBackendMode.mockReturnValue("supabase");
       const pendingResumeIntent = {
@@ -544,7 +551,14 @@ describe("registration auth action", () => {
         "/en/login?error=invalid_credentials&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
       );
 
-      expect(actionMocks.setAuthResumeIntent).not.toHaveBeenCalled();
+      expect(actionMocks.setAuthResumeIntent).toHaveBeenCalledWith({
+        locale: "en",
+        productSlug: "moon-garden-coloring-book",
+        returnTo: "/en/products/moon-garden-coloring-book",
+        code: "REPLACEMENT-CODE",
+        userId: "reader-user",
+        emailHash: "reader-email-hash",
+      });
       expect(actionMocks.redeemAuthResumeIntent).not.toHaveBeenCalled();
     },
   );
@@ -1534,9 +1548,47 @@ describe("premium unlock action", () => {
     await expectRedirect(unlockPremiumAction(formData), location);
   });
 
+  it("does not redeem a stale account-bound code for a different signed-in user", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.getProductBySlugForRequest.mockResolvedValue({
+      id: "product-id",
+      slug: "moon-garden-coloring-book",
+      reviewDelayDays: 7,
+    });
+    actionMocks.getDemoSession.mockResolvedValue({
+      email: "reader@example.com",
+      userId: "account-b",
+      emailVerified: true,
+      unlockedProductIds: [],
+    });
+    actionMocks.readAuthResumeIntent.mockResolvedValue({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "reader-email-hash",
+      userId: "account-a",
+      createdAt: Date.now(),
+    });
+    actionMocks.authResumeIntentMatchesUser.mockReturnValue(false);
+
+    const formData = new FormData();
+    formData.set("locale", "en");
+    formData.set("productSlug", "moon-garden-coloring-book");
+    formData.set("code", "LOMI-BOOK-2026");
+
+    await expectRedirect(
+      unlockPremiumAction(formData),
+      "/en/login?error=verification_mismatch&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.redeemPremiumCodeForRequest).not.toHaveBeenCalled();
+    expect(actionMocks.clearAuthResumeIntent).toHaveBeenCalledTimes(1);
+    expect(actionMocks.clearUnlockIntent).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["matching account and product", "moon-garden-coloring-book", true, true],
-    ["different account", "moon-garden-coloring-book", false, false],
     ["different product", "another-product", true, false],
   ] as const)(
     "clears a saved retry intent after success only for the %s",
@@ -1563,6 +1615,7 @@ describe("premium unlock action", () => {
         createdAt: Date.now(),
       });
       actionMocks.authResumeIntentMatchesEmail.mockReturnValue(matchesAccount);
+      actionMocks.authResumeIntentMatchesUser.mockReturnValue(matchesAccount);
       actionMocks.redeemPremiumCodeForRequest.mockResolvedValue({
         ok: true,
         status: "success",

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import {
-  authResumeCallbackIntentMatchesUser,
+  authResumeIntentMatchesEmail,
   authResumeIntentMatchesUser,
   clearAuthResumeIntent,
   decodeAuthResumeCallbackToken,
@@ -100,19 +100,37 @@ export async function GET(request: Request) {
 
   const user = await getCallbackUser(supabase);
 
-  if (intent && user && !authResumeCallbackIntentMatchesUser(intent, user)) {
+  if (
+    intent &&
+    user &&
+    ((intent.userId && !authResumeIntentMatchesUser(intent, user)) ||
+      (intent.emailHash && !authResumeIntentMatchesEmail(intent, user.email)))
+  ) {
     await clearAuthResumeIntent();
     await clearUnlockIntent();
     return failureResponse(locale, intent, callbackReturnTo, "verification_mismatch");
   }
 
-  // Email confirmation callbacks can carry an email-bound intent created
-  // before Supabase returns the new user's ID. Bind it as soon as the
-  // callback establishes that identity so a later retry cannot be claimed by
-  // another account that reuses the email address.
+  const matchingBoundCookieIntent =
+    intent &&
+    user &&
+    cookieIntent?.userId &&
+    authResumeIntentMatchesUser(cookieIntent, user) &&
+    cookieIntent.productSlug === intent.productSlug &&
+    cookieIntent.returnTo === intent.returnTo
+      ? cookieIntent
+      : null;
+
+  // An email-bound callback token is enough to preserve the destination, but
+  // it cannot authorize the premium code. Reuse a code only when a separate,
+  // signed cookie already binds it to the authenticated user.
   const verifiedIntent =
     intent && user?.id && !intent.userId
-      ? { ...intent, userId: user.id }
+      ? {
+          ...intent,
+          userId: user.id,
+          code: matchingBoundCookieIntent?.code,
+        }
       : intent;
 
   if (!user?.email_confirmed_at) {

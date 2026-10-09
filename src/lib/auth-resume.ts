@@ -159,15 +159,6 @@ export function authResumeIntentMatchesUser(
   return true;
 }
 
-export function authResumeCallbackIntentMatchesUser(
-  intent: Pick<AuthResumeIntent, "userId" | "emailHash">,
-  user: { id?: string | null; email?: string | null },
-) {
-  return intent.userId
-    ? authResumeIntentMatchesUser(intent, user)
-    : authResumeIntentMatchesEmail(intent, user.email);
-}
-
 export function getAccountBoundResumeCode(
   intent: AuthResumeIntent | null | undefined,
   user: { id?: string | null; email?: string | null } | null | undefined,

@@ -232,7 +232,6 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
           crossDevicePage,
           {
             pathname: `/en/products/${productSlug}`,
-            query: { unlocked: "1" },
             hash: "#premium",
           },
           12_000,
@@ -258,9 +257,24 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         throw new Error("The real confirmation callback did not return to the intended product.");
       }
       completed.realConfirmationCallback = true;
-      completed.crossDeviceResume = true;
+      completed.crossDeviceProductReturn = true;
       completed.sessionEstablishedForAccountOne = await isConfirmedUser(admin, userOne.email);
       expect(completed.sessionEstablishedForAccountOne).toBe(true);
+      completed.emailOnlyCallbackDidNotRedeemPremiumCode =
+        !(await hasUnlock(admin, userOne.email));
+      expect(completed.emailOnlyCallbackDidNotRedeemPremiumCode).toBe(true);
+
+      const crossDeviceUnlock = crossDevicePage.getByTestId("unlock-code-state");
+      await crossDeviceUnlock.getByLabel("Premium code").fill(premiumCode);
+      await crossDeviceUnlock
+        .getByRole("button", { name: "Unlock premium content", exact: true })
+        .click();
+      await waitForLocation(crossDevicePage, {
+        pathname: `/en/products/${productSlug}`,
+        query: { unlocked: "1" },
+        hash: "#premium",
+      });
+      completed.premiumCodeReenteredAfterCrossDeviceConfirmation = true;
       completed.premiumIntentRedeemedForAccountOne = await hasUnlock(admin, userOne.email);
       expect(completed.premiumIntentRedeemedForAccountOne).toBe(true);
 
