@@ -70,8 +70,9 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
       productSaved = true;
       await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+\?saved=1$/i);
-      productPath = new URL(page.url()).pathname;
     });
+    const verifiedProductPath = new URL(page.url()).pathname;
+    productPath = verifiedProductPath;
     await expect(page.getByText("Zapisano zmiany.", { exact: true })).toBeVisible();
     await waitForAdminTransition(page);
     await expect(page.getByLabel("Status")).toHaveValue("draft");
@@ -101,7 +102,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await withExpectedNavigation(browserDiagnostics, "dismiss unsaved internal navigation", async () => {
       page.once("dialog", (dialog) => void dialog.dismiss());
       await productsBackLink.click();
-      await expect(page).toHaveURL(editorUrlRegex(productPath));
+      await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
     });
 
@@ -121,7 +122,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await page.locator('a[href="/admin/products"]').last().click();
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.getByRole("link", { name: titleText, exact: false }).click();
-      await expect(page).toHaveURL(editorUrlRegex(productPath));
+      await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
       await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
       await page.reload();
@@ -134,7 +135,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await page.locator('a[href="/admin/products"]').last().click();
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.goBack();
-      await expect(page).toHaveURL(editorUrlRegex(productPath));
+      await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
     });
     await page.getByLabel("Pozycja w katalogu").fill("39");
     await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
@@ -145,7 +146,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       const cancelForwardDialog = await cancelForwardPromise;
       expect(cancelForwardDialog.type()).toBe("confirm");
       await cancelForwardDialog.dismiss();
-      await expect(page).toHaveURL(editorUrlRegex(productPath));
+      await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("39");
     });
 
@@ -157,7 +158,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await acceptForwardDialog.accept();
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.getByRole("link", { name: titleText, exact: false }).click();
-      await expect(page).toHaveURL(editorUrlRegex(productPath));
+      await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
     });
 
@@ -170,12 +171,12 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await acceptAfterUnmountNavigation.accept();
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.goBack();
-      await expect(page).toHaveURL(editorUrlRegex(productPath));
+      await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
       await page.goForward();
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.goBack();
-      await expect(page).toHaveURL(editorUrlRegex(productPath));
+      await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
     });
 
@@ -187,7 +188,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       const backDialog = await backDialogPromise;
       expect(backDialog.type()).toBe("confirm");
       await backDialog.dismiss();
-      await expect(page).toHaveURL(editorUrlRegex(productPath));
+      await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("40");
     });
     await withExpectedNavigation(browserDiagnostics, "save and reload edited product states", async () => {
@@ -251,7 +252,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           await legacyPage.locator('a[href="/admin/products"]').last().click();
           await expect(legacyPage).toHaveURL(/\/admin\/products$/);
           await legacyPage.goBack();
-          await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+          await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await legacyPage.getByLabel("Pozycja w katalogu").fill("41");
 
           const cancelLegacyForwardPromise = legacyPage.waitForEvent("dialog", { timeout: 5_000 });
@@ -259,7 +260,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           const cancelLegacyForwardDialog = await cancelLegacyForwardPromise;
           expect(cancelLegacyForwardDialog.type()).toBe("confirm");
           await cancelLegacyForwardDialog.dismiss();
-          await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+          await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("41");
 
           const acceptLegacyForwardPromise = legacyPage.waitForEvent("dialog", { timeout: 5_000 });
@@ -269,7 +270,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           await acceptLegacyForwardDialog.accept();
           await expect(legacyPage).toHaveURL(/\/admin\/products$/);
           await legacyPage.getByRole("link", { name: titleText, exact: false }).click();
-          await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+          await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
 
           await legacyPage.getByLabel("Pozycja w katalogu").fill("43");
@@ -280,7 +281,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           await acceptDirtyInternalNavigationDialog.accept();
           await expect(legacyPage).toHaveURL(/\/admin\/products$/);
           await legacyPage.goBack();
-          await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+          await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
           await legacyPage.getByLabel("Pozycja w katalogu").fill("44");
 
@@ -289,7 +290,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           const cancelDirtyLegacyForwardDialog = await cancelDirtyLegacyForwardPromise;
           expect(cancelDirtyLegacyForwardDialog.type()).toBe("confirm");
           await cancelDirtyLegacyForwardDialog.dismiss();
-          await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+          await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("44");
 
           await legacyPage.getByLabel("Pozycja w katalogu").fill("41");
@@ -303,7 +304,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           const cancelLegacyBackDialog = await cancelLegacyBackPromise;
           expect(cancelLegacyBackDialog.type()).toBe("confirm");
           await cancelLegacyBackDialog.dismiss();
-          await expect(legacyPage).toHaveURL(editorUrlRegex(productPath));
+          await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("42");
         });
       } finally {
