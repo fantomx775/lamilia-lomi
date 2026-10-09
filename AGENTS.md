@@ -270,8 +270,10 @@ Record concise progress and blockers on the issue with
 `node scripts/agent-harness.mjs comment <issue-number> --body-file <path>`.
 Open a pull request that references the issue, with a summary and exact
 verification evidence. Set Project Status to `Review` after opening the PR.
-Never set `Done` while the issue is open: the Project’s close/merge automation
-owns that transition. An open PR is review work, not completion.
+Do not manually set `Done` while an issue is open. The delivery command may set
+Project Status to `Done` only after exact-SHA Production deployment, smoke, and
+required migration evidence pass, then it closes the issue. An open PR is
+review work, not completion; the Project's PR-merged automation stays disabled.
 
 To resume in a fresh session, rerun `inspect`, read the latest issue comments
 and linked PR, then continue on its existing branch/worktree. Report the
