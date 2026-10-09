@@ -9,6 +9,7 @@ import {
   redeemAuthResumeIntent,
   readAuthResumeIntent,
   sanitizeInternalReturnTo,
+  setAuthResumeIntent,
 } from "@/lib/auth-resume";
 import { normalizeLocale } from "@/lib/locale";
 import { createClient } from "@/lib/supabase/server";
@@ -95,6 +96,23 @@ export async function GET(request: Request) {
   const user = await getCallbackUser(supabase);
 
   if (!user?.email_confirmed_at) {
+    if (intent && (intent.userId || intent.emailHash)) {
+      await setAuthResumeIntent({
+        locale: intent.locale,
+        productSlug: intent.productSlug,
+        returnTo: intent.returnTo,
+        code: intent.code,
+        userId: intent.userId,
+        emailHash: intent.emailHash,
+      });
+      return failureResponse(
+        locale,
+        intent,
+        callbackReturnTo,
+        "verification_unavailable",
+      );
+    }
+
     return failureResponse(locale, intent, callbackReturnTo);
   }
 

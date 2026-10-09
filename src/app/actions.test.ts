@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const actionMocks = vi.hoisted(() => ({
   buildAuthRedirect: vi.fn(),
   buildSupabaseAuthCallbackUrl: vi.fn(),
+  authResumeIntentMatchesEmail: vi.fn(),
+  authResumeIntentMatchesUser: vi.fn(),
   clearAuthResumeIntent: vi.fn(),
   clearDemoSession: vi.fn(),
   clearUnlockIntent: vi.fn(),
@@ -14,6 +16,7 @@ const actionMocks = vi.hoisted(() => ({
   getAuthResumeRedirect: vi.fn(),
   getProductBySlugForRequest: vi.fn(),
   getUnlockIntent: vi.fn(),
+  readAuthResumeIntent: vi.fn(),
   isSupabaseEmailNotConfirmedError: vi.fn(),
   isUnlockRegistrationContext: vi.fn(),
   redeemAuthResumeIntent: vi.fn(),
@@ -40,11 +43,14 @@ vi.mock("@/lib/auth", () => ({
 }));
 
 vi.mock("@/lib/auth-resume", () => ({
+  authResumeIntentMatchesEmail: actionMocks.authResumeIntentMatchesEmail,
+  authResumeIntentMatchesUser: actionMocks.authResumeIntentMatchesUser,
   buildSupabaseAuthCallbackUrl: actionMocks.buildSupabaseAuthCallbackUrl,
   createAuthResumeIntent: actionMocks.createAuthResumeIntent,
   clearAuthResumeIntent: actionMocks.clearAuthResumeIntent,
   redeemAuthResumeIntent: actionMocks.redeemAuthResumeIntent,
   getAuthResumeRedirect: actionMocks.getAuthResumeRedirect,
+  readAuthResumeIntent: actionMocks.readAuthResumeIntent,
   setAuthResumeIntent: actionMocks.setAuthResumeIntent,
 }));
 
@@ -88,9 +94,12 @@ import {
 } from "./actions";
 
 beforeEach(() => {
+  actionMocks.authResumeIntentMatchesEmail.mockReturnValue(false);
+  actionMocks.authResumeIntentMatchesUser.mockReturnValue(false);
   actionMocks.getBackendMode.mockReturnValue("local");
   actionMocks.getProductBySlugForRequest.mockResolvedValue(null);
   actionMocks.getUnlockIntent.mockResolvedValue(null);
+  actionMocks.readAuthResumeIntent.mockResolvedValue(null);
   actionMocks.isUnlockRegistrationContext.mockImplementation(({ redirectTo }) =>
     Boolean(redirectTo?.includes("/products/")),
   );
@@ -213,6 +222,93 @@ describe("registration auth action", () => {
       ),
       "/en/products/moon-garden-coloring-book#premium",
     );
+  });
+
+  it("recovers a signed callback intent after login only for its verified account", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    const pendingResumeIntent = {
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "reader-email-hash",
+      userId: "reader-user",
+      createdAt: Date.now(),
+    };
+    actionMocks.readAuthResumeIntent.mockResolvedValue(pendingResumeIntent);
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(true);
+    actionMocks.authResumeIntentMatchesUser.mockReturnValue(true);
+    actionMocks.redeemAuthResumeIntent.mockResolvedValue({
+      ok: true,
+      status: "success",
+    });
+    const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
+    const getUser = vi.fn().mockResolvedValue({
+      data: {
+        user: {
+          id: "reader-user",
+          email: "reader@example.com",
+          email_confirmed_at: "2026-10-09T10:00:00.000Z",
+        },
+      },
+      error: null,
+    });
+    actionMocks.createClient.mockResolvedValue({
+      auth: { signInWithPassword, getUser },
+    });
+
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "reader@example.com",
+          "password123",
+          "/en/products/moon-garden-coloring-book",
+        ),
+      ),
+      "/en/products/moon-garden-coloring-book?unlocked=1#premium",
+    );
+
+    expect(getUser).toHaveBeenCalledTimes(1);
+    expect(actionMocks.redeemAuthResumeIntent).toHaveBeenCalledWith(
+      pendingResumeIntent,
+    );
+  });
+
+  it("keeps a pending callback intent when login identity lookup is unavailable", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    const pendingResumeIntent = {
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      emailHash: "reader-email-hash",
+      userId: "reader-user",
+      createdAt: Date.now(),
+    };
+    actionMocks.readAuthResumeIntent.mockResolvedValue(pendingResumeIntent);
+    actionMocks.authResumeIntentMatchesEmail.mockReturnValue(true);
+    const signInWithPassword = vi.fn().mockResolvedValue({ error: null });
+    const getUser = vi.fn().mockResolvedValue({
+      data: { user: null },
+      error: new Error("temporary lookup failure"),
+    });
+    actionMocks.createClient.mockResolvedValue({
+      auth: { signInWithPassword, getUser },
+    });
+
+    await expectRedirect(
+      loginDemoAction(
+        loginForm(
+          "reader@example.com",
+          "password123",
+          "/en/products/moon-garden-coloring-book",
+        ),
+      ),
+      "/en/login?error=verification_unavailable&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+
+    expect(actionMocks.redeemAuthResumeIntent).not.toHaveBeenCalled();
+    expect(actionMocks.clearAuthResumeIntent).not.toHaveBeenCalled();
   });
 
   it("keeps a local-mode product password-login return anchored to premium", async () => {

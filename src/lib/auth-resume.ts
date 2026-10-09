@@ -163,6 +163,19 @@ export function authResumeIntentMatchesUser(
   return true;
 }
 
+export function authResumeIntentMatchesEmail(
+  intent: Pick<AuthResumeIntent, "emailHash">,
+  email: string | null | undefined,
+) {
+  const currentEmailHash = hashEmail(email);
+
+  return Boolean(
+    intent.emailHash &&
+      currentEmailHash &&
+      safeEqual(intent.emailHash, currentEmailHash),
+  );
+}
+
 export function sanitizeInternalReturnTo(
   value: string | null | undefined,
   locale: Locale,

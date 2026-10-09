@@ -22,6 +22,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import {
+  authResumeIntentMatchesEmail,
   authResumeIntentMatchesUser,
   authResumeMaxAgeSeconds,
   buildSupabaseAuthCallbackUrl,
@@ -156,6 +157,18 @@ describe("Supabase auth resume contract", () => {
     expect(authResumeIntentMatchesUser(intent, { id: "other-user", email: "reader@example.com" })).toBe(false);
     expect(authResumeIntentMatchesUser(intent, { id: "user-123", email: "other@example.com" })).toBe(false);
     expect(authResumeIntentMatchesUser({ userId: undefined, emailHash: undefined }, { id: "user-123" })).toBe(false);
+  });
+
+  it("matches a signed resume identity to an email without storing the email", () => {
+    const intent = createAuthResumeIntent({
+      locale: "en",
+      returnTo: "/en/account",
+      email: "Reader@Example.com",
+    });
+
+    expect(authResumeIntentMatchesEmail(intent, "reader@example.com")).toBe(true);
+    expect(authResumeIntentMatchesEmail(intent, "other@example.com")).toBe(false);
+    expect(authResumeIntentMatchesEmail({ emailHash: undefined }, "reader@example.com")).toBe(false);
   });
 
   it("signs the pending resume cookie and rejects tampering", async () => {

@@ -11,11 +11,14 @@ import {
   validateRegistrationInput,
 } from "@/lib/auth";
 import {
+  authResumeIntentMatchesEmail,
+  authResumeIntentMatchesUser,
   buildSupabaseAuthCallbackUrl,
   createAuthResumeIntent,
   clearAuthResumeIntent,
   getAuthResumeRedirect,
   redeemAuthResumeIntent,
+  readAuthResumeIntent,
   setAuthResumeIntent,
 } from "@/lib/auth-resume";
 import type { AuthResumeIntent } from "@/lib/auth-resume";
@@ -181,6 +184,12 @@ export async function loginDemoAction(formData: FormData) {
   }
 
   if (getBackendMode() === "supabase") {
+    const pendingResumeIntent = await readAuthResumeIntent();
+    const pendingResumeMatchesEmail = Boolean(
+      pendingResumeIntent &&
+        pendingResumeIntent.returnTo === returnTo &&
+        authResumeIntentMatchesEmail(pendingResumeIntent, email),
+    );
     const intent = createAuthResumeIntent({
       locale,
       productSlug: returnProductSlug,
@@ -198,16 +207,60 @@ export async function loginDemoAction(formData: FormData) {
       }));
     } catch (authError) {
       logUnexpectedFailure("[auth] Sign-in failed unexpectedly.", authError);
-      await setAuthResumeIntent({ locale, returnTo, code, email });
+      if (!pendingResumeMatchesEmail || code) {
+        await setAuthResumeIntent({ locale, returnTo, code, email });
+      }
       redirect(`/${locale}/login?error=invalid_credentials&returnTo=${encodeURIComponent(intent.returnTo)}`);
     }
 
     if (error) {
-      await setAuthResumeIntent({ locale, returnTo, code, email });
+      if (!pendingResumeMatchesEmail || code) {
+        await setAuthResumeIntent({ locale, returnTo, code, email });
+      }
       const errorCode = isSupabaseEmailNotConfirmedError(error)
         ? "email_unverified"
         : "invalid_credentials";
       redirect(`/${locale}/login?error=${errorCode}&returnTo=${encodeURIComponent(intent.returnTo)}`);
+    }
+
+    if (
+      !code &&
+      pendingResumeMatchesEmail &&
+      pendingResumeIntent?.productSlug &&
+      pendingResumeIntent.code
+    ) {
+      let pendingUser: Awaited<ReturnType<typeof supabase.auth.getUser>> | null = null;
+      try {
+        pendingUser = await supabase.auth.getUser();
+      } catch (userError) {
+        logUnexpectedFailure(
+          "[auth] Pending auth resume user lookup failed unexpectedly.",
+          userError,
+        );
+      }
+
+      if (
+        !pendingUser ||
+        pendingUser.error ||
+        !pendingUser.data.user?.email_confirmed_at
+      ) {
+        redirect(
+          `/${locale}/login?error=verification_unavailable&returnTo=${encodeURIComponent(returnTo)}`,
+        );
+      }
+
+      if (!authResumeIntentMatchesUser(pendingResumeIntent, pendingUser.data.user)) {
+        await clearAuthResumeIntent();
+        await clearUnlockIntent();
+        redirect(
+          `/${locale}/login?error=verification_mismatch&returnTo=${encodeURIComponent(returnTo)}`,
+        );
+      }
+
+      await completeSupabaseAuthResume(
+        pendingResumeIntent,
+        pendingResumeIntent.code,
+      );
     }
 
     await completeSupabaseAuthResume(intent, code);
@@ -249,11 +302,22 @@ export async function resendSupabaseVerificationEmailAction(formData: FormData) 
     );
   }
 
+  const pendingResumeIntent = await readAuthResumeIntent();
+  const pendingResumeMatchesEmail = Boolean(
+    pendingResumeIntent &&
+      pendingResumeIntent.returnTo === returnTo &&
+      authResumeIntentMatchesEmail(pendingResumeIntent, email),
+  );
   const intent = await setAuthResumeIntent({
     locale,
-    productSlug: productSlugFromReturnTo(returnTo, locale),
+    productSlug:
+      pendingResumeMatchesEmail && !code
+        ? pendingResumeIntent?.productSlug
+        : productSlugFromReturnTo(returnTo, locale),
     returnTo,
-    code,
+    code: code || (pendingResumeMatchesEmail ? pendingResumeIntent?.code : undefined),
+    userId: pendingResumeMatchesEmail ? pendingResumeIntent?.userId : undefined,
+    emailHash: pendingResumeMatchesEmail ? pendingResumeIntent?.emailHash : undefined,
     email: text(formData, "email"),
   });
 

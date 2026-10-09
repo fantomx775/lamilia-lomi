@@ -14,6 +14,7 @@ const resume = vi.hoisted(() => ({
   redeem: vi.fn(),
   clearUnlock: vi.fn(),
   setUnlock: vi.fn(),
+  setAuthResume: vi.fn(),
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -41,6 +42,7 @@ vi.mock("@/lib/auth-resume", () => ({
       : `/${locale}/account`,
   redeemAuthResumeIntent: resume.redeem,
   readAuthResumeIntent: async () => resume.intent,
+  setAuthResumeIntent: resume.setAuthResume,
   sanitizeInternalReturnTo: (value: string | null, locale: string) =>
     value?.startsWith(`/${locale}/`) ? value : `/${locale}/account`,
 }));
@@ -62,6 +64,7 @@ describe("Supabase auth callback", () => {
     resume.redeem.mockReset();
     resume.clearUnlock.mockReset();
     resume.setUnlock.mockReset();
+    resume.setAuthResume.mockReset();
     resume.redeem.mockResolvedValue(null);
   });
 
@@ -213,6 +216,38 @@ describe("Supabase auth callback", () => {
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
     expect(resume.redeem).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toContain("error=verification_failed");
+  });
+
+  it("retains account-bound retry context when the confirmed user lookup is unavailable", async () => {
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      productSlug: "moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    };
+    auth.verifyOtp.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({ data: { user: null }, error: new Error("temporary lookup failure") });
+
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?token_hash=actual-token-hash&type=email&locale=en&resume=opaque-resume",
+      ),
+    );
+
+    expect(resume.setAuthResume).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      userId: undefined,
+      emailHash: "reader-email-hash",
+    });
+    expect(resume.redeem).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toContain(
+      "error=verification_unavailable",
+    );
+    expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
   });
 
   it("rejects callback URLs that mix a code and a token hash", async () => {
