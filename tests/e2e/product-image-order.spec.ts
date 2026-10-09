@@ -261,15 +261,14 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       }
 
       if (productPath) {
-        await page.goto(productPath).catch(() => undefined);
         const deleteProduct = page.getByRole("button", { name: "Usuń produkt", exact: true });
-        if (await deleteProduct.isVisible().catch(() => false)) {
-          page.once("dialog", (dialog) => void dialog.accept());
-          await Promise.all([
-            page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
-            deleteProduct.click(),
-          ]);
-        }
+        await page.goto(productPath);
+        await expect(deleteProduct).toBeVisible({ timeout: 15_000 });
+        page.once("dialog", (dialog) => void dialog.accept());
+        await Promise.all([
+          page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
+          deleteProduct.click(),
+        ]);
       } else if (productId && page.url().includes("/admin/products/new")) {
         for (const fixture of imageFixtures) {
           const preview = page.getByRole("img", { name: "Podgląd " + fixture.name });
