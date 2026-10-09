@@ -11,6 +11,14 @@ const localeOptionNames = {
   es: "Español (ES)",
 } as const;
 
+// This suite exercises local demo accounts and fixed email addresses. Keep it
+// away from externally configured Playwright targets.
+test.describe("Local demo unlock funnel", () => {
+  test.skip(
+    Boolean(process.env.PLAYWRIGHT_BASE_URL),
+    "The unlock-funnel suite is restricted to the local demo app.",
+  );
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem(
@@ -235,6 +243,7 @@ test("mobile locale switching keeps no-code state and prevents cross-product int
 
   await page.goto(`/en/products/${productSlug}`);
   await expect(page.getByLabel("Premium code")).toHaveValue("");
+});
 });
 
 async function switchLocaleThroughMobileMenu(
