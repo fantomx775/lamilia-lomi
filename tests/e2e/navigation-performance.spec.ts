@@ -244,6 +244,10 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   const pageErrors: string[] = [];
   const sameOriginFailures: string[] = [];
   let appOrigin = "";
+  const safeRequestPath = (value: string) => {
+    const url = new URL(value);
+    return url.origin + url.pathname;
+  };
   page.on("console", (message) => {
     if (message.type() === "error") {
       const location = message.location();
@@ -254,17 +258,13 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   page.on("requestfailed", (request) => {
     if (appOrigin && new URL(request.url()).origin === appOrigin) {
       const failure = request.failure()?.errorText ?? "request failed";
-      // The browser cancels an in-flight route request when a later navigation
-      // replaces it. Route and heading assertions below verify each destination.
-      if (failure !== "net::ERR_ABORTED") {
-        sameOriginFailures.push(`${request.method()} ${failure} ${request.url()}`);
-      }
+      sameOriginFailures.push(`${request.method()} ${failure} ${safeRequestPath(request.url())}`);
     }
   });
   page.on("response", (response) => {
     const responseUrl = new URL(response.url());
     if (response.status() >= 400 && appOrigin && responseUrl.origin === appOrigin) {
-      sameOriginFailures.push(`${response.status()} ${response.url()}`);
+      sameOriginFailures.push(`${response.status()} ${safeRequestPath(response.url())}`);
     }
   });
 

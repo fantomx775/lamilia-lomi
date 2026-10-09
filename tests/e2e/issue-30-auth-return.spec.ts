@@ -9,6 +9,7 @@ test("auth pages explain errors and preserve a product return path", async ({ pa
   await page.goto(
     `/en/login?error=invalid_credentials&returnTo=%2Fen%2Fproducts%2F${productSlug}`,
   );
+  await page.locator('input[type="password"]').fill("");
 
   await expect(page.getByRole("heading", { name: "Log in" })).toBeVisible();
   await expect(page.locator("#login-error")).toHaveText(
@@ -22,7 +23,7 @@ test("auth pages explain errors and preserve a product return path", async ({ pa
   await saveEvidenceScreenshot(page, testInfo, "login-invalid-credentials");
 
   await createAccountLink.click();
-  await expect(page).toHaveURL(new RegExp(`/en/register\\?returnTo=`));
+  await expect(page).toHaveURL(new RegExp(`/en/register\\?returnTo=`), { timeout: 15_000 });
   const loginLink = page.getByRole("main").getByRole("link", { name: "Log in" });
   await expect(loginLink).toHaveAttribute(
     "href",
@@ -32,7 +33,7 @@ test("auth pages explain errors and preserve a product return path", async ({ pa
   await saveEvidenceScreenshot(page, testInfo, "register-product-return");
 
   await loginLink.click();
-  await expect(page).toHaveURL(new RegExp(`/en/login\\?returnTo=`));
+  await expect(page).toHaveURL(new RegExp(`/en/login\\?returnTo=`), { timeout: 15_000 });
   await expect(page.locator('input[name="returnTo"]')).toHaveValue(
     `/en/products/${productSlug}`,
   );
@@ -334,13 +335,25 @@ async function saveEvidenceScreenshot(
     await expect(essentialConsent).toBeHidden();
   }
   await page.addStyleTag({
-    content: 'input[id*="premium-code"]::placeholder { color: transparent !important; }',
+    content: `
+      input[type="password"],
+      input[id*="premium-code"],
+      input[name="code"] {
+        -webkit-text-security: disc !important;
+      }
+      input[id*="premium-code"]::placeholder { color: transparent !important; }
+    `,
   });
 
   const folder = path.resolve(process.cwd(), "docs", "verification", "issue-30");
   await mkdir(folder, { recursive: true });
+  const sensitiveFields = page.locator(
+    'input[type="password"], input[id*="premium-code"], input[name="code"], input[name*="token"]',
+  );
   await page.screenshot({
     path: path.join(folder, `${testInfo.project.name}-${name}.png`),
     fullPage: name !== "verification-pending",
+    mask: [sensitiveFields],
+    maskColor: "#111111",
   });
 }
