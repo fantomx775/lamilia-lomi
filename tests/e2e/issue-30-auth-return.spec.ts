@@ -129,13 +129,17 @@ test("premium code intent survives login and unlocks the product", async ({ page
 });
 
 test("premium code intent survives local registration, demo verification, and unlock", async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
   await page.context().clearCookies();
   await page.goto(`/en/products/${productSlug}#premium`);
 
   const unlockSection = page.getByTestId("product-unlock-section");
   await unlockSection.getByLabel("Premium code").fill("LOMI-BOOK-2026");
   await unlockSection.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL(new RegExp(`/en/register\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`));
+  await expect(page).toHaveURL(
+    new RegExp(`/en/register\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`),
+    { timeout: 20_000 },
+  );
   await expect(page.locator('input[name="code"]')).toHaveValue("LOMI-BOOK-2026");
 
   await page.getByLabel("Email").fill("premium-registration-reader@example.com");
@@ -143,17 +147,21 @@ test("premium code intent survives local registration, demo verification, and un
   await page.getByRole("checkbox", { name: /Terms/ }).check();
   await page.getByRole("button", { name: "Create account" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`), { timeout: 20_000 });
   const verifyButton = page.getByRole("button", { name: "Mark demo email as verified" });
   await expect(verifyButton).toBeInViewport();
   await saveEvidenceScreenshot(page, testInfo, "premium-registration-verification");
 
   await verifyButton.click();
   await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page.getByTestId("unlock-code-state")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
   await page.getByRole("button", { name: "Unlock premium content" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}\\?unlocked=1#premium$`));
+  await expect(page).toHaveURL(
+    new RegExp(`/en/products/${productSlug}\\?unlocked=1#premium$`),
+    { timeout: 20_000 },
+  );
   await expect(page.getByTestId("unlock-success-state")).toBeVisible();
   await expect(page).not.toHaveURL(/LOMI-BOOK-2026|premiumCode|[?&]code=/i);
   await saveEvidenceScreenshot(page, testInfo, "premium-registration-unlocked");

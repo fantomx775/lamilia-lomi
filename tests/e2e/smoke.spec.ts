@@ -8,7 +8,7 @@ test("guest can browse public product flow", async ({ page }) => {
   await page.goto("/en/products?q=moon");
   await expect(page.getByRole("link", { name: /Moon Garden Coloring Book/i })).toBeVisible();
 
-  await page.goto("/en/products/moon-garden-coloring-book?code=LOMI-BOOK-2026");
+  await page.goto("/en/products/moon-garden-coloring-book");
   await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   await expect(page.getByText("Log in to unlock premium content")).toBeVisible();
 });
