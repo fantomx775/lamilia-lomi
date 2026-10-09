@@ -2457,7 +2457,8 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       issueOutcome = await updateTrackedIssueAfterDelivery(client, issue, {
         status,
         details,
-        wasOpenBeforeMerge: issueBeforeMerge?.state === "open",
+        wasOpenBeforeMerge: issueBeforeMerge?.state === "open" ||
+          (pullRequest.merged === true && issue !== null),
       });
     } catch (error) {
       issueOutcome = { status: "BLOCKED", issue, details: "Issue/Project tracking update failed: " + error.message };

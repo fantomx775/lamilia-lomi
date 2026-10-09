@@ -135,13 +135,13 @@ function cleanMergePolicy(overrides = {}) {
   };
 }
 
-function createDeliveryClient() {
+function createDeliveryClient({ alreadyMerged = false, initialIssueState = "open" } = {}) {
   const mergeSha = "c".repeat(40);
   const issueId = "I_issue-7";
   const calls = [];
-  let merged = false;
-  let issueState = "open";
-  let projectStatus = "Review";
+  let merged = alreadyMerged;
+  let issueState = initialIssueState;
+  let projectStatus = initialIssueState === "closed" ? "Done" : "Review";
   const client = {
     owner: "example",
     repo: "repo",
@@ -1795,6 +1795,28 @@ test("failed Production verification is recorded and cannot close or complete a 
   ), false);
   assert.ok(fixture.calls.some(({ path, method }) => path.startsWith("/repos/example/repo/issues/7/comments") && method === "POST"));
   assert.ok(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"));
+});
+
+test("resumed delivery reopens a previously auto-closed issue when Production verification fails", async () => {
+  const fixture = createDeliveryClient({ alreadyMerged: true, initialIssueState: "closed" });
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({ decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => ({
+      status: "FAIL",
+      deployment: { id: 14, sha: fixture.mergeSha, state: "failure" },
+      details: "Vercel deployment failed during build.",
+    }),
+  });
+
+  assert.equal(result.decision, "DELIVERY_FAILED");
+  assert.equal(result.completed, false);
+  assert.equal(fixture.issueState, "open");
+  assert.equal(fixture.projectStatus, "Blocked");
+  assert.ok(fixture.calls.some(({ path, method, body }) =>
+    path.endsWith("/issues/7") && method === "PATCH" && JSON.parse(body).state === "open",
+  ));
+  assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
 });
 
 test("a blocked pre-merge gate prevents the merge API and Production side effects", async () => {
