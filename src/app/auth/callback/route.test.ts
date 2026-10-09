@@ -236,6 +236,14 @@ describe("Supabase auth callback", () => {
     expect(auth.verifyOtp).not.toHaveBeenCalled();
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
     expect(resume.redeem).not.toHaveBeenCalled();
+    expect(resume.setAuthResume).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      userId: undefined,
+      emailHash: "reader-email-hash",
+    });
     expect(response.headers.get("location")).toContain("error=verification_failed");
   });
 
@@ -273,26 +281,63 @@ describe("Supabase auth callback", () => {
   });
 
   it("rejects callback URLs that mix a code and a token hash", async () => {
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      productSlug: "moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    };
+
     const response = await GET(
       new Request(
-        "https://app.example/auth/callback?code=auth-code&token_hash=actual-token-hash&type=email&locale=en",
+        "https://app.example/auth/callback?code=auth-code&token_hash=actual-token-hash&type=email&locale=en&resume=opaque-resume",
       ),
     );
 
     expect(auth.verifyOtp).not.toHaveBeenCalled();
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
     expect(resume.redeem).not.toHaveBeenCalled();
+    expect(resume.setAuthResume).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      userId: undefined,
+      emailHash: "reader-email-hash",
+    });
     expect(response.headers.get("location")).toContain("error=verification_failed");
   });
 
   it("returns a controlled failure for a missing callback parameter", async () => {
-    auth.getUser.mockResolvedValue({ data: { user: null } });
+    resume.callbackIntent = {
+      locale: "en",
+      emailHash: "reader-email-hash",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      productSlug: "moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    };
 
-    const response = await GET(new Request("https://app.example/auth/callback?locale=pl"));
+    const response = await GET(
+      new Request(
+        "https://app.example/auth/callback?locale=en&resume=opaque-resume",
+      ),
+    );
 
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(auth.verifyOtp).not.toHaveBeenCalled();
+    expect(auth.getUser).not.toHaveBeenCalled();
+    expect(resume.redeem).not.toHaveBeenCalled();
+    expect(resume.setAuthResume).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+      userId: undefined,
+      emailHash: "reader-email-hash",
+    });
     expect(response.headers.get("location")).toBe(
-      "https://canonical.lamilialomi.example/pl/login?error=verification_failed",
+      "https://canonical.lamilialomi.example/en/login?error=verification_failed&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book%23premium",
     );
   });
 

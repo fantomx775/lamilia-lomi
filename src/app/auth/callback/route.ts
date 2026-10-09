@@ -45,11 +45,13 @@ export async function GET(request: Request) {
     (callbackCode && callbackTokenHash) ||
     (callbackTokenHash && callbackType !== "email")
   ) {
+    await persistAuthResumeIntent(intent);
     return failureResponse(locale, intent, callbackReturnTo);
   }
 
   if (!callbackCode && !callbackTokenHash) {
     if (intent) {
+      await persistAuthResumeIntent(intent);
       return failureResponse(locale, intent, callbackReturnTo);
     }
 
