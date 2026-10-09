@@ -167,8 +167,11 @@ to `Ready`.
     missing history fails closed. It reopens only issues GitHub proves this
     exact PR merge closed, holds each at `Blocked` through Production, and
     updates each only after verification. Independently closed issues remain
-    untouched. The merge commit's first parent preserves the exact reviewed
-    base SHA for recovery after `main` advances. Do not pass an unfinished
+    untouched. Compare the merge commit's first parent with the exact reviewed
+    base SHA for both immediate delivery and recovery after `main` advances.
+    If they differ or cannot be read, still collect Production deployment and
+    smoke evidence but keep delivery blocked and do not mark its issue Done.
+    Do not pass an unfinished
     parent epic as the issue to close. If
     a new agent resumes, rerun inspect and continue from the existing branch.
 
@@ -352,7 +355,9 @@ current base SHA must still match the one used for gate verification. When
 GitHub enforces approval of the latest reviewable push, the harness also checks
 GitHub's current `reviewDecision` before reporting merge readiness. The
 generated Vercel URL must match this project's exact name, nine-character
-commit hash, and team scope.
+commit hash, and team scope. After a normal merge, the merge commit's first
+parent must also match the base SHA used for review; a mismatch or unreadable
+parent keeps delivery blocked even if Production smoke passes.
 
 Post a concise issue update from a file when durable progress is useful:
 

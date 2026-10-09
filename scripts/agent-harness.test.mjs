@@ -185,6 +185,7 @@ function createDeliveryClient({
   previouslyVerifiedDelivery = false,
   previouslyVerifiedDeliveryAuthor = "author",
   baseShaOnPreMerge = null,
+  mergeParentSha = CURRENT_BASE_SHA,
 } = {}) {
   const mergeSha = "c".repeat(40);
   const issueId = "I_issue-7";
@@ -248,6 +249,9 @@ function createDeliveryClient({
           }
         }
         return { merged: true, sha: mergeSha, message: "Pull Request successfully merged" };
+      }
+      if (path === "/repos/example/repo/commits/" + mergeSha) {
+        return { sha: mergeSha, parents: [{ sha: mergeParentSha }, { sha: CURRENT_SHA }] };
       }
       if (path === "/repos/example/repo/issues/7" && method === "PATCH") {
         const body = JSON.parse(options.body);
@@ -2031,6 +2035,31 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   assert.ok(calls.some((path) => path.endsWith("/statuses?per_page=100&page=1")));
   assert.ok(calls.every((path) => !/\/merges(?:\?|$)|\/deployments(?:\?|$)/.test(path)));
 
+  const unavailableLastPushDecisionClient = {
+    ...client,
+    graphql: async (query, variables) => {
+      if (query.includes("reviewDecision")) throw new Error("GitHub reviewDecision unavailable");
+      return client.graphql(query, variables);
+    },
+    request: async (path) => {
+      if (path.endsWith("/branches/main/protection")) {
+        return { required_pull_request_reviews: {
+          required_approving_review_count: 1,
+          dismiss_stale_reviews: false,
+          require_last_push_approval: true,
+        } };
+      }
+      if (path.endsWith("/pulls/52/reviews?per_page=100&page=1")) {
+        return [cleanGitHubReview({ headSha: CURRENT_SHA, user: "reviewer", state: "APPROVED" })];
+      }
+      return client.request(path);
+    },
+  };
+  const unavailableLastPushDecision = await verifyPullRequest(unavailableLastPushDecisionClient, 52);
+  assert.equal(unavailableLastPushDecision.decision, "BLOCKED");
+  assert.equal(unavailableLastPushDecision.stages.waitingForEnforcedApproval, false);
+  assert.equal(unavailableLastPushDecision.checks.branchReviewPolicy.status, "BLOCKED");
+
   const mergedPullRequest = cleanPullRequest({
     state: "closed",
     merged: true,
@@ -2718,6 +2747,39 @@ test("blocks merge when the base SHA changes after verification", async () => {
   assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
 });
 
+test("blocks delivery when the merge commit first parent differs from the reviewed base", async () => {
+  const fixture = createDeliveryClient({ mergeParentSha: "d".repeat(40) });
+  let productionSmokeRan = false;
+  const result = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
+    verify: async () => ({
+      decision: "READY_FOR_MERGE",
+      currentSha: CURRENT_SHA,
+      pullRequest: { baseSha: CURRENT_BASE_SHA },
+      reasons: [],
+    }),
+    waitForDeployment: async (_client, mergeSha) => ({
+      status: "PASS",
+      deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },
+      details: "Exact-SHA deployment passed.",
+    }),
+    smoke: async () => {
+      productionSmokeRan = true;
+      return { status: "PASS", checks: [], details: "Production smoke passed." };
+    },
+  });
+
+  assert.equal(result.merged, true);
+  assert.equal(result.mergeBaseVerification.status, "BLOCKED");
+  assert.equal(result.mergeBaseVerification.expectedSha, CURRENT_BASE_SHA);
+  assert.equal(result.mergeBaseVerification.sha, "d".repeat(40));
+  assert.equal(productionSmokeRan, true);
+  assert.equal(result.decision, "BLOCKED");
+  assert.equal(result.completed, false);
+  assert.equal(fixture.issueState, "open");
+  assert.notEqual(fixture.projectStatus, "Done");
+});
+
 test("does not mark an issue Done when GitHub did not record a trusted delivery comment", async () => {
   const fixture = createDeliveryClient({ issueCommentActor: "different-account" });
   const result = await deliverPullRequest(fixture.client, 52, {
@@ -2801,8 +2863,8 @@ test("reconciles closing references added in the merge race before Production tr
 test("retries verified delivery when Project status propagation is delayed", async () => {
   const fixture = createDeliveryClient({ projectUpdateDelayReads: 1 });
   const verify = async (_client, _number, { allowMerged } = {}) => allowMerged
-    ? { decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }
-    : { decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, reasons: [] };
+    ? { decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, pullRequest: { baseSha: CURRENT_BASE_SHA }, reasons: [] }
+    : { decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA, pullRequest: { baseSha: CURRENT_BASE_SHA }, reasons: [] };
   const waitForDeployment = async (_client, mergeSha) => ({
     status: "PASS",
     deployment: { id: 14, sha: mergeSha, environmentUrl: "https://production.example.test" },

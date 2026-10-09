@@ -198,7 +198,10 @@ cannot identify which deployment answered a smoke request. Recheck the base
 SHA in the final PR read immediately before merge; GitHub's merge API pins the
 head SHA but has no base-SHA compare-and-swap condition. Use a merge commit so
 its first parent records the exact reviewed base SHA, and use that immutable
-parent when validating a merged-delivery retry after `main` advances. Read PR
+parent to validate both the immediate merge and any retry after `main`
+advances. If the immediate merge's first parent differs from the reviewed
+base, still collect Production deployment and smoke evidence but keep delivery
+blocked and do not mark its issue Done. Read PR
 commit history fully,
 using GraphQL when the REST response reaches its 250-commit cap. For enforced
 latest-push approval rules, require GitHub's current `reviewDecision` to be

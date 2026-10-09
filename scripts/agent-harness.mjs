@@ -1975,11 +1975,13 @@ export function summarizeBranchReviewPolicy({
   const enough = approvals.size >= required;
   const latestPushApproved = policy.requireLastPushApproval !== true ||
     (latestPushReviewDecisionAvailable && latestPushReviewDecision === "APPROVED");
+  const waitingForLatestPushApproval = policy.requireLastPushApproval === true &&
+    latestPushReviewDecisionAvailable && latestPushReviewDecision === "REVIEW_REQUIRED";
   return {
     status: enough && latestPushApproved ? "PASS" : "BLOCKED",
     approvalsRequired: required,
     approvalsPresent: approvals.size,
-    waitingForApproval: !enough || !latestPushApproved,
+    waitingForApproval: !enough || waitingForLatestPushApproval,
     latestPushApprovalRequired: policy.requireLastPushApproval === true,
     latestPushReviewDecision: latestPushReviewDecisionAvailable ? latestPushReviewDecision : null,
     unassessedRules: [],
@@ -3028,6 +3030,7 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
       productionDeployment: deliveryEvidence?.productionDeployment || { status: "NOT RUN" },
       productionSmoke: deliveryEvidence?.productionSmoke || { status: "NOT RUN" },
       postDeploymentMigration: deliveryEvidence?.postDeploymentMigration || { status: "NOT RUN" },
+      mergeBaseVerification: deliveryEvidence?.mergeBaseVerification || { status: "NOT RUN" },
       recordedAt: new Date().toISOString(),
     };
     const exactProductionEvidence = deliveryRecord.status === "PASS" &&
@@ -3181,6 +3184,8 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   let pullRequest = await client.request(pullRequestPath);
   let candidateSha = pullRequest.head?.sha || null;
   let mergeSha = pullRequest.merge_commit_sha || null;
+  let verifiedBaseSha = null;
+  let mergeBaseVerification = { status: "NOT RUN", sha: null, details: "Merge base has not been checked." };
   let mergeResult = { merged: Boolean(pullRequest.merged), alreadyMerged: Boolean(pullRequest.merged) };
   let verification = null;
   let issueBeforeMerge = null;
@@ -3259,7 +3264,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       };
     }
     candidateSha = verification.currentSha;
-    const verifiedBaseSha = validSha(verification.pullRequest?.baseSha)
+    verifiedBaseSha = validSha(verification.pullRequest?.baseSha)
       ? verification.pullRequest.baseSha.toLowerCase()
       : pullRequest.base?.sha?.toLowerCase();
     if (!validSha(verifiedBaseSha)) {
@@ -3435,6 +3440,9 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       };
     }
     candidateSha = verification.currentSha;
+    verifiedBaseSha = validSha(verification.pullRequest?.baseSha)
+      ? verification.pullRequest.baseSha.toLowerCase()
+      : null;
     const smokePlan = resolveSmokePlan(verification);
     if (smokePlan.status !== "PASS") {
       return {
@@ -3488,6 +3496,45 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     closingReferenceError = "After merge, the complete closing-issue references could not be reconciled; delivery cannot be marked complete: " + error.message;
   }
 
+  try {
+    const mergeCommit = await client.request(
+      "/repos/" + client.owner + "/" + client.repo + "/commits/" + mergeSha,
+    );
+    const mergeParents = mergeCommit?.parents;
+    const actualBaseSha = Array.isArray(mergeParents) && mergeParents.length >= 2 && validSha(mergeParents[0]?.sha)
+      ? mergeParents[0].sha.toLowerCase()
+      : null;
+    if (!validSha(verifiedBaseSha) || !validSha(actualBaseSha)) {
+      mergeBaseVerification = {
+        status: "BLOCKED",
+        sha: actualBaseSha,
+        expectedSha: validSha(verifiedBaseSha) ? verifiedBaseSha : null,
+        details: "The merge commit's first parent or the base SHA used for review could not be verified.",
+      };
+    } else if (actualBaseSha !== verifiedBaseSha) {
+      mergeBaseVerification = {
+        status: "BLOCKED",
+        sha: actualBaseSha,
+        expectedSha: verifiedBaseSha,
+        details: "The merge commit's first parent differs from the base SHA used for review.",
+      };
+    } else {
+      mergeBaseVerification = {
+        status: "PASS",
+        sha: actualBaseSha,
+        expectedSha: verifiedBaseSha,
+        details: "The merge commit's first parent matches the exact base SHA used for review.",
+      };
+    }
+  } catch (error) {
+    mergeBaseVerification = {
+      status: "BLOCKED",
+      sha: null,
+      expectedSha: validSha(verifiedBaseSha) ? verifiedBaseSha : null,
+      details: "The merge commit's first parent could not be verified: " + error.message,
+    };
+  }
+
   for (const trackedIssue of trackedIssueNumbers) {
     try {
       trackingPreparations.set(trackedIssue, await prepareTrackedIssueForProduction(
@@ -3534,7 +3581,8 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     productionDeployment ||= { status: "BLOCKED", deployment: null, details: error.message };
   }
 
-  const postDeploymentPass = productionDeployment?.status === "PASS" &&
+  const postDeploymentPass = mergeBaseVerification.status === "PASS" &&
+    productionDeployment?.status === "PASS" &&
     productionSmoke?.status === "PASS" &&
     postDeploymentMigration?.status === "PASS";
   const status = postDeploymentPass ? "PASS" :
@@ -3544,6 +3592,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   const details = [
     "Candidate SHA: " + (candidateSha || "unknown"),
     "Merge SHA: " + mergeSha,
+    "Reviewed merge base: " + mergeBaseVerification.status + " — " + mergeBaseVerification.details,
     "Production deployment: " + (productionDeployment?.status || "NOT RUN") + " — " + (productionDeployment?.details || "not verified"),
     "Production smoke: " + (productionSmoke?.status || "NOT RUN") + " — " + (productionSmoke?.details || "not run"),
     "Post-deployment migration: " + (postDeploymentMigration?.status || "NOT RUN") + " — " + (postDeploymentMigration?.details || "not run"),
@@ -3564,6 +3613,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
           productionDeployment,
           productionSmoke,
           postDeploymentMigration,
+          mergeBaseVerification,
         },
       }));
     } catch (error) {
@@ -3607,6 +3657,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     productionDeployment: productionDeployment || { status: "NOT RUN" },
     productionSmoke: productionSmoke || { status: "NOT RUN" },
     postDeploymentMigration: postDeploymentMigration || { status: "NOT RUN" },
+    mergeBaseVerification,
     issue: issueOutcome,
     completed,
     recordedAt: new Date().toISOString(),
@@ -3622,6 +3673,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     productionDeployment: record.productionDeployment,
     productionSmoke: record.productionSmoke,
     postDeploymentMigration: record.postDeploymentMigration,
+    mergeBaseVerification: record.mergeBaseVerification,
     trackingPreparation,
     issue: issueOutcome,
     issues: issueOutcomes,
