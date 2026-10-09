@@ -208,6 +208,7 @@ async function persistUnlockIntent(
     locale: string;
     productSlug?: string;
     returnTo: string;
+    code?: string;
   } | null,
 ) {
   if (!intent?.productSlug || !intent.code) {
