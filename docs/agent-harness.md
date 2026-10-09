@@ -136,11 +136,11 @@ to `Ready`.
    Project issue to `Review` when an open non-draft PR is linked.
 10. Run `node scripts/agent-harness.mjs deliver-pr <pr-number> --issue
     <issue-number>` for a fully resolved work item. Use a non-closing issue
-    reference such as `Part of #29`: any local-repository `Closes`, `Fixes`, or
-    `Resolves` reference in the PR body or a PR commit message blocks delivery,
-    even without `--issue`, because GitHub can close the issue at merge before
-    Production is checked. Unreadable or incomplete PR commit history fails
-    closed; rewrite or squash closing messages before merging.
+    reference such as `Part of #29`: before merge, any local-repository
+    `Closes`, `Fixes`, or `Resolves` reference in the PR body or a PR commit
+    message blocks delivery, even without `--issue`, because GitHub can close
+    the issue before Production is checked. Unreadable or incomplete PR commit
+    history fails closed; rewrite or squash closing messages before merging.
     The command reruns the gate, merges with the verified head SHA through
     GitHub's normal merge API, confirms the merge commit, sets the issue to
     `Blocked` during Production verification, waits for its GitHub Production
@@ -161,8 +161,11 @@ to `Ready`.
     completed exact-SHA delivery stays closed if a later recheck fails. If Production
     fails or cannot be verified, the command records available deployment log
     and target URLs, investigates through the normal fix/review/merge path when
-    safe, and keeps the issue `Blocked`. It reopens an issue only when GitHub
-    proves this exact PR merge closed it; independently closed issues remain
+    safe, and keeps the issue `Blocked`. Recovery of an already-merged PR
+    infers every local issue closed by the PR body or complete commit history;
+    missing history fails closed. It reopens only issues GitHub proves this
+    exact PR merge closed, holds each at `Blocked` through Production, and
+    updates each only after verification. Independently closed issues remain
     untouched. Do not pass an unfinished parent epic as the issue to close. If
     a new agent resumes, rerun inspect and continue from the existing branch.
 

@@ -2889,14 +2889,37 @@ export async function deliverPullRequest(client, pullRequestNumber, {
   let mergeResult = { merged: Boolean(pullRequest.merged), alreadyMerged: Boolean(pullRequest.merged) };
   let verification = null;
   let issueBeforeMerge = null;
-  let trackingPreparation = issue === null
-    ? { status: "NOT RUN", state: null, details: "No issue number was provided." }
-    : null;
+  const trackingPreparations = new Map();
 
-  const closingIssues = findClosingIssueReferences(
+  let closingIssues = findClosingIssueReferences(
     pullRequest.body || "",
     client.owner + "/" + client.repo,
   );
+  if (pullRequest.merged) {
+    try {
+      const commitMessages = await readPullRequestCommitMessages(client, number);
+      closingIssues = [...new Set([
+        ...closingIssues,
+        ...commitMessages.flatMap((message) =>
+          findClosingIssueReferences(message, client.owner + "/" + client.repo),
+        ),
+      ])];
+    } catch (error) {
+      return {
+        status: "BLOCKED",
+        decision: "BLOCKED",
+        stage: "commit-history",
+        merged: true,
+        candidateSha,
+        mergeSha,
+        reasons: ["The merged PR's closing issue references could not be determined because its complete commit history is unavailable: " + error.message],
+      };
+    }
+  }
+  const trackedIssueNumbers = [...new Set([
+    ...(issue === null ? [] : [issue]),
+    ...(pullRequest.merged ? closingIssues : []),
+  ])];
   if (!pullRequest.merged && closingIssues.length) {
     return {
       status: "BLOCKED",
@@ -3097,15 +3120,15 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     }
   }
 
-  if (issue !== null) {
+  for (const trackedIssue of trackedIssueNumbers) {
     try {
-      trackingPreparation = await prepareTrackedIssueForProduction(client, issue, pullRequest);
+      trackingPreparations.set(trackedIssue, await prepareTrackedIssueForProduction(client, trackedIssue, pullRequest));
     } catch (error) {
-      trackingPreparation = {
+      trackingPreparations.set(trackedIssue, {
         status: "BLOCKED",
         state: null,
         details: "The issue and Project state could not be prepared for Production verification: " + error.message,
-      };
+      });
     }
   }
 
@@ -3148,13 +3171,13 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     "Production smoke: " + (productionSmoke?.status || "NOT RUN") + " — " + (productionSmoke?.details || "not run"),
     "Post-deployment migration: " + (postDeploymentMigration?.status || "NOT RUN") + " — " + (postDeploymentMigration?.details || "not run"),
   ].join("\n");
-  let issueOutcome = { status: "NOT RUN", issue: null, details: "No issue number was provided." };
-  if (issue !== null) {
+  const issueOutcomes = [];
+  for (const trackedIssue of trackedIssueNumbers) {
     try {
-      issueOutcome = await updateTrackedIssueAfterDelivery(client, issue, {
+      issueOutcomes.push(await updateTrackedIssueAfterDelivery(client, trackedIssue, {
         status,
         details,
-        trackingPrepared: trackingPreparation,
+        trackingPrepared: trackingPreparations.get(trackedIssue),
         pullRequest,
         deliveryEvidence: {
           candidateSha,
@@ -3163,12 +3186,33 @@ export async function deliverPullRequest(client, pullRequestNumber, {
           productionSmoke,
           postDeploymentMigration,
         },
-      });
+      }));
     } catch (error) {
-      issueOutcome = { status: "BLOCKED", issue, details: "Issue/Project tracking update failed: " + error.message };
+      issueOutcomes.push({ status: "BLOCKED", issue: trackedIssue, details: "Issue/Project tracking update failed: " + error.message });
     }
   }
-  const completed = status === "PASS" && (issue === null || issueOutcome.status === "PASS");
+  const issueOutcome = issueOutcomes.length === 0
+    ? { status: "NOT RUN", issue: null, details: "No issue number was provided or inferred from a merged closing reference." }
+    : issueOutcomes.length === 1
+      ? issueOutcomes[0]
+      : {
+          status: issueOutcomes.every((outcome) => outcome.status === "PASS") ? "PASS" : "BLOCKED",
+          issues: issueOutcomes,
+          details: issueOutcomes.map((outcome) => "#" + outcome.issue + ": " + outcome.status + " — " + outcome.details).join("\n"),
+        };
+  const issuePreparationValues = trackedIssueNumbers.map((trackedIssue) => ({
+    issue: trackedIssue,
+    ...(trackingPreparations.get(trackedIssue) || { status: "BLOCKED", details: "Issue preparation did not produce a result." }),
+  }));
+  const trackingPreparation = issuePreparationValues.length === 0
+    ? { status: "NOT RUN", state: null, details: "No issue number was provided or inferred from a merged closing reference." }
+    : issuePreparationValues.length === 1
+      ? issuePreparationValues[0]
+      : {
+          status: issuePreparationValues.every((preparation) => preparation.status === "PASS") ? "PASS" : "BLOCKED",
+          issues: issuePreparationValues,
+        };
+  const completed = status === "PASS" && (trackedIssueNumbers.length === 0 || issueOutcome.status === "PASS");
   const record = {
     schemaVersion: 1,
     status: completed ? "PASS" : status === "PASS" ? "BLOCKED" : status,
@@ -3195,6 +3239,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     postDeploymentMigration: record.postDeploymentMigration,
     trackingPreparation,
     issue: issueOutcome,
+    issues: issueOutcomes,
     deliveryComment: comment.url,
     completed,
     reasons: completed ? [] : [details, ...(issueOutcome.status === "BLOCKED" ? [issueOutcome.details] : [])],

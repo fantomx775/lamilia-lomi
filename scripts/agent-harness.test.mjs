@@ -301,6 +301,136 @@ function createDeliveryClient({
   return { client, calls, mergeSha, get issueState() { return issueState; }, get projectStatus() { return projectStatus; } };
 }
 
+function createMultiIssueMergedDeliveryClient({
+  pullRequestBody = "Closes #7 and resolves #8",
+  pullRequestCommitMessages = ["Update the delivery workflow"],
+} = {}) {
+  const mergeSha = "c".repeat(40);
+  const calls = [];
+  const issueStates = new Map([[7, "closed"], [8, "closed"]]);
+  const projectStatuses = new Map([[7, "Done"], [8, "Done"]]);
+  const issueComments = new Map([[7, []], [8, []]]);
+  const issueNodeId = (number) => "I_issue-" + number;
+  const projectItemId = (number) => "item-" + number;
+  const client = {
+    owner: "example",
+    repo: "repo",
+    projectOwner: "owner",
+    projectNumber: 1,
+    calls,
+    request: async (path, options = {}) => {
+      const method = options.method || "GET";
+      calls.push({ path, method, body: options.body || null });
+      if (path === "/repos/example/repo/pulls/52") {
+        return cleanPullRequest({
+          state: "closed",
+          merged: true,
+          merge_commit_sha: mergeSha,
+          merged_at: "2026-10-08T12:00:00Z",
+          body: pullRequestBody,
+        });
+      }
+      if (path.startsWith("/repos/example/repo/pulls/52/commits")) {
+        return pullRequestCommitMessages.map((message) => ({ commit: { message } }));
+      }
+      if (path.startsWith("/repos/example/repo/pulls/52/files")) return [];
+      if (path.startsWith("/repos/example/repo/issues/52/comments") && method === "POST") {
+        return { id: calls.length, html_url: "https://github.com/example/repo/pull/52#issuecomment-" + calls.length };
+      }
+      if (path.startsWith("/repos/example/repo/issues/52/comments")) return [];
+      const issueMatch = path.match(/^\/repos\/example\/repo\/issues\/(\d+)(?:\/(comments))?/);
+      if (issueMatch) {
+        const issueNumber = Number(issueMatch[1]);
+        if (issueNumber !== 7 && issueNumber !== 8) throw new Error("Unexpected issue " + issueNumber);
+        if (issueMatch[2] === "comments") {
+          if (method === "POST") {
+            const body = JSON.parse(options.body).body;
+            issueComments.get(issueNumber).push({
+              user: { login: "author" },
+              created_at: "2026-10-08T12:00:03Z",
+              body,
+            });
+            return { id: calls.length, html_url: "https://github.com/example/repo/issues/" + issueNumber + "#issuecomment-" + calls.length };
+          }
+          return issueComments.get(issueNumber);
+        }
+        if (method === "PATCH") {
+          const body = JSON.parse(options.body);
+          issueStates.set(issueNumber, body.state);
+          return { number: issueNumber, node_id: issueNodeId(issueNumber), state: body.state };
+        }
+        return {
+          number: issueNumber,
+          node_id: issueNodeId(issueNumber),
+          state: issueStates.get(issueNumber),
+          title: "Delivery issue " + issueNumber,
+        };
+      }
+      throw new Error("Unexpected delivery API request: " + method + " " + path);
+    },
+    graphql: async (query, variables = {}) => {
+      calls.push({ path: "graphql", method: "POST", body: query });
+      if (query.includes("closedByPullRequestsReferences")) {
+        return {
+          repository: {
+            issue: {
+              closedAt: "2026-10-08T12:00:02Z",
+              closedByPullRequestsReferences: {
+                nodes: [{
+                  number: 52,
+                  mergedAt: "2026-10-08T12:00:00Z",
+                  mergeCommit: { oid: mergeSha },
+                }],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        };
+      }
+      if (query.includes("UpdateProjectV2ItemFieldValueInput")) {
+        const issueNumber = variables.input.itemId === projectItemId(7) ? 7 : 8;
+        const optionId = variables.input.value.singleSelectOptionId;
+        projectStatuses.set(issueNumber, optionId.replace(/^status-/, ""));
+        return { updateProjectV2ItemFieldValue: { projectV2Item: { id: projectItemId(issueNumber) } } };
+      }
+      return {
+        user: {
+          projectV2: {
+            id: "project-1",
+            title: "Project",
+            url: "https://github.com/users/owner/projects/1",
+            fields: {
+              nodes: [{
+                id: "status-field",
+                name: "Status",
+                options: ["Backlog", "Review", "Blocked", "Done"].map((name) => ({ id: "status-" + name, name })),
+              }],
+            },
+            items: {
+              nodes: [7, 8].map((issueNumber) => ({
+                id: projectItemId(issueNumber),
+                isArchived: false,
+                content: { __typename: "Issue", id: issueNodeId(issueNumber) },
+                fieldValues: {
+                  nodes: [{ name: projectStatuses.get(issueNumber), field: { name: "Status" } }],
+                },
+              })),
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      };
+    },
+  };
+  return {
+    client,
+    calls,
+    mergeSha,
+    issueStates,
+    projectStatuses,
+  };
+}
+
 test("reads GitHub HTTPS and SSH repository remotes", () => {
   assert.deepEqual(repositoryFromRemote("https://github.com/fantomx775/lamilia-lomi.git"), {
     owner: "fantomx775",
@@ -2376,6 +2506,59 @@ test("resumed delivery reopens a previously auto-closed issue when Production ve
     path.endsWith("/issues/7") && method === "PATCH" && JSON.parse(body).state === "open",
   ));
   assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
+});
+
+test("merged recovery infers every closing issue without --issue and blocks them after Production failure", async () => {
+  const fixture = createMultiIssueMergedDeliveryClient();
+  const result = await deliverPullRequest(fixture.client, 52, {
+    verify: async () => ({ decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => ({
+      status: "FAIL",
+      deployment: { id: 14, sha: fixture.mergeSha, state: "failure" },
+      details: "Vercel deployment failed during build.",
+    }),
+  });
+
+  assert.equal(result.decision, "DELIVERY_FAILED");
+  assert.equal(result.completed, false);
+  assert.equal(result.issue.status, "PASS");
+  assert.deepEqual(result.issues.map((outcome) => outcome.issue), [7, 8]);
+  assert.ok(result.issues.every((outcome) => outcome.status === "PASS"));
+  for (const issueNumber of [7, 8]) {
+    assert.equal(fixture.issueStates.get(issueNumber), "open");
+    assert.equal(fixture.projectStatuses.get(issueNumber), "Blocked");
+    assert.ok(fixture.calls.some(({ path, method, body }) =>
+      path.endsWith("/issues/" + issueNumber) && method === "PATCH" && JSON.parse(body).state === "open",
+    ));
+    assert.equal(fixture.calls.some(({ path, method, body }) =>
+      path.endsWith("/issues/" + issueNumber) && method === "PATCH" && JSON.parse(body).state === "closed",
+    ), false);
+  }
+  assert.equal(fixture.calls.some(({ path, method }) => path.endsWith("/pulls/52/merge") && method === "PUT"), false);
+});
+
+test("merged recovery fails closed when PR commit history cannot be read", async () => {
+  const fixture = createDeliveryClient({ alreadyMerged: true, initialIssueState: "closed" });
+  const request = fixture.client.request;
+  fixture.client.request = async (path, options) => {
+    if (path.startsWith("/repos/example/repo/pulls/52/commits")) {
+      throw new Error("GitHub history unavailable");
+    }
+    return request(path, options);
+  };
+  let deploymentChecks = 0;
+  const result = await deliverPullRequest(fixture.client, 52, {
+    verify: async () => ({ decision: "VERIFIED_MERGE", currentSha: CURRENT_SHA, reasons: [] }),
+    waitForDeployment: async () => { deploymentChecks += 1; return { status: "FAIL" }; },
+  });
+
+  assert.equal(result.stage, "commit-history");
+  assert.equal(result.merged, true);
+  assert.equal(result.completed, undefined);
+  assert.equal(deploymentChecks, 0);
+  assert.equal(fixture.issueState, "closed");
+  assert.equal(fixture.projectStatus, "Done");
+  assert.match(result.reasons[0], /complete commit history is unavailable/);
 });
 
 test("failed retry preserves a closed issue with prior exact-SHA Production pass evidence", async () => {
