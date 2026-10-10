@@ -17,6 +17,7 @@ import type { Category, CategoryImage, Tag } from "@/lib/types";
 type TaxonomyItem = Category | Tag;
 type TaxonomyKind = "category" | "tag";
 type TaxonomyContent = { name: string; description: string };
+type SuccessfulAdminMutation = Extract<AdminMutationResult, { ok: true }>;
 export type SaveAction = (formData: FormData) => Promise<AdminMutationResult>;
 export type DeleteAction = (formData: FormData) => Promise<AdminMutationResult>;
 
@@ -25,6 +26,7 @@ type TaxonomyEditorProps = {
   item?: TaxonomyItem;
   onClose: () => void;
   onSaved: () => void;
+  onDeleted?: (result: SuccessfulAdminMutation) => void;
   saveAction?: SaveAction;
   deleteAction?: DeleteAction;
 };
@@ -35,6 +37,7 @@ export function TaxonomyEditorDrawer({
   open,
   onClose,
   onSaved,
+  onDeleted,
   saveAction,
   deleteAction,
   restoreFocusElement,
@@ -59,6 +62,7 @@ export function TaxonomyEditorDrawer({
         item={item}
         onClose={onClose}
         onSaved={onSaved}
+        onDeleted={onDeleted}
         saveAction={saveAction}
         deleteAction={deleteAction}
       />
@@ -71,6 +75,7 @@ function TaxonomyEditorForm({
   item,
   onClose,
   onSaved,
+  onDeleted,
   saveAction,
   deleteAction,
 }: TaxonomyEditorProps) {
@@ -133,7 +138,8 @@ function TaxonomyEditorForm({
         return;
       }
 
-      onSaved();
+      if (onDeleted) onDeleted(result);
+      else onSaved();
     });
   };
 

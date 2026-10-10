@@ -116,7 +116,12 @@ export async function deleteCategoryAction(formData: FormData) {
     redirect(withAdminError("/admin/categories", result.errors));
   }
 
-  redirect("/admin/categories?deleted=1");
+  const query = new URLSearchParams({ deleted: "1" });
+  if (result.cleanupDeferred) {
+    query.set("cleanupDeferred", "1");
+    query.set("categoryId", result.id);
+  }
+  redirect(`/admin/categories?${query.toString()}`);
 }
 
 export async function saveCategoryInlineAction(formData: FormData) {

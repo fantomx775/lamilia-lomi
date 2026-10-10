@@ -133,6 +133,32 @@ describe("admin resource list adapters", () => {
     expect(screen.getByText(/tylko do odczytu/i)).toBeInTheDocument();
   });
 
+  it("surfaces deferred category image cleanup after the category is deleted", async () => {
+    const user = userEvent.setup();
+    const deleteAction = vi.fn().mockResolvedValue({
+      ok: true,
+      id: "category-1",
+      cleanupDeferred: true,
+    });
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(
+      <CategoriesResourceList
+        rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1 }]}
+        items={[{ id: "category-1", slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }]}
+        deleteAction={deleteAction}
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "Edytuj kategorię Books" })[0]);
+    await user.click(screen.getByRole("button", { name: "Usuń kategorię" }));
+
+    expect(deleteAction).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("alert")).toHaveTextContent("jej plik obrazu nie został usunięty");
+    expect(screen.getByRole("alert")).toHaveTextContent("category-1");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
   it("shows a safe retry state when the admin user reader is unavailable", () => {
     const users = render(<UsersResourceList rows={[]} loadError />);
 
