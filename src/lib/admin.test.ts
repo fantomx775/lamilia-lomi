@@ -11,6 +11,7 @@ import {
 import { exportUsersToCsv, validateProductForPublish } from "./admin";
 import { ADMIN_ERROR_CODES } from "./admin-errors";
 import { getSeedContentSnapshot } from "./content-store";
+import { PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH, PRODUCT_TITLE_MAX_LENGTH } from "./product-text";
 import { products } from "./seed-data";
 
 describe("admin behavior", () => {
@@ -95,6 +96,38 @@ describe("admin behavior", () => {
       code: "LOMI-OCEAN-2026",
       active: true,
     });
+  });
+
+  it("accepts product text at the character limits and rejects longer values without truncating", () => {
+    const atLimit = new FormData();
+    atLimit.set("title", "T".repeat(PRODUCT_TITLE_MAX_LENGTH));
+    atLimit.set("shortDescription", "S".repeat(PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH));
+
+    const accepted = buildProductFromFormData(atLimit, { snapshot: getSeedContentSnapshot() });
+    const acceptedEnglish = accepted.product.translations.find((translation) => translation.locale === "en");
+
+    expect(accepted.errors).not.toContain(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_TOO_LONG);
+    expect(accepted.errors).not.toContain(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_SHORT_DESCRIPTION_TOO_LONG);
+    expect(acceptedEnglish?.title).toHaveLength(PRODUCT_TITLE_MAX_LENGTH);
+    expect(acceptedEnglish?.shortDescription).toHaveLength(PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH);
+
+    const overlongTitle = new FormData();
+    overlongTitle.set("title", "T".repeat(PRODUCT_TITLE_MAX_LENGTH + 1));
+    overlongTitle.set("shortDescription", "A short description.");
+    const rejectedTitle = buildProductFromFormData(overlongTitle, { snapshot: getSeedContentSnapshot() });
+
+    expect(rejectedTitle.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_TOO_LONG);
+    expect(rejectedTitle.product.translations.find((translation) => translation.locale === "en")?.title)
+      .toHaveLength(PRODUCT_TITLE_MAX_LENGTH + 1);
+
+    const overlongShortDescription = new FormData();
+    overlongShortDescription.set("title", "A valid title");
+    overlongShortDescription.set("shortDescription", "S".repeat(PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH + 1));
+    const rejectedShortDescription = buildProductFromFormData(overlongShortDescription, { snapshot: getSeedContentSnapshot() });
+
+    expect(rejectedShortDescription.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_SHORT_DESCRIPTION_TOO_LONG);
+    expect(rejectedShortDescription.product.translations.find((translation) => translation.locale === "en")?.shortDescription)
+      .toHaveLength(PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH + 1);
   });
 
   it("keeps public media and premium files in separate visibility classes", () => {

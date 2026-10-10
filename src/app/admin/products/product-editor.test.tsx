@@ -34,6 +34,10 @@ import { AdminProductEditorHistoryGuard } from "@/app/admin/admin-product-editor
 import { buildProductFromFormData } from "@/lib/admin-content";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 import { getSeedContentSnapshot } from "@/lib/content-store";
+import {
+  PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH,
+  PRODUCT_TITLE_MAX_LENGTH,
+} from "@/lib/product-text";
 import type { Product, ProductAsset } from "@/lib/types";
 
 function productWithGalleryAssets(product: Product, filenames: string[], reverseStateOrder = false): Product {
@@ -258,6 +262,57 @@ describe("ProductEditor V2", () => {
     );
 
     expect(view.getByRole("alert")).toHaveTextContent("English title is required.");
+  });
+
+  it("shows where title and short description are used, counts text, and warns near each limit", () => {
+    const view = render(
+      <ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />,
+    );
+    const title = view.getByLabelText("Tytuł");
+    const shortDescription = view.getByLabelText("Krótki opis");
+
+    expect(title).toHaveAttribute("maxLength", String(PRODUCT_TITLE_MAX_LENGTH));
+    expect(shortDescription.tagName).toBe("TEXTAREA");
+    expect(shortDescription).toHaveAttribute("rows", "4");
+    expect(shortDescription).toHaveAttribute("maxLength", String(PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH));
+    expect(view.getByText("Używany w katalogu i na stronie produktu.")).toBeInTheDocument();
+    expect(view.getByText(/Wyświetlany na kartach i w podglądzie produktu/)).toBeInTheDocument();
+
+    fireEvent.change(title, { target: { value: "T".repeat(PRODUCT_TITLE_MAX_LENGTH - 20) } });
+    fireEvent.change(shortDescription, { target: { value: "S".repeat(PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH - 20) } });
+
+    expect(view.getByText(`${PRODUCT_TITLE_MAX_LENGTH - 20} / ${PRODUCT_TITLE_MAX_LENGTH} znaków`)).toBeInTheDocument();
+    expect(view.getByText(`${PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH - 20} / ${PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH} znaków`)).toBeInTheDocument();
+    expect(view.getAllByText("Zbliżasz się do limitu. Pozostało 20 znaków.")).toHaveLength(2);
+  });
+
+  it("blocks over-limit text with field-level feedback while preserving both values", async () => {
+    const saveAction = vi.fn();
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+    const title = view.getByLabelText("Tytuł");
+    const shortDescription = view.getByLabelText("Krótki opis");
+    const overlongTitle = "T".repeat(PRODUCT_TITLE_MAX_LENGTH + 1);
+    const overlongDescription = "S".repeat(PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH + 1);
+
+    fireEvent.change(title, { target: { value: overlongTitle } });
+    fireEvent.change(shortDescription, { target: { value: overlongDescription } });
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+
+    expect(saveAction).not.toHaveBeenCalled();
+    expect(title).toHaveValue(overlongTitle);
+    expect(shortDescription).toHaveValue(overlongDescription);
+    expect(title).toHaveAttribute("aria-invalid", "true");
+    expect(shortDescription).toHaveAttribute("aria-invalid", "true");
+    expect(view.container.querySelector("#product-title-error")).toHaveTextContent("Tytuł może mieć maksymalnie 140 znaków.");
+    expect(view.container.querySelector("#product-short-description-error")).toHaveTextContent("Krótki opis może mieć maksymalnie 300 znaków.");
   });
 
   it("submits the single product content fields through the provided server action", async () => {
