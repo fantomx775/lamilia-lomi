@@ -5,6 +5,7 @@ import type { Locale } from "@/i18n/routing";
 import { defaultLocale, normalizeLocale } from "./locale";
 import { getCanonicalAppUrl } from "./config";
 import { getContentSnapshot } from "./content-store";
+import { getRichTextTextContent } from "./rich-text";
 import type {
   Audience,
   CatalogFilters,
@@ -239,7 +240,7 @@ export function getCatalogProductsFromSnapshot(
     const searchable = [
       product.title,
       product.shortDescription,
-      product.longDescription,
+      getRichTextTextContent(product.longDescription),
       ...product.categories.map((category) => category.name),
       ...product.tags.map((tag) => tag.name),
     ]

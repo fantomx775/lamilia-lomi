@@ -37,6 +37,7 @@ import {
   saveTagForRequest,
 } from "./supabase-content-admin";
 import { getSeedContentSnapshot } from "./content-store";
+import { RICH_TEXT_FORMAT_PREFIX, serializeRichTextDocument } from "./rich-text";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const assetId = "11111111-1111-4111-8111-111111111199";
@@ -181,14 +182,32 @@ describe("Supabase content admin mutations", () => {
     form.set("productType", existingProduct.productType);
     form.set("title", "Updated English product");
     form.set("shortDescription", "Updated English description");
+    form.set("longDescription", `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "Updated rich description", marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }] }],
+        },
+        { type: "rawHTML", attrs: { html: "<script>alert(1)</script>" } },
+      ],
+    })}`);
 
     await expect(saveProductForRequest(form)).resolves.toMatchObject({ ok: true, id: productId });
 
-    const payload = mocks.rpc.mock.calls[0][1] as { product_state: { translations: Array<{ locale: string; title: string }> } };
+    const payload = mocks.rpc.mock.calls[0][1] as { product_state: { translations: Array<{ locale: string; title: string; longDescription: string }> } };
     expect(payload.product_state.translations).toEqual(expect.arrayContaining([
-      expect.objectContaining({ locale: "en", title: "Updated English product" }),
+      expect.objectContaining({
+        locale: "en",
+        title: "Updated English product",
+        longDescription: serializeRichTextDocument({
+          type: "doc",
+          content: [{ type: "paragraph", content: [{ type: "text", text: "Updated rich description" }] }],
+        }),
+      }),
       expect.objectContaining({ locale: "pl", title: seededProduct.translations.find((translation) => translation.locale === "pl")?.title }),
     ]));
+    expect(payload.product_state.translations.find((translation) => translation.locale === "en")?.longDescription).not.toContain("javascript:");
   });
 
   it("saves only the English static page while retaining other locale rows", async () => {
@@ -202,14 +221,31 @@ describe("Supabase content admin mutations", () => {
     });
     const form = new FormData();
     form.set("title", "Updated English terms");
-    form.set("body", "Updated English terms body");
+    form.set("body", `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify({
+      type: "doc",
+      content: [
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Updated English terms" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Terms body", marks: [{ type: "link", attrs: { href: "data:text/html,unsafe" } }] }] },
+      ],
+    })}`);
 
     await expect(savePagesForRequest(form, "terms")).resolves.toMatchObject({ ok: true, id: "terms" });
 
     expect(mocks.upsertedRows.filter((row) => row.table === "static_pages")).toHaveLength(1);
     expect(mocks.upsertedRows).toContainEqual(expect.objectContaining({
       table: "static_pages",
-      rows: expect.objectContaining({ slug: "terms", locale: "en", title: "Updated English terms" }),
+      rows: expect.objectContaining({
+        slug: "terms",
+        locale: "en",
+        title: "Updated English terms",
+        body: serializeRichTextDocument({
+          type: "doc",
+          content: [
+            { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Updated English terms" }] },
+            { type: "paragraph", content: [{ type: "text", text: "Terms body" }] },
+          ],
+        }),
+      }),
       options: { onConflict: "slug,locale" },
     }));
     expect(mocks.deletedTables).toHaveLength(0);

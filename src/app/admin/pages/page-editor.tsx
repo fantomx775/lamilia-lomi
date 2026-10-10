@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
+import { RichTextEditor } from "@/components/admin/rich-text-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,7 +61,7 @@ export function PageEditor({
             </div>
             <div className="grid gap-2">
               <Label htmlFor="page-body">Treść</Label>
-              <textarea id="page-body" name="body" value={value.body} onChange={(event) => updateValue("body", event.target.value)} className="min-h-[28rem] w-full rounded-md border border-[var(--color-border)] bg-white px-3 py-3 text-sm leading-6 outline-none transition focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]" />
+              <RichTextEditor id="page-body" name="body" label="Treść" value={value.body} onChange={(body) => updateValue("body", body)} />
             </div>
           </div>
         </div>
