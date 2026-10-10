@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
 test("admin catalog preference persists and stays responsive", async ({ page }, testInfo) => {
@@ -18,6 +19,7 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
     page.getByRole("button", { name: "Kontynuuj" }).click(),
   ]);
 
+  const releaseContentStoreLock = await acquireLocalContentStoreLock();
   try {
     await expect(
       page.getByRole("combobox", { name: "Karty w wierszu na dużych ekranach" }),
@@ -83,9 +85,13 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
       fullPage: true,
     });
   } finally {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/admin/settings");
-    await saveCatalogColumns(page, "4");
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/admin/settings");
+      await saveCatalogColumns(page, "4");
+    } finally {
+      releaseContentStoreLock();
+    }
   }
 });
 

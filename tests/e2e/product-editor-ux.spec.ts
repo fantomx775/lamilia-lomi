@@ -402,8 +402,8 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
     await expect(noJsPage.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeVisible();
     await expect(noJsPage.getByLabel("Tytuł")).toHaveValue(title);
     await expect(noJsPage.getByLabel("Krótki opis")).toHaveValue(description);
-    await expect(noJsPage.locator("#product-title-en")).not.toHaveAttribute("aria-invalid", "true");
-    await expect(noJsPage.locator("#product-short-description-en")).not.toHaveAttribute("aria-invalid", "true");
+    await expect(titleInput).not.toHaveAttribute("aria-invalid", "true");
+    await expect(noJsPage.getByLabel("Krótki opis")).not.toHaveAttribute("aria-invalid", "true");
     await expect(noJsPage.getByLabel("Adres produktu")).toHaveValue(/no-js-retained-/);
     await expect(noJsPage.getByLabel("Pozycja w katalogu")).toHaveValue("73");
     await expect(noJsPage.getByLabel("Status")).toHaveValue("published");
