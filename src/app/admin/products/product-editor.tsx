@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { routing, type Locale } from "@/i18n/routing";
 import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type AdminMutationResult } from "@/lib/admin-errors";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
-import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMediaWithTus, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
+import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMedia, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
@@ -37,6 +37,7 @@ type AssetDraft = {
   bucket: string;
   path: string;
   storagePath?: string;
+  storageProvider?: ProductAsset["storageProvider"];
   filename: string;
   contentType: string;
   sizeBytes?: number;
@@ -494,6 +495,7 @@ export function ProductEditor({
       bucket: spec.bucket,
       path: "",
       storagePath: undefined,
+      storageProvider: "supabase" as const,
       filename: file.name,
       contentType: validatedContentTypes.get(file) ?? file.type,
       sizeBytes: file.size,
@@ -534,10 +536,10 @@ export function ProductEditor({
 
     updateAsset(draft.clientId, "status", "uploading");
     updateAsset(draft.clientId, "error", undefined);
+    let uploadedAsset: Partial<AssetDraft> = currentDraft;
 
     try {
       let uploadTarget = currentDraft.upload;
-      let uploadedAsset: Partial<AssetDraft> = currentDraft;
 
       if (!uploadTarget) {
         let response = await fetch("/api/admin/assets", {
@@ -584,7 +586,7 @@ export function ProductEditor({
       }
 
       if (uploadTarget) {
-        await uploadMediaWithTus(file, uploadTarget, currentDraft.contentType, (progress) => {
+        await uploadMedia(file, uploadTarget, currentDraft.contentType, (progress) => {
           updateAsset(draft.clientId, "progress", progress);
         });
       }
@@ -593,9 +595,9 @@ export function ProductEditor({
       const stale = !isCurrentUpload(draft.kind, version) || !currentState || currentState.removed;
 
       if (stale) {
-        const storagePath = uploadedAsset.storagePath ?? uploadTarget?.path;
+        const storagePath = uploadedAsset.storagePath ?? (uploadTarget?.driver === "supabase-tus" ? uploadTarget.path : undefined);
         if (storagePath) {
-          await deleteUploadedStorage(draft.kind, storagePath);
+          await deleteUploadedStorage(draft.kind, storagePath, uploadedAsset.storageProvider);
         }
         setAssets((current) => current.filter((asset) => asset.clientId !== draft.clientId));
         return;
@@ -624,8 +626,27 @@ export function ProductEditor({
         return asset;
       }));
     } catch (error) {
+      if (uploadedAsset.id && uploadedAsset.storagePath) {
+        try {
+          await deleteUploadedStorage(
+            draft.kind,
+            uploadedAsset.storagePath,
+            uploadedAsset.storageProvider,
+          );
+        } catch {
+          console.error("Nie udało się posprzątać nieudanego uploadu.", {
+            assetId: uploadedAsset.id,
+          });
+        }
+      }
       setAssets((current) => current.map((asset) => asset.clientId === draft.clientId ? {
         ...asset,
+        id: "",
+        path: "",
+        storagePath: undefined,
+        storageProvider: "supabase" as const,
+        upload: undefined,
+        uploaded: false,
         status: "failed",
         error: getMediaUploadErrorMessage(error),
       } : asset));
@@ -635,7 +656,7 @@ export function ProductEditor({
   const removeAsset = async (asset: AssetDraft) => {
     if (!asset.id || asset.uploaded || asset.upload) {
       try {
-        if (asset.storagePath) await deleteUploadedStorage(asset.kind, asset.storagePath);
+        if (asset.storagePath) await deleteUploadedStorage(asset.kind, asset.storagePath, asset.storageProvider);
         markDirty();
         setAssets((current) => current.filter((item) => item.clientId !== asset.clientId));
       } catch (error) {
@@ -649,11 +670,15 @@ export function ProductEditor({
     updateAsset(asset.clientId, "removed", true);
   };
 
-  const deleteUploadedStorage = async (kind: ProductAsset["kind"], storagePath: string) => {
+  const deleteUploadedStorage = async (
+    kind: ProductAsset["kind"],
+    storagePath: string,
+    storageProvider?: ProductAsset["storageProvider"],
+  ) => {
     const response = await fetch("/api/admin/assets", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId: draftProductId, kind, storagePath }),
+      body: JSON.stringify({ productId: draftProductId, kind, storagePath, storageProvider: storageProvider ?? "supabase" }),
     });
 
     if (!response.ok) {
@@ -1218,6 +1243,7 @@ function hiddenAssetFields(asset: AssetDraft, removed = false) {
     <input type="hidden" name="assetKind" value={asset.kind} />
     <input type="hidden" name="assetBucket" value={asset.bucket} />
     <input type="hidden" name="assetPath" value={path} />
+    <input type="hidden" name="assetStorageProvider" value={asset.storageProvider ?? "supabase"} />
     <input type="hidden" name="assetFilename" value={asset.filename} />
     <input type="hidden" name="assetContentType" value={asset.contentType} />
     <input type="hidden" name="assetSizeBytes" value={asset.sizeBytes ?? ""} />
@@ -1568,7 +1594,7 @@ function buildAssets(
 
   return (product?.assets ?? [])
     .filter((asset) => asset.isActive !== false)
-    .map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, storagePath: asset.storagePath, filename: asset.filename, contentType: asset.contentType, sizeBytes: asset.sizeBytes, locale: asset.locale ?? "", title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false, status: "uploaded" as const, uploaded: false }));
+    .map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, storagePath: asset.storagePath, storageProvider: asset.storageProvider ?? "supabase", filename: asset.filename, contentType: asset.contentType, sizeBytes: asset.sizeBytes, locale: asset.locale ?? "", title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false, status: "uploaded" as const, uploaded: false }));
 }
 
 function buildAmazonLinks(

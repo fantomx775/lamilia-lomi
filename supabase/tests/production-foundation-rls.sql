@@ -561,10 +561,82 @@ rollback;
 begin;
 set local role authenticated;
 set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
-insert into public.products (id, slug, status, audience, product_type, review_delay_days, sort_order)
-values ('55555555-5555-4555-8555-555555555555', 'admin-policy-write', 'draft', 'adults', 'book', 14, 99);
-select case when count(*) = 1 then 'PASS admin can mutate content' else 'FAIL admin content mutation count=' || count(*) end
-from public.products where slug = 'admin-policy-write';
+select case when
+  not has_table_privilege('authenticated', 'public.products', 'INSERT')
+  and not has_table_privilege('authenticated', 'public.products', 'UPDATE')
+  and not has_table_privilege('authenticated', 'public.products', 'DELETE')
+  and not has_table_privilege('authenticated', 'public.products', 'TRUNCATE')
+  and not has_table_privilege('authenticated', 'public.products', 'REFERENCES')
+  and not has_table_privilege('authenticated', 'public.products', 'TRIGGER')
+  and not has_table_privilege('authenticated', 'public.product_assets', 'INSERT')
+  and not has_table_privilege('authenticated', 'public.product_assets', 'UPDATE')
+  and not has_table_privilege('authenticated', 'public.product_assets', 'DELETE')
+  and not has_table_privilege('authenticated', 'public.product_assets', 'TRUNCATE')
+  and not has_table_privilege('authenticated', 'public.product_assets', 'REFERENCES')
+  and not has_table_privilege('authenticated', 'public.product_assets', 'TRIGGER')
+then 'PASS admin direct writes to product and asset rows are restricted'
+else 'FAIL admin retains direct product or asset write privileges' end;
+select case when (public.save_product(pg_temp.product_state(
+  '11111111-1111-4111-8111-111111111111'::uuid,
+  ' admin rpc'
+) ->> 'status') = 'success'
+then 'PASS admin can mutate product content through the guarded RPC'
+else 'FAIL admin RPC content mutation was rejected' end;
+rollback;
+
+begin;
+set local role postgres;
+update public.product_assets
+set storage_provider = 'r2_public'
+where id = '11111111-1111-4111-8111-111111111101';
+set local role authenticated;
+set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+do $$
+begin
+  begin
+    perform public.save_product(jsonb_set(
+      pg_temp.product_state('11111111-1111-4111-8111-111111111111'::uuid),
+      '{status}',
+      '"archived"'::jsonb
+    ));
+    raise exception 'FAIL legacy save RPC archived a product with public R2 media';
+  exception when sqlstate '55000' then
+    raise notice 'PASS legacy save RPC blocks archive while public R2 media exists';
+  end;
+
+  begin
+    perform public.delete_product('11111111-1111-4111-8111-111111111111'::uuid);
+    raise exception 'FAIL delete RPC removed a product with public R2 media';
+  exception when sqlstate '55000' then
+    raise notice 'PASS delete RPC blocks deletion while public R2 media exists';
+  end;
+
+  begin
+    perform public.archive_product('11111111-1111-4111-8111-111111111111'::uuid);
+    raise exception 'FAIL archive RPC archived a product with public R2 media';
+  exception when sqlstate '55000' then
+    raise notice 'PASS archive RPC blocks archiving while public R2 media exists';
+  end;
+end;
+$$;
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+select case when public.archive_product('11111111-1111-4111-8111-111111111111'::uuid)
+then 'PASS archive RPC updates an existing product'
+else 'FAIL archive RPC did not update an existing product' end;
+select case when (select status from public.products where id = '11111111-1111-4111-8111-111111111111') = 'archived'
+then 'PASS archive RPC changes only the product status'
+else 'FAIL archive RPC status was not archived' end;
+select case when count(*) > 0 then 'PASS archive RPC retains product asset rows'
+else 'FAIL archive RPC removed product asset rows' end
+from public.product_assets where product_id = '11111111-1111-4111-8111-111111111111';
+select case when public.archive_product('aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'::uuid) is false
+  and not exists (select 1 from public.products where id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa')
+then 'PASS archive RPC does not recreate a concurrently deleted product'
+else 'FAIL archive RPC recreated a missing product' end;
 rollback;
 
 -- Leave the local database as it was before this harness ran.
@@ -605,4 +677,4 @@ where id in (
   'cccccccc-3333-4333-8333-cccccccccccc'
 );
 
-\echo 'RLS matrix complete: 67 positive scenarios passed'
+\echo 'RLS matrix complete: 72 positive scenarios passed'

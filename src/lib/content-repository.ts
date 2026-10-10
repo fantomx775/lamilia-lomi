@@ -6,6 +6,7 @@ import { getBackendMode } from "@/lib/config";
 import { createClient } from "@/lib/supabase/server";
 
 import { normalizeCatalogSettings } from "./catalog-settings";
+import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
 import type {
   AmazonLink,
   Category,
@@ -91,7 +92,8 @@ export const getPublicProductDetailSnapshotForRequest = cache(
             title,
             sort_order,
             is_public,
-            is_active
+            is_active,
+            storage_provider
           ),
           amazon_links ( id, product_id, market, url, is_primary )
         `,
@@ -256,7 +258,7 @@ function mapProduct(
     translations: translationRows.map(mapProductTranslation),
     categoryIds: categoryRows.map((item) => stringValue(item.category_id)),
     tagIds: tagRows.map((item) => stringValue(item.tag_id)),
-    assets: assetRows.map(mapAsset),
+    assets: assetRows.map((asset) => mapAsset(asset, row.status as Product["status"])),
     amazonLinks: amazonRows.map(mapAmazonLink),
     premiumCodes: premiumCodeRows.map(mapPremiumCode),
   };
@@ -347,22 +349,27 @@ function mapTaxonomyTranslation(row: DbRow): TaxonomyTranslation {
   };
 }
 
-function mapAsset(row: DbRow): ProductAsset {
+function mapAsset(row: DbRow, productStatus?: Product["status"]): ProductAsset {
   const kind = row.kind as ProductAsset["kind"];
   const rawPath = stringValue(row.path);
   const isUploadedStorageAsset = rawPath.startsWith("products/");
+  const storageProvider = storageProviderValue(row.storage_provider);
+  const r2PublicUrl = storageProvider === "r2_public" && Boolean(row.is_public) && productStatus === "published"
+    ? r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", rawPath)
+    : null;
 
   return {
     id: stringValue(row.id),
     productId: stringValue(row.product_id),
     kind,
     bucket: stringValue(row.bucket),
-    path: Boolean(row.is_public) && isUploadedStorageAsset
+    path: r2PublicUrl ?? (Boolean(row.is_public) && isUploadedStorageAsset
       ? `/api/media/${stringValue(row.id)}`
       : Boolean(row.is_public) && !rawPath.startsWith("/")
         ? `/${rawPath}`
-        : rawPath,
+        : rawPath),
     storagePath: isUploadedStorageAsset ? rawPath : undefined,
+    storageProvider,
     filename: stringValue(row.filename),
     contentType: stringValue(row.content_type),
     sizeBytes: numberOrUndefined(row.size_bytes),
@@ -372,6 +379,12 @@ function mapAsset(row: DbRow): ProductAsset {
     isPublic: Boolean(row.is_public),
     isActive: row.is_active === undefined ? true : Boolean(row.is_active),
   };
+}
+
+function storageProviderValue(value: unknown): ProductAsset["storageProvider"] {
+  return value === "r2_private" || value === "r2_public_pending" || value === "r2_public_revoking" || value === "r2_public"
+    ? value
+    : "supabase";
 }
 
 function mapAmazonLink(row: DbRow): AmazonLink {

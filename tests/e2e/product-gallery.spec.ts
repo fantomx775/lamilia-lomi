@@ -3,9 +3,28 @@ import { expect, test } from "@playwright/test";
 test("product gallery opens a full-size image preview and supports navigation", async ({ page }, testInfo) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "ll_cookie_consent",
+      JSON.stringify({ essential: true, analytics: false }),
+    );
+  });
+
+  await page.goto("/en/products");
+  const catalog = page.getByTestId("product-catalog-grid");
+  await expect(catalog).toBeVisible();
+  const catalogCover = catalog.getByRole("img").first();
+  await expect(catalogCover).toBeVisible();
+  await expect.poll(() => catalogCover.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await page.screenshot({ path: testInfo.outputPath("product-catalog.png"), fullPage: true });
 
   await page.goto("/en/products/moon-garden-coloring-book");
   await expect(page.getByRole("heading", { name: "Inside the book" })).toBeVisible();
+  const productCover = page.getByRole("main").getByRole("img").first();
+  await expect(productCover).toBeVisible();
+  await expect.poll(() => productCover.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await page.screenshot({ path: testInfo.outputPath("product-detail-cover.png"), fullPage: true });
+
   await page.getByRole("button", { name: "Open image 1" }).click();
 
   const dialog = page.getByRole("dialog", { name: "Image preview" });

@@ -2,16 +2,28 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAssetByIdForRequest: vi.fn(),
+  getDemoSession: vi.fn(),
   getBackendMode: vi.fn(),
   getProductByIdForRequest: vi.fn(),
   createServiceRoleClient: vi.fn(),
+  createSignedR2ReadUrl: vi.fn(),
+  getR2PublicBaseUrl: vi.fn(),
+  r2PublicMediaUrl: vi.fn(),
+  hasAdminAccess: vi.fn(),
 }));
 
+vi.mock("@/lib/auth", () => ({ hasAdminAccess: mocks.hasAdminAccess }));
 vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
+vi.mock("@/lib/media-r2-config", () => ({
+  getR2PublicBaseUrl: mocks.getR2PublicBaseUrl,
+  r2PublicMediaUrl: mocks.r2PublicMediaUrl,
+}));
+vi.mock("@/lib/media-r2", () => ({ createSignedR2ReadUrl: mocks.createSignedR2ReadUrl }));
 vi.mock("@/lib/products-request", () => ({
   getAssetByIdForRequest: mocks.getAssetByIdForRequest,
   getProductByIdForRequest: mocks.getProductByIdForRequest,
 }));
+vi.mock("@/lib/session.server", () => ({ getDemoSession: mocks.getDemoSession }));
 vi.mock("@/lib/supabase/admin", () => ({ createServiceRoleClient: mocks.createServiceRoleClient }));
 
 import { GET } from "./route";
@@ -22,6 +34,10 @@ const assetId = "11111111-1111-4111-8111-111111111199";
 describe("public media delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getDemoSession.mockResolvedValue(null);
+    mocks.hasAdminAccess.mockImplementation((session) => session?.role === "admin");
+    mocks.getR2PublicBaseUrl.mockReturnValue(null);
+    mocks.r2PublicMediaUrl.mockReturnValue(null);
   });
 
   it("redirects authorized media to a short-lived Storage URL without downloading through Next", async () => {
@@ -54,6 +70,127 @@ describe("public media delivery", () => {
     expect(response.headers.get("location")).toContain("token=short");
     expect(createSignedUrl).toHaveBeenCalledWith(`products/${productId}/cover/${assetId}-cover.jpg`, 60, { download: undefined });
     expect(download).not.toHaveBeenCalled();
+  });
+
+  it("serves published private-R2 media through a short-lived signed URL", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider: "r2_private",
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+    mocks.createSignedR2ReadUrl.mockResolvedValue("https://r2.example/private-signed-image");
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://r2.example/private-signed-image");
+    expect(mocks.createSignedR2ReadUrl).toHaveBeenCalledWith(`products/${productId}/cover/${assetId}-cover.jpg`);
+    expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
+  });
+
+  it.each(["r2_public_pending", "r2_public_revoking"] as const)(
+    "keeps %s media on the private signed route",
+    async (storageProvider) => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider,
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+    mocks.createSignedR2ReadUrl.mockResolvedValue("https://r2.example/private-signed-image");
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://r2.example/private-signed-image");
+    expect(mocks.createSignedR2ReadUrl).toHaveBeenCalledWith(`products/${productId}/cover/${assetId}-cover.jpg`);
+    },
+  );
+
+  it("lets an admin preview archived R2 media through a private URL", async () => {
+    const archivedAsset = {
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider: "r2_public",
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      isPublic: true,
+      isActive: true,
+    };
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    mocks.getAssetByIdForRequest.mockImplementation(async (_id, options) =>
+      options?.includeDrafts ? archivedAsset : undefined,
+    );
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "archived" });
+    mocks.createSignedR2ReadUrl.mockResolvedValue("https://r2.example/private-admin-preview");
+    mocks.getR2PublicBaseUrl.mockReturnValue("https://media.example.com");
+    mocks.r2PublicMediaUrl.mockReturnValue("https://media.example.com/public-image");
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://r2.example/private-admin-preview");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(mocks.getAssetByIdForRequest).toHaveBeenLastCalledWith(assetId, { includeDrafts: true });
+    expect(mocks.createSignedR2ReadUrl).toHaveBeenCalledWith(`products/${productId}/cover/${assetId}-cover.jpg`);
+    expect(mocks.r2PublicMediaUrl).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the retained Supabase mirror when private R2 reads fail", async () => {
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: { signedUrl: "https://project.storage.supabase.co/object/sign/public-media/file?token=mirror" },
+      error: null,
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider: "r2_private",
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+    mocks.createSignedR2ReadUrl.mockRejectedValue(new Error("R2 unavailable"));
+    mocks.createServiceRoleClient.mockReturnValue({
+      storage: { from: vi.fn(() => ({ createSignedUrl })) },
+    });
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toContain("token=mirror");
+    consoleError.mockRestore();
   });
 
   it("does not issue a Storage URL for draft or misclassified media", async () => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -6,6 +6,22 @@ const mocks = vi.hoisted(() => ({
   getBackendMode: vi.fn(),
   selectedColumns: "",
   filters: [] as Array<[string, unknown]>,
+  productAssetRow: {} as {
+    id: string;
+    product_id: string;
+    kind: string;
+    bucket: string;
+    path: string;
+    storage_provider: string;
+    filename: string;
+    content_type: string;
+    size_bytes: number;
+    locale: null;
+    title: string;
+    sort_order: number;
+    is_public: boolean;
+    is_active: boolean;
+  },
 }));
 
 vi.mock("server-only", () => ({}));
@@ -15,11 +31,32 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
 import { getLocalizedProductDetailViewForRequest } from "./products-request";
 
 describe("targeted public product detail read", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("R2_PUBLIC_BASE_URL", "https://media.example.com");
     mocks.getBackendMode.mockReturnValue("supabase");
     mocks.selectedColumns = "";
     mocks.filters = [];
+    mocks.productAssetRow = {
+      id: "cover-1",
+      product_id: "product-1",
+      kind: "cover",
+      bucket: "public-assets",
+      path: "products/product-1/cover/cover-1.png",
+      storage_provider: "r2_public",
+      filename: "cover.png",
+      content_type: "image/png",
+      size_bytes: 2048,
+      locale: null,
+      title: "Moon Garden cover",
+      sort_order: 1,
+      is_public: true,
+      is_active: true,
+    };
 
     const query = {
       select: vi.fn((columns: string) => {
@@ -74,23 +111,7 @@ describe("targeted public product detail read", () => {
               },
             },
           ],
-          product_assets: [
-            {
-              id: "cover-1",
-              product_id: "product-1",
-              kind: "cover",
-              bucket: "public-assets",
-              path: "/assets/cover.png",
-              filename: "cover.png",
-              content_type: "image/png",
-              size_bytes: 2048,
-              locale: null,
-              title: "Moon Garden cover",
-              sort_order: 1,
-              is_public: true,
-              is_active: true,
-            },
-          ],
+          product_assets: [mocks.productAssetRow],
           amazon_links: [
             {
               id: "amazon-1",
@@ -117,7 +138,10 @@ describe("targeted public product detail read", () => {
     expect(product).toMatchObject({
       id: "product-1",
       title: "Moon Garden",
-      cover: { id: "cover-1", path: "/assets/cover.png" },
+      cover: {
+        id: "cover-1",
+        path: "https://media.example.com/products/product-1/cover/cover-1.png",
+      },
       categories: [{ id: "category-1", name: "Mindfulness" }],
       tags: [{ id: "tag-1", name: "Quiet time" }],
       primaryAmazonLink: { id: "amazon-1", market: "amazon.com" },
@@ -126,6 +150,7 @@ describe("targeted public product detail read", () => {
     expect(mocks.from).toHaveBeenCalledWith("products");
     expect(mocks.selectedColumns).toContain("product_translations");
     expect(mocks.selectedColumns).toContain("product_assets!product_assets_product_id_fkey");
+    expect(mocks.selectedColumns).toContain("storage_provider");
     expect(mocks.selectedColumns).not.toContain("*");
     expect(mocks.selectedColumns).not.toContain("premium_codes");
     expect(mocks.selectedColumns).not.toContain("static_pages");
@@ -134,5 +159,20 @@ describe("targeted public product detail read", () => {
       ["status", "published"],
       ["product_assets.is_active", true],
     ]);
+  });
+
+  it("keeps publication-pending product images on the private media route", async () => {
+    mocks.productAssetRow.storage_provider = "r2_public_pending";
+
+    const product = await getLocalizedProductDetailViewForRequest(
+      "moon-garden-coloring-book",
+      "en",
+    );
+
+    expect(product?.cover).toMatchObject({
+      id: "cover-1",
+      path: "/api/media/cover-1",
+      storageProvider: "r2_public_pending",
+    });
   });
 });

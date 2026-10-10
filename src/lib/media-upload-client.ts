@@ -4,12 +4,24 @@ import { Upload } from "tus-js-client";
 
 import { createClient, getClientPublicEnv } from "./supabase/client";
 
-export type SignedMediaUploadTarget = {
+export type SupabaseTusUploadTarget = {
+  driver: "supabase-tus";
   endpoint: string;
   token: string;
   bucket: string;
   path: string;
 };
+
+export type SignedMediaUploadTarget =
+  | SupabaseTusUploadTarget
+  | {
+    driver: "r2-mirrored";
+    r2: {
+      url: string;
+      headers: Record<string, string>;
+    };
+    supabase: SupabaseTusUploadTarget;
+  };
 
 export function getMediaErrorMessage(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : "";
@@ -30,9 +42,50 @@ export function getMediaUploadErrorMessage(error: unknown) {
   return getMediaErrorMessage(error, "Nie udało się przesłać pliku. Spróbuj ponownie.");
 }
 
-export async function uploadMediaWithTus(
+export async function uploadMedia(
   file: File,
   target: SignedMediaUploadTarget,
+  contentType: string,
+  onProgress: (percentage: number) => void,
+) {
+  if (target.driver === "r2-mirrored") {
+    await uploadR2Put(file, target.r2, (progress) => onProgress(Math.round(progress * 0.5)));
+    await uploadTus(file, target.supabase, contentType, (progress) => {
+      onProgress(50 + Math.round(progress * 0.5));
+    });
+    return;
+  }
+
+  await uploadTus(file, target, contentType, onProgress);
+}
+
+function uploadR2Put(
+  file: File,
+  target: { url: string; headers: Record<string, string> },
+  onProgress: (percentage: number) => void,
+) {
+  return new Promise<void>((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("PUT", target.url);
+    for (const [name, value] of Object.entries(target.headers)) {
+      request.setRequestHeader(name, value);
+    }
+    request.upload.onprogress = (event) => {
+      onProgress(event.lengthComputable ? Math.round((event.loaded / event.total) * 100) : 0);
+    };
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) resolve();
+      else reject(new Error(`R2 upload failed with status ${request.status}.`));
+    };
+    request.onerror = () => reject(new Error("R2 upload network request failed."));
+    request.onabort = () => reject(new Error("R2 upload was cancelled."));
+    request.send(file);
+  });
+}
+
+async function uploadTus(
+  file: File,
+  target: SupabaseTusUploadTarget,
   contentType: string,
   onProgress: (percentage: number) => void,
 ) {

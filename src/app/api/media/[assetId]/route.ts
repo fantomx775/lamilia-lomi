@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 
+import { hasAdminAccess } from "@/lib/auth";
 import { getBackendMode } from "@/lib/config";
 import { isMediaKind, mediaBucketForKind, mediaFilenameForDisplay } from "@/lib/media-upload";
+import { getR2PublicBaseUrl, r2PublicMediaUrl } from "@/lib/media-r2-config";
+import { createSignedR2ReadUrl } from "@/lib/media-r2";
 import { getAssetByIdForRequest, getProductByIdForRequest } from "@/lib/products-request";
+import { getDemoSession } from "@/lib/session.server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 type Props = { params: Promise<{ assetId: string }> };
@@ -13,15 +17,35 @@ export async function GET(request: Request, { params }: Props) {
   const { assetId } = await params;
   let asset: Awaited<ReturnType<typeof getAssetByIdForRequest>>;
   let product: Awaited<ReturnType<typeof getProductByIdForRequest>> | null = null;
+  let adminPreviewAuthorized = false;
 
   try {
     asset = await getAssetByIdForRequest(assetId);
     product = asset ? await getProductByIdForRequest(asset.productId) : null;
+
+    if (!asset || !product || product.status !== "published") {
+      if (!hasAdminAccess(await getDemoSession())) {
+        return notFoundMediaResponse();
+      }
+
+      adminPreviewAuthorized = true;
+      asset = await getAssetByIdForRequest(assetId, { includeDrafts: true });
+      product = asset
+        ? await getProductByIdForRequest(asset.productId, { includeDrafts: true })
+        : null;
+    }
   } catch (error) {
     return unavailableMediaResponse(assetId, undefined, error);
   }
 
-  if (!asset || !product || product.status !== "published" || asset.isPublic !== true || asset.isActive === false || asset.kind === "premium_download") {
+  if (
+    !asset ||
+    !product ||
+    (product.status !== "published" && !adminPreviewAuthorized) ||
+    asset.isPublic !== true ||
+    asset.isActive === false ||
+    asset.kind === "premium_download"
+  ) {
     return notFoundMediaResponse();
   }
 
@@ -69,6 +93,38 @@ export async function GET(request: Request, { params }: Props) {
   }
 
   const isDownload = new URL(request.url).searchParams.get("download") === "1";
+  if (asset.storageProvider === "r2_public" && product.status === "published") {
+    const publicUrl = r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", storagePath);
+    if (publicUrl) {
+      const response = NextResponse.redirect(publicUrl);
+      response.headers.set("Cache-Control", "private, max-age=30");
+      return response;
+    }
+  }
+
+  if (
+    asset.storageProvider === "r2_private" ||
+    asset.storageProvider === "r2_public_pending" ||
+    asset.storageProvider === "r2_public_revoking" ||
+    asset.storageProvider === "r2_public"
+  ) {
+    try {
+      const signedUrl = await createSignedR2ReadUrl(storagePath);
+      const response = NextResponse.redirect(signedUrl);
+      response.headers.set(
+        "Cache-Control",
+        adminPreviewAuthorized ? "private, no-store" : "private, max-age=30",
+      );
+      return response;
+    } catch (r2Error) {
+      console.error("[public-media] R2 read failed; trying the retained Supabase mirror.", {
+        assetId,
+        status: storageErrorStatus(r2Error),
+        statusCode: storageErrorStatusCode(r2Error),
+      });
+    }
+  }
+
   let signedUrlResult: {
     data: { signedUrl?: string } | null;
     error: unknown;
@@ -105,7 +161,10 @@ export async function GET(request: Request, { params }: Props) {
   }
 
   const response = NextResponse.redirect(redirectTarget);
-  response.headers.set("Cache-Control", "private, max-age=30");
+  response.headers.set(
+    "Cache-Control",
+    adminPreviewAuthorized ? "private, no-store" : "private, max-age=30",
+  );
   return response;
 }
 

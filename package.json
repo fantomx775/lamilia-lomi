@@ -14,6 +14,8 @@
     "vercel:preview": "node scripts/vercel/deploy-preview.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1148.0",
+    "@aws-sdk/s3-request-presigner": "^3.1148.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.2",
     "class-variance-authority": "^0.7.1",

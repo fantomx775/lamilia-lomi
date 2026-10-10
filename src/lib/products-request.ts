@@ -40,8 +40,13 @@ export async function getProductByIdForRequest(
   return snapshot.products.find((product) => product.id === id);
 }
 
-export async function getAssetByIdForRequest(assetId: string) {
-  const snapshot = await getPublicContentSnapshot();
+export async function getAssetByIdForRequest(
+  assetId: string,
+  options: { includeDrafts?: boolean } = {},
+) {
+  const snapshot = options.includeDrafts
+    ? await getAdminContentSnapshot()
+    : await getPublicContentSnapshot();
 
   return snapshot.products
     .flatMap((product) => product.assets)

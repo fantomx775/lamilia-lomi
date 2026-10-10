@@ -51,6 +51,16 @@ describe("Supabase production foundation contracts", () => {
     const premiumCodeLengthMigration = read(
       "supabase/migrations/20260912111002_enforce_premium_code_length.sql",
     );
+    const r2MediaMigration = read(
+      "supabase/migrations/20261008120000_r2_media_storage_provider.sql",
+    );
+    const r2PublicationMigration = read(
+      "supabase/migrations/20261008224035_r2_media_publication_pending.sql",
+    );
+    const r2RevocationMigration = read(
+      "supabase/migrations/20261009113000_r2_media_publication_revoking.sql",
+    );
+    const r2BackfillScript = read("scripts/media-r2-backfill.mjs");
     const tagDescriptionsMigration = read(
       "supabase/migrations/20260905100000_add_tag_translation_descriptions.sql",
     );
@@ -119,7 +129,60 @@ describe("Supabase production foundation contracts", () => {
     expect(concurrencyTest).toContain("public.save_product");
     expect(concurrencyRunner).toContain("pg_advisory_xact_lock");
     expect(concurrencyTest).toContain("33333333-3333-4333-8333-333333333333");
-    expect(productAdmin).toContain('supabase.rpc("save_product"');
+    expect(productAdmin).toContain('"save_product_with_storage_provider" : "save_product"');
+    expect(r2MediaMigration).toContain("add column if not exists storage_provider text not null default 'supabase'");
+    expect(r2MediaMigration).toContain("asset.kind in ('cover', 'gallery')");
+    expect(r2MediaMigration).toContain("product.status = 'published'");
+    expect(r2MediaMigration).toContain("grant execute on function public.set_product_asset_storage_provider(uuid, text) to authenticated, service_role");
+    expect(r2MediaMigration).toMatch(/create or replace function public\.save_product_with_storage_provider\(product_state jsonb\)[\s\S]*?security invoker/);
+    expect(r2MediaMigration).toMatch(/create or replace function public\.set_product_asset_storage_provider\([\s\S]*?security invoker/);
+    expect(r2MediaMigration).toContain("grant execute on function private.save_product_with_storage_provider(jsonb) to authenticated");
+    expect(r2MediaMigration).toContain("grant execute on function private.set_product_asset_storage_provider(uuid, text) to authenticated, service_role");
+    expect(r2PublicationMigration).toContain("'r2_public_pending'");
+    expect(r2PublicationMigration).toContain("asset.path = requested_path");
+    expect(r2PublicationMigration).toContain("product.status = 'published'");
+    expect(r2PublicationMigration).toContain("pg_advisory_xact_lock(hashtextextended(requested_product_id::text, 0))");
+    expect(r2PublicationMigration).toContain("grant execute on function public.set_product_asset_storage_provider(uuid, text, text) to authenticated, service_role");
+    expect(r2PublicationMigration).toContain("if requested_provider = 'r2_public' then");
+    expect(r2RevocationMigration).toContain("current_provider in ('r2_public_pending', 'r2_public_revoking', 'r2_public')");
+    expect(r2RevocationMigration).toMatch(/and current_provider = 'r2_public_pending'\r?\n\s+and coalesce\(\(select auth\.role\(\)\), ''\) <> 'service_role'/);
+    expect(r2RevocationMigration).toMatch(/requested_provider = 'r2_private'\r?\n\s+and current_provider = 'r2_public_revoking'\r?\n\s+and coalesce\(\(select auth\.role\(\)\), ''\) <> 'service_role' then\r?\n\s+return false/);
+    expect(r2RevocationMigration).toMatch(/create or replace function private\.save_product_with_storage_provider\(product_state jsonb\)[\s\S]+?previous_asset\.storage_provider = 'r2_public_revoking'[\s\S]+?Public media must be revoked before changing product media or publication state\./);
+    expect(r2RevocationMigration).toMatch(/if requested_provider in \('r2_public_pending', 'r2_public'\) and not exists \([\s\S]+?asset\.is_active[\s\S]+?product\.status = 'published'/);
+    expect(r2RevocationMigration).toMatch(/requested_provider in \('r2_public_pending', 'r2_public'\) and exists \([\s\S]+?sibling\.storage_provider = 'r2_public_revoking'[\s\S]+?return false/);
+    expect(r2RevocationMigration).toMatch(/current_provider = 'r2_public_revoking' or exists \([\s\S]+?sibling\.storage_provider = 'r2_public_revoking'[\s\S]+?return false/);
+    expect(r2RevocationMigration).toMatch(/create or replace function private\.begin_stale_product_asset_public_revocation\([\s\S]+?if current_product_status = 'published' and exists \([\s\S]+?sibling\.path = requested_path[\s\S]+?sibling\.storage_provider in \('r2_public_pending', 'r2_public'\)[\s\S]+?sibling\.is_active[\s\S]+?sibling\.is_public[\s\S]+?return false;[\s\S]+?if current_provider = 'r2_public_revoking' then return true; end if;/);
+    const staleRevocationFunction = r2RevocationMigration.match(
+      /create or replace function private\.begin_stale_product_asset_public_revocation\([\s\S]*?\n\$\$;/,
+    )?.[0] ?? "";
+    expect(staleRevocationFunction).toContain(
+      "if current_provider = 'r2_public_revoking' then return true; end if;",
+    );
+    expect(staleRevocationFunction).not.toContain(
+      "sibling.storage_provider = 'r2_public_revoking'",
+    );
+    expect(r2BackfillScript).toContain('.in("storage_provider", ["r2_public_pending", "r2_public"])');
+    expect(r2BackfillScript).toMatch(/function isPotentiallyEligiblePublicAsset\(row\)[\s\S]+?\["r2_public_pending", "r2_public"\]\.includes\(row\.storage_provider\)/);
+    expect(r2RevocationMigration).toMatch(/when nullif\(item ->> 'storageProvider', ''\) in \('r2_public_pending', 'r2_public_revoking', 'r2_public'\)\s+then 'r2_private'/);
+    expect(r2RevocationMigration).toMatch(/previous_asset\.storage_provider = 'r2_public_revoking'[\s\S]+?requested_product_status is distinct from 'published'[\s\S]+?next_asset\.path is distinct from previous_asset\.path[\s\S]+?Public media must be revoked before changing product media or publication state\./);
+    expect(r2RevocationMigration).toMatch(/create or replace function private\.assert_legacy_product_save_safe\(product_state jsonb\)[\s\S]+?previous_asset\.storage_provider in \('r2_public_pending', 'r2_public_revoking', 'r2_public'\)[\s\S]+?Public media must be revoked before changing product media or publication state\./);
+    expect(r2RevocationMigration).toMatch(/create or replace function public\.save_product\(product_state jsonb\)[\s\S]+?perform private\.assert_legacy_product_save_safe\(product_state\);[\s\S]+?return private\.save_product\(product_state\);/);
+    expect(r2RevocationMigration).toContain("grant execute on function private.assert_legacy_product_save_safe(jsonb) to authenticated");
+    expect(r2RevocationMigration).toContain("revoke insert, update, delete, truncate, references, trigger");
+    expect(r2RevocationMigration).toContain('drop policy if exists "products_admin_all" on public.products');
+    expect(r2RevocationMigration).toContain('drop policy if exists "assets_admin_all" on public.product_assets');
+    expect(r2RevocationMigration).toMatch(/create or replace function private\.archive_product\(requested_product_id uuid\)[\s\S]+?pg_advisory_xact_lock\(hashtextextended\(requested_product_id::text, 0\)\)[\s\S]+?if not found then return false; end if;[\s\S]+?storage_provider in \('r2_public_pending', 'r2_public_revoking', 'r2_public'\)[\s\S]+?update public\.products\s+set status = 'archived'/);
+    expect(r2RevocationMigration).toContain("grant execute on function public.archive_product(uuid) to authenticated");
+    expect(r2RevocationMigration).toMatch(/create or replace function private\.delete_product\(requested_product_id uuid\)[\s\S]+?storage_provider in \('r2_public_pending', 'r2_public_revoking', 'r2_public'\)[\s\S]+?Public media must be revoked before deleting this product\./);
+    expect(r2RevocationMigration).toContain("grant execute on function public.delete_product(uuid) to authenticated");
+    expect(productAdmin).toContain('supabase.rpc("archive_product"');
+    expect(rlsTest).toContain("admin direct writes to product and asset rows are restricted");
+    expect(rlsTest).toContain("legacy save RPC blocks archive while public R2 media exists");
+    expect(rlsTest).toContain("delete RPC blocks deletion while public R2 media exists");
+    expect(productAdmin).toContain('supabase.rpc("delete_product"');
+    expect(productAdmin).not.toContain('from("products").delete');
+    expect(productAdmin).not.toContain('from("products").update');
+    expect(r2PublicationMigration).toContain("grant execute on function public.set_product_asset_storage_provider(uuid, text) to authenticated, service_role");
     expect(productAdmin).not.toContain('from("product_assets").delete');
     expect(productAdmin).not.toContain('from("premium_codes").delete');
     expect(authActions).toContain("buildSupabaseAuthCallbackUrl(locale, safeRedirectTo, intent)");

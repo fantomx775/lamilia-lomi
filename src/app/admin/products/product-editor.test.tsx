@@ -4,17 +4,18 @@ import { cleanup, fireEvent, render, screen, waitFor, within, type RenderResult 
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const editorMocks = vi.hoisted(() => ({
-  uploadMediaWithTus: vi.fn(),
-  routerReplace: vi.fn(),
-}));
+const editorMocks = vi.hoisted(() => {
+  const uploadMedia = vi.fn();
+  return { uploadMedia, uploadMediaWithTus: uploadMedia, routerReplace: vi.fn() };
+});
 
 vi.mock("@/lib/media-upload-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/media-upload-client")>();
 
   return {
     ...actual,
-    uploadMediaWithTus: editorMocks.uploadMediaWithTus,
+    uploadMedia: editorMocks.uploadMedia,
+    uploadMediaWithTus: editorMocks.uploadMedia,
   };
 });
 
@@ -97,6 +98,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  editorMocks.uploadMedia.mockReset();
   editorMocks.uploadMediaWithTus.mockReset();
   editorMocks.routerReplace.mockReset();
 });
@@ -618,7 +620,7 @@ describe("ProductEditor V2", () => {
         }),
       };
     }));
-    editorMocks.uploadMediaWithTus.mockImplementation((file: File) => new Promise<void>((resolve) => {
+    editorMocks.uploadMedia.mockImplementation((file: File) => new Promise<void>((resolve) => {
       finishers.set(file.name, () => resolve());
     }));
 
@@ -629,7 +631,7 @@ describe("ProductEditor V2", () => {
     expect(input).not.toBeNull();
 
     await user.upload(input!, filenames.map((filename) => new File([filename], filename, { type: "image/png" })));
-    await waitFor(() => expect(editorMocks.uploadMediaWithTus).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(editorMocks.uploadMedia).toHaveBeenCalledTimes(3));
     expect(galleryActionOrder(view)).toEqual(filenames);
 
     await user.click(view.getByRole("button", { name: "Przenieś image-c.png wyżej" }));
@@ -901,7 +903,7 @@ describe("ProductEditor V2", () => {
 
   it("keeps Save disabled until a signed resumable upload completes", async () => {
     let finishUpload!: () => void;
-    editorMocks.uploadMediaWithTus.mockImplementation(() => new Promise<void>((resolve) => {
+    editorMocks.uploadMedia.mockImplementation(() => new Promise<void>((resolve) => {
       finishUpload = resolve;
     }));
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
@@ -960,7 +962,7 @@ describe("ProductEditor V2", () => {
   });
 
   it("shows a friendly message when TUS returns a raw Storage error", async () => {
-    editorMocks.uploadMediaWithTus.mockRejectedValue(new Error(
+    editorMocks.uploadMedia.mockRejectedValue(new Error(
       "tus: unexpected response while creating upload, response code: 400, response text: Invalid key: products/example/gallery/Zdjęcie cyfrowe 1.webp",
     ));
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({

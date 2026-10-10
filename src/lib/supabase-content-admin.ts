@@ -22,7 +22,13 @@ import {
 } from "./admin-content";
 import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
-import { cleanupNewMediaFromFormData, cleanupPersistedMedia } from "./media-storage";
+import {
+  cleanupNewMediaFromFormData,
+  cleanupPersistedMedia,
+  finalizeR2MediaUploads,
+  reconcileR2Publication,
+  revokeR2PublicAssetsBeforeMutation,
+} from "./media-storage";
 import { mediaBucketForKind } from "./media-upload";
 import { createServiceRoleClient } from "./supabase/admin";
 import {
@@ -39,6 +45,7 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   let storageAuthorizationToken: string | null | undefined;
   let savedProduct: Product | undefined;
   let previousAssets: Product["assets"] = [];
+  let productSaveOutcomeUnknown = false;
 
   try {
     const backendMode = getBackendMode();
@@ -73,7 +80,6 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
         await cleanupPersistedMedia({
           previous: existing?.assets ?? [],
           next: product.assets,
-          authorizationToken: storageAuthorizationToken,
         });
       }
       return result;
@@ -81,8 +87,8 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
 
     const snapshot = await getAdminContentSnapshot();
     const existing = snapshot.products.find((product) => product.id === stringField(formData, "id"));
-    const { product, errors } = buildProductFromFormData(formData, { existing, snapshot });
-    savedProduct = product;
+    const { product: parsedProduct, errors } = buildProductFromFormData(formData, { existing, snapshot });
+    let product = parsedProduct;
     previousAssets = existing?.assets ?? [];
     const assetErrors = validateProductAssetSubmission(formData, product, existing);
 
@@ -103,23 +109,65 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
     product.premiumCodes.forEach((code) => assertUuidSet(code.id));
 
     const supabase = await createClient();
+    const uploadedIds = new Set(
+      formData.getAll("assetId").flatMap((value, index) =>
+        typeof value === "string" && formData.getAll("assetUploaded")[index] === "1"
+          ? [value.trim()]
+          : [],
+      ),
+    );
     await assertSupabaseUploadsExist(
       product.assets.filter((asset) => product.status === "published" || !existing?.assets.some((previous) => previous.id === asset.id)),
       storageAuthorizationToken,
     );
-    const { data, error } = await supabase.rpc("save_product", {
-      product_state: buildProductMutationPayload(product),
+    await finalizeR2MediaUploads(product.assets, uploadedIds);
+    const revokedPublicAssetIds = await revokeR2PublicAssetsBeforeMutation({
+      previousAssets,
+      nextAssets: product.assets,
+      status: product.status,
     });
+    if (revokedPublicAssetIds.size) {
+      product = {
+        ...product,
+        assets: product.assets.map((asset) => revokedPublicAssetIds.has(asset.id)
+          ? { ...asset, storageProvider: "r2_private" as const }
+          : asset),
+      };
+    }
+    savedProduct = product;
+    const usesStorageProviderMetadata =
+      process.env.MEDIA_STORAGE_PROVIDER?.trim().toLowerCase() === "r2" ||
+      product.assets.some((asset) => asset.storageProvider !== undefined && asset.storageProvider !== "supabase") ||
+      previousAssets.some((asset) => asset.storageProvider !== undefined && asset.storageProvider !== "supabase");
+    let saveResult: Awaited<ReturnType<typeof supabase.rpc>>;
+    try {
+      saveResult = await supabase.rpc(
+        usesStorageProviderMetadata ? "save_product_with_storage_provider" : "save_product",
+        { product_state: buildProductMutationPayload(product) },
+      );
+    } catch (error) {
+      productSaveOutcomeUnknown = true;
+      throw error;
+    }
+
+    const { data, error } = saveResult;
 
     if (error) {
+      productSaveOutcomeUnknown = !isDefinitivePostgresFailure(error);
       throw new AdminDatabaseError("product mutation", error);
     }
 
     if (!data || typeof data !== "object" || data.status !== "success") {
+      productSaveOutcomeUnknown = true;
       throw new AdminApplicationError(ADMIN_ERROR_CODES.INTERNAL);
     }
   } catch (error) {
-    const mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+    let mediaCleanupFailures: Awaited<ReturnType<typeof cleanupNewMediaFromFormData>> = [];
+    if (productSaveOutcomeUnknown) {
+      console.error("Product save outcome is unknown; uploaded media was retained for recovery.");
+    } else {
+      mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+    }
     return {
       ok: false,
       errors: [mapAdminError(error, "product mutation")],
@@ -134,7 +182,11 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   await cleanupPersistedMedia({
     previous: previousAssets,
     next: savedProduct.assets,
-    authorizationToken: storageAuthorizationToken,
+  });
+  await reconcileR2Publication({
+    assets: savedProduct.assets,
+    previousAssets,
+    status: savedProduct.status,
   });
 
   return { ok: true, id: savedProduct.id };
@@ -167,6 +219,7 @@ export function buildProductMutationPayload(product: Product) {
       kind: asset.kind,
       bucket: mediaBucketForKind(asset.kind),
       path: asset.storagePath ?? asset.path,
+      storageProvider: asset.storageProvider ?? "supabase",
       filename: asset.filename,
       contentType: asset.contentType,
       sizeBytes: asset.sizeBytes ?? null,
@@ -206,12 +259,21 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
     }
 
     const supabase = await createClient();
-    const storageAuthorizationToken = await getCurrentAccessToken();
-    await run(supabase.from("products").delete().eq("id", productId), "product deletion");
+    await revokeR2PublicAssetsBeforeMutation({
+      previousAssets: previous.assets,
+      nextAssets: [],
+      status: "archived",
+    });
+    const { data, error } = await supabase.rpc("delete_product", {
+      requested_product_id: productId,
+    });
+    if (error) throw new AdminDatabaseError("product deletion", error);
+    if (data !== true) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
+    }
     await cleanupPersistedMedia({
       previous: previous.assets,
       next: [],
-      authorizationToken: storageAuthorizationToken,
     });
     return { ok: true, id: productId };
   });
@@ -224,15 +286,22 @@ export async function archiveProductForRequest(productId: string): Promise<Admin
     }
 
     const snapshot = await getAdminContentSnapshot();
-    if (!snapshot.products.some((product) => product.id === productId)) {
+    const previous = snapshot.products.find((product) => product.id === productId);
+    if (!previous) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
     }
 
     const supabase = await createClient();
-    await run(
-      supabase.from("products").update({ status: "archived", updated_at: new Date().toISOString() }).eq("id", productId),
-      "product archive",
-    );
+    await revokeR2PublicAssetsBeforeMutation({
+      previousAssets: previous.assets,
+      nextAssets: previous.assets,
+      status: "archived",
+    });
+    const { data, error } = await supabase.rpc("archive_product", {
+      requested_product_id: productId,
+    });
+    if (error) throw new AdminDatabaseError("product archive", error);
+    if (data !== true) return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
     return { ok: true, id: productId };
   });
 }
@@ -465,6 +534,17 @@ export async function assertSupabaseUploadsExist(
       throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD);
     }
   }
+}
+
+function isDefinitivePostgresFailure(error: DatabaseErrorLike) {
+  if (typeof error.code !== "string" || !/^[0-9A-Z]{5}$/.test(error.code)) {
+    return false;
+  }
+
+  // Connection exceptions and SQLSTATE 40003 can leave a committed write's
+  // outcome unknown. Keep uploaded media until a later reconciliation proves
+  // whether the product row references it.
+  return !error.code.startsWith("08") && error.code !== "40003";
 }
 
 function stringField(formData: FormData, key: string) {

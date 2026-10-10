@@ -4,21 +4,26 @@ const mocks = vi.hoisted(() => ({
   createSignedMediaUpload: vi.fn(),
   getBackendMode: vi.fn(),
   getCurrentAccessToken: vi.fn(),
+  getMediaUploadProvider: vi.fn(),
+  createSignedR2Upload: vi.fn(),
   getDemoSession: vi.fn(),
+  removeUploadedMedia: vi.fn(),
   storeMediaFile: vi.fn(),
 }));
 
 vi.mock("@/lib/auth", () => ({ hasAdminAccess: vi.fn(() => true) }));
 vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
+vi.mock("@/lib/media-r2-config", () => ({ getMediaUploadProvider: mocks.getMediaUploadProvider }));
+vi.mock("@/lib/media-r2", () => ({ createSignedR2Upload: mocks.createSignedR2Upload }));
 vi.mock("@/lib/media-storage", () => ({
   createSignedMediaUpload: mocks.createSignedMediaUpload,
-  removeUploadedMedia: vi.fn(),
+  removeUploadedMedia: mocks.removeUploadedMedia,
   storeMediaFile: mocks.storeMediaFile,
 }));
 vi.mock("@/lib/session.server", () => ({ getDemoSession: mocks.getDemoSession }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentAccessToken: mocks.getCurrentAccessToken }));
 
-import { POST } from "./route";
+import { DELETE, POST } from "./route";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 
 const productId = "11111111-1111-4111-8111-111111111111";
@@ -26,6 +31,48 @@ const productId = "11111111-1111-4111-8111-111111111111";
 describe("admin media upload setup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getMediaUploadProvider.mockReturnValue("supabase");
+  });
+
+  it("prepares a private R2 upload and a Supabase rollback mirror for cover images", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getMediaUploadProvider.mockReturnValue("r2");
+    mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    mocks.getCurrentAccessToken.mockResolvedValue("admin-user-jwt");
+    mocks.createSignedMediaUpload.mockResolvedValue({
+      bucket: "public-media",
+      storagePath: `products/${productId}/cover/11111111-1111-4111-8111-111111111199-cover.jpg`,
+      publicPath: "unused",
+      filename: "cover.jpg",
+      uploadEndpoint: "https://project.storage.supabase.co/storage/v1/upload/resumable",
+      uploadToken: "signed-token",
+    });
+    mocks.createSignedR2Upload.mockResolvedValue({
+      url: "https://r2.example/upload",
+      headers: { "Content-Type": "image/jpeg" },
+      storagePath: `products/${productId}/cover/11111111-1111-4111-8111-111111111199-cover.jpg`,
+      stagingPath: `staging/products/${productId}/cover/11111111-1111-4111-8111-111111111199-cover.jpg`,
+    });
+
+    const response = await POST(new Request("https://lamilialomi.com/api/admin/assets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, kind: "cover", filename: "cover.jpg", sizeBytes: 1024, contentType: "image/jpeg" }),
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.asset).toMatchObject({ storageProvider: "r2_private", path: expect.stringMatching(/^\/api\/media\//) });
+    expect(payload.upload).toMatchObject({
+      driver: "r2-mirrored",
+      r2: { url: "https://r2.example/upload" },
+      supabase: { driver: "supabase-tus", token: "signed-token" },
+    });
+    expect(mocks.createSignedR2Upload).toHaveBeenCalledWith(expect.objectContaining({
+      productId,
+      kind: "cover",
+      sizeBytes: 1024,
+    }));
   });
 
   it("returns a scoped resumable target without parsing or buffering multipart data", async () => {
@@ -94,6 +141,35 @@ describe("admin media upload setup", () => {
     expect(response.status).toBe(200);
     expect(payload.asset).toMatchObject({ filename: "cover.jpg", uploaded: true });
     expect(mocks.storeMediaFile).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-id", kind: "cover" }));
+  });
+
+  it("defers cloud media cleanup in the private-serving revocation state", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    mocks.getCurrentAccessToken.mockResolvedValue("admin-user-jwt");
+    mocks.removeUploadedMedia.mockResolvedValue(false);
+
+    const response = await DELETE(new Request("https://lamilialomi.com/api/admin/assets", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productId,
+        kind: "cover",
+        storagePath: `products/${productId}/cover/asset.jpg`,
+        storageProvider: "r2_public_revoking",
+      }),
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true, cleanupDeferred: true });
+    expect(mocks.removeUploadedMedia).toHaveBeenCalledWith(expect.objectContaining({
+      productId,
+      kind: "cover",
+      storageProvider: "r2_public_revoking",
+      authorizationToken: "admin-user-jwt",
+    }));
+    expect(mocks.removeUploadedMedia.mock.calls[0][0]).not.toHaveProperty("preservePersistedReferences");
   });
 
   it("does not expose Storage implementation errors from the setup endpoint", async () => {
