@@ -549,7 +549,7 @@ function parseAssets(
         valueAt(contentTypes, index) ||
         inferContentType(filename),
       sizeBytes: existing?.sizeBytes ?? (numberFromValue(valueAt(sizes, index), 0) || undefined),
-      locale: existing?.locale,
+      locale: existing ? existing.locale : "en",
       title: valueAt(titles, index) || existing?.title || filename,
       sortOrder: numberFromValue(valueAt(sortOrders, index), existing?.sortOrder ?? 100),
       isPublic,

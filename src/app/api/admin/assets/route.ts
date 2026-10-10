@@ -64,7 +64,6 @@ async function createLocalUpload(request: Request) {
       bytes: new Uint8Array(await file.arrayBuffer()),
     });
     const id = randomUUID();
-    const locale = stringField(formData, "locale");
 
     return NextResponse.json({
       asset: {
@@ -78,7 +77,7 @@ async function createLocalUpload(request: Request) {
         filename: stored.filename,
         contentType: validation.contentType,
         sizeBytes: file.size,
-        locale: locale === "en" || locale === "pl" || locale === "de" || locale === "es" ? locale : undefined,
+        locale: "en",
         title: stored.filename,
         sortOrder: 100,
         isPublic: kindValue !== "premium_download",
@@ -130,10 +129,6 @@ async function createSupabaseUpload(request: Request, authorizationToken: string
       filename,
       authorizationToken,
     });
-    const locale = body?.locale === "en" || body?.locale === "pl" || body?.locale === "de" || body?.locale === "es"
-      ? body.locale
-      : undefined;
-
     if (getMediaUploadProvider() === "r2" && (kindValue === "cover" || kindValue === "gallery")) {
       const r2 = await createSignedR2Upload({
         assetId: id,
@@ -156,7 +151,7 @@ async function createSupabaseUpload(request: Request, authorizationToken: string
           filename: stored.filename,
           contentType: validation.contentType,
           sizeBytes,
-          locale,
+          locale: "en",
           title: stored.filename,
           sortOrder: 100,
           isPublic: true,
@@ -189,7 +184,7 @@ async function createSupabaseUpload(request: Request, authorizationToken: string
         filename: stored.filename,
         contentType: validation.contentType,
         sizeBytes,
-        locale,
+        locale: "en",
         title: stored.filename,
         sortOrder: 100,
         isPublic: kindValue !== "premium_download",

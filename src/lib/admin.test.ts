@@ -84,8 +84,8 @@ describe("admin behavior", () => {
     ]);
     expect(result.product.assets).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "cover", isPublic: true }),
-        expect.objectContaining({ kind: "premium_download", isPublic: false }),
+        expect.objectContaining({ kind: "cover", isPublic: true, locale: "en" }),
+        expect.objectContaining({ kind: "premium_download", isPublic: false, locale: "en" }),
       ]),
     );
     expect(result.product.categoryIds).toEqual([snapshot.categories[0].id]);
@@ -301,6 +301,7 @@ describe("admin behavior", () => {
         path: asset.path,
         filename: asset.filename,
         title: asset.title,
+        locale: asset.locale,
       }));
     }
     expect(result.product.amazonLinks).toEqual(existing.amazonLinks);
