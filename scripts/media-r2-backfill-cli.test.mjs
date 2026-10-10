@@ -32,14 +32,26 @@ describe("R2 backfill CLI arguments", () => {
     ["--product-id="],
     ["--product-id", "not-a-uuid"],
   ])("rejects missing or invalid scoped IDs: %s %s", (...argv) => {
-    const { args, values } = parseBackfillArgs(argv);
-
-    expect(() => parseReconcileProductId(args, values)).toThrow("--product-id requires a product UUID.");
+    expect(() => {
+      const { args, values } = parseBackfillArgs(argv);
+      parseReconcileProductId(args, values);
+    }).toThrow(/--product-id requires (a value|a product UUID)\./);
   });
 
   it("leaves product scope unset when the flag is absent", () => {
     const { args, values } = parseBackfillArgs(["--reconcile-public"]);
 
     expect(parseReconcileProductId(args, values)).toBeUndefined();
+  });
+
+  it.each(["--apply=false", "--apply=", "--rollback=true", "--reconcile-public=false"])(
+    "rejects a value on boolean option %s",
+    (argument) => {
+      expect(() => parseBackfillArgs([argument])).toThrow("does not accept a value");
+    },
+  );
+
+  it.each(["--product-idd", "--reconcile-publicx"])("rejects unknown option %s", (argument) => {
+    expect(() => parseBackfillArgs([`${argument}=${productId}`])).toThrow("Unknown option");
   });
 });
