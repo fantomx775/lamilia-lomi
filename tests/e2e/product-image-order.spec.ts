@@ -2,9 +2,10 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
+import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
-test.setTimeout(300_000);
+test.setTimeout(600_000);
 
 const imageFixtures = [
   { name: "01-red.png", rgb: [230, 42, 52] },
@@ -19,12 +20,20 @@ test.beforeEach(async ({ page }, testInfo) => {
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Gallery ordering E2E uses fixed demo admin credentials and requires a loopback app running the local demo backend.",
   );
+  releaseContentStoreLock = await acquireLocalContentStoreLock();
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "ll_cookie_consent",
       JSON.stringify({ essential: true, analytics: false }),
     );
   });
+});
+
+let releaseContentStoreLock: (() => void) | undefined;
+
+test.afterEach(() => {
+  releaseContentStoreLock?.();
+  releaseContentStoreLock = undefined;
 });
 
 test("admin reorders gallery previews through upload, save, reload, and edit", async ({ page }, testInfo) => {

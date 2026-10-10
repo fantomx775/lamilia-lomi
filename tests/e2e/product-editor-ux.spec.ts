@@ -2,21 +2,30 @@ import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
+import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
-test.setTimeout(240_000);
+test.setTimeout(600_000);
+
+let releaseContentStoreLock: (() => void) | undefined;
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Product editor E2E uses fixed demo admin credentials and disposable records; it requires a loopback app running the local demo backend.",
   );
+  releaseContentStoreLock = await acquireLocalContentStoreLock();
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "ll_cookie_consent",
       JSON.stringify({ essential: true, analytics: false }),
     );
   });
+});
+
+test.afterEach(() => {
+  releaseContentStoreLock?.();
+  releaseContentStoreLock = undefined;
 });
 
 test("product editor preserves work, saves all statuses, and keeps Save reachable", async ({ page, browser }, testInfo) => {

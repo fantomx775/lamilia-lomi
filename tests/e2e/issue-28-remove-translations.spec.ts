@@ -2,9 +2,10 @@ import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
+import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
-test.setTimeout(120_000);
+test.setTimeout(600_000);
 
 test("single-language admin content saves and reloads without changing public URLs", async ({ page }, testInfo) => {
   test.skip(
@@ -12,6 +13,7 @@ test("single-language admin content saves and reloads without changing public UR
     "Uses the local demo admin session and restores its disposable content store after verification.",
   );
 
+  const releaseContentStoreLock = await acquireLocalContentStoreLock();
   const contentStorePath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
   const hadContentStore = fs.existsSync(contentStorePath);
   const originalContentStore = hadContentStore ? fs.readFileSync(contentStorePath) : undefined;
@@ -129,20 +131,33 @@ test("single-language admin content saves and reloads without changing public UR
     expect(browserDiagnostics.failedRequests.filter((request) => request.disposition === "unresolved")).toEqual([]);
     expect(browserDiagnostics.failedResponses).toEqual([]);
   } finally {
-    if (originalContentStore) {
-      fs.writeFileSync(contentStorePath, originalContentStore);
-    } else if (fs.existsSync(contentStorePath)) {
-      fs.rmSync(contentStorePath);
+    try {
+      if (originalContentStore) {
+        fs.writeFileSync(contentStorePath, originalContentStore);
+      } else if (fs.existsSync(contentStorePath)) {
+        fs.rmSync(contentStorePath);
+      }
+    } finally {
+      releaseContentStoreLock();
     }
   }
 });
 
 async function saveScreenshot(page: import("@playwright/test").Page, directory: string, name: string, projectName: string) {
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
-  await page.screenshot({
-    path: path.join(directory, `${name}-${projectName}.png`),
-    fullPage: true,
-    animations: "disabled",
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   });
+  const screenshotStyles = await page.addStyleTag({
+    content: "nextjs-portal, [data-testid='product-save-bar'] { display: none !important; } [class~='sticky'] { position: static !important; top: auto !important; bottom: auto !important; }",
+  });
+  try {
+    await page.screenshot({
+      path: path.join(directory, `${name}-${projectName}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+  } finally {
+    await screenshotStyles.evaluate((element) => element.parentNode?.removeChild(element));
+  }
 }
