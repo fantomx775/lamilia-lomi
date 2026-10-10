@@ -32,6 +32,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requestFailures: string[] = [];
+  const abortedProductMutationRequests: string[] = [];
   const expectedNavigationCancellations: string[] = [];
   const mainFrameNavigations: Array<{ at: number; url: string }> = [];
   const unexpectedHttpFailures: string[] = [];
@@ -83,6 +84,20 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     };
     const recentNavigation = [...mainFrameNavigations].reverse().find((event) => at - event.at <= 5_000);
     const failedUrl = new URL(request.url());
+    const abortedProductMutation =
+      failure === "net::ERR_ABORTED" &&
+      request.method() === "POST" &&
+      productId !== "" &&
+      (failedUrl.pathname === "/admin/products/new" ||
+        failedUrl.pathname === `/admin/products/${productId}`);
+    if (abortedProductMutation) {
+      // A completed server action can be cancelled client-side by the next
+      // reload/navigation. The final saved-order reload and deletion checks
+      // below prove whether its mutation actually persisted.
+      abortedProductMutationRequests.push(JSON.stringify(detail));
+      return;
+    }
+
     const exactLoginPost = request.method() === "POST" && failedUrl.pathname === "/pl/login" &&
       failedUrl.search === "?redirectTo=/admin";
     const expectedAdminLoginCancellation = exactLoginPost && (adminLoginPending || adminLoginVerified);
@@ -355,6 +370,8 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
         "Browser console errors: " + (consoleErrors.join("\n") || "none"),
         "Page errors: " + (pageErrors.join("\n") || "none"),
         "Unexpected failed requests: " + (requestFailures.join("\n") || "none"),
+        "Aborted product mutation requests (saved-order reload and cleanup checks must pass): " +
+          (abortedProductMutationRequests.join("\n") || "none"),
         "Expected exact navigation cancellations: " + (expectedNavigationCancellations.join("\n") || "none"),
         "Main-frame navigation events: " +
           (mainFrameNavigations.map((event) => new Date(event.at).toISOString() + " " + event.url).join("\n") || "none"),
@@ -377,6 +394,12 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   expect(requestFailures).toEqual([]);
   expect(unexpectedHttpFailures).toEqual([]);
   expect(localUploadFallbacks.length).toBeLessThanOrEqual(5);
+  if (abortedProductMutationRequests.length) {
+    console.log(
+      "Product mutation requests were cancelled client-side; saved-order reload and product cleanup checks passed: " +
+        abortedProductMutationRequests.join("\n"),
+    );
+  }
 });
 
 async function readGallerySignature(page: Page) {

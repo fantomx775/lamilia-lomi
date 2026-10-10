@@ -2659,6 +2659,33 @@ test("waits for a successful Production deployment of the exact merge SHA", asyn
   assert.match(failed.details, /deployments\/5\/logs/);
 });
 
+test("accepts a Vercel deployment whose ref is the production branch when its SHA is exact", async () => {
+  const mergeSha = "c".repeat(40);
+  const deploymentUrl = "https://lamilia-lomi-8bozqd5pu-fantomxs-projects.vercel.app";
+  const ready = await waitForProductionDeployment({
+    owner: "example",
+    repo: "repo",
+    request: async (path) => path.includes("/deployments?sha=")
+      ? [{
+          id: 10,
+          sha: mergeSha,
+          ref: "main",
+          task: "deploy",
+          creator: { login: "vercel[bot]" },
+          environment: "Production",
+        }]
+      : [{
+          state: "success",
+          environment_url: deploymentUrl,
+          creator: { login: "vercel[bot]" },
+        }],
+  }, mergeSha, { timeoutMs: 0 });
+
+  assert.equal(ready.status, "PASS");
+  assert.equal(ready.deployment.sha, mergeSha);
+  assert.equal(ready.deployment.ref, "main");
+});
+
 test("Production deployment verification requires Vercel provenance and this project's HTTPS origin", async () => {
   const mergeSha = "c".repeat(40);
   const untrusted = await waitForProductionDeployment({

@@ -1,4 +1,5 @@
 import type { Locale } from "@/i18n/routing";
+import type { MediaStorageProvider } from "./media-r2-config";
 
 export type ProductStatus = "draft" | "published" | "archived";
 export type Audience = "kids" | "adults";
@@ -45,8 +46,10 @@ export type ProductAsset = {
   kind: AssetKind;
   bucket: string;
   path: string;
-  /** Internal Storage key for uploaded Supabase assets; never shown in the normal editor. */
+  /** Internal object key for uploaded assets; never shown in the normal editor. */
   storagePath?: string;
+  /** Null-safe for older and local snapshots; database rows default to Supabase. */
+  storageProvider?: MediaStorageProvider;
   filename: string;
   contentType: string;
   sizeBytes?: number;

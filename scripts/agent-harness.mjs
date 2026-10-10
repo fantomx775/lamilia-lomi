@@ -2567,8 +2567,7 @@ export async function waitForProductionDeployment(client, mergeSha, {
       .sort((left, right) => (right.created_at || "").localeCompare(left.created_at || ""));
     const vercelDeployments = exactShaDeployments.filter((deployment) =>
       (isVercelActor(deployment.creator) || isVercelActor(deployment.performed_via_github_app)) &&
-      deployment.task === "deploy" &&
-      deployment.ref?.toLowerCase() === mergeSha.toLowerCase(),
+      deployment.task === "deploy",
     );
     if (!vercelDeployments.length && exactShaDeployments.length) {
       lastReadError = "Exact-SHA Production deployment records exist, but none are verifiable as a Vercel Git deployment for this project.";

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   createServiceRoleClient: vi.fn(),
   storageFrom: vi.fn(),
   storageExists: vi.fn(),
+  storageRemove: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -27,6 +28,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 import {
+  archiveProductForRequest,
   assertSupabaseUploadsExist,
   saveProductForRequest,
   saveTagForRequest,
@@ -34,6 +36,26 @@ import {
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const assetId = "11111111-1111-4111-8111-111111111199";
+
+function uploadedCoverForm(slug: string, title: string) {
+  const form = new FormData();
+  form.set("id", productId);
+  form.set("slug", slug);
+  form.set("status", "draft");
+  form.set("audience", "kids");
+  form.set("productType", "coloring-book");
+  form.set("title_en", title);
+  form.append("assetId", assetId);
+  form.append("assetKind", "cover");
+  form.append("assetPath", `products/${productId}/cover/${assetId}-cover.jpg`);
+  form.append("assetFilename", "cover.jpg");
+  form.append("assetContentType", "image/jpeg");
+  form.append("assetSizeBytes", "1024");
+  form.append("assetStorageProvider", "supabase");
+  form.append("assetUploaded", "1");
+  form.set("coverAssetId", assetId);
+  return form;
+}
 
 describe("Supabase content admin mutations", () => {
   beforeEach(() => {
@@ -59,7 +81,8 @@ describe("Supabase content admin mutations", () => {
     }));
     mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
     mocks.storageExists.mockResolvedValue({ data: true, error: null });
-    mocks.storageFrom.mockReturnValue({ exists: mocks.storageExists });
+    mocks.storageRemove.mockResolvedValue({ error: null });
+    mocks.storageFrom.mockReturnValue({ exists: mocks.storageExists, remove: mocks.storageRemove });
     mocks.createServiceRoleClient.mockReturnValue({
       storage: { from: mocks.storageFrom },
     });
@@ -83,6 +106,46 @@ describe("Supabase content admin mutations", () => {
         description: "New description",
       },
     ]);
+  });
+
+  it("archives through the update-only RPC without saving a stale product snapshot", async () => {
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [{ id: productId, assets: [] }],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+
+    await expect(archiveProductForRequest(productId)).resolves.toEqual({ ok: true, id: productId });
+
+    expect(mocks.rpc).toHaveBeenCalledWith("archive_product", {
+      requested_product_id: productId,
+    });
+    expect(mocks.rpc).not.toHaveBeenCalledWith("save_product", expect.anything());
+    expect(mocks.rpc).not.toHaveBeenCalledWith("save_product_with_storage_provider", expect.anything());
+  });
+
+  it("does not recreate a product deleted after the admin snapshot was read", async () => {
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [{ id: productId, assets: [] }],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.rpc.mockResolvedValue({ data: false, error: null });
+
+    await expect(archiveProductForRequest(productId)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.not_found.product"],
+    });
+
+    expect(mocks.rpc).toHaveBeenCalledWith("archive_product", {
+      requested_product_id: productId,
+    });
+    expect(mocks.rpc).not.toHaveBeenCalledWith("save_product", expect.anything());
   });
 
   it("returns a stable application error when Supabase rejects a duplicate premium code", async () => {
@@ -110,6 +173,49 @@ describe("Supabase content admin mutations", () => {
       ok: false,
       errors: ["admin.conflict.premium_code_duplicate"],
     });
+  });
+
+  it.each([undefined, "40003", "08007", "08006"])(
+    "retains uploaded media when a product save RPC outcome is ambiguous (%s)",
+    async (code) => {
+      mocks.rpc.mockResolvedValue({
+        data: null,
+        error: {
+          ...(code ? { code } : {}),
+          message: "upstream connection closed before the save result was confirmed",
+        },
+      });
+
+      const form = uploadedCoverForm("ambiguous-save-product", "Ambiguous save product");
+      await expect(saveProductForRequest(form)).resolves.toMatchObject({ ok: false });
+
+      expect(mocks.storageRemove).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retains uploaded media when PostgreSQL confirms the save transaction failed", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: "23505", message: "duplicate key value violates a unique constraint" },
+    });
+
+    const form = uploadedCoverForm("failed-save-product", "Failed save product");
+    await expect(saveProductForRequest(form)).resolves.toMatchObject({ ok: false });
+
+    expect(mocks.storageRemove).not.toHaveBeenCalled();
+  });
+
+  it("retains uploaded media when a retry fails validation after an ambiguous save outcome", async () => {
+    mocks.rpc.mockRejectedValueOnce(new Error("connection closed after database commit"));
+    const firstAttempt = uploadedCoverForm("retry-after-ambiguous-save", "First attempt");
+    await expect(saveProductForRequest(firstAttempt)).resolves.toMatchObject({ ok: false });
+
+    const retry = uploadedCoverForm("retry-after-ambiguous-save", "Retry");
+    retry.set("title_en", "");
+
+    await expect(saveProductForRequest(retry)).resolves.toMatchObject({ ok: false });
+
+    expect(mocks.storageRemove).not.toHaveBeenCalled();
   });
 
   it("rejects an oversized premium code before calling the save RPC", async () => {

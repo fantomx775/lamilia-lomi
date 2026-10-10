@@ -135,8 +135,17 @@ export function validateProductAssetSubmission(
     }
 
     const storagePath = asset.storagePath ?? asset.path;
+    const storageProvider = asset.storageProvider ?? "supabase";
     const expectedSupabasePrefix = `products/${product.id}/${asset.kind}/${asset.id}-`;
     const expectedLocalPrefix = `/uploads/${product.id}/${asset.kind}/`;
+
+    if (!(["supabase", "r2_private"].includes(storageProvider))) {
+      return [ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH];
+    }
+
+    if (storageProvider === "r2_private" && asset.kind !== "cover" && asset.kind !== "gallery") {
+      return [ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH];
+    }
 
     if (!storagePath.startsWith(expectedSupabasePrefix) && !storagePath.startsWith(expectedLocalPrefix)) {
       return [ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH];
@@ -530,6 +539,7 @@ function parseAssets(
   const sizes = formData.getAll("assetSizeBytes");
   const localesFromForm = formData.getAll("assetLocale");
   const titles = formData.getAll("assetTitle");
+  const storageProviders = formData.getAll("assetStorageProvider");
   const sortOrders = formData.getAll("assetSortOrder");
   const existingById = new Map(existingAssets.map((asset) => [asset.id, asset]));
   const rowCount = Math.max(ids.length, kinds.length, paths.length);
@@ -561,6 +571,7 @@ function parseAssets(
       kind,
       bucket: mediaBucketForKind(kind),
       path,
+      storageProvider: existing?.storageProvider ?? storageProviderField(valueAt(storageProviders, index)),
       filename,
       contentType:
         existing?.contentType ||
@@ -863,6 +874,10 @@ function assetKindValue(value: string): ProductAsset["kind"] {
     value === "premium_download"
     ? value
     : "gallery";
+}
+
+function storageProviderField(value: string): NonNullable<ProductAsset["storageProvider"]> {
+  return value === "r2_private" || value === "r2_public" ? value : "supabase";
 }
 
 function amazonMarketValue(value: string | undefined): AmazonLink["market"] | undefined {
