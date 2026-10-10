@@ -48,8 +48,8 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
     const mediaErrors = validateProductMediaSubmission(formData);
 
     if (mediaErrors.length) {
-      await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-      return { ok: false, errors: mediaErrors };
+      const mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+      return { ok: false, errors: mediaErrors, ...(mediaCleanupFailures.length ? { mediaCleanupFailures } : {}) };
     }
 
     if (backendMode === "local") {
@@ -59,13 +59,16 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
       const assetErrors = validateProductAssetSubmission(formData, product, existing);
 
       if (errors.length || assetErrors.length) {
-        await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-        return { ok: false, errors: [...errors, ...assetErrors] };
+        const mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+        return { ok: false, errors: [...errors, ...assetErrors], ...(mediaCleanupFailures.length ? { mediaCleanupFailures } : {}) };
       }
 
       const result = saveProductFromFormData(formData);
       if (!result.ok) {
-        await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+        const mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+        if (mediaCleanupFailures.length) {
+          return { ...result, mediaCleanupFailures };
+        }
       } else {
         await cleanupPersistedMedia({
           previous: existing?.assets ?? [],
@@ -84,8 +87,8 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
     const assetErrors = validateProductAssetSubmission(formData, product, existing);
 
     if (errors.length || assetErrors.length) {
-      await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-      return { ok: false, errors: [...errors, ...assetErrors] };
+      const mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+      return { ok: false, errors: [...errors, ...assetErrors], ...(mediaCleanupFailures.length ? { mediaCleanupFailures } : {}) };
     }
 
     assertUuidSet(product.id);
@@ -116,8 +119,12 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
       throw new AdminApplicationError(ADMIN_ERROR_CODES.INTERNAL);
     }
   } catch (error) {
-    await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-    return { ok: false, errors: [mapAdminError(error, "product mutation")] };
+    const mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+    return {
+      ok: false,
+      errors: [mapAdminError(error, "product mutation")],
+      ...(mediaCleanupFailures.length ? { mediaCleanupFailures } : {}),
+    };
   }
 
   if (!savedProduct) {

@@ -2,6 +2,7 @@ import { ProductEditor } from "../product-editor";
 import {
   archiveProductAction,
   deleteProductAction,
+  saveNewProductFormAction,
   saveProductAction,
 } from "@/app/admin/actions";
 import { getAdminContentSnapshot } from "@/lib/content-repository";
@@ -23,6 +24,7 @@ export default async function NewProductPage({ searchParams }: Props) {
       tags={snapshot.tags}
       feedback={error}
       saveAction={saveProductAction}
+      saveFormAction={saveNewProductFormAction}
       archiveAction={archiveProductAction}
       deleteAction={deleteProductAction}
     />

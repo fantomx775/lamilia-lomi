@@ -1,4 +1,5 @@
 import type { Locale } from "@/i18n/routing";
+import type { ProductAsset } from "@/lib/types";
 
 export const ADMIN_ERROR_CODES = {
   INTERNAL: "admin.internal",
@@ -35,7 +36,15 @@ export type AdminErrorCode = (typeof ADMIN_ERROR_CODES)[keyof typeof ADMIN_ERROR
 
 export type AdminMutationResult =
   | { ok: true; id: string }
-  | { ok: false; errors: AdminErrorCode[] };
+  | {
+      ok: false;
+      errors: AdminErrorCode[];
+      mediaCleanupFailures?: Array<{
+        assetId: string;
+        kind: ProductAsset["kind"];
+        storagePath: string;
+      }>;
+    };
 
 export type DatabaseErrorLike = {
   code?: string | null;
