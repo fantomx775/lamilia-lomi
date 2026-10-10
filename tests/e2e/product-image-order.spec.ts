@@ -2,6 +2,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
+import { isLocalDemoAppTarget } from "./local-target";
 
 test.setTimeout(300_000);
 
@@ -13,7 +14,11 @@ const imageFixtures = [
   { name: "05-purple.png", rgb: [175, 45, 190] },
 ] as const;
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  test.skip(
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "Gallery ordering E2E uses fixed demo admin credentials and requires a loopback app running the local demo backend.",
+  );
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "ll_cookie_consent",
@@ -41,12 +46,21 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   let cleanupFailure: unknown;
   let createSaveNavigationPending = false;
 
+  const safeUrlPath = (value: string) => {
+    try {
+      const url = new URL(value);
+      return url.origin + url.pathname;
+    } catch {
+      return "unavailable";
+    }
+  };
+
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame()) mainFrameNavigations.push({ at: Date.now(), url: frame.url() });
+    if (frame === page.mainFrame()) mainFrameNavigations.push({ at: Date.now(), url: safeUrlPath(frame.url()) });
   });
   page.on("requestfailed", (request) => {
     const at = Date.now();
@@ -59,12 +73,12 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     }
     const detail = {
       method: request.method(),
-      url: request.url(),
+      url: safeUrlPath(request.url()),
       failure,
       resourceType: request.resourceType(),
       isNavigationRequest: request.isNavigationRequest(),
-      pageUrl: page.url(),
-      frameUrl,
+      pageUrl: safeUrlPath(page.url()),
+      frameUrl: safeUrlPath(frameUrl),
       failedAt: new Date(at).toISOString(),
     };
     const recentNavigation = [...mainFrameNavigations].reverse().find((event) => at - event.at <= 5_000);
@@ -74,6 +88,10 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     const expectedAdminLoginCancellation = exactLoginPost && (adminLoginPending || adminLoginVerified);
     const exactNextDevChunk = request.method() === "GET" && request.resourceType() === "script" &&
       failedUrl.pathname.startsWith("/_next/static/chunks/") && failedUrl.pathname.endsWith(".js");
+    const exactLocalNextDevFont = request.method() === "GET" && request.resourceType() === "font" &&
+      failedUrl.origin === new URL(page.url()).origin &&
+      failedUrl.pathname === "/__nextjs_font/geist-latin.woff2" &&
+      new URL(page.url()).pathname.startsWith("/admin");
     const createActionPost = request.method() === "POST" && failedUrl.pathname === "/admin/products/new" &&
       Boolean(request.headers()["next-action"]);
     const nextFlightFetch = request.method() === "GET" && request.resourceType() === "fetch" &&
@@ -84,7 +102,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     const expectedVerifiedUpdateSaveCancellation = productUpdateSavePending && productMutationAction;
     const expectedVerifiedProductDeleteCancellation = productDeletePending && productMutationAction;
     if (failure === "net::ERR_ABORTED" && (
-      (recentNavigation && exactNextDevChunk) ||
+      (recentNavigation && (exactNextDevChunk || exactLocalNextDevFont)) ||
       expectedAdminLoginCancellation ||
       expectedCreateSaveCancellation ||
       expectedVerifiedUpdateSaveCancellation ||
@@ -92,7 +110,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     )) {
       const cancellation = JSON.stringify({
         ...detail,
-        adjacentMainFrameNavigation: recentNavigation?.url ?? page.url(),
+        adjacentMainFrameNavigation: recentNavigation?.url ?? safeUrlPath(page.url()),
         reason: expectedAdminLoginCancellation
           ? "the login action was followed by an asserted redirect to /admin"
           : expectedCreateSaveCancellation
@@ -112,7 +130,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   page.on("response", (response) => {
     if (response.status() < 400) return;
     const request = response.request();
-    const entry = request.method() + " " + response.status() + " " + response.url();
+    const entry = request.method() + " " + response.status() + " " + safeUrlPath(response.url());
     if (
       response.status() === 415 &&
       request.method() === "POST" &&

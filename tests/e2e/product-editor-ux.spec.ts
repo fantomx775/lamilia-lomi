@@ -2,10 +2,15 @@ import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
+import { isLocalDemoAppTarget } from "./local-target";
 
 test.setTimeout(240_000);
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  test.skip(
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "Product editor E2E uses fixed demo admin credentials and disposable records; it requires a loopback app running the local demo backend.",
+  );
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "ll_cookie_consent",
