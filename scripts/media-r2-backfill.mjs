@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { createClient } from "@supabase/supabase-js";
 
+import { parseBackfillArgs, parseReconcileProductId } from "./media-r2-backfill-cli.mjs";
 import {
   assertR2TargetConfirmation,
   cleanupFailedPublicBackfill,
@@ -26,13 +27,7 @@ import {
   verifyPublicMediaDeliveryBytes,
 } from "./media-r2-backfill-integrity.mjs";
 
-const args = new Set(process.argv.slice(2));
-const values = new Map();
-for (let index = 2; index < process.argv.length; index += 1) {
-  if (process.argv[index].startsWith("--") && process.argv[index + 1] && !process.argv[index + 1].startsWith("--")) {
-    values.set(process.argv[index], process.argv[index + 1]);
-  }
-}
+const { args, values } = parseBackfillArgs(process.argv.slice(2));
 
 const apply = args.has("--apply");
 const rollback = args.has("--rollback");
@@ -46,6 +41,15 @@ if (rollback && reconcilePublic) {
 
 const includeR2 = true;
 const useR2 = apply || rollback || reconcilePublic;
+let reconcileProductId;
+try {
+  reconcileProductId = parseReconcileProductId(args, values);
+} catch (error) {
+  fail(error instanceof Error ? error.message : "--product-id requires a product UUID.");
+}
+if (reconcileProductId && !reconcilePublic) {
+  fail("--product-id is supported only with --reconcile-public.");
+}
 const config = readConfig({ includeR2, requireR2Credentials: useR2 });
 const projectRef = new URL(config.supabaseUrl).hostname.split(".")[0];
 const confirmedProject = values.get("--confirm-project");
@@ -81,17 +85,17 @@ const s3 = useR2 ? new S3Client({
 if (rollback) {
   await rollbackAsset(values.get("--asset-id"), apply);
 } else if (reconcilePublic) {
-  await reconcilePublicBucketMedia(apply);
+  await reconcilePublicBucketMedia(apply, reconcileProductId);
 } else {
   await backfillProductImages();
 }
 
-async function reconcilePublicBucketMedia(write) {
-  const eligiblePublicPaths = await readPotentiallyEligiblePublicImagePaths();
-  const revokingRows = await readRevokingPublicAssetRows();
+async function reconcilePublicBucketMedia(write, productId) {
+  const eligiblePublicPaths = await readPotentiallyEligiblePublicImagePaths(productId);
+  const revokingRows = await readRevokingPublicAssetRows(productId);
   const rowsToRecover = new Map(revokingRows.map((row) => [row.id, row]));
   const result = await reconcilePublicProductImages({
-    listPublicKeys: listPublicProductImageKeys,
+    listPublicKeys: () => listPublicProductImageKeys(productId),
     eligiblePublicPaths,
     preparePublicObjectDeletion: async (key) => {
       const prepared = await prepareStalePublicObjectForDeletion(key);
@@ -168,18 +172,18 @@ async function prepareStalePublicObjectForDeletion(storagePath) {
 async function readPublicPathAssetRows(storagePath) {
   const { data, error } = await supabase
     .from("product_assets")
-    .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider, is_active, is_public, products(status)")
+    .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider, is_active, is_public, products!product_assets_product_id_fkey(status)")
     .eq("path", storagePath);
   if (error) fail(`Could not recheck public media path ${storagePath}: ${error.message}`);
   return data ?? [];
 }
 
-async function readPotentiallyEligiblePublicImagePaths() {
+async function readPotentiallyEligiblePublicImagePaths(productId) {
   const paths = new Set();
   for (let offset = 0; ; offset += 200) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("product_assets")
-      .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider, is_active, is_public, products!inner(status)")
+      .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider, is_active, is_public, products!product_assets_product_id_fkey!inner(status)")
       .in("storage_provider", ["r2_public_pending", "r2_public"])
       .eq("products.status", "published")
       .eq("is_active", true)
@@ -189,6 +193,8 @@ async function readPotentiallyEligiblePublicImagePaths() {
       .like("path", "products/%")
       .order("path")
       .range(offset, offset + 199);
+    if (productId) query = query.eq("product_id", productId);
+    const { data, error } = await query;
     if (error) fail(`Could not read eligible public or publishing media rows: ${error.message}`);
 
     for (const row of data ?? []) {
@@ -200,10 +206,10 @@ async function readPotentiallyEligiblePublicImagePaths() {
   return paths;
 }
 
-async function readRevokingPublicAssetRows() {
+async function readRevokingPublicAssetRows(productId) {
   const rows = [];
   for (let offset = 0; ; offset += 200) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("product_assets")
       .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider")
       .eq("storage_provider", "r2_public_revoking")
@@ -212,6 +218,8 @@ async function readRevokingPublicAssetRows() {
       .like("path", "products/%")
       .order("path")
       .range(offset, offset + 199);
+    if (productId) query = query.eq("product_id", productId);
+    const { data, error } = await query;
     if (error) fail(`Could not read revoking public media rows: ${error.message}`);
 
     for (const row of data ?? []) {
@@ -223,12 +231,12 @@ async function readRevokingPublicAssetRows() {
   return rows;
 }
 
-async function* listPublicProductImageKeys() {
+async function* listPublicProductImageKeys(productId) {
   let continuationToken;
   do {
     const page = await s3.send(new ListObjectsV2Command({
       Bucket: config.publicBucket,
-      Prefix: "products/",
+      Prefix: productId ? `products/${productId}/` : "products/",
       ContinuationToken: continuationToken,
     }));
     yield (page.Contents ?? []).map((object) => object.Key).filter((key) => typeof key === "string");

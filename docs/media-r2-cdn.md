@@ -84,6 +84,18 @@ If a process stops after a public copy is written, reconcile the public bucket b
 node --env-file=.env.local scripts/media-r2-backfill.mjs --reconcile-public
 ```
 
+To inspect or reconcile one product's public images only, add its UUID. This scopes both the database queries and the R2 listing to that product's `products/<uuid>/` prefix:
+
+```text
+node --env-file=.env.local scripts/media-r2-backfill.mjs --reconcile-public --product-id [product-uuid]
+```
+
+After reviewing the scoped dry run, the same UUID can be supplied to the confirmed apply command:
+
+```text
+node --env-file=.env.local scripts/media-r2-backfill.mjs --reconcile-public --product-id [product-uuid] --apply --confirm-project [project-ref] --confirm-r2-target [account-id/private-bucket/public-bucket]
+```
+
 Review the dry-run paths. Keep the maintenance window in place through apply, so a concurrent promotion cannot create an object after it was checked:
 
 ```text
