@@ -153,8 +153,10 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await page.keyboard.type("Use the account responsibly");
     await termsEditor.press("Enter");
     await page.keyboard.type("Keep your account details current");
-    await termsEditor.locator("p").first().click();
+    await termsEditor.press("Control+Home");
+    await termsEditor.press("Shift+End");
     await page.getByLabel("Styl akapitu").selectOption("h2");
+    await expect(termsEditor.locator("h2").first()).toHaveText("Terms and Conditions");
     await page.getByRole("button", { name: "Podgląd" }).click();
     await expect(page.getByRole("heading", { level: 2, name: "Terms and Conditions" })).toBeVisible();
     await expect(page.locator("#page-editor-form ol li")).toHaveCount(2);
