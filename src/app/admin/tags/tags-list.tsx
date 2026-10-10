@@ -15,7 +15,6 @@ export type AdminTagListRow = {
   name: string;
   slug: string;
   productCount: number;
-  languageCodes: string[];
 };
 
 function buildColumns(onEdit: (id: string, trigger: HTMLElement) => void): DataTableColumn<AdminTagListRow>[] {
@@ -37,7 +36,6 @@ function buildColumns(onEdit: (id: string, trigger: HTMLElement) => void): DataT
     },
     { id: "slug", header: "Slug", cell: (row) => <span className="font-mono text-xs">{row.slug}</span> },
     { id: "products", header: "Produkty", cell: (row) => row.productCount },
-    { id: "languages", header: "Języki", cell: (row) => formatLanguages(row.languageCodes) },
   ];
 }
 
@@ -83,7 +81,7 @@ export function TagsResourceList({
         rows={rows}
         columns={columns}
         getRowId={(row) => row.id}
-        getSearchText={(row) => [row.name, row.slug, ...row.languageCodes].join(" ")}
+        getSearchText={(row) => [row.name, row.slug].join(" ")}
         onRowActivate={(row, trigger) => openEdit(row.id, trigger)}
         toolbarActions={<Button type="button" size="sm" onClick={(event) => openCreate(event.currentTarget)}><Plus className="size-4" aria-hidden />Dodaj tag</Button>}
         renderMobileCard={(row) => (
@@ -95,7 +93,7 @@ export function TagsResourceList({
           >
             <p className="truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.name}</p>
             <p className="mt-1 truncate font-mono text-xs text-[var(--color-muted)]">{row.slug}</p>
-            <p className="mt-4 text-sm text-[var(--color-muted)]">{row.productCount} produktów · {formatLanguages(row.languageCodes)}</p>
+            <p className="mt-4 text-sm text-[var(--color-muted)]">{row.productCount} produktów</p>
           </button>
         )}
         emptyState={<p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak tagów.</p>}
@@ -112,8 +110,4 @@ export function TagsResourceList({
       />
     </>
   );
-}
-
-function formatLanguages(languageCodes: string[]) {
-  return languageCodes.length > 0 ? languageCodes.map((code) => code.toUpperCase()).join(", ") : "—";
 }

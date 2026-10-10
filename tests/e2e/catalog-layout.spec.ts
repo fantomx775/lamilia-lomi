@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
 test("admin catalog preference persists and stays responsive", async ({ page }, testInfo) => {
@@ -7,7 +8,8 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
     "Uses the local demo admin session and requires a loopback app running the local demo backend.",
   );
   test.skip(testInfo.project.name !== "chromium", "Checks all viewport sizes in one Chromium session");
-  test.setTimeout(90_000);
+  // The local content-store lock can queue this flow behind a full editor run.
+  test.setTimeout(600_000);
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/pl/login?redirectTo=/admin/settings");
@@ -18,6 +20,7 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
     page.getByRole("button", { name: "Kontynuuj" }).click(),
   ]);
 
+  const releaseContentStoreLock = await acquireLocalContentStoreLock();
   try {
     await expect(
       page.getByRole("combobox", { name: "Karty w wierszu na dużych ekranach" }),
@@ -83,9 +86,13 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
       fullPage: true,
     });
   } finally {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/admin/settings");
-    await saveCatalogColumns(page, "4");
+    try {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto("/admin/settings");
+      await saveCatalogColumns(page, "4");
+    } finally {
+      releaseContentStoreLock();
+    }
   }
 });
 

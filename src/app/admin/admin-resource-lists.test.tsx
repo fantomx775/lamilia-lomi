@@ -31,19 +31,18 @@ describe("admin resource list adapters", () => {
               status: "published",
               audience: "kids",
               productType: "coloring-book",
-              languageCodes: ["en"],
             },
           ]}
         />
       ),
       () => (
         <CategoriesResourceList
-          rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1, languageCodes: ["en"] }]}
+          rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1 }]}
         />
       ),
       () => (
         <TagsResourceList
-          rows={[{ id: "tag-1", name: "Calm", slug: "calm", productCount: 1, languageCodes: ["en"] }]}
+          rows={[{ id: "tag-1", name: "Calm", slug: "calm", productCount: 1 }]}
         />
       ),
       () => (
@@ -62,7 +61,7 @@ describe("admin resource list adapters", () => {
       ),
       () => (
         <PagesResourceList
-          rows={[{ id: "privacy", title: "Privacy", slug: "privacy", languageCodes: ["en"], updatedAt: "today" }]}
+          rows={[{ id: "privacy", title: "Privacy", slug: "privacy", updatedAt: "today" }]}
         />
       ),
     ];
@@ -76,7 +75,7 @@ describe("admin resource list adapters", () => {
 
   it("exposes semantic links and buttons for each resource workflow", () => {
     const product = render(
-      <ProductsResourceList rows={[{ id: "product-1", title: "Test product", slug: "test-product", status: "published", audience: "kids", productType: "coloring-book", languageCodes: ["en"] }]} />,
+      <ProductsResourceList rows={[{ id: "product-1", title: "Test product", slug: "test-product", status: "published", audience: "kids", productType: "coloring-book" }]} />,
     );
     expect(product.container.querySelector('tbody a[href="/admin/products/product-1"]')).toBeInTheDocument();
     expect(product.container.querySelector('a[href="/admin/products/new"]')).toBeInTheDocument();
@@ -84,7 +83,7 @@ describe("admin resource list adapters", () => {
 
     const category = render(
       <CategoriesResourceList
-        rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1, languageCodes: ["en"] }]}
+        rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1 }]}
         items={[{ id: "category-1", slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }]}
       />,
     );
@@ -93,7 +92,7 @@ describe("admin resource list adapters", () => {
 
     const tag = render(
       <TagsResourceList
-        rows={[{ id: "tag-1", name: "Calm", slug: "calm", productCount: 1, languageCodes: ["en"] }]}
+        rows={[{ id: "tag-1", name: "Calm", slug: "calm", productCount: 1 }]}
         items={[{ id: "tag-1", slug: "calm", translations: [{ locale: "en", name: "Calm" }] }]}
       />,
     );
@@ -101,7 +100,7 @@ describe("admin resource list adapters", () => {
     expect(tag.getByRole("button", { name: /Dodaj tag/i })).toBeInTheDocument();
 
     const page = render(
-      <PagesResourceList rows={[{ id: "privacy", title: "Privacy", slug: "privacy", languageCodes: ["en"], updatedAt: "today" }]} />,
+      <PagesResourceList rows={[{ id: "privacy", title: "Privacy", slug: "privacy", updatedAt: "today" }]} />,
     );
     expect(page.container.querySelector('tbody a[href="/admin/pages/privacy"]')).toBeInTheDocument();
     expect(page.container.querySelector('a[href="/admin/pages/new"]')).not.toBeInTheDocument();
@@ -118,13 +117,14 @@ describe("admin resource list adapters", () => {
     const user = userEvent.setup();
     const category = render(
       <CategoriesResourceList
-        rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1, languageCodes: ["en"] }]}
+        rows={[{ id: "category-1", name: "Books", slug: "books", sortOrder: 1, productCount: 1 }]}
         items={[{ id: "category-1", slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }]}
       />,
     );
     await user.click(category.getAllByRole("button", { name: "Edytuj kategorię Books" })[0]);
     expect(screen.getByRole("dialog", { name: "Edytuj kategorię" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /EN/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(screen.queryByText("Języki")).not.toBeInTheDocument();
 
     cleanup();
     const users = render(<UsersResourceList rows={[{ id: "user@example.com", email: "user@example.com", role: "user", emailVerified: true, marketingConsent: false, unlockCount: 1, unlockedProducts: ["Moon Garden"] }]} />);

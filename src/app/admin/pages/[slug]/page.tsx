@@ -18,7 +18,7 @@ export default async function EditPage({ params, searchParams }: Props) {
 
   const query = await searchParams;
   const error = query.error ? formatAdminErrors(query.error, "pl") : undefined;
-  const feedback = error ?? (query.saved ? "Zapisano wszystkie wersje językowe." : undefined);
+  const feedback = error ?? (query.saved ? "Zapisano zmiany." : undefined);
   const records = (await getAdminContentSnapshot()).staticPages.filter(
     (page) => page.slug === slug,
   );

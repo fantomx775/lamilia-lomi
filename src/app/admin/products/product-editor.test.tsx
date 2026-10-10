@@ -107,8 +107,7 @@ describe("ProductEditor V2", () => {
   const snapshot = getSeedContentSnapshot();
   const product = snapshot.products[0];
 
-  it("renders one active locale panel and preserves locale values while switching", async () => {
-    const user = userEvent.setup();
+  it("renders the canonical product content without language tabs or media selectors", () => {
     const view = render(
       <ProductEditor
         title="Edycja produktu"
@@ -119,18 +118,11 @@ describe("ProductEditor V2", () => {
     );
 
     expect(view.getByRole("heading", { name: "Podstawowe informacje" })).toBeInTheDocument();
-    expect(view.getAllByRole("tabpanel")).toHaveLength(1);
-    expect(view.getByRole("tabpanel").querySelector('input[name="title_en"]')).toHaveValue(product.translations[0].title);
-
-    await user.click(view.getByRole("tab", { name: /PL/ }));
-    const polishTitle = view.getByRole("tabpanel").querySelector<HTMLInputElement>('input[name="title_pl"]')!;
-    expect(polishTitle).toHaveValue(product.translations[1].title);
+    expect(view.queryByRole("tab")).not.toBeInTheDocument();
+    expect(view.getByLabelText("Tytuł")).toHaveValue(product.translations.find((translation) => translation.locale === "en")?.title);
+    expect(view.container.querySelector('[name="title_pl"]')).not.toBeInTheDocument();
+    expect(view.container.querySelector('[name="assetLocale"]')).not.toBeInTheDocument();
     expect(view.getByText("SEO i wygląd w Google")).toBeInTheDocument();
-    fireEvent.change(polishTitle, { target: { value: `${product.translations[1].title} temporary` } });
-    fireEvent.change(polishTitle, { target: { value: product.translations[1].title } });
-
-    await waitFor(() => expect(view.getByText("Wszystkie zmiany są zapisane")).toBeInTheDocument());
-    expect(view.queryByText("Niezapisane zmiany")).not.toBeInTheDocument();
   });
 
   it("shows five purpose-built media sections without the legacy asset builder", () => {
@@ -268,7 +260,7 @@ describe("ProductEditor V2", () => {
     expect(view.getByRole("alert")).toHaveTextContent("English title is required.");
   });
 
-  it("submits current locale values through the provided server action", async () => {
+  it("submits the single product content fields through the provided server action", async () => {
     const saveAction = vi.fn().mockResolvedValue({ ok: true, id: product.id });
     vi.spyOn(window.history, "back").mockImplementation(() => {
       const state = {
@@ -289,14 +281,15 @@ describe("ProductEditor V2", () => {
       </AdminProductEditorHistoryGuard>,
     );
 
-    const title = view.container.querySelector<HTMLInputElement>("#product-title-en");
+    const title = view.container.querySelector<HTMLInputElement>("#product-title");
     expect(title).not.toBeNull();
     await user.type(title!, "Ocean Calm");
     await user.click(screen.getByRole("button", { name: /Zapisz/ }));
 
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
     const formData = saveAction.mock.calls[0][0] as FormData;
-    expect(formData.get("title_en")).toBe("Ocean Calm");
+    expect(formData.get("title")).toBe("Ocean Calm");
+    expect(formData.has("title_pl")).toBe(false);
     await waitFor(() => expect(editorMocks.routerReplace).toHaveBeenCalledWith(`/admin/products/${product.id}?saved=1`));
   });
 
@@ -398,7 +391,7 @@ describe("ProductEditor V2", () => {
       </AdminProductEditorHistoryGuard>,
     );
 
-    const titles = view.container.querySelectorAll<HTMLInputElement>("#product-title-en");
+    const titles = view.container.querySelectorAll<HTMLInputElement>("#product-title");
     expect(titles).toHaveLength(2);
     fireEvent.change(titles[1], { target: { value: "Newer editor" } });
     view.rerender(

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
+import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
@@ -110,6 +111,9 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Admin product-write E2E uses fixed demo credentials and requires a loopback app running the local demo backend.",
   );
+  // The local content-store lock can queue this flow behind a full editor run.
+  test.setTimeout(600_000);
+  const releaseContentStoreLock = await acquireLocalContentStoreLock();
   const consoleErrors: string[] = [];
   const expectedUploadFallbackErrors: string[] = [];
   const serverErrors: string[] = [];
@@ -185,13 +189,17 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
     expect(consoleErrors).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath("admin-premium-existing.png"), fullPage: true });
   } finally {
-    if (productPath) {
-      await page.goto(productPath);
-      page.once("dialog", (dialog) => void dialog.accept());
-      await Promise.all([
-        page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
-        page.getByRole("button", { name: "Usuń produkt" }).click(),
-      ]);
+    try {
+      if (productPath) {
+        await page.goto(productPath);
+        page.once("dialog", (dialog) => void dialog.accept());
+        await Promise.all([
+          page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
+          page.getByRole("button", { name: "Usuń produkt" }).click(),
+        ]);
+      }
+    } finally {
+      releaseContentStoreLock();
     }
   }
 });

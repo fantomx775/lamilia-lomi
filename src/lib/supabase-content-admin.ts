@@ -8,6 +8,8 @@ import { createClient, getCurrentAccessToken } from "@/lib/supabase/server";
 import {
   archiveProduct,
   buildProductFromFormData,
+  buildCategoryFromFormData,
+  buildTagFromFormData,
   buildStaticPagesFromFormData,
   deleteCategory,
   deleteProduct,
@@ -314,34 +316,22 @@ export async function saveCategoryForRequest(formData: FormData): Promise<AdminM
 
     const snapshot = await getAdminContentSnapshot();
     const existing = snapshot.categories.find((category) => category.id === stringField(formData, "id"));
-    const categoryId = stringField(formData, "id") || existing?.id || randomUUID();
-    assertUuidSet(categoryId);
-    const name = stringField(formData, "name_en") || existing?.translations[0]?.name || "Category";
-    const slug = stringField(formData, "slug") || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    const category = {
-      id: categoryId,
-      slug,
-      sortOrder: numberField(formData, "sortOrder", existing?.sortOrder ?? 100),
-      translations: ["en", "pl", "de", "es"].map((locale) => ({
-        locale: locale as "en" | "pl" | "de" | "es",
-        name: stringField(formData, `name_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.name || "",
-        description: stringField(formData, `description_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.description,
-      })).filter((translation) => translation.name || translation.description),
-    };
+    const category = buildCategoryFromFormData(formData, snapshot, existing);
+    const english = category.translations.find((translation) => translation.locale === "en");
 
-    if (!category.translations.some((translation) => translation.locale === "en" && translation.name)) {
+    if (!english?.name) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.VALIDATION_CATEGORY_NAME_REQUIRED] };
     }
 
+    assertUuidSet(category.id);
     const supabase = await createClient();
     await run(supabase.from("categories").upsert({ id: category.id, slug: category.slug, sort_order: category.sortOrder }), "category");
-    await run(supabase.from("category_translations").delete().eq("category_id", category.id), "category translations cleanup");
-    await run(supabase.from("category_translations").insert(category.translations.map((translation) => ({
+    await run(supabase.from("category_translations").upsert({
       category_id: category.id,
-      locale: translation.locale,
-      name: translation.name,
-      description: translation.description ?? null,
-    }))), "category translations");
+      locale: "en",
+      name: english.name,
+      description: english.description ?? null,
+    }, { onConflict: "category_id,locale" }), "category translation");
     return { ok: true, id: category.id };
   });
 }
@@ -371,30 +361,23 @@ export async function saveTagForRequest(formData: FormData): Promise<AdminMutati
 
     const snapshot = await getAdminContentSnapshot();
     const existing = snapshot.tags.find((tag) => tag.id === stringField(formData, "id"));
-    const tagId = stringField(formData, "id") || existing?.id || randomUUID();
-    assertUuidSet(tagId);
-    const name = stringField(formData, "name_en") || existing?.translations[0]?.name || "Tag";
-    const slug = stringField(formData, "slug") || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    const translations = ["en", "pl", "de", "es"].map((locale) => ({
-      locale: locale as "en" | "pl" | "de" | "es",
-      name: stringField(formData, `name_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.name || "",
-      description: stringField(formData, `description_${locale}`) || existing?.translations.find((item) => item.locale === locale)?.description,
-    })).filter((translation) => translation.name);
+    const tag = buildTagFromFormData(formData, snapshot, existing);
+    const english = tag.translations.find((translation) => translation.locale === "en");
 
-    if (!translations.some((translation) => translation.locale === "en")) {
+    if (!english?.name) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.VALIDATION_TAG_NAME_REQUIRED] };
     }
 
+    assertUuidSet(tag.id);
     const supabase = await createClient();
-    await run(supabase.from("tags").upsert({ id: tagId, slug }), "tag");
-    await run(supabase.from("tag_translations").delete().eq("tag_id", tagId), "tag translations cleanup");
-    await run(supabase.from("tag_translations").insert(translations.map((translation) => ({
-      tag_id: tagId,
-      locale: translation.locale,
-      name: translation.name,
-      description: translation.description ?? null,
-    }))), "tag translations");
-    return { ok: true, id: tagId };
+    await run(supabase.from("tags").upsert({ id: tag.id, slug: tag.slug }), "tag");
+    await run(supabase.from("tag_translations").upsert({
+      tag_id: tag.id,
+      locale: "en",
+      name: english.name,
+      description: english.description ?? null,
+    }, { onConflict: "tag_id,locale" }), "tag translation");
+    return { ok: true, id: tag.id };
   });
 }
 
@@ -559,11 +542,6 @@ function stringField(formData: FormData, key: string) {
   }
 
   return "";
-}
-
-function numberField(formData: FormData, key: string, fallback: number) {
-  const value = Number(stringField(formData, key));
-  return Number.isFinite(value) ? value : fallback;
 }
 
 function assertUuidSet(value: string) {

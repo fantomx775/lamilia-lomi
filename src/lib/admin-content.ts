@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 
-import { routing, type Locale } from "@/i18n/routing";
-
 import {
   getContentSnapshot,
   saveContentSnapshot,
@@ -21,8 +19,6 @@ import { mediaBucketForKind, validateMediaFile } from "./media-upload";
 import { ADMIN_ERROR_CODES, type AdminErrorCode, type AdminMutationResult } from "./admin-errors";
 import { normalizePremiumCode, validatePremiumCodeEntries } from "./premium-code";
 import { slugify } from "./utils";
-
-const locales = routing.locales;
 
 export function buildProductFromFormData(
   formData: FormData,
@@ -314,16 +310,18 @@ export function deleteTag(tagId: string): AdminMutationResult {
 export function saveStaticPageFromFormData(formData: FormData): AdminMutationResult {
   const snapshot = getContentSnapshot();
   const slug = staticPageSlugField(formData, "slug");
-  const locale = localeField(formData, "locale", "en");
+  const locale = "en" as const;
   const existing = snapshot.staticPages.find(
     (page) => page.slug === slug && page.locale === locale,
   );
+  const title = optionalTextField(formData, "title");
+  const body = optionalTextField(formData, "body");
   const page: StaticPageRecord = {
     id: existing?.id ?? `static-${slug}-${locale}`,
     slug,
     locale,
-    title: textField(formData, "title") || existing?.title || slug,
-    body: textField(formData, "body") || existing?.body || "",
+    title: title.present ? title.value ?? "" : existing?.title ?? slug,
+    body: body.present ? body.value ?? "" : existing?.body ?? "",
     updatedAt: new Date().toISOString(),
   };
 
@@ -363,20 +361,20 @@ export function buildStaticPagesFromFormData(
   snapshot: ContentSnapshot = getContentSnapshot(),
   expectedSlug: StaticPageRecord["slug"],
 ): { slug: StaticPageRecord["slug"]; pages: StaticPageRecord[] } {
-  const pages = locales.map((locale) => {
-    const existing = snapshot.staticPages.find(
-      (page) => page.slug === expectedSlug && page.locale === locale,
-    );
-
-    return {
-      id: existing?.id ?? `static-${expectedSlug}-${locale}`,
-      slug: expectedSlug,
-      locale,
-      title: textField(formData, `title_${locale}`) || existing?.title || expectedSlug,
-      body: textField(formData, `body_${locale}`) || existing?.body || "",
-      updatedAt: new Date().toISOString(),
-    } satisfies StaticPageRecord;
-  });
+  const locale = "en" as const;
+  const existing = snapshot.staticPages.find(
+    (page) => page.slug === expectedSlug && page.locale === locale,
+  );
+  const title = optionalTextField(formData, "title");
+  const body = optionalTextField(formData, "body");
+  const pages: StaticPageRecord[] = [{
+    id: existing?.id ?? `static-${expectedSlug}-${locale}`,
+    slug: expectedSlug,
+    locale,
+    title: title.present ? title.value ?? "" : existing?.title ?? expectedSlug,
+    body: body.present ? body.value ?? "" : existing?.body ?? "",
+    updatedAt: new Date().toISOString(),
+  }];
 
   return { slug: expectedSlug, pages };
 }
@@ -417,38 +415,60 @@ export function validateAssetClassification(asset: Pick<ProductAsset, "kind" | "
   return { ok: true as const };
 }
 
-function buildCategoryFromFormData(
+export function buildCategoryFromFormData(
   formData: FormData,
   snapshot: ContentSnapshot,
   existing?: Category,
 ): Category {
   const id = textField(formData, "id") || existing?.id || randomUUID();
-  const enName = textField(formData, "name_en") || existing?.translations[0]?.name || "Category";
+  const existingEnglish = existing?.translations.find((translation) => translation.locale === "en");
+  const name = textField(formData, "name") || existingEnglish?.name || "Category";
+  const description = optionalTextField(formData, "description");
+  const englishTranslation: TaxonomyTranslation = {
+    locale: "en",
+    name,
+    description: description.present ? description.value : existingEnglish?.description,
+  };
 
   return {
     id,
     slug: uniqueSlug(
-      textField(formData, "slug") || slugify(enName),
+      textField(formData, "slug") || slugify(name),
       snapshot.categories,
       id,
     ),
     sortOrder: intField(formData, "sortOrder", existing?.sortOrder ?? 100),
-    translations: parseTaxonomyTranslations(formData, existing?.translations),
+    translations: upsertByComposite(
+      existing?.translations ?? [],
+      englishTranslation,
+      (translation) => translation.locale,
+    ),
   };
 }
 
-function buildTagFromFormData(
+export function buildTagFromFormData(
   formData: FormData,
   snapshot: ContentSnapshot,
   existing?: Tag,
 ): Tag {
   const id = textField(formData, "id") || existing?.id || randomUUID();
-  const enName = textField(formData, "name_en") || existing?.translations[0]?.name || "Tag";
+  const existingEnglish = existing?.translations.find((translation) => translation.locale === "en");
+  const name = textField(formData, "name") || existingEnglish?.name || "Tag";
+  const description = optionalTextField(formData, "description");
+  const englishTranslation: TaxonomyTranslation = {
+    locale: "en",
+    name,
+    description: description.present ? description.value : existingEnglish?.description,
+  };
 
   return {
     id,
-    slug: uniqueSlug(textField(formData, "slug") || slugify(enName), snapshot.tags, id),
-    translations: parseTaxonomyTranslations(formData, existing?.translations),
+    slug: uniqueSlug(textField(formData, "slug") || slugify(name), snapshot.tags, id),
+    translations: upsertByComposite(
+      existing?.translations ?? [],
+      englishTranslation,
+      (translation) => translation.locale,
+    ),
   };
 }
 
@@ -456,73 +476,25 @@ function parseProductTranslations(
   formData: FormData,
   existing?: Product,
 ): ProductTranslation[] {
-  const existingByLocale = new Map(
-    existing?.translations.map((translation) => [translation.locale, translation]),
+  const previous = existing?.translations.find((translation) => translation.locale === "en");
+  const fieldValue = (name: string, priorValue: string | undefined) => {
+    const field = optionalTextField(formData, name);
+    return field.present ? field.value ?? "" : priorValue ?? "";
+  };
+  const english: ProductTranslation = {
+    locale: "en",
+    title: fieldValue("title", previous?.title),
+    shortDescription: fieldValue("shortDescription", previous?.shortDescription),
+    longDescription: fieldValue("longDescription", previous?.longDescription),
+    seoTitle: optionalFieldValue(formData, "seoTitle", previous?.seoTitle),
+    seoDescription: optionalFieldValue(formData, "seoDescription", previous?.seoDescription),
+  };
+
+  return upsertByComposite(
+    existing?.translations ?? [],
+    english,
+    (translation) => translation.locale,
   );
-
-  return locales
-    .map((locale): ProductTranslation | null => {
-      const previous = existingByLocale.get(locale);
-      const title = textField(formData, `title_${locale}`) || previous?.title || "";
-      const shortDescription =
-        textField(formData, `shortDescription_${locale}`) ||
-        previous?.shortDescription ||
-        "";
-      const longDescription =
-        textField(formData, `longDescription_${locale}`) ||
-        previous?.longDescription ||
-        "";
-      const seoTitleField = optionalTextField(formData, `seoTitle_${locale}`);
-      const seoDescriptionField = optionalTextField(formData, `seoDescription_${locale}`);
-      const seoTitle = seoTitleField.present ? seoTitleField.value : previous?.seoTitle;
-      const seoDescription = seoDescriptionField.present
-        ? seoDescriptionField.value
-        : previous?.seoDescription;
-
-      if (
-        !title &&
-        !shortDescription &&
-        !longDescription &&
-        !seoTitle &&
-        !seoDescription
-      ) {
-        return null;
-      }
-
-      return {
-        locale,
-        title,
-        shortDescription,
-        longDescription,
-        seoTitle,
-        seoDescription,
-      };
-    })
-    .filter((translation): translation is ProductTranslation => Boolean(translation));
-}
-
-function parseTaxonomyTranslations(
-  formData: FormData,
-  existing: TaxonomyTranslation[] = [],
-): TaxonomyTranslation[] {
-  const existingByLocale = new Map(
-    existing.map((translation) => [translation.locale, translation]),
-  );
-
-  return locales
-    .map((locale): TaxonomyTranslation | null => {
-      const previous = existingByLocale.get(locale);
-      const name = textField(formData, `name_${locale}`) || previous?.name || "";
-      const description =
-        textField(formData, `description_${locale}`) || previous?.description;
-
-      if (!name && !description) {
-        return null;
-      }
-
-      return { locale, name, description };
-    })
-    .filter((translation): translation is TaxonomyTranslation => Boolean(translation));
 }
 
 function parseAssets(
@@ -537,7 +509,6 @@ function parseAssets(
   const filenames = formData.getAll("assetFilename");
   const contentTypes = formData.getAll("assetContentType");
   const sizes = formData.getAll("assetSizeBytes");
-  const localesFromForm = formData.getAll("assetLocale");
   const titles = formData.getAll("assetTitle");
   const storageProviders = formData.getAll("assetStorageProvider");
   const sortOrders = formData.getAll("assetSortOrder");
@@ -578,8 +549,7 @@ function parseAssets(
         valueAt(contentTypes, index) ||
         inferContentType(filename),
       sizeBytes: existing?.sizeBytes ?? (numberFromValue(valueAt(sizes, index), 0) || undefined),
-      locale:
-        localeFieldValue(valueAt(localesFromForm, index)) ?? existing?.locale,
+      locale: existing ? existing.locale : "en",
       title: valueAt(titles, index) || existing?.title || filename,
       sortOrder: numberFromValue(valueAt(sortOrders, index), existing?.sortOrder ?? 100),
       isPublic,
@@ -888,14 +858,6 @@ function staticPageSlugField(formData: FormData, key: string): StaticPageRecord[
   return textField(formData, key) === "terms" ? "terms" : "privacy";
 }
 
-function localeField(formData: FormData, key: string, fallback: Locale) {
-  return localeFieldValue(textField(formData, key)) ?? fallback;
-}
-
-function localeFieldValue(value: string | undefined): Locale | undefined {
-  return locales.find((locale) => locale === value);
-}
-
 function uniqueSlug<T extends { id: string; slug: string }>(
   input: string,
   collection: T[],
@@ -948,6 +910,11 @@ function optionalTextField(formData: FormData, key: string) {
   const value = textField(formData, key);
 
   return { present: true as const, value: value || undefined };
+}
+
+function optionalFieldValue(formData: FormData, key: string, previousValue: string | undefined) {
+  const field = optionalTextField(formData, key);
+  return field.present ? field.value : previousValue;
 }
 
 function upsertManyByComposite<T>(

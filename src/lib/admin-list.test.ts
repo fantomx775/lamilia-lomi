@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { getAdminDisplayName, getAdminLanguageCodes } from "./admin-list";
+import { getAdminDisplayName } from "./admin-list";
 
 describe("admin list display helpers", () => {
-  it("prefers English and falls back to another translation", () => {
+  it("uses English and otherwise falls back to the stable slug", () => {
     expect(
       getAdminDisplayName(
         [
@@ -14,9 +14,7 @@ describe("admin list display helpers", () => {
       ),
     ).toBe("Coloring books");
 
-    expect(getAdminDisplayName([{ locale: "pl", name: "Kolorowanki" }], "fallback")).toBe(
-      "Kolorowanki",
-    );
+    expect(getAdminDisplayName([{ locale: "pl", name: "Kolorowanki" }], "fallback")).toBe("fallback");
   });
 
   it("uses the slug when no translation has a display name", () => {
@@ -25,13 +23,4 @@ describe("admin list display helpers", () => {
     );
   });
 
-  it("keeps language availability unique and in source order", () => {
-    expect(
-      getAdminLanguageCodes([
-        { locale: "en" },
-        { locale: "pl" },
-        { locale: "en" },
-      ]),
-    ).toEqual(["en", "pl"]);
-  });
 });

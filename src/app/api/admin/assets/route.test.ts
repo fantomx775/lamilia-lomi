@@ -90,7 +90,7 @@ describe("admin media upload setup", () => {
     const request = new Request("https://lamilialomi.com/api/admin/assets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId, kind: "video", filename: "preview.mp4", sizeBytes: 1024, contentType: "video/mp4" }),
+      body: JSON.stringify({ productId, kind: "video", filename: "preview.mp4", sizeBytes: 1024, contentType: "video/mp4", locale: "pl" }),
     });
     const formData = vi.spyOn(request, "formData");
 
@@ -100,7 +100,7 @@ describe("admin media upload setup", () => {
     expect(response.status).toBe(200);
     expect(formData).not.toHaveBeenCalled();
     expect(payload.upload).toMatchObject({ token: "signed-token", bucket: "public-videos" });
-    expect(payload.asset.uploaded).toBe(false);
+    expect(payload.asset).toMatchObject({ uploaded: false, locale: "en" });
     expect(mocks.createSignedMediaUpload).toHaveBeenCalledWith(expect.objectContaining({ authorizationToken: "admin-user-jwt" }));
   });
 
@@ -130,6 +130,7 @@ describe("admin media upload setup", () => {
     const formData = new FormData();
     formData.append("productId", "product-id");
     formData.append("kind", "cover");
+    formData.append("locale", "pl");
     formData.append("file", new File(["cover"], "cover.jpg", { type: "image/jpeg" }));
 
     const response = await POST(new Request("https://lamilialomi.com/api/admin/assets", {
@@ -139,7 +140,7 @@ describe("admin media upload setup", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.asset).toMatchObject({ filename: "cover.jpg", uploaded: true });
+    expect(payload.asset).toMatchObject({ filename: "cover.jpg", uploaded: true, locale: "en" });
     expect(mocks.storeMediaFile).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-id", kind: "cover" }));
   });
 

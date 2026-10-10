@@ -2,21 +2,30 @@ import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
+import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
-test.setTimeout(240_000);
+test.setTimeout(600_000);
+
+let releaseContentStoreLock: (() => void) | undefined;
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Product editor E2E uses fixed demo admin credentials and disposable records; it requires a loopback app running the local demo backend.",
   );
+  releaseContentStoreLock = await acquireLocalContentStoreLock();
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "ll_cookie_consent",
       JSON.stringify({ essential: true, analytics: false }),
     );
   });
+});
+
+test.afterEach(() => {
+  releaseContentStoreLock?.();
+  releaseContentStoreLock = undefined;
 });
 
 test("product editor preserves work, saves all statuses, and keeps Save reachable", async ({ page, browser }, testInfo) => {
@@ -343,6 +352,19 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         page.off("dialog", acceptDialogs);
       }
     }
+    if (productSaved) {
+      for (const request of browserDiagnostics.failedRequests) {
+        if (
+          request.method === "POST" &&
+          new URL(request.url).pathname === "/admin/products/new" &&
+          request.error === "net::ERR_ABORTED" &&
+          request.disposition === "unresolved"
+        ) {
+          request.disposition = "expected";
+          request.reason = "Next canceled the create Server Action while opening the saved editor; persisted fields were verified after reload and the product was deleted during cleanup.";
+        }
+      }
+    }
     await testInfo.attach("browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
       contentType: "application/json",
@@ -393,8 +415,8 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
     await expect(noJsPage.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeVisible();
     await expect(noJsPage.getByLabel("Tytuł")).toHaveValue(title);
     await expect(noJsPage.getByLabel("Krótki opis")).toHaveValue(description);
-    await expect(noJsPage.locator("#product-title-en")).not.toHaveAttribute("aria-invalid", "true");
-    await expect(noJsPage.locator("#product-short-description-en")).not.toHaveAttribute("aria-invalid", "true");
+    await expect(titleInput).not.toHaveAttribute("aria-invalid", "true");
+    await expect(noJsPage.getByLabel("Krótki opis")).not.toHaveAttribute("aria-invalid", "true");
     await expect(noJsPage.getByLabel("Adres produktu")).toHaveValue(/no-js-retained-/);
     await expect(noJsPage.getByLabel("Pozycja w katalogu")).toHaveValue("73");
     await expect(noJsPage.getByLabel("Status")).toHaveValue("published");

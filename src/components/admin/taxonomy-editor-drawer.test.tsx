@@ -33,13 +33,17 @@ afterEach(() => {
 });
 
 describe("TaxonomyEditorDrawer", () => {
-  it("switches locales and submits the shared category form", async () => {
-    saveCategoryInlineAction.mockResolvedValue({ ok: true, id: "new-category" });
+  it("edits and submits the single category content language", async () => {
+    saveCategoryInlineAction.mockResolvedValue({ ok: true, id: "category-1" });
     const user = userEvent.setup();
     const onSaved = vi.fn();
     render(
       <TaxonomyEditorDrawer
         kind="category"
+        item={{ id: "category-1", slug: "books", sortOrder: 1, translations: [
+          { locale: "en", name: "Books" },
+          { locale: "pl", name: "Książki" },
+        ] }}
         open
         onClose={vi.fn()}
         onSaved={onSaved}
@@ -48,12 +52,17 @@ describe("TaxonomyEditorDrawer", () => {
       />,
     );
 
-    await user.click(screen.getByRole("tab", { name: /DE/ }));
-    expect(screen.getByLabelText("Nazwa")).toHaveAttribute("name", "name_de");
-    await user.type(screen.getByLabelText("Nazwa"), "Calm books");
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Nazwa")).toHaveAttribute("name", "name");
+    expect(screen.getByLabelText("Nazwa")).toHaveValue("Books");
+    await user.clear(screen.getByLabelText("Nazwa"));
+    await user.type(screen.getByLabelText("Nazwa"), "Story books");
     await user.click(screen.getByRole("button", { name: "Zapisz" }));
 
     expect(saveCategoryInlineAction).toHaveBeenCalled();
+    const formData = saveCategoryInlineAction.mock.calls[0][0] as FormData;
+    expect(formData.get("name")).toBe("Story books");
+    expect(formData.has("name_pl")).toBe(false);
     expect(onSaved).toHaveBeenCalled();
   });
 
@@ -80,7 +89,7 @@ describe("TaxonomyEditorDrawer", () => {
     vi.unstubAllGlobals();
   });
 
-  it("supports the same locale and save flow for tags", async () => {
+  it("uses the same single-language save flow for tags", async () => {
     saveTagInlineAction.mockResolvedValue({ ok: true, id: "new-tag" });
     const user = userEvent.setup();
     const onSaved = vi.fn();
@@ -95,10 +104,14 @@ describe("TaxonomyEditorDrawer", () => {
       />,
     );
 
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Nazwa"), "Calm");
     await user.click(screen.getByRole("button", { name: "Zapisz" }));
 
     expect(saveTagInlineAction).toHaveBeenCalled();
+    const formData = saveTagInlineAction.mock.calls[0][0] as FormData;
+    expect(formData.get("name")).toBe("Calm");
+    expect(formData.has("name_de")).toBe(false);
     expect(onSaved).toHaveBeenCalled();
   });
 });
