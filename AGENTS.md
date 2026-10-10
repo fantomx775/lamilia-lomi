@@ -12,6 +12,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 This is a small side project. Optimize for fast iteration and use quality gates proportionally to risk.
 
+## Default outcome: review-ready PR, not a merge
+
+For implementation tasks, autonomously finish the code, focused tests, one independent code review and fix loop, and a non-draft PR ready for human review. Update the GitHub Project issue to `Review` and STOP: do not call `deliver-pr`/`resume-pr`, merge, deploy Production, or close the issue without an explicit user instruction approving delivery. `verify-pr` is the read-only pre-review readiness check; if it reports fixable missing evidence, stale records, or test failures, repair them and retry rather than ending the work with `BLOCKED`. Report `BLOCKED` only for a genuine unresolved external dependency/access obstacle or a confirmed defect that cannot be resolved autonomously. Never claim a check passed when it did not run.
+
 ## Normal PR / feature change
 
 Default verification:
@@ -113,10 +117,10 @@ result or limitation. An absent GitHub check is `NOT RUN`; never describe
 missing checks as passing. Include focused local checks and relevant remote
 check status separately.
 
-Run `node scripts/agent-harness.mjs verify-pr <pull-request>` before merging.
+Run `node scripts/agent-harness.mjs verify-pr <pull-request>` before handing off the PR for human review.
 The command is read-only and exits successfully only for `READY_FOR_MERGE`.
 It requires current-SHA implementation evidence, browser evidence for UI
-changes, two distinct independently tasked AI reviews, no unresolved Critical
+changes, one independently tasked AI code review, no unresolved Critical
 or High findings, applicable migration/dependency evidence, required GitHub
 checks, and GitHub mergeability. Missing optional CI is reported as `NOT RUN`
 and does not block when no checks are required. A different GitHub identity,
@@ -128,14 +132,13 @@ all other gates pass but GitHub rules require an approval that is not present.
 The verifier rereads the PR and blocks if its state, draft status, base, or
 head changed during assessment.
 
-Keep exact-SHA local verification and two independent AI review records in PR
+Keep exact-SHA local verification and one independent AI code-review record in PR
 comments using the v1 JSON markers documented in `docs/agent-harness.md`. A
-new commit makes older records stale. Each reviewer must receive the task goal
-and actual diff independently, examine correctness, regressions, testing, and
-scope, and report Critical/High/Medium/Low findings, required fixes, unresolved
-findings, and the full SHA reviewed. The two records need distinct reviewer
-agent identities; they may be posted by the same GitHub account. Never
-fabricate formal GitHub approvals. Any unresolved Critical/High finding blocks
+new commit makes older records stale. The reviewer receives the task goal and
+actual diff, inspects correctness, regressions, tests and scope, and reports
+Critical/High/Medium/Low findings, required fixes, unresolved findings, and
+the full SHA reviewed. This is code review, not a requirement to rerun tests
+or browser automation in the reviewer session. Never fabricate formal GitHub approvals. Any unresolved Critical/High finding blocks
 merging until the cause is fixed and all required evidence is refreshed.
 
 There is no project-level requirement for a submitted GitHub review from a
@@ -150,12 +153,13 @@ local verification evidence for the new SHA.
 
 The gate reads required checks and review rules from branch protection and
 effective branch rules. If no CI checks are required, passing current-SHA local
-verification and the two AI reviews are sufficient; missing optional checks
+verification and one independent AI review are sufficient; missing optional checks
 remain `NOT RUN`, not CI success. A formal approval from another GitHub
 identity is required only when GitHub itself enforces it. Existing approvals
 count only when they apply to the exact current head under the effective rules;
 latest-push approval rules are satisfied only by an approval of that head.
 
+Only after the user explicitly approves a merge, the separate command
 `node scripts/agent-harness.mjs deliver-pr <pull-request> [--issue <issue>]`
 executes the delivery gate. It reruns `verify-pr`, submits a normal GitHub
 merge request with the verified head SHA, confirms the merge commit, waits for
@@ -207,12 +211,14 @@ using GraphQL when the REST response reaches its 250-commit cap. For enforced
 latest-push approval rules, require GitHub's current `reviewDecision` to be
 `APPROVED`. Trust prior issue-delivery comments only when posted by the PR
 author. AI review records must identify the actual independent agent task IDs,
-bind both base and head SHA, and be checked against the two real agent reports.
+bind both base and head SHA, and be checked against the real independent reviewer's report.
 
 ## UI browser verification
 
 For changes that alter visible UI behavior, run the application and exercise
-the affected user flow in a real browser with Playwright or browser-use.
+the affected user flow with local Playwright by default. Use manual Browser Use
+selectively for complex UI flows or difficult regressions; it is not an
+additional mandatory gate and does not require a Vercel deployment.
 Capture screenshots under `docs/verification/issue-<number>/` (or
 `docs/verification/pr-<number>/` when no issue exists) and include them in the
 PR. Record the tested full SHA, a browser run ID, and for each screenshot its
@@ -290,15 +296,17 @@ Use an existing branch or pull request when it belongs to the issue. Do not
 create parallel work. For a new substantial change, use an isolated
 `codex/<short-slug>` branch/worktree and preserve the primary checkout. Plan
 from the issue’s acceptance criteria, implement the requested scope, and run
-the proportional checks described above. Ask another agent for an independent
-review when it will add useful coverage. Delegate independent research or
+the proportional checks described above. Use one independently tasked code reviewer
+for the finished diff; fix substantive findings and repeat that review if the
+code changes. Delegate independent research or
 implementation slices when they can proceed in parallel without overlapping
 edits. Fix meaningful findings before the pull request.
 
 Record concise progress and blockers on the issue with
 `node scripts/agent-harness.mjs comment <issue-number> --body-file <path>`.
 Open a pull request that references the issue, with a summary and exact
-verification evidence. Set Project Status to `Review` after opening the PR.
+verification evidence. Set Project Status to `Review` after opening the PR. Run `verify-pr`, resolve
+fixable failures, and hand the ready PR to the user without merging.
 Do not manually set `Done` while an issue is open. The delivery command may set
 Project Status to `Done` only after exact-SHA Production deployment, smoke, and
 required migration evidence pass, then it closes the issue. An open PR is

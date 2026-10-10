@@ -4,6 +4,16 @@ This repository uses [GitHub Project #1](https://github.com/users/fantomx775/pro
 as the shared work board. Issues and pull requests hold the durable task record;
 the Project holds workflow status and planning fields.
 
+## Default issue workflow
+
+The default output is an open, non-draft, tested, independently code-reviewed PR.
+Do not merge, deploy Production, run `deliver-pr`/`resume-pr`, or close an issue
+until the user explicitly approves delivery. Recover from missing evidence,
+test failures and routine tool errors autonomously where possible; do not end
+an implementation task with `BLOCKED` just because a fixable verification
+record is missing. Use local focused Playwright for changed UI flows; manual
+Browser Use is optional for difficult regression diagnosis or complex UX.
+
 ## Start from an issue number
 
 Run the read-only discovery command before editing:
@@ -163,13 +173,12 @@ configured and tested, report autonomous dependency resumption as BLOCKED.
    changes in dependencies (not only devDependencies), verify runtime/framework
    compatibility and lockfile alignment, and run focused checks/build as
    needed. Do not add unrelated full-release checks to an ordinary PR.
-7. Have two independently tasked AI sub-agents each read the task goal and
-   actual diff, review correctness, regressions, tests, and scope, and report
-   severity, required fixes, unresolved findings, and the full 40-character
-   SHA. Persist two records with distinct reviewer-agent identities using the
-   v1 marker below. The same GitHub account may post both records. Re-review
-   meaningful fixes on the new SHA. Do not fabricate GitHub approvals.
-8. Fix and retest confirmed findings, then repeat both reviews on the final
+7. Have one independent AI sub-agent code-review the actual diff against the
+   issue goal, correctness, regressions, test coverage and scope. It need not
+   run the tests or browse the app. Persist one current-SHA review record in
+   the v1 format below. Re-review meaningful fixes on the new SHA. Never
+   fabricate GitHub approvals.
+8. Fix and retest confirmed findings, then repeat the code review on the final
    candidate SHA. Any unresolved Critical/High finding or incomplete/stale
    evidence blocks merging. A GitHub review state alone is informational unless
    an effective branch rule requires approval. A formal approval from another
@@ -181,8 +190,9 @@ configured and tested, report autonomous dependency resumption as BLOCKED.
    means every quality gate, enforced GitHub rule, and release obligation
    passes; missing optional CI does not block when no checks are required.
    `READY_FOR_REVIEW` is only for an approval required by GitHub rules. Set the
-   Project issue to `Review` when an open non-draft PR is linked.
-10. Run `node scripts/agent-harness.mjs deliver-pr <pr-number> --issue
+   Project issue to `Review` when an open non-draft PR is linked. STOP here by
+   default and hand the PR to the user for further review.
+10. Only after the user explicitly approves delivery, run `node scripts/agent-harness.mjs deliver-pr <pr-number> --issue
     <issue-number>` for a fully resolved work item. Use a non-closing issue
     reference such as `Part of #29`: before merge, any local-repository
     `Closes`, `Fixes`, or `Resolves` reference in the PR body or a PR commit
@@ -232,16 +242,13 @@ immediately after each marker, inside a fenced `json` block. A new commit
 requires new AI-review and verification records with the exact new head SHA.
 Never fabricate a formal GitHub approval.
 
-Each PR needs two genuinely independent AI reviews. The records must use
-distinct `reviewerAgent` values containing the actual independent agent task
-IDs, both must state that each agent was tasked independently and read the
-actual diff, and both must name the same full head SHA and base SHA. Check the
-records against the two real orchestration reports before posting them. The
-GitHub identity that posts the comments may be the same. The harness validates
-distinct task IDs and record contents; the Codex orchestrator must source those
-IDs from the actual independent task results before posting. GitHub does not
-expose Codex task provenance, so comment fields alone do not prove that a task
-ran.
+Each PR needs one genuinely independent AI code review. Its record must name
+an actual independent agent task ID in `reviewerAgent`, state that the agent
+was tasked independently and read the actual diff, and bind the full head and
+base SHAs. Check it against the real orchestration report before posting it.
+The PR author can publish the review record on GitHub; that is not a formal
+GitHub approval. The harness validates the record's structure, but GitHub
+does not prove that an underlying Codex agent task actually ran.
 Each finding object needs a `summary` and `requiredFix`. Empty arrays mean no
 findings at that severity.
 
@@ -427,7 +434,7 @@ npm test -- scripts/agent-harness.test.mjs --maxWorkers=1
 
 They cover GitHub authentication fallback, exact repository-to-card matching,
 acceptance criteria, issue references, readiness and recovery, migration-aware
-release ordering, two distinct AI reviewers, actual branch approval rules,
+release ordering, one independent AI code reviewer, actual branch approval rules,
 optional and required CI, exact-SHA evidence, UI browser evidence, migration
 obligations, automatic merge, Production readiness/smoke, and issue completion
 only after successful Production verification.
@@ -454,7 +461,7 @@ retain any configured GitHub App or integration identity; an explicit
 "any app" setting remains provider-agnostic. Unsupported, incomplete, or
 unreadable active rules block the merge decision. If no
   required status checks are configured, the output says so and uses passing
-  current-SHA local evidence plus two independent AI reviews as the fallback.
+  current-SHA local evidence plus one independent AI review as the fallback.
   Optional CI may be missing and remains `NOT RUN`; it does not block delivery.
   A different GitHub account is required only when enforced branch rules demand
   an approval. The absence of CI is never reported as green CI. It prints structured

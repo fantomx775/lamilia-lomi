@@ -1217,13 +1217,13 @@ test("reports missing CI as NOT RUN and never as PASS", () => {
   );
 });
 
-test("requires two distinct independently tasked AI reviews and allows them to share the author's GitHub identity", () => {
+test("accepts one independently tasked AI code review and remains compatible with multiple reports", () => {
   const record = cleanAiReviewRecord();
   const comment = structuredComment(AI_REVIEW_MARKER, record, "author");
   const ai = validateAiReview({ headSha: CURRENT_SHA, comments: [comment] });
 
-  assert.equal(ai.status, "BLOCKED");
-  assert.equal(ai.requiredReviewCount, 2);
+  assert.equal(ai.status, "PASS");
+  assert.equal(ai.requiredReviewCount, 1);
   assert.equal(ai.independentReviewCount, 1);
   assert.equal(ai.reviewers[0].reviewerAgent, "reviewer-A");
   assert.equal(ai.reviewers[0].recordedBy, "author");
@@ -1653,10 +1653,10 @@ test("reports configured required checks as missing, pending, failed, or green o
   }).status, "PASS");
 });
 
-test("two AI reviews and local evidence satisfy an unprotected branch without optional CI or owner approval", () => {
+test("one AI code review and local evidence satisfy an unprotected branch without optional CI or owner approval", () => {
   const comments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
-    ...cleanAiReviewComments(),
+    cleanAiReviewComments()[0],
   ];
   const input = {
     pullRequest: cleanPullRequest(),
@@ -3843,7 +3843,7 @@ test("a blocked pre-merge gate prevents the merge API and Production side effect
     verify: async () => ({
       decision: "BLOCKED",
       currentSha: CURRENT_SHA,
-      reasons: ["Two independent reviews are required."],
+      reasons: ["One independent review is required."],
     }),
     waitForDeployment: async () => { productionChecks += 1; return { status: "PASS" }; },
   });
