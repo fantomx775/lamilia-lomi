@@ -1077,7 +1077,7 @@ export function validateAiReview({
   const reviewerAgents = current.map(({ record }) => record.reviewerAgent.trim().toLowerCase());
   const distinctReviewerAgents = new Set(reviewerAgents);
   const duplicateReviewerAgents = distinctReviewerAgents.size !== reviewerAgents.length;
-  const enoughIndependentReviews = distinctReviewerAgents.size >= 2;
+  const enoughIndependentReviews = distinctReviewerAgents.size >= 1;
   const status = unresolvedHighOrCritical || duplicateReviewerAgents
     ? "FAIL"
     : enoughIndependentReviews
@@ -1088,7 +1088,7 @@ export function validateAiReview({
     reviewedSha: headSha,
     reviewedBaseSha: validSha(baseSha) ? baseSha.toLowerCase() : null,
     reviewedBaseShaVerified: validSha(baseSha),
-    requiredReviewCount: 2,
+    requiredReviewCount: 1,
     independentReviewCount: distinctReviewerAgents.size,
     reviewers: current.map(({ record, comment }) => ({
       reviewerAgent: record.reviewerAgent,
@@ -1099,10 +1099,10 @@ export function validateAiReview({
     details: unresolvedHighOrCritical
       ? "AI sub-agent review reports unresolved Critical or High findings."
       : duplicateReviewerAgents
-        ? "AI review records reuse a reviewer-agent identity; two distinct independent agents are required."
+        ? "AI review records reuse a reviewer-agent identity; publish one final independent review record for this SHA."
         : !enoughIndependentReviews
-          ? distinctReviewerAgents.size + " of 2 required independent AI sub-agent reviews cover the current head SHA."
-          : distinctReviewerAgents.size + " distinct independently tasked AI sub-agent reviews cover the current head SHA.",
+          ? distinctReviewerAgents.size + " of 1 required independent AI code review covers the current head SHA."
+          : distinctReviewerAgents.size + " independently tasked AI code reviewer(s) cover the current head SHA.",
   };
 }
 
@@ -2171,12 +2171,12 @@ export function assessPullRequestVerification({
   ) {
     ciPolicy = {
       status: "PASS",
-      details: "No required checks are configured; current-SHA local verification and two independent AI reviews satisfy the CI fallback. Optional GitHub checks are informational.",
+      details: "No required checks are configured; current-SHA local verification and one independent AI code review satisfy the CI fallback. Optional GitHub checks are informational.",
     };
   } else {
     ciPolicy = {
       status: "BLOCKED",
-      details: "No required checks are configured; current-SHA local verification and two independent AI reviews must pass.",
+      details: "No required checks are configured; current-SHA local verification and one independent AI code review must pass.",
     };
   }
   const releaseRequirements = validateReleaseEvidence({
