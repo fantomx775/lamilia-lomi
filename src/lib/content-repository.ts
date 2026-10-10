@@ -68,6 +68,12 @@ export const getPublicProductDetailSnapshotForRequest = cache(
               id,
               slug,
               sort_order,
+              image_asset_id,
+              image_storage_path,
+              image_storage_provider,
+              image_filename,
+              image_content_type,
+              image_size_bytes,
               category_translations ( locale, name, description )
             )
           ),
@@ -325,11 +331,32 @@ function mapProductTranslation(row: DbRow): ProductTranslation {
 }
 
 function mapCategory(row: DbRow, translationRows: DbRow[]): Category {
+  const id = stringValue(row.id);
+  const imageId = optionalString(row.image_asset_id);
+  const storagePath = optionalString(row.image_storage_path);
+  const storageProvider = row.image_storage_provider === "r2_public" ? "r2_public" : "supabase";
+  const imagePath = imageId && storagePath
+    ? storageProvider === "r2_public"
+      ? r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", storagePath) ?? `/api/category-media/${id}?v=${encodeURIComponent(imageId)}`
+      : `/api/category-media/${id}?v=${encodeURIComponent(imageId)}`
+    : null;
+
   return {
-    id: stringValue(row.id),
+    id,
     slug: stringValue(row.slug),
     sortOrder: numberValue(row.sort_order, 100),
     translations: translationRows.map(mapTaxonomyTranslation),
+    ...(imagePath && imageId && storagePath ? {
+      image: {
+        id: imageId,
+        path: imagePath,
+        storagePath,
+        storageProvider,
+        filename: stringValue(row.image_filename),
+        contentType: stringValue(row.image_content_type),
+        sizeBytes: numberValue(row.image_size_bytes, 0),
+      },
+    } : {}),
   };
 }
 

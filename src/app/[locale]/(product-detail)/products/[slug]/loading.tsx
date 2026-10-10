@@ -3,7 +3,7 @@ export default function ProductDetailLoading() {
     <div data-testid="product-detail-loading" aria-busy="true" role="status" aria-live="polite">
       <span className="sr-only">Loading product details</span>
       <section className="mx-auto grid max-w-7xl gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[0.85fr_1.15fr] lg:px-8">
-        <div className="aspect-[3/4] animate-pulse rounded-lg bg-[var(--color-blush)] motion-reduce:animate-none" />
+        <div className="aspect-[8.5/11] animate-pulse rounded-lg bg-[var(--color-blush)] motion-reduce:animate-none" />
         <div className="flex flex-col justify-center space-y-5">
           <div className="h-6 w-48 animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none" />
           <div className="h-12 w-4/5 animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none" />
@@ -15,7 +15,7 @@ export default function ProductDetailLoading() {
         <div className="mx-auto max-w-7xl">
           <div className="mx-auto h-9 max-w-sm animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none" />
           <div className="mt-10 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-            <div className="aspect-[4/3] animate-pulse rounded-lg bg-[var(--color-blush)] motion-reduce:animate-none" />
+            <div className="aspect-square animate-pulse rounded-lg bg-[var(--color-blush)] motion-reduce:animate-none" />
             <div className="aspect-video animate-pulse rounded-lg bg-[var(--color-blush)] motion-reduce:animate-none" />
           </div>
         </div>

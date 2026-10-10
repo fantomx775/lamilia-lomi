@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type AdminMutationResult } from "@/lib/admin-errors";
+import { imageRatioRequirement, readImageDimensions, validateImageDimensions } from "@/lib/image-ratios";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMedia, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
@@ -463,7 +464,30 @@ export function ProductEditor({
       return;
     }
 
-    const files = spec.multiple ? validFiles : validFiles.slice(0, 1);
+    let imageFiles = validFiles;
+    if (kind === "cover" || kind === "gallery") {
+      const dimensionResults = await Promise.all(validFiles.map(async (file) => {
+        try {
+          const validation = validateImageDimensions(kind, await readImageDimensions(file));
+          if (!validation.ok) {
+            selectionErrors.push(`${file.name}: ${validation.error}`);
+            return null;
+          }
+          return file;
+        } catch (error) {
+          selectionErrors.push(`${file.name}: ${error instanceof Error ? error.message : "Nie udało się odczytać obrazu."}`);
+          return null;
+        }
+      }));
+      imageFiles = dimensionResults.filter((file): file is File => file !== null);
+    }
+
+    if (!imageFiles.length) {
+      setMediaErrors((current) => ({ ...current, [kind]: selectionErrors.join(" ") || "Nie wybrano prawidłowego pliku." }));
+      return;
+    }
+
+    const files = spec.multiple ? imageFiles : imageFiles.slice(0, 1);
     markDirty();
     const activeCount = assets.filter((asset) => !asset.removed && asset.kind === kind && asset.status !== "failed").length;
 
@@ -504,15 +528,19 @@ export function ProductEditor({
 
     if (!spec.multiple) {
       const version = nextUploadVersion(kind);
-      setAssets((current) => [
-        ...current.map((asset) => asset.kind === kind && !asset.removed && (asset.status === "queued" || asset.status === "uploading")
+      const nextAssets = [
+        ...assetsRef.current.map((asset) => asset.kind === kind && !asset.removed && (asset.status === "queued" || asset.status === "uploading")
           ? { ...asset, removed: true }
           : asset),
         ...newDrafts,
-      ]);
+      ];
+      assetsRef.current = nextAssets;
+      setAssets(nextAssets);
       await Promise.all(newDrafts.map((draft) => uploadAsset(draft, version)));
     } else {
-      setAssets((current) => [...current, ...newDrafts]);
+      const nextAssets = [...assetsRef.current, ...newDrafts];
+      assetsRef.current = nextAssets;
+      setAssets(nextAssets);
       await Promise.all(newDrafts.map((draft) => uploadAsset(draft)));
     }
   };
@@ -1050,8 +1078,8 @@ function MediaSections({
   onMove: (clientId: string, direction: -1 | 1) => void;
 }) {
   return <div className="grid min-w-0 gap-6">
-    <MediaSection kind="cover" title="OKŁADKA" description="Jedna grafika reprezentująca produkt. Możesz ją później zastąpić lub usunąć." assets={assets} error={errors.cover} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
-    <MediaSection kind="gallery" title="GALERIA" description="Dodaj do 20 obrazów i ustaw ich kolejność przyciskami góra/dół." assets={assets} error={errors.gallery} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="cover" title="OKŁADKA" description={`Jedna grafika reprezentująca produkt. ${imageRatioRequirement("cover")} Możesz ją później zastąpić lub usunąć.`} assets={assets} error={errors.cover} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="gallery" title="GALERIA" description={`Dodaj do 20 obrazów i ustaw ich kolejność przyciskami góra/dół. ${imageRatioRequirement("gallery")}`} assets={assets} error={errors.gallery} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
     <MediaSection kind="video" title="WIDEO FLIPTHROUGH" description="Jedno publiczne wideo pokazujące zawartość produktu." assets={assets} error={errors.video} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
     <MediaSection kind="public_download" title="PUBLICZNE PLIKI DO POBRANIA" description="Pliki dostępne dla każdego odwiedzającego — bez logowania i bez odblokowania." assets={assets} error={errors.public_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
     <MediaSection kind="premium_download" title="MATERIAŁY PREMIUM" description="Prywatne materiały dostępne dopiero po weryfikacji e-maila i odblokowaniu produktu." assets={assets} error={errors.premium_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
@@ -1183,7 +1211,7 @@ function AssetPreview({ asset }: { asset: AssetDraft }) {
     };
   }, [asset.file, asset.path]);
 
-  return <div ref={previewRef} role="img" aria-label={`Podgląd ${asset.filename}`} className="size-20 shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] bg-cover bg-center" />;
+  return <div ref={previewRef} role="img" aria-label={`Podgląd ${asset.filename}`} className="size-20 shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] bg-contain bg-center bg-no-repeat" />;
 }
 
 function AssetVideoPreview({ asset }: { asset: AssetDraft }) {
@@ -1238,7 +1266,7 @@ function mediaTitle(kind: ProductAsset["kind"]) {
 }
 
 function uploadHint(kind: ProductAsset["kind"]) {
-  return { cover: "1 obraz · PNG, JPG lub WEBP · maks. 20 MB", gallery: "Maks. 20 obrazów · PNG, JPG lub WEBP · maks. 20 MB każdy", video: "1 plik · MP4 lub WebM · maks. 50 MB", public_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 20 MB każdy", premium_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 50 MB każdy" }[kind];
+  return { cover: "1 obraz · PNG, JPG lub WEBP · maks. 20 MB · akceptujemy 1:1 i 8.5:11", gallery: "Maks. 20 obrazów · PNG, JPG lub WEBP · maks. 20 MB każdy · akceptujemy 1:1 i 8.5:11", video: "1 plik · MP4 lub WebM · maks. 50 MB", public_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 20 MB każdy", premium_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 50 MB każdy" }[kind];
 }
 
 function AmazonEditor({

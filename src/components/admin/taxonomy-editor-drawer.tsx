@@ -1,14 +1,18 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 import { AdminDrawer } from "@/components/admin/admin-drawer";
 import { AdminEditorSection } from "@/components/admin/admin-editor-foundation";
+import { ImageWithFallback } from "@/components/image-with-fallback";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminMutationResult, type AdminErrorCode } from "@/lib/admin-errors";
-import type { Category, Tag } from "@/lib/types";
+import { imageRatioRequirement, readImageDimensions, validateImageDimensions } from "@/lib/image-ratios";
+import { validateMediaFile } from "@/lib/media-upload";
+import type { Category, CategoryImage, Tag } from "@/lib/types";
 
 type TaxonomyItem = Category | Tag;
 type TaxonomyKind = "category" | "tag";
@@ -75,6 +79,13 @@ function TaxonomyEditorForm({
   const [values, setValues] = useState<TaxonomyContent>(() => buildContent(item));
   const isCategory = kind === "category";
   const itemId = item?.id ?? "";
+  const router = useRouter();
+  const [categoryImage, setCategoryImage] = useState<CategoryImage | undefined>(
+    isCategory ? (item as Category | undefined)?.image : undefined,
+  );
+  const [imagePending, setImagePending] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [imageMessage, setImageMessage] = useState("");
 
   const updateValue = (field: keyof TaxonomyContent, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
@@ -124,6 +135,76 @@ function TaxonomyEditorForm({
 
       onSaved();
     });
+  };
+
+  const uploadCategoryImage = async (file?: File) => {
+    if (!file || !itemId) return;
+    setImageError("");
+    setImageMessage("");
+
+    const fileValidation = validateMediaFile("cover", file);
+    if (!fileValidation.ok) {
+      setImageError(fileValidation.error);
+      return;
+    }
+
+    try {
+      const dimensions = await readImageDimensions(file);
+      const validation = validateImageDimensions("category", dimensions);
+      if (!validation.ok) {
+        setImageError(validation.error);
+        return;
+      }
+    } catch (error) {
+      setImageError(error instanceof Error ? error.message : "Nie udało się odczytać obrazu.");
+      return;
+    }
+
+    setImagePending(true);
+    try {
+      const formData = new FormData();
+      formData.set("categoryId", itemId);
+      formData.set("file", file);
+      const response = await fetch("/api/admin/category-image", { method: "POST", body: formData });
+      const result = await response.json().catch(() => null) as { image?: CategoryImage; cleanupDeferred?: boolean; error?: string } | null;
+      if (!response.ok || !result?.image) {
+        setImageError(result?.error ?? "Nie udało się zapisać obrazu kategorii.");
+        return;
+      }
+      setCategoryImage(result.image);
+      setImageMessage(result.cleanupDeferred ? "Obraz został podmieniony. Poprzedni plik wymaga sprzątnięcia." : "Obraz kategorii został zapisany.");
+      router.refresh();
+    } catch {
+      setImageError("Nie udało się zapisać obrazu kategorii. Spróbuj ponownie.");
+    } finally {
+      setImagePending(false);
+    }
+  };
+
+  const removeCategoryImage = async () => {
+    if (!itemId || !categoryImage || !window.confirm("Czy na pewno usunąć obraz kategorii?")) return;
+    setImagePending(true);
+    setImageError("");
+    setImageMessage("");
+    try {
+      const response = await fetch("/api/admin/category-image", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categoryId: itemId }),
+      });
+      const result = await response.json().catch(() => null) as { cleanupDeferred?: boolean; error?: string } | null;
+      if (!response.ok) {
+        setImageError(result?.error ?? "Nie udało się usunąć obrazu kategorii.");
+        return;
+      }
+      setCategoryImage(undefined);
+      setImageMessage(result?.cleanupDeferred ? "Obraz został odłączony. Plik wymaga sprzątnięcia." : "Obraz kategorii został usunięty.");
+      router.refresh();
+    } catch {
+      setImageError("Nie udało się usunąć obrazu kategorii. Spróbuj ponownie.");
+    } finally {
+      setImagePending(false);
+    }
   };
 
   return (
@@ -177,6 +258,40 @@ function TaxonomyEditorForm({
             </div>
           </AdminEditorSection>
 
+          {isCategory ? (
+            <AdminEditorSection title="Obraz kategorii" description={imageRatioRequirement("category")}>
+              {itemId ? (
+                <div className="grid gap-3">
+                  <div className="relative aspect-square w-full max-w-56 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)]">
+                    <ImageWithFallback src={categoryImage?.path} alt={categoryImage ? `Obraz kategorii ${categoryImage.filename}` : "Podgląd obrazu kategorii"} className="object-contain p-2" sizes="224px" />
+                  </div>
+                  <label className="grid gap-2 text-sm font-medium" htmlFor="category-image-file">
+                    {categoryImage ? "Zastąp obraz" : "Dodaj obraz"}
+                    <input
+                      id="category-image-file"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      disabled={imagePending}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        event.currentTarget.value = "";
+                        void uploadCategoryImage(file);
+                      }}
+                      className="block w-full rounded-md border border-[var(--color-border)] bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-[var(--color-blush)] file:px-3 file:py-1.5"
+                    />
+                  </label>
+                  {categoryImage ? <Button type="button" variant="outline" className="justify-self-start text-red-800" disabled={imagePending} onClick={() => void removeCategoryImage()}>Usuń obraz</Button> : null}
+                  <p className="text-xs leading-5 text-[var(--color-muted)]">PNG, JPG lub WEBP · maks. 20 MB. Kwadrat 1:1, co najmniej 480 × 480 px. Obraz zachowuje oryginalne proporcje.</p>
+                  {imagePending ? <p role="status" className="text-sm text-[var(--color-muted)]">Zapisywanie obrazu…</p> : null}
+                  {imageError ? <p role="alert" className="text-sm text-red-800">{imageError}</p> : null}
+                  {imageMessage ? <p role="status" className="text-sm text-emerald-800">{imageMessage}</p> : null}
+                </div>
+              ) : (
+                <p className="text-sm leading-6 text-[var(--color-muted)]">Najpierw zapisz kategorię, a potem otwórz ją ponownie, aby dodać obraz.</p>
+              )}
+            </AdminEditorSection>
+          ) : null}
+
           {item ? (
             <div className="rounded-lg border border-red-200 bg-red-50/50 p-4">
               <p className="text-sm font-semibold text-red-900">Strefa niebezpieczna</p>
@@ -191,7 +306,7 @@ function TaxonomyEditorForm({
 
       <div className="sticky bottom-0 z-10 flex shrink-0 flex-wrap justify-end gap-2 border-t border-[var(--color-border)] bg-white/95 px-4 py-3 shadow-[0_-4px_16px_rgba(62,52,47,0.06)] backdrop-blur sm:px-6">
         <Button type="button" variant="outline" onClick={onClose} disabled={isPending}>Anuluj</Button>
-        <Button type="submit" disabled={isPending}>{isPending ? "Zapisywanie…" : "Zapisz"}</Button>
+        <Button type="submit" disabled={isPending || imagePending}>{isPending ? "Zapisywanie…" : "Zapisz"}</Button>
       </div>
     </form>
   );

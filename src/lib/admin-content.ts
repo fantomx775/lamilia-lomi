@@ -7,6 +7,7 @@ import {
 import type {
   AmazonLink,
   Category,
+  CategoryImage,
   ContentSnapshot,
   Product,
   ProductAsset,
@@ -265,6 +266,28 @@ export function deleteCategory(categoryId: string): AdminMutationResult {
   return { ok: true, id: categoryId };
 }
 
+export function updateCategoryImageInSnapshot(
+  categoryId: string,
+  image: CategoryImage | undefined,
+): AdminMutationResult {
+  const snapshot = getContentSnapshot();
+  if (!snapshot.categories.some((category) => category.id === categoryId)) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+  }
+
+  saveContentSnapshot({
+    ...snapshot,
+    categories: snapshot.categories.map((category) => {
+      if (category.id !== categoryId) return category;
+      const categoryWithoutImage = { ...category };
+      delete categoryWithoutImage.image;
+      return image ? { ...categoryWithoutImage, image } : categoryWithoutImage;
+    }),
+  });
+
+  return { ok: true, id: categoryId };
+}
+
 export function saveTagFromFormData(formData: FormData): AdminMutationResult {
   const snapshot = getContentSnapshot();
   const existing = snapshot.tags.find((tag) => tag.id === textField(formData, "id"));
@@ -443,6 +466,7 @@ export function buildCategoryFromFormData(
       englishTranslation,
       (translation) => translation.locale,
     ),
+    ...(existing?.image ? { image: existing.image } : {}),
   };
 }
 

@@ -432,7 +432,7 @@ async function readGallerySignature(page: Page) {
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Could not create a canvas for gallery preview checks.");
       context.drawImage(image, 0, 0);
-      const pixel = context.getImageData(16, 16, 1, 1).data;
+      const pixel = context.getImageData(64, 64, 1, 1).data;
       return { label, rgb: [pixel[0], pixel[1], pixel[2]] };
     })),
   );
@@ -598,20 +598,20 @@ function listFilesRecursively(directory: string): string[] {
 }
 
 function makePng(rgb: readonly number[], variant: number) {
-  const width = 128;
-  const height = 96;
+  const width = 640;
+  const height = 640;
   const scanlines = Buffer.alloc(height * (1 + width * 4));
   for (let y = 0; y < height; y += 1) {
     const rowOffset = y * (1 + width * 4);
     scanlines[rowOffset] = 0;
     for (let x = 0; x < width; x += 1) {
       const offset = rowOffset + 1 + x * 4;
-      const border = x < 8 || y < 8 || x >= width - 8 || y >= height - 8;
+      const border = x < 24 || y < 24 || x >= width - 24 || y >= height - 24;
       scanlines[offset] = border ? Math.min(255, rgb[0] + 30) : rgb[0];
       scanlines[offset + 1] = border ? Math.min(255, rgb[1] + 30) : rgb[1];
       scanlines[offset + 2] = border ? Math.min(255, rgb[2] + 30) : rgb[2];
       scanlines[offset + 3] = 255;
-      if (x > 32 + variant * 4 && x < 64 + variant * 4 && y > 28 && y < 68) {
+      if (x > 160 + variant * 24 && x < 320 + variant * 24 && y > 140 && y < 340) {
         scanlines[offset] = 255;
         scanlines[offset + 1] = 255;
         scanlines[offset + 2] = 255;

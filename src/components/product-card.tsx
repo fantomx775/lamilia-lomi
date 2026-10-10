@@ -1,9 +1,8 @@
-import Image from "next/image";
 import Link from "next/link";
 
+import { ImageWithFallback } from "@/components/image-with-fallback";
 import { LinkPendingIndicator } from "@/components/link-pending-indicator";
 import type { Locale } from "@/i18n/routing";
-import { isMediaProxyPath } from "@/lib/media-upload";
 import type { LocalizedProductView } from "@/lib/types";
 
 import { Badge } from "./ui/badge";
@@ -35,14 +34,12 @@ export function ProductCard({
                 : "Opening product details"
         }
       />
-      <div className="relative aspect-[3/4] bg-[var(--color-blush)]">
-        <Image
+      <div className="relative aspect-[8.5/11] bg-[var(--color-blush)]">
+        <ImageWithFallback
           src={product.cover.path}
           alt={product.cover.title ?? product.title}
-          fill
-          loading={imageLoading}
-          unoptimized={isMediaProxyPath(product.cover.path)}
-          className="object-cover"
+          priority={imageLoading === "eager"}
+          className="object-contain"
           sizes={imageSizes ?? "(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"}
         />
       </div>

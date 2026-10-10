@@ -40,6 +40,7 @@ import {
   demoteR2PublicObject,
   finalizeR2StagingUpload,
   promoteR2PrivateObject,
+  uploadR2CategoryImage,
   verifyPublicDelivery,
 } from "./media-r2";
 
@@ -240,5 +241,45 @@ describe("R2 product image storage", () => {
       contentType: "image/jpeg",
       sha256: "f".repeat(64),
     })).rejects.toThrow("bytes that do not match");
+  });
+
+  it("uploads category images through private staging and verifies the public CDN copy", async () => {
+    const categoryId = "22222222-2222-4222-8222-222222222222";
+    const imageId = "33333333-3333-4333-8333-333333333333";
+    const categoryPath = `categories/${categoryId}/image/${imageId}-books.webp`;
+    const bytes = Buffer.from([1, 2, 3, 4]);
+    mocks.send.mockImplementation(async (command) => {
+      const name = (command as { name?: string }).name;
+      if (name === "GetObjectCommand") {
+        return { ContentLength: bytes.length, ContentType: "image/webp", Body: { transformToByteArray: async () => bytes } };
+      }
+      return { ContentLength: bytes.length, ContentType: "image/webp" };
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(bytes, {
+      status: 200,
+      headers: { "content-length": String(bytes.length), "content-type": "image/webp" },
+    })));
+
+    await expect(uploadR2CategoryImage({
+      categoryId,
+      imageId,
+      storagePath: categoryPath,
+      contentType: "image/webp",
+      bytes,
+    })).resolves.toBe(`https://media.example.com/${categoryPath}`);
+
+    expect(mocks.send.mock.calls[0][0]).toMatchObject({
+      input: {
+        Bucket: "lamilia-private",
+        Key: `staging/${categoryPath}`,
+        ContentType: "image/webp",
+        ContentLength: bytes.length,
+      },
+    });
+    expect(mocks.send.mock.calls.some(([command]) =>
+      (command as { name?: string }).name === "CopyObjectCommand" &&
+      (command as { input?: { Bucket?: string } }).input?.Bucket === "lamilia-public",
+    )).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(`https://media.example.com/${categoryPath}`, expect.objectContaining({ method: "GET" }));
   });
 });
