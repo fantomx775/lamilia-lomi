@@ -87,12 +87,12 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await page.goto(`/en/products?q=${encodeURIComponent("split phrase")}`);
     const grid = page.getByTestId("product-catalog-grid");
     await expect(grid.locator(`a[href="/en/products/${productSlug}"]`)).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No products found" })).toHaveCount(0);
+    await expect(page.getByText("No products found", { exact: true })).toHaveCount(0);
     await page.evaluate(() => document.fonts.ready.then(() => undefined));
     await page.screenshot({ path: screenshotPath, fullPage: true, animations: "disabled" });
 
     await page.goto(`/en/products?q=${encodeURIComponent("metadata-only")}`);
-    await expect(page.getByRole("heading", { name: "No products found" })).toBeVisible();
+    await expect(page.getByText("No products found", { exact: true })).toBeVisible();
 
     console.log(
       `PR44_BROWSER_EVIDENCE ${JSON.stringify({
