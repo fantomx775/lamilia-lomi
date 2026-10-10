@@ -111,6 +111,8 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Admin product-write E2E uses fixed demo credentials and requires a loopback app running the local demo backend.",
   );
+  // The local content-store lock can queue this flow behind a full editor run.
+  test.setTimeout(600_000);
   const releaseContentStoreLock = await acquireLocalContentStoreLock();
   const consoleErrors: string[] = [];
   const expectedUploadFallbackErrors: string[] = [];

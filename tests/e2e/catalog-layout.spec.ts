@@ -8,7 +8,8 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
     "Uses the local demo admin session and requires a loopback app running the local demo backend.",
   );
   test.skip(testInfo.project.name !== "chromium", "Checks all viewport sizes in one Chromium session");
-  test.setTimeout(90_000);
+  // The local content-store lock can queue this flow behind a full editor run.
+  test.setTimeout(600_000);
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/pl/login?redirectTo=/admin/settings");
