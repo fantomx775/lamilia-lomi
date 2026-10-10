@@ -1081,7 +1081,7 @@ describe("registration auth action", () => {
     );
   });
 
-  it("recovers a matching account's saved code after switching the product locale", async () => {
+  it("recovers a matching account's saved code in the English-only flow", async () => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     actionMocks.getProductBySlugForRequest.mockResolvedValue({
       id: "product-id",
@@ -1109,19 +1109,19 @@ describe("registration auth action", () => {
     await expectRedirect(
       registerDemoAction(
         registrationForm(
-          "/pl/products/moon-garden-coloring-book",
+          "/en/products/moon-garden-coloring-book",
           undefined,
           "reader@example.com",
-          "pl",
+          "en",
         ),
       ),
-      "/pl/register?error=auth&returnTo=%2Fpl%2Fproducts%2Fmoon-garden-coloring-book",
+      "/en/register?error=auth&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
     );
 
     expect(actionMocks.setAuthResumeIntent).not.toHaveBeenCalled();
     expect(actionMocks.buildSupabaseAuthCallbackUrl).toHaveBeenCalledWith(
-      "pl",
-      "/pl/products/moon-garden-coloring-book",
+      "en",
+      "/en/products/moon-garden-coloring-book",
       expect.objectContaining({ code: "LOMI-BOOK-2026", userId: "reader-user" }),
     );
   });
@@ -1211,7 +1211,7 @@ describe("registration auth action", () => {
     );
   });
 
-  it("does not transfer another account's saved code after switching product locale", async () => {
+  it("does not transfer another account's saved code in the English-only flow", async () => {
     actionMocks.getBackendMode.mockReturnValue("supabase");
     actionMocks.getProductBySlugForRequest.mockResolvedValue({
       id: "product-id",
@@ -1239,13 +1239,13 @@ describe("registration auth action", () => {
     await expectRedirect(
       registerDemoAction(
         registrationForm(
-          "/pl/products/moon-garden-coloring-book",
+          "/en/products/moon-garden-coloring-book",
           undefined,
           "second-reader@example.com",
-          "pl",
+          "en",
         ),
       ),
-      "/pl/register?error=auth&returnTo=%2Fpl%2Fproducts%2Fmoon-garden-coloring-book",
+      "/en/register?error=auth&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
     );
 
     expect(actionMocks.setAuthResumeIntent).not.toHaveBeenCalled();
@@ -1841,13 +1841,13 @@ describe("premium unlock action", () => {
       });
 
       const formData = new FormData();
-      formData.set("locale", "pl");
+      formData.set("locale", "en");
       formData.set("productSlug", "moon-garden-coloring-book");
       formData.set("code", "LOMI-BOOK-2026");
 
       await expectRedirect(
         unlockPremiumAction(formData),
-        "/pl/products/moon-garden-coloring-book?unlocked=1#premium",
+        "/en/products/moon-garden-coloring-book?unlocked=1#premium",
       );
 
       if (shouldClear) {

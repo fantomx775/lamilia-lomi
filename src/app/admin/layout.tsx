@@ -35,7 +35,7 @@ async function AdminAccessLayout({ children }: { children: React.ReactNode }) {
   if (!access) {
     return (
       <>
-        <SiteHeader locale="pl" showLanguageSwitcher={false} />
+        <SiteHeader locale="en" />
         <main className="grid min-h-[calc(100vh-4rem)] place-items-center bg-[var(--color-bg)] px-4">
           <Card className="max-w-md">
             <CardHeader>
@@ -46,7 +46,7 @@ async function AdminAccessLayout({ children }: { children: React.ReactNode }) {
                 Panel admina jest dostępny tylko dla użytkownika z rolą admin.
                 Zaloguj się jako `admin@lamilialomi.test`, aby zobaczyć tryb demo.
               </p>
-              <Link className={buttonClassName({ className: "mt-5" })} href="/pl/login?redirectTo=/admin">
+              <Link className={buttonClassName({ className: "mt-5" })} href="/en/login?redirectTo=/admin">
                 Logowanie demo
               </Link>
             </CardContent>
@@ -58,7 +58,7 @@ async function AdminAccessLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <SiteHeader locale={access.preferredLocale} showLanguageSwitcher={false} />
+      <SiteHeader locale="en" />
       <AdminProductEditorHistoryGuard>
         <DashboardShell nav={nav} title="LamiliaLomi" subtitle="Panel administracyjny">
           {children}

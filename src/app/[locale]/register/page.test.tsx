@@ -112,11 +112,11 @@ describe("Register page", () => {
     );
   });
 
-  it("does not reuse an unlock code from another locale", async () => {
+  it("keeps the unlock code in the only supported locale", async () => {
     pageMocks.getUnlockIntent.mockResolvedValue({
-      locale: "pl",
+      locale: "en",
       productSlug: "moon-garden-coloring-book",
-      returnTo: "/pl/products/moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
       code: "LOMI-BOOK-2026",
       createdAt: Date.now(),
     });
@@ -130,6 +130,8 @@ describe("Register page", () => {
       }),
     );
 
-    expect(view.container.querySelector<HTMLInputElement>('input[name="code"]')).toHaveValue("");
+    expect(view.container.querySelector<HTMLInputElement>('input[name="code"]')).toHaveValue(
+      "LOMI-BOOK-2026",
+    );
   });
 });

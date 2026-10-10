@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { hasAdminAccess } from "@/lib/auth";
 import { getBackendMode } from "@/lib/config";
+import { defaultLocale } from "@/lib/locale";
 import { isMediaKind, mediaBucketForKind, mediaFilenameForDisplay } from "@/lib/media-upload";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "@/lib/media-r2-config";
 import { createSignedR2ReadUrl } from "@/lib/media-r2";
@@ -34,6 +35,13 @@ export async function GET(request: Request, { params }: Props) {
         ? await getProductByIdForRequest(asset.productId, { includeDrafts: true })
         : null;
     }
+
+    if (asset?.locale != null && asset.locale !== defaultLocale && !adminPreviewAuthorized) {
+      adminPreviewAuthorized = hasAdminAccess(await getDemoSession());
+      if (!adminPreviewAuthorized) {
+        return notFoundMediaResponse();
+      }
+    }
   } catch (error) {
     return unavailableMediaResponse(assetId, undefined, error);
   }
@@ -42,6 +50,7 @@ export async function GET(request: Request, { params }: Props) {
     !asset ||
     !product ||
     (product.status !== "published" && !adminPreviewAuthorized) ||
+    (asset.locale != null && asset.locale !== defaultLocale && !adminPreviewAuthorized) ||
     asset.isPublic !== true ||
     asset.isActive === false ||
     asset.kind === "premium_download"
@@ -97,7 +106,10 @@ export async function GET(request: Request, { params }: Props) {
     const publicUrl = r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", storagePath);
     if (publicUrl) {
       const response = NextResponse.redirect(publicUrl);
-      response.headers.set("Cache-Control", "private, max-age=30");
+      response.headers.set(
+        "Cache-Control",
+        adminPreviewAuthorized ? "private, no-store" : "private, max-age=30",
+      );
       return response;
     }
   }

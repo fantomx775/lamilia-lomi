@@ -97,11 +97,11 @@ describe("Login page registration CTA", () => {
     expect(href).not.toContain("LOMI-BOOK-2026");
   });
 
-  it("does not reuse an unlock code from another locale", async () => {
+  it("keeps the unlock code in the only supported locale", async () => {
     pageMocks.getUnlockIntent.mockResolvedValue({
-      locale: "pl",
+      locale: "en",
       productSlug: "moon-garden-coloring-book",
-      returnTo: "/pl/products/moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
       code: "LOMI-BOOK-2026",
       createdAt: Date.now(),
     });
@@ -115,7 +115,9 @@ describe("Login page registration CTA", () => {
       }),
     );
 
-    expect(view.container.querySelector<HTMLInputElement>('input[name="code"]')).toHaveValue("");
+    expect(view.container.querySelector<HTMLInputElement>('input[name="code"]')).toHaveValue(
+      "LOMI-BOOK-2026",
+    );
   });
 
   it("shows demo verification guidance without a non-functional resend form", async () => {

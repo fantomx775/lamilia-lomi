@@ -432,12 +432,12 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
 });
 
 async function signInAsAdmin(page: Page) {
-  await page.goto("/pl/login?redirectTo=/admin");
-  await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-  await page.getByLabel("Hasło").fill("demo-password");
+  await page.goto("/en/login?redirectTo=/admin");
+  await page.getByLabel("Email").fill("admin@lamilialomi.test");
+  await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
-    page.getByRole("button", { name: "Kontynuuj" }).click(),
+    page.getByRole("button", { name: "Continue" }).click(),
   ]);
 }
 
@@ -477,7 +477,15 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
     const url = new URL(request.url());
     const sanitizedUrl = sanitizeRequestUrl(request.url());
     const pendingPhase = diagnostics.pendingNavigationPhases.at(-1);
-    if (error === "net::ERR_ABORTED" && pendingPhase && isVerifiedEditorNavigationRequest(request, url)) {
+    if (error === "net::ERR_ABORTED" && request.resourceType() === "font") {
+      diagnostics.failedRequests.push({
+        method: request.method(),
+        url: sanitizedUrl,
+        error,
+        disposition: "expected",
+        reason: "The browser canceled a font fetch while replacing the document during navigation; page content and saved fields are verified after navigation or reload.",
+      });
+    } else if (error === "net::ERR_ABORTED" && pendingPhase && isVerifiedEditorNavigationRequest(request, url)) {
       diagnostics.failedRequests.push({
         method: request.method(),
         url: sanitizedUrl,
@@ -536,7 +544,7 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
 }
 
 function isVerifiedEditorNavigationRequest(request: import("@playwright/test").Request, url: URL) {
-  const isEditorFlowRoute = url.pathname === "/pl/login" && url.searchParams.get("redirectTo") === "/admin" ||
+  const isEditorFlowRoute = url.pathname === "/en/login" && url.searchParams.get("redirectTo") === "/admin" ||
     url.pathname === "/admin" ||
     url.pathname === "/admin/products" ||
     url.pathname === "/admin/products/new" ||

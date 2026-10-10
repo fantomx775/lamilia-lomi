@@ -1,6 +1,8 @@
 import type { Locale } from "@/i18n/routing";
 import type { MediaStorageProvider } from "./media-r2-config";
 
+export type StoredLocale = "en" | "pl" | "de" | "es";
+
 export type ProductStatus = "draft" | "published" | "archived";
 export type Audience = "kids" | "adults";
 export type AssetKind =
@@ -13,7 +15,7 @@ export type UserRole = "user" | "admin";
 export type ReminderStatus = "pending" | "sent" | "failed" | "cancelled";
 
 export type ProductTranslation = {
-  locale: Locale;
+  locale: StoredLocale;
   title: string;
   shortDescription: string;
   longDescription: string;
@@ -22,7 +24,7 @@ export type ProductTranslation = {
 };
 
 export type TaxonomyTranslation = {
-  locale: Locale;
+  locale: StoredLocale;
   name: string;
   description?: string;
 };
@@ -53,7 +55,7 @@ export type ProductAsset = {
   filename: string;
   contentType: string;
   sizeBytes?: number;
-  locale?: Locale;
+  locale?: StoredLocale;
   title?: string;
   sortOrder: number;
   isPublic: boolean;
@@ -80,7 +82,7 @@ export type PremiumCode = {
 export type StaticPageRecord = {
   id: string;
   slug: "privacy" | "terms";
-  locale: Locale;
+  locale: StoredLocale;
   title: string;
   body: string;
   updatedAt: string;

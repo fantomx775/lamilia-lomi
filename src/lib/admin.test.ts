@@ -348,6 +348,24 @@ describe("admin behavior", () => {
 
   it("builds one page update and leaves existing public locale records intact", () => {
     const snapshot = getSeedContentSnapshot();
+    snapshot.staticPages.push(
+      {
+        id: "legacy-privacy-pl",
+        slug: "privacy",
+        locale: "pl",
+        title: "Regulamin prywatności",
+        body: "Stored legacy Polish privacy content.",
+        updatedAt: "2026-05-31T00:00:00.000Z",
+      },
+      {
+        id: "legacy-terms-pl",
+        slug: "terms",
+        locale: "pl",
+        title: "Regulamin",
+        body: "Stored legacy Polish terms content.",
+        updatedAt: "2026-05-31T00:00:00.000Z",
+      },
+    );
     const form = new FormData();
     form.set("slug", "privacy");
     form.set("title", "Updated Privacy Policy");
@@ -368,7 +386,9 @@ describe("admin behavior", () => {
         expect.objectContaining({ slug: "terms", locale: "pl", title: "Regulamin" }),
       ]),
     );
-    expect(snapshot.staticPages.find((page) => page.slug === "privacy" && page.locale === "pl")?.body).toContain("LamiliaLomi przechowuje");
+    expect(snapshot.staticPages.find((page) => page.slug === "privacy" && page.locale === "pl")?.body).toBe(
+      "Stored legacy Polish privacy content.",
+    );
 
     form.set("slug", "terms");
     const protectedResult = buildStaticPagesFromFormData(form, snapshot, "privacy");
@@ -379,6 +399,7 @@ describe("admin behavior", () => {
   it("updates English taxonomy content without dropping stored translations", () => {
     const snapshot = getSeedContentSnapshot();
     const category = snapshot.categories[0];
+    category.translations.push({ locale: "pl", name: "Kolorowanki" });
     const categoryForm = new FormData();
     categoryForm.set("id", category.id);
     categoryForm.set("name", "Updated books");
@@ -394,6 +415,7 @@ describe("admin behavior", () => {
     );
 
     const tag = snapshot.tags[0];
+    tag.translations.push({ locale: "pl", name: "Bonus do druku" });
     const tagForm = new FormData();
     tagForm.set("id", tag.id);
     tagForm.set("name", "Updated tag");

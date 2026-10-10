@@ -9,17 +9,74 @@ import {
   parseCatalogFilters,
 } from "./products";
 import type { ContentSnapshot } from "./types";
+import { getSeedContentSnapshot } from "./local-content";
 
 describe("product catalog behavior", () => {
   it("hides draft products from public product lookup", () => {
     expect(getLocalizedProductView("secret-draft-product", "en")).toBeNull();
   });
 
-  it("falls back to English when Polish translation is missing", () => {
+  it("serves English content for retired locale requests", () => {
     const product = getLocalizedProductView("mindful-mandalas-for-adults", "pl");
 
     expect(product?.title).toBe("Mindful Mandalas for Adults");
-    expect(product?.audienceLabel).toBe("Dorośli");
+    expect(product?.audienceLabel).toBe("Adults");
+  });
+
+  it("does not fall back to a stored non-English translation when English is missing", () => {
+    const snapshot = getSeedContentSnapshot();
+    const product = snapshot.products.find(
+      (item) => item.slug === "moon-garden-coloring-book",
+    );
+
+    expect(product).toBeDefined();
+    product!.translations = [
+      {
+        locale: "pl",
+        title: "Nie powinien wyświetlić się polski tytuł",
+        shortDescription: "Polish legacy description",
+        longDescription: "Polish legacy description",
+      },
+    ];
+
+    expect(
+      getLocalizedProductViewFromSnapshot(
+        snapshot,
+        "moon-garden-coloring-book",
+        "pl",
+      ),
+    ).toBeNull();
+  });
+
+  it("does not expose legacy non-English media on English product pages", () => {
+    const snapshot = getSeedContentSnapshot();
+    const product = snapshot.products.find(
+      (item) => item.slug === "moon-garden-coloring-book",
+    );
+
+    expect(product).toBeDefined();
+    product!.coverAssetId = "legacy-polish-cover";
+    product!.assets.push({
+      ...product!.assets[0],
+      id: "legacy-polish-cover",
+      locale: "pl",
+      title: "Polish cover",
+    });
+    product!.assets.push({
+      ...product!.assets[1],
+      id: "legacy-polish-gallery",
+      locale: "pl",
+      title: "Polish gallery image",
+    });
+
+    const view = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "moon-garden-coloring-book",
+      "en",
+    );
+
+    expect(view?.cover.id).not.toBe("legacy-polish-cover");
+    expect(view?.gallery.some((asset) => asset.id === "legacy-polish-gallery")).toBe(false);
   });
 
   it("filters, searches, and sorts catalog results through public query params", () => {
@@ -92,7 +149,7 @@ describe("product catalog behavior", () => {
     expect(product?.cover.path).toBe("/assets/covers/cover-placeholder.svg");
   });
 
-  it("surfaces active public downloads and respects locale fallback", () => {
+  it("surfaces English public downloads for retired locale requests", () => {
     const product = getLocalizedProductView("moon-garden-coloring-book", "de");
 
     expect(product?.publicDownloads).toEqual([

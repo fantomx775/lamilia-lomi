@@ -22,7 +22,7 @@ import {
   setAuthResumeIntent,
 } from "@/lib/auth-resume";
 import type { AuthResumeIntent } from "@/lib/auth-resume";
-import { isSupportedLocale, normalizeLocale } from "@/lib/locale";
+import { normalizeLocale } from "@/lib/locale";
 import { redeemPremiumCodeForRequest } from "@/lib/premium-request";
 import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
 import { scheduleReviewReminder } from "@/lib/reminders";
@@ -37,7 +37,6 @@ import {
 import {
   productSlugFromReturnTo,
   sanitizeReturnTo,
-  switchLocalePath,
 } from "@/lib/return-to";
 
 export async function startUnlockAuthAction(formData: FormData) {
@@ -60,103 +59,6 @@ export async function startUnlockAuthAction(formData: FormData) {
   });
 
   redirect(`/${locale}/${mode}?returnTo=${encodeURIComponent(returnTo)}`);
-}
-
-export async function switchLocaleAction(formData: FormData) {
-  const sourceLocaleInput = text(formData, "sourceLocale");
-  const targetLocaleInput = text(formData, "targetLocale");
-
-  if (!isSupportedLocale(sourceLocaleInput) || !isSupportedLocale(targetLocaleInput)) {
-    redirect("/en/library");
-  }
-
-  const sourceLocale = sourceLocaleInput;
-  const targetLocale = targetLocaleInput;
-  const requestedHash = text(formData, "hash");
-  let currentUrl: URL;
-
-  try {
-    currentUrl = new URL(
-      `${text(formData, "pathname")}${withSearchPrefix(text(formData, "search"))}`,
-      "http://lamilialomi.local",
-    );
-  } catch {
-    redirect(`/${targetLocale}/library`);
-  }
-
-  const safeCurrent = sanitizeReturnTo(
-    `${currentUrl.pathname}${currentUrl.search}`,
-    sourceLocale,
-    `/${sourceLocale}/library`,
-  );
-  const safeCurrentUrl = new URL(safeCurrent, "http://lamilialomi.local");
-  const productSlug = productSlugFromReturnTo(safeCurrent, sourceLocale);
-  const nestedReturnTo =
-    currentUrl.searchParams.get("returnTo") ?? currentUrl.searchParams.get("redirectTo");
-  const safeNestedReturnTo = nestedReturnTo
-    ? sanitizeReturnTo(nestedReturnTo, sourceLocale, `/${sourceLocale}/library`)
-    : undefined;
-  const nestedProductSlug = safeNestedReturnTo
-    ? productSlugFromReturnTo(safeNestedReturnTo, sourceLocale)
-    : undefined;
-  const contextProductSlug = productSlug ?? nestedProductSlug;
-  const translatedPath = switchLocalePath(
-    safeCurrentUrl.pathname,
-    sourceLocale,
-    targetLocale,
-  );
-  const translatedNestedReturnTo = safeNestedReturnTo
-    ? switchLocalePath(safeNestedReturnTo, sourceLocale, targetLocale)
-    : undefined;
-  const targetSearchParams = new URLSearchParams();
-
-  for (const key of ["returnTo", "redirectTo", "error", "unlock", "step", "unlocked"]) {
-    const value = currentUrl.searchParams.get(key);
-
-    if (!value) {
-      continue;
-    }
-
-    if ((key === "returnTo" || key === "redirectTo") && translatedNestedReturnTo) {
-      targetSearchParams.set(key, translatedNestedReturnTo);
-    } else if (key !== "returnTo" && key !== "redirectTo") {
-      targetSearchParams.set(key, value.slice(0, 128));
-    }
-  }
-
-  const targetSearch = targetSearchParams.toString();
-  const premiumFragment = productSlug && requestedHash === "#premium" ? "#premium" : "";
-  const targetPath = `${translatedPath}${targetSearch ? `?${targetSearch}` : ""}${premiumFragment}`;
-
-  if (contextProductSlug) {
-    const product = await getProductBySlugForRequest(contextProductSlug);
-
-    if (!product) {
-      await clearUnlockIntent();
-      redirect(`/${targetLocale}/products`);
-    }
-
-    const existingIntent = await getUnlockIntent();
-    const code = productSlug
-      ? currentUrl.searchParams.get("code") ??
-        currentUrl.searchParams.get("premiumCode") ??
-        undefined
-      : undefined;
-
-    await setUnlockIntent({
-      locale: targetLocale,
-      productSlug: product.slug,
-      returnTo: productSlug ? targetPath : translatedNestedReturnTo,
-      code:
-        code ||
-        (existingIntent?.locale === sourceLocale &&
-        existingIntent.productSlug === product.slug
-          ? existingIntent.code
-          : undefined),
-    });
-  }
-
-  redirect(targetPath);
 }
 
 export async function loginDemoAction(formData: FormData) {
@@ -991,14 +893,6 @@ function rawText(formData: FormData, key: string) {
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function withSearchPrefix(value: string) {
-  if (!value) {
-    return "";
-  }
-
-  return value.startsWith("?") ? value : `?${value}`;
 }
 
 function appendQueryPath(path: string, key: string, value: string) {

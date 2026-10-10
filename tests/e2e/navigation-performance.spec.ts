@@ -11,16 +11,16 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("direct unknown Product Detail renders a localized route-layer soft 404", async ({ page }) => {
-  const response = await page.goto("/pl/products/not-a-real-product");
+test("direct unknown Product Detail renders an English route-layer soft 404", async ({ page }) => {
+  const response = await page.goto("/en/products/not-a-real-product");
 
   // App Router streams the route loading boundary before the page-level notFound()
   // can run. Keep the DB lookup out of Proxy and assert the framework-native soft 404.
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole("heading", { name: "Nie znaleziono produktu" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Przeglądaj katalog" })).toHaveAttribute(
+  await expect(page.getByRole("heading", { name: "Product not found" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Browse catalog" })).toHaveAttribute(
     "href",
-    "/pl/products",
+    "/en/products",
   );
   const robotsContent = await page.locator('meta[name="robots"]').evaluateAll((elements) =>
     elements.map((element) => element.getAttribute("content")),
@@ -92,12 +92,12 @@ test("admin sidebar navigation reaches the main resource pages with immediate ac
   test.skip(testInfo.project.name !== "chromium", "Admin sidebar navigation is verified at desktop width");
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/pl/login?redirectTo=/admin");
-  await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-  await page.getByLabel("Hasło").fill("demo-password");
+  await page.goto("/en/login?redirectTo=/admin");
+  await page.getByLabel("Email").fill("admin@lamilialomi.test");
+  await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
-    page.getByRole("button", { name: "Kontynuuj" }).click(),
+    page.getByRole("button", { name: "Continue" }).click(),
   ]);
 
   const routes = [
