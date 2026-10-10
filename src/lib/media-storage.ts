@@ -575,7 +575,7 @@ async function readRowsForStoragePath(storagePath: string) {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("product_assets")
-    .select("id, product_id, kind, path, storage_provider, is_active, is_public, products!inner(status)")
+    .select("id, product_id, kind, path, storage_provider, is_active, is_public, products!product_assets_product_id_fkey!inner(status)")
     .eq("path", storagePath);
   if (error) throw new Error(error.message);
   return data ?? [];
@@ -651,7 +651,7 @@ async function restoreR2PublicAssetIfEligible(asset: ProductAsset) {
   const supabase = await createClient();
   const { data: current, error } = await supabase
     .from("product_assets")
-    .select("id, path, storage_provider, is_active, is_public, content_type, products!inner(status)")
+    .select("id, path, storage_provider, is_active, is_public, content_type, products!product_assets_product_id_fkey!inner(status)")
     .eq("id", asset.id)
     .eq("path", storagePath)
     .maybeSingle();
