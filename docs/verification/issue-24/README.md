@@ -2,44 +2,31 @@
 
 ## Browser evidence
 
-Local Playwright capture run: `issue24-local-chromium-mobile-20261010-review-fix`.
-The same run covered Chromium desktop (1280×720) and Pixel 7 mobile emulation (412×839). The combined run passed 6/6 tests across the new category image lifecycle flow, existing gallery flow, and image-order regression flow.
+The latest local Playwright run (`issue24-local-chromium-mobile-20261010-deferred-cleanup`) passed 6/6 tests on the Issue #24 source candidate. Chromium desktop used 1280×720; Pixel 7 mobile emulation used 412×839. The run covered category upload, replacement, storefront display, removal, the deferred-cleanup warning, admin product thumbnails, and gallery ordering through upload, save, reload, and edit.
 
-The category flow verified invalid 4:3 rejection, square upload, replacement, storefront display, and removal. It checked that uploaded previews retain their 640 px source dimensions and that the category display uses a square frame. The image-order regression uploaded, reordered, saved, reloaded, and edited an existing product. Gallery screenshots cover the catalog, product detail cover, and enlarged gallery preview.
-
-Screenshots from this run:
+Latest-run screenshots:
 
 - `chromium/category-admin-uploaded.png`
 - `chromium/category-storefront.png`
 - `chromium/admin-product-thumbnails.png`
+- `chromium/category-cleanup-warning.png`
 - `mobile/category-admin-uploaded.png`
 - `mobile/category-storefront.png`
 - `mobile/admin-product-thumbnails.png`
-- `product-gallery/chromium/product-catalog.png`
-- `product-gallery/chromium/product-detail-cover.png`
-- `product-gallery/chromium/product-gallery-preview.png`
-- `product-gallery/mobile/product-catalog.png`
-- `product-gallery/mobile/product-detail-cover.png`
-- `product-gallery/mobile/product-gallery-preview.png`
-- `product-image-order/chromium/chromium-01-four-images-uploaded.png`
-- `product-image-order/chromium/chromium-03-fifth-image-uploaded-and-reordered.png`
-- `product-image-order/chromium/chromium-06-saved-product-reloaded.png`
-- `product-image-order/mobile/mobile-01-four-images-uploaded.png`
-- `product-image-order/mobile/mobile-03-fifth-image-uploaded-and-reordered.png`
-- `product-image-order/mobile/mobile-06-saved-product-reloaded.png`
+- `mobile/category-cleanup-warning.png`
 
-Visual review confirmed readable desktop and mobile admin lists, square category previews, portrait product covers, contained gallery previews, and no visible stretching or broken images. The local Next development badge appears in some captures.
+The product gallery and image-order screenshot sets remain from the earlier `issue24-local-chromium-mobile-20261010-review-fix` capture. Their flows were rechecked in the latest run; those surfaces were not changed by the deferred-cleanup fix.
+
+Visual review confirmed portrait and square images retain their proportions, category previews fit their square frame, gallery images remain contained, and desktop/mobile product lists stay usable. The deferred-cleanup warning is readable at both sizes and includes the category ID needed for follow-up. Some captures show the local Next.js development badge.
 
 ## Checks
 
-- Focused Vitest: 8 files, 78 tests passed (image ratios/dimensions, R2 media configuration/upload behavior, category persistence/API, and admin editor behavior).
-- After the independent-review fix, the same focused Vitest set passed again: 8 files, 80 tests.
-- Changed-file lint and TypeScript check passed.
-- Production build passed with local-only values: `LAMILIA_BACKEND=local` and `NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000`.
-- `git diff --check` passed.
-- Local Supabase validation applied the repository foundation migration and `20261010184114_category_image_media.sql` to an isolated local project, then confirmed all six nullable category media columns and three constraints. No hosted database or production R2 assets/configuration were touched.
-- Applying the complete pre-existing migration chain is blocked by `20260815120000_supabase_production_foundation.sql`, which attempts `ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY` and fails locally with SQLSTATE `42501` (not owner of `storage.objects`). The targeted foundation plus Issue #24 migration passed.
-- R2 category upload behavior was verified with the existing R2 pipeline through mocked SDK tests; no live R2 account or assets were used.
-- Browser inspection found no console errors or broken image loads. The image-order flow logged the expected `net::ERR_ABORTED` navigation cancellation when the new product save navigated to its editor; it did not affect persistence or rendering.
+- Focused Vitest: 9 files, 85 tests passed, including image-ratio/dimension validation, category persistence and cleanup, R2-compatible storage behavior, admin UI, and deletion-warning coverage.
+- TypeScript check, changed-file lint, production build, and `git diff --check` passed.
+- Local Playwright: 6/6 passed across desktop and mobile.
+- The browser run logged disabled gallery-order arrows at their expected bounds and an expected `net::ERR_ABORTED` request when product creation navigated to the new editor. Assertions confirmed saved product/image ordering. It also showed the known development hydration warning involving `caret-color` on the admin search input; the existing Issue #30 browser diagnostics classify that warning as known noise. No page errors or broken image loads were found.
+- Local Supabase validation applied the foundation and `20261010184114_category_image_media.sql` migrations to an isolated local project, then confirmed all six nullable category media columns and three constraints. No hosted database or production R2 assets/configuration were touched.
+- R2 category upload behavior was verified through the existing pipeline with mocked SDK tests; no live R2 account or assets were used.
+- Applying the complete pre-existing local migration chain is blocked by `20260815120000_supabase_production_foundation.sql`, which attempts to alter `storage.objects` and fails with SQLSTATE `42501` (not owner). The targeted foundation plus Issue #24 migration passed.
 
-The production migration remains unapplied for the deployment phase.
+The production migration remains intentionally unapplied for the deployment phase and must precede deployment of code that reads the new columns.
