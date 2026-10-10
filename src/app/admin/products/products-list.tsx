@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 
 import { AdminResourceList } from "@/components/admin/admin-resource-list";
+import { ImageWithFallback } from "@/components/image-with-fallback";
 import type { DataTableColumn } from "@/components/admin/data-table";
 import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
@@ -16,6 +17,7 @@ export type AdminProductListRow = {
   status: ProductStatus;
   audience: Audience;
   productType: string;
+  coverPath?: string;
 };
 
 const statusLabels: Record<ProductStatus, string> = {
@@ -39,8 +41,15 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
         href={`/admin/products/${row.id}`}
         className="group block min-w-0 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
       >
-        <p className="font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
-        <p className="mt-1 truncate text-xs text-[var(--color-muted)]">{row.slug}</p>
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="relative size-12 shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]">
+            <ImageWithFallback src={row.coverPath} alt={row.title} className="object-contain p-0.5" sizes="48px" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</span>
+            <span className="mt-1 block truncate text-xs text-[var(--color-muted)]">{row.slug}</span>
+          </span>
+        </span>
       </Link>
     ),
   },
@@ -89,6 +98,9 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
           aria-label={`Edytuj produkt ${row.title}`}
         >
           <div className="flex min-w-0 items-start justify-between gap-3">
+            <span className="relative size-14 shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]">
+              <ImageWithFallback src={row.coverPath} alt={row.title} className="object-contain p-0.5" sizes="56px" />
+            </span>
             <div className="min-w-0">
               <p className="truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
               <p className="mt-1 truncate text-xs text-[var(--color-muted)]">{row.slug}</p>

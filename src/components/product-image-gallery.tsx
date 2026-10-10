@@ -117,14 +117,14 @@ export function ProductImageGallery({
               onClick={() => setActiveIndex(index)}
               className="group block w-full rounded-[1.25rem] text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
             >
-              <span className="relative block aspect-[4/3] overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
+              <span className="relative block aspect-square overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
                 <Image
                   src={image.path}
                   alt={image.alt}
                   fill
                   loading={index === 0 ? "eager" : undefined}
                   unoptimized={image.unoptimized}
-                  className="object-cover transition duration-500 ease-out group-hover:scale-[1.02] group-focus-visible:scale-[1.02]"
+                  className="object-contain"
                   sizes="(min-width: 1024px) 32vw, (min-width: 640px) 50vw, 100vw"
                 />
                 <span

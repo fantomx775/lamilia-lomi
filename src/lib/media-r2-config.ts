@@ -116,9 +116,37 @@ export function r2PublicMediaUrl(baseUrl: string, storagePath: string) {
 }
 
 export function isSafeMediaStoragePath(value: string) {
+  const segments = value.split("/");
+  const safeSegments = segments.length === 4 && segments.every((segment) => segment && segment !== "." && segment !== "..");
+  if (!safeSegments) return false;
+
+  if (segments[0] === "products") {
+    return true;
+  }
+
+  return isSafeCategoryImageStoragePath(value);
+}
+
+export function isSafeCategoryImageStoragePath(value: string, categoryId?: string, imageId?: string) {
+  const segments = value.split("/");
+  const [root, ownerId, kind, filename] = segments;
+  if (
+    segments.length !== 4 ||
+    root !== "categories" ||
+    kind !== "image" ||
+    (categoryId && ownerId !== categoryId) ||
+    !isUuid(ownerId)
+  ) {
+    return false;
+  }
+
+  const imagePrefix = imageId ? `${imageId}-` : "";
   return (
-    value.startsWith("products/") &&
-    value.split("/").length === 4 &&
-    value.split("/").every((segment) => segment && segment !== "." && segment !== "..")
+    filename.startsWith(imagePrefix) &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-[A-Za-z0-9_-][A-Za-z0-9._-]{0,160}$/i.test(filename)
   );
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }

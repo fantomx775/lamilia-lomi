@@ -22,7 +22,7 @@ export default function LocaleLoading() {
           {Array.from({ length: 2 }, (_, index) => (
             <div
               key={index}
-              className="aspect-[3/4] animate-pulse rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] motion-reduce:animate-none"
+              className="aspect-[8.5/11] animate-pulse rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] motion-reduce:animate-none"
             />
           ))}
         </div>

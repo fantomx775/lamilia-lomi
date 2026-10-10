@@ -1,12 +1,11 @@
 import { ArrowRight, Sparkles } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 
 import { ProductCard } from "@/components/product-card";
 import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
-import { isMediaProxyPath } from "@/lib/media-upload";
+import { ImageWithFallback } from "@/components/image-with-fallback";
 import {
   getAudienceLabel,
   getAudiencePath,
@@ -63,14 +62,12 @@ export default async function HomePage({ params }: Props) {
               key={product!.id}
               className="group overflow-hidden rounded-lg border border-[var(--color-border)] bg-white/80 p-3 shadow-[0_18px_46px_rgba(62,52,47,0.1)] transition-[transform,box-shadow] duration-150 motion-reduce:transition-none hover:-translate-y-0.5 motion-reduce:hover:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
             >
-              <div className="relative aspect-[3/4] overflow-hidden rounded-md bg-[var(--color-blush)]">
-                <Image
+              <div className="relative aspect-[8.5/11] overflow-hidden rounded-md bg-[var(--color-blush)]">
+                <ImageWithFallback
                   src={product!.cover.path}
                   alt={product!.cover.title ?? product!.title}
-                  fill
-                  loading="eager"
-                  unoptimized={isMediaProxyPath(product!.cover.path)}
-                  className="object-cover transition duration-500 motion-reduce:transition-none group-hover:scale-[1.02] motion-reduce:group-hover:scale-100"
+                  priority
+                  className="object-contain"
                   sizes="(min-width: 1024px) 28vw, 48vw"
                 />
               </div>
