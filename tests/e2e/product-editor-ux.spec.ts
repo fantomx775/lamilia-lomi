@@ -352,6 +352,19 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         page.off("dialog", acceptDialogs);
       }
     }
+    if (productSaved) {
+      for (const request of browserDiagnostics.failedRequests) {
+        if (
+          request.method === "POST" &&
+          new URL(request.url).pathname === "/admin/products/new" &&
+          request.error === "net::ERR_ABORTED" &&
+          request.disposition === "unresolved"
+        ) {
+          request.disposition = "expected";
+          request.reason = "Next canceled the create Server Action while opening the saved editor; persisted fields were verified after reload and the product was deleted during cleanup.";
+        }
+      }
+    }
     await testInfo.attach("browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
       contentType: "application/json",
