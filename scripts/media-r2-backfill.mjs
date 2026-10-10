@@ -254,7 +254,7 @@ async function backfillProductImages() {
   for (let offset = 0; ; offset += 200) {
     const { data, error } = await supabase
       .from("product_assets")
-      .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider, is_active, is_public, products!inner(status)")
+      .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider, is_active, is_public, products!product_assets_product_id_fkey!inner(status)")
       .in("kind", ["cover", "gallery"])
       .order("product_id")
       .order("id")
@@ -518,7 +518,7 @@ async function hasOtherEligiblePublicReference(row) {
 async function readBackfillAsset(assetId) {
   const { data, error } = await supabase
     .from("product_assets")
-    .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider, is_active, is_public, products!inner(status)")
+    .select("id, product_id, kind, bucket, path, content_type, size_bytes, storage_provider, is_active, is_public, products!product_assets_product_id_fkey!inner(status)")
     .eq("id", assetId)
     .maybeSingle();
   if (error) throw new Error("Could not refresh the current product image row.");
