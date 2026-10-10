@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { createClient } from "@supabase/supabase-js";
 
+import { parseBackfillArgs, parseReconcileProductId } from "./media-r2-backfill-cli.mjs";
 import {
   assertR2TargetConfirmation,
   cleanupFailedPublicBackfill,
@@ -26,13 +27,7 @@ import {
   verifyPublicMediaDeliveryBytes,
 } from "./media-r2-backfill-integrity.mjs";
 
-const args = new Set(process.argv.slice(2));
-const values = new Map();
-for (let index = 2; index < process.argv.length; index += 1) {
-  if (process.argv[index].startsWith("--") && process.argv[index + 1] && !process.argv[index + 1].startsWith("--")) {
-    values.set(process.argv[index], process.argv[index + 1]);
-  }
-}
+const { args, values } = parseBackfillArgs(process.argv.slice(2));
 
 const apply = args.has("--apply");
 const rollback = args.has("--rollback");
@@ -46,12 +41,14 @@ if (rollback && reconcilePublic) {
 
 const includeR2 = true;
 const useR2 = apply || rollback || reconcilePublic;
-const reconcileProductId = values.get("--product-id")?.trim();
+let reconcileProductId;
+try {
+  reconcileProductId = parseReconcileProductId(args, values);
+} catch (error) {
+  fail(error instanceof Error ? error.message : "--product-id requires a product UUID.");
+}
 if (reconcileProductId && !reconcilePublic) {
   fail("--product-id is supported only with --reconcile-public.");
-}
-if (reconcileProductId && !isUuid(reconcileProductId)) {
-  fail("--product-id requires a product UUID.");
 }
 const config = readConfig({ includeR2, requireR2Credentials: useR2 });
 const projectRef = new URL(config.supabaseUrl).hostname.split(".")[0];
