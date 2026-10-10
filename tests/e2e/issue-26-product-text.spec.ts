@@ -53,9 +53,14 @@ test("product text fields count, warn, survive failed saves, and persist on crea
   });
   page.on("requestfailed", (request) => {
     const failure = request.failure()?.errorText ?? "failed";
-    // Next redirects successful server actions by aborting the POST after it
-    // starts navigation; that is expected and the destination is asserted below.
-    if (failure !== "net::ERR_ABORTED") {
+    // Next may cancel a server-action POST or an in-flight RSC navigation when
+    // a later navigation supersedes it; the destination and saved values are
+    // asserted below. Other request failures remain unexpected.
+    const expectedNextNavigationAbort = failure === "net::ERR_ABORTED" && (
+      (request.method() === "POST" && Boolean(request.headers()["next-action"])) ||
+      (request.method() === "GET" && new URL(request.url()).searchParams.has("_rsc"))
+    );
+    if (!expectedNextNavigationAbort) {
       unexpectedFailedRequests.push(`${request.method()} ${request.url()}: ${failure}`);
     }
   });
@@ -186,6 +191,7 @@ test("product text fields count, warn, survive failed saves, and persist on crea
       page.on("dialog", acceptDialog);
       try {
         await page.goto(productPath);
+        await page.evaluate(() => document.fonts.ready.then(() => true));
         const deleteButton = page.getByRole("button", { name: "Usuń produkt" });
         await Promise.all([
           page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1", { timeout: 15_000 }),
