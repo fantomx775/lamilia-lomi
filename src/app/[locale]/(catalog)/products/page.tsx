@@ -26,14 +26,16 @@ export default async function ProductsPage({ params, searchParams }: Props) {
   const categories = snapshot.categories
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((category) => ({
-      slug: category.slug,
-      name: getTranslation(category.translations, locale).name,
-    }));
-  const tags = snapshot.tags.map((tag) => ({
-    slug: tag.slug,
-    name: getTranslation(tag.translations, locale).name,
-  }));
+    .flatMap((category) => {
+      const translation = getTranslation(category.translations, locale);
+
+      return translation ? [{ slug: category.slug, name: translation.name }] : [];
+    });
+  const tags = snapshot.tags.flatMap((tag) => {
+    const translation = getTranslation(tag.translations, locale);
+
+    return translation ? [{ slug: tag.slug, name: translation.name }] : [];
+  });
   const productTypes = getAllProductTypesFromSnapshot(snapshot);
   const desktopColumnClass = {
     3: "xl:grid-cols-3",

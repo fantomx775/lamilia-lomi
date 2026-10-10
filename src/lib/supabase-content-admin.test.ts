@@ -159,6 +159,15 @@ describe("Supabase content admin mutations", () => {
       ...seededProduct,
       id: productId,
       slug: "existing-product",
+      translations: [
+        ...seededProduct.translations,
+        {
+          locale: "pl" as const,
+          title: "Legacy Polish product",
+          shortDescription: "Stored legacy translation.",
+          longDescription: "Stored legacy translation.",
+        },
+      ],
       coverAssetId: "",
       videoAssetId: undefined,
       assets: [],
@@ -187,12 +196,22 @@ describe("Supabase content admin mutations", () => {
     const payload = mocks.rpc.mock.calls[0][1] as { product_state: { translations: Array<{ locale: string; title: string }> } };
     expect(payload.product_state.translations).toEqual(expect.arrayContaining([
       expect.objectContaining({ locale: "en", title: "Updated English product" }),
-      expect.objectContaining({ locale: "pl", title: seededProduct.translations.find((translation) => translation.locale === "pl")?.title }),
+      expect.objectContaining({ locale: "pl", title: "Legacy Polish product" }),
     ]));
   });
 
   it("saves only the English static page while retaining other locale rows", async () => {
-    const seededPages = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "terms");
+    const seededPages = [
+      ...getSeedContentSnapshot().staticPages.filter((page) => page.slug === "terms"),
+      {
+        id: "legacy-terms-pl",
+        slug: "terms" as const,
+        locale: "pl" as const,
+        title: "Legacy Polish terms",
+        body: "Stored legacy terms content.",
+        updatedAt: "2026-05-31T00:00:00.000Z",
+      },
+    ];
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [],
       categories: [],

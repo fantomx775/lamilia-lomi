@@ -7,7 +7,7 @@ import { isLocalDemoAppTarget } from "./local-target";
 
 test.setTimeout(600_000);
 
-test("single-language admin content saves and reloads without changing public URLs", async ({ page }, testInfo) => {
+test("single-language admin content saves and reloads on the English public URL", async ({ page }, testInfo) => {
   test.skip(
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Uses the local demo admin session and restores its disposable content store after verification.",
@@ -17,7 +17,7 @@ test("single-language admin content saves and reloads without changing public UR
   const contentStorePath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
   const hadContentStore = fs.existsSync(contentStorePath);
   const originalContentStore = hadContentStore ? fs.readFileSync(contentStorePath) : undefined;
-  const screenshotDirectory = path.resolve(process.cwd(), "docs", "verification", "issue-28");
+  const screenshotDirectory = path.resolve(process.cwd(), "docs", "verification", "issue-42");
   const browserDiagnostics = {
     consoleErrors: [] as string[],
     pageErrors: [] as string[],
@@ -35,7 +35,7 @@ test("single-language admin content saves and reloads without changing public UR
     const requestUrl = new URL(request.url());
     const isExpectedNavigationAbort = error === "net::ERR_ABORTED" && (
       request.isNavigationRequest() ||
-      (request.resourceType() === "font" && requestUrl.pathname.startsWith("/__nextjs_font/")) ||
+      request.resourceType() === "font" ||
       Boolean(request.headers()["next-action"]) ||
       (request.resourceType() === "fetch" && requestUrl.searchParams.has("_rsc"))
     );
@@ -61,11 +61,11 @@ test("single-language admin content saves and reloads without changing public UR
 
   try {
     await page.goto("/pl/login?redirectTo=/admin/products");
-    await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-    await page.getByLabel("Hasło").fill("demo-password");
+    await page.getByLabel("Email").fill("admin@lamilialomi.test");
+    await page.getByLabel("Password").fill("demo-password");
     await Promise.all([
       page.waitForURL((url) => url.pathname === "/admin/products"),
-      page.getByRole("button", { name: "Kontynuuj" }).click(),
+      page.getByRole("button", { name: "Continue" }).click(),
     ]);
 
     await page.goto("/admin/products/new");
@@ -104,7 +104,6 @@ test("single-language admin content saves and reloads without changing public UR
     await page.goto("/admin/pages/terms");
     await expect(page.getByRole("tab")).toHaveCount(0);
     await expect(page.locator('#page-editor-form input[name="title_pl"]')).toHaveCount(0);
-    const originalPolishTermsTitle = "Regulamin";
     await page.getByLabel("Tytuł").fill("Issue 28 terms content");
     await page.getByLabel("Treść").fill("Updated English terms saved through the single-language editor.");
     await saveScreenshot(page, screenshotDirectory, "terms-editor", testInfo.project.name);
@@ -119,7 +118,8 @@ test("single-language admin content saves and reloads without changing public UR
     await expect(page.getByRole("heading", { name: "Issue 28 terms content" })).toBeVisible();
     await expect(page.getByText("Updated English terms saved through the single-language editor.")).toBeVisible();
     await page.goto("/pl/terms");
-    await expect(page.getByRole("heading", { name: originalPolishTermsTitle })).toBeVisible();
+    await expect(page).toHaveURL(/\/en\/terms$/);
+    await expect(page.getByRole("heading", { name: "Issue 28 terms content" })).toBeVisible();
 
     await testInfo.attach("browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),

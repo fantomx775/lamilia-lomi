@@ -5,22 +5,17 @@ import { Suspense } from "react";
 import type { Locale } from "@/i18n/routing";
 import { getHeaderAccountStateForRequest } from "@/lib/session.server";
 
-import { LanguageSwitcher } from "./language-switcher";
 import { buttonClassName } from "./ui/button";
 
-export function SiteHeader({
-  locale,
-  showLanguageSwitcher = true,
-}: {
+export function SiteHeader({ locale }: {
   locale: Locale;
-  showLanguageSwitcher?: boolean;
 }) {
   const labels = {
-    products: locale === "pl" ? "Katalog" : "Catalog",
-    library: locale === "pl" ? "Moja biblioteka" : "My Library",
-    account: locale === "pl" ? "Moje konto" : "Account",
-    login: locale === "pl" ? "Logowanie" : "Log in",
-    navigation: locale === "pl" ? "Główna nawigacja" : "Primary navigation",
+    products: "Catalog",
+    library: "My Library",
+    account: "Account",
+    login: "Log in",
+    navigation: "Primary navigation",
   };
 
   return (
@@ -53,7 +48,6 @@ export function SiteHeader({
           </Link>
         </nav>
         <div className="flex items-center gap-2">
-          {showLanguageSwitcher ? <LanguageSwitcher locale={locale} /> : null}
           <Suspense fallback={<HeaderAccountFallback />}>
             <HeaderAccountLink locale={locale} labels={labels} />
           </Suspense>

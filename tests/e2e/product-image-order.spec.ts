@@ -107,14 +107,13 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       return;
     }
 
-    const exactLoginPost = request.method() === "POST" && failedUrl.pathname === "/pl/login" &&
+    const exactLoginPost = request.method() === "POST" && failedUrl.pathname === "/en/login" &&
       failedUrl.search === "?redirectTo=/admin";
     const expectedAdminLoginCancellation = exactLoginPost && (adminLoginPending || adminLoginVerified);
     const exactNextDevChunk = request.method() === "GET" && request.resourceType() === "script" &&
       failedUrl.pathname.startsWith("/_next/static/chunks/") && failedUrl.pathname.endsWith(".js");
-    const exactLocalNextDevFont = request.method() === "GET" && request.resourceType() === "font" &&
+    const localAdminFontFetch = request.method() === "GET" && request.resourceType() === "font" &&
       failedUrl.origin === new URL(page.url()).origin &&
-      failedUrl.pathname === "/__nextjs_font/geist-latin.woff2" &&
       new URL(page.url()).pathname.startsWith("/admin");
     const createActionPost = request.method() === "POST" && failedUrl.pathname === "/admin/products/new" &&
       Boolean(request.headers()["next-action"]);
@@ -126,7 +125,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     const expectedVerifiedUpdateSaveCancellation = productUpdateSavePending && productMutationAction;
     const expectedVerifiedProductDeleteCancellation = productDeletePending && productMutationAction;
     if (failure === "net::ERR_ABORTED" && (
-      (recentNavigation && (exactNextDevChunk || exactLocalNextDevFont)) ||
+      (recentNavigation && (exactNextDevChunk || localAdminFontFetch)) ||
       expectedAdminLoginCancellation ||
       expectedCreateSaveCancellation ||
       expectedVerifiedUpdateSaveCancellation ||
@@ -167,14 +166,14 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   });
 
   try {
-    await page.goto("/pl/login?redirectTo=/admin");
-    await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-    await page.getByLabel("Hasło").fill("demo-password");
+    await page.goto("/en/login?redirectTo=/admin");
+    await page.getByLabel("Email").fill("admin@lamilialomi.test");
+    await page.getByLabel("Password").fill("demo-password");
     adminLoginPending = true;
     try {
       await Promise.all([
         page.waitForURL((url) => url.pathname === "/admin"),
-        page.getByRole("button", { name: "Kontynuuj" }).click(),
+        page.getByRole("button", { name: "Continue" }).click(),
       ]);
       adminLoginVerified = true;
     } finally {

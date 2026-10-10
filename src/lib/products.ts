@@ -20,11 +20,7 @@ export function isPublicProduct(product: Product) {
   return product.status === "published";
 }
 
-export function getAudienceLabel(audience: Audience, locale: Locale) {
-  if (locale === "pl") {
-    return audience === "kids" ? "Dzieci" : "Dorośli";
-  }
-
+export function getAudienceLabel(audience: Audience) {
   return audience === "kids" ? "Kids" : "Adults";
 }
 
@@ -35,12 +31,8 @@ export function getAudiencePath(audience: Audience, locale: Locale) {
 export function getTranslation<T extends ProductTranslation | TaxonomyTranslation>(
   translations: T[],
   locale: Locale,
-): T {
-  return (
-    translations.find((translation) => translation.locale === locale) ??
-    translations.find((translation) => translation.locale === defaultLocale) ??
-    translations[0]
-  );
+): T | undefined {
+  return translations.find((translation) => translation.locale === locale);
 }
 
 export function pickPrimaryAmazonLink(product: Product) {
@@ -95,7 +87,28 @@ export function getLocalizedProductViewFromSnapshot(
   }
 
   const translation = getTranslation(product.translations, locale);
-  const activeAssets = product.assets.filter((asset) => asset.isActive !== false);
+  if (!translation) {
+    return null;
+  }
+
+  const localizedCategories = product.categoryIds.flatMap((categoryId) => {
+    const category = categories.find((item) => item.id === categoryId);
+    const categoryTranslation = category && getTranslation(category.translations, locale);
+
+    return category && categoryTranslation
+      ? [{ ...category, name: categoryTranslation.name }]
+      : [];
+  });
+  const localizedTags = product.tagIds.flatMap((tagId) => {
+    const tag = tags.find((item) => item.id === tagId);
+    const tagTranslation = tag && getTranslation(tag.translations, locale);
+
+    return tag && tagTranslation ? [{ ...tag, name: tagTranslation.name }] : [];
+  });
+  const activeAssets = localizedAssets(
+    product.assets.filter((asset) => asset.isActive !== false),
+    locale,
+  );
   const cover =
     activeAssets.find((asset) => asset.id === product.coverAssetId) ??
     createCoverPlaceholder(product);
@@ -105,7 +118,7 @@ export function getLocalizedProductViewFromSnapshot(
     slug: product.slug,
     status: product.status,
     audience: product.audience,
-    audienceLabel: getAudienceLabel(product.audience, locale),
+    audienceLabel: getAudienceLabel(product.audience),
     productType: product.productType,
     title: translation.title,
     shortDescription: translation.shortDescription,
@@ -115,27 +128,14 @@ export function getLocalizedProductViewFromSnapshot(
     cover,
     gallery: sortAssets(activeAssets.filter((asset) => asset.kind === "gallery")),
     video: activeAssets.find((asset) => asset.kind === "video"),
-    publicDownloads: localizedAssets(
+    publicDownloads: sortAssets(
       activeAssets.filter((asset) => asset.kind === "public_download"),
-      locale,
     ),
     premiumAssets: sortAssets(
       activeAssets.filter((asset) => asset.kind === "premium_download"),
     ),
-    categories: product.categoryIds
-      .map((categoryId) => categories.find((category) => category.id === categoryId))
-      .filter((category): category is NonNullable<typeof category> => Boolean(category))
-      .map((category) => ({
-        ...category,
-        name: getTranslation(category.translations, locale).name,
-      })),
-    tags: product.tagIds
-      .map((tagId) => tags.find((tag) => tag.id === tagId))
-      .filter((tag): tag is NonNullable<typeof tag> => Boolean(tag))
-      .map((tag) => ({
-        ...tag,
-        name: getTranslation(tag.translations, locale).name,
-      })),
+    categories: localizedCategories,
+    tags: localizedTags,
     amazonLinks: product.amazonLinks,
     primaryAmazonLink: pickPrimaryAmazonLink(product),
     reviewDelayDays: product.reviewDelayDays,
@@ -145,9 +145,8 @@ export function getLocalizedProductViewFromSnapshot(
 export function localizedAssets(assets: ProductAsset[], locale: Locale) {
   const global = assets.filter((asset) => !asset.locale);
   const exact = assets.filter((asset) => asset.locale === locale);
-  const fallback = assets.filter((asset) => asset.locale === defaultLocale);
 
-  return sortAssets([...global, ...(exact.length ? exact : fallback)]);
+  return sortAssets([...global, ...exact]);
 }
 
 export function getPublishedProductViews(locale: Locale) {
@@ -296,7 +295,6 @@ export function buildProductMetadata(
       canonical,
       languages: {
         en: `${appUrl}/en/products/${product.slug}`,
-        pl: `${appUrl}/pl/products/${product.slug}`,
       },
     },
     openGraph: {
@@ -349,17 +347,19 @@ export function getCategoryOptions(locale: Locale) {
     .categories
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((category) => ({
-      slug: category.slug,
-      name: getTranslation(category.translations, locale).name,
-    }));
+    .flatMap((category) => {
+      const translation = getTranslation(category.translations, locale);
+
+      return translation ? [{ slug: category.slug, name: translation.name }] : [];
+    });
 }
 
 export function getTagOptions(locale: Locale) {
-  return getContentSnapshot().tags.map((tag) => ({
-    slug: tag.slug,
-    name: getTranslation(tag.translations, locale).name,
-  }));
+  return getContentSnapshot().tags.flatMap((tag) => {
+    const translation = getTranslation(tag.translations, locale);
+
+    return translation ? [{ slug: tag.slug, name: translation.name }] : [];
+  });
 }
 
 function sortAssets(assets: ProductAsset[]) {

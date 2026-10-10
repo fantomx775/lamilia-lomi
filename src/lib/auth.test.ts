@@ -66,7 +66,7 @@ describe("auth behavior", () => {
         locale: "pl",
         redirectTo: "/en/products/moon-garden-coloring-book",
       }),
-    ).toBe("/pl/library");
+    ).toBe("/en/products/moon-garden-coloring-book#premium");
   });
 
   it("allows registration only in a product unlock context", () => {

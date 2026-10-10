@@ -10,7 +10,7 @@ describe("QR unlock funnel state machine", () => {
   it("models the happy path from QR entry to authorized download", () => {
     let snapshot: UnlockFunnelSnapshot = {
       state: "qr_entry",
-      locale: "pl",
+      locale: "en",
       productSlug: "moon-garden-coloring-book",
     };
 
@@ -22,7 +22,7 @@ describe("QR unlock funnel state machine", () => {
     snapshot = transitionUnlockFunnel(snapshot, { type: "library_opened" });
     snapshot = transitionUnlockFunnel(snapshot, { type: "download_authorized" });
 
-    expect(snapshot).toMatchObject({ state: "download_allowed", locale: "pl" });
+    expect(snapshot).toMatchObject({ state: "download_allowed", locale: "en" });
   });
 
   it("keeps invalid products and failed redemption in controlled denial/input states", () => {

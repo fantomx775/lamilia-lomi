@@ -2,7 +2,11 @@ import createMiddleware from "next-intl/middleware";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { routing } from "./i18n/routing";
-import { isUnlocalizedAuthPath, shouldBypassLocaleRouting } from "./lib/proxy-paths";
+import {
+  getEnglishOnlyRedirectUrl,
+  isUnlocalizedAuthPath,
+  shouldBypassLocaleRouting,
+} from "./lib/proxy-paths";
 import { hasSupabaseAuthCookie } from "./lib/supabase/auth-cookie";
 import { updateSession } from "./lib/supabase/proxy";
 
@@ -10,6 +14,12 @@ const handleI18nRouting = createMiddleware(routing);
 
 export default function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const englishOnlyRedirect = getEnglishOnlyRedirectUrl(request.nextUrl);
+
+  if (englishOnlyRedirect) {
+    return NextResponse.redirect(englishOnlyRedirect, 308);
+  }
+
   const isAuthRequest = isUnlocalizedAuthPath(pathname);
   const response = shouldBypassLocaleRouting(pathname)
     ? NextResponse.next({ request })

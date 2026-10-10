@@ -43,7 +43,7 @@ describe("Supabase auth resume contract", () => {
     const url = new URL(callback);
 
     expect(url.pathname).toBe("/auth/callback");
-    expect(url.searchParams.get("locale")).toBe("pl");
+    expect(url.searchParams.get("locale")).toBe("en");
     expect(url.searchParams.has("code")).toBe(false);
   });
 
@@ -209,7 +209,7 @@ describe("Supabase auth resume contract", () => {
       getAccountBoundResumeCode(
         intent,
         { id: "user-123", email: "reader@example.com" },
-        "pl",
+        "en",
         "moon-garden-coloring-book",
       ),
     ).toBe("LOMI-BOOK-2026");
