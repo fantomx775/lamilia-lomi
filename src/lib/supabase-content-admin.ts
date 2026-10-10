@@ -427,18 +427,30 @@ export async function removeCategoryImageForRequest(categoryId: string): Promise
 
 export async function deleteCategoryForRequest(categoryId: string): Promise<AdminMutationResult> {
   return runAdminMutation("category deletion", async () => {
-    if (getBackendMode() === "local") {
-      return deleteCategory(categoryId);
-    }
-
+    const backendMode = getBackendMode();
+    const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
     const snapshot = await getAdminContentSnapshot();
-    if (!snapshot.categories.some((category) => category.id === categoryId)) {
+    const category = snapshot.categories.find((entry) => entry.id === categoryId);
+    if (!category) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
     }
 
-    const supabase = await createClient();
-    await run(supabase.from("categories").delete().eq("id", categoryId), "category deletion");
-    return { ok: true, id: categoryId };
+    if (backendMode === "local") {
+      const result = deleteCategory(categoryId);
+      if (!result.ok) return result;
+    } else {
+      const supabase = await createClient();
+      await run(supabase.from("categories").delete().eq("id", categoryId), "category deletion");
+    }
+
+    const cleanupDeferred = category.image
+      ? !await cleanupCategoryImageSafely({
+        categoryId,
+        image: category.image,
+        authorizationToken,
+      })
+      : false;
+    return { ok: true, id: categoryId, cleanupDeferred };
   });
 }
 
