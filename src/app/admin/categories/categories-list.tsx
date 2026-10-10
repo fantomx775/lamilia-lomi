@@ -8,6 +8,7 @@ import { AdminResourceList } from "@/components/admin/admin-resource-list";
 import { TaxonomyEditorDrawer, type DeleteAction, type SaveAction } from "@/components/admin/taxonomy-editor-drawer";
 import type { DataTableColumn } from "@/components/admin/data-table";
 import { Button } from "@/components/ui/button";
+import type { AdminMutationResult } from "@/lib/admin-errors";
 import type { Category } from "@/lib/types";
 
 export type AdminCategoryListRow = {
@@ -46,16 +47,19 @@ export function CategoriesResourceList({
   items = [],
   saveAction,
   deleteAction,
+  initialCleanupDeferredCategoryId,
 }: {
   rows: AdminCategoryListRow[];
   items?: Category[];
   saveAction?: SaveAction;
   deleteAction?: DeleteAction;
+  initialCleanupDeferredCategoryId?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [restoreFocusElement, setRestoreFocusElement] = useState<HTMLElement | null>(null);
+  const [cleanupDeferredCategoryId, setCleanupDeferredCategoryId] = useState<string | null>(initialCleanupDeferredCategoryId ?? null);
   const editingItem = items.find((item) => item.id === editingId);
 
   const openCreate = (trigger: HTMLElement) => {
@@ -77,8 +81,24 @@ export function CategoriesResourceList({
     router.refresh();
   };
 
+  const handleDeleted = (result: Extract<AdminMutationResult, { ok: true }>) => {
+    setOpen(false);
+    setCleanupDeferredCategoryId(result.cleanupDeferred ? result.id : null);
+    router.refresh();
+  };
+
   return (
     <>
+      {cleanupDeferredCategoryId ? (
+        <div role="alert" className="mb-4 flex items-start justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p>
+            Kategorię usunięto, ale jej plik obrazu nie został usunięty z magazynu. Sprzątnięcie wymaga interwencji administratora; przekaż mu ID kategorii: <code className="font-mono">{cleanupDeferredCategoryId}</code>.
+          </p>
+          <button type="button" className="shrink-0 font-medium underline" onClick={() => setCleanupDeferredCategoryId(null)}>
+            Zamknij komunikat
+          </button>
+        </div>
+      ) : null}
       <AdminResourceList
         title="Kategorie"
         description="Przeglądaj kategorie przypisane do katalogu produktów."
@@ -111,6 +131,7 @@ export function CategoriesResourceList({
         open={open}
         onClose={() => setOpen(false)}
         onSaved={handleSaved}
+        onDeleted={handleDeleted}
         saveAction={saveAction}
         deleteAction={deleteAction}
         restoreFocusElement={restoreFocusElement}

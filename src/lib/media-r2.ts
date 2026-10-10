@@ -12,7 +12,12 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import type { AssetKind } from "./types";
-import { getR2StorageConfig, isSafeMediaStoragePath, r2PublicMediaUrl } from "./media-r2-config";
+import {
+  getR2StorageConfig,
+  isSafeCategoryImageStoragePath,
+  isSafeMediaStoragePath,
+  r2PublicMediaUrl,
+} from "./media-r2-config";
 
 const signedUrlTtlSeconds = 15 * 60;
 
@@ -57,12 +62,62 @@ export async function createSignedR2Upload(input: {
   };
 }
 
+export async function uploadR2CategoryImage(input: {
+  categoryId: string;
+  imageId: string;
+  storagePath: string;
+  contentType: string;
+  bytes: Uint8Array;
+}) {
+  if (
+    !isUuid(input.categoryId) ||
+    !isUuid(input.imageId) ||
+    !isSafeCategoryImageStoragePath(input.storagePath, input.categoryId, input.imageId)
+  ) {
+    throw new Error("Invalid R2 category image path.");
+  }
+
+  const config = getR2StorageConfig();
+  const stagingPath = `staging/${input.storagePath}`;
+  try {
+    await getClient().send(new PutObjectCommand({
+      Bucket: config.privateBucket,
+      Key: stagingPath,
+      Body: Buffer.from(input.bytes),
+      ContentType: input.contentType,
+      ContentLength: input.bytes.byteLength,
+      CacheControl: "private, no-store",
+    }));
+    await finalizeR2StagingUpload({
+      stagingPath,
+      storagePath: input.storagePath,
+      contentType: input.contentType,
+      sizeBytes: input.bytes.byteLength,
+    });
+    await promoteR2PrivateObject(input.storagePath, input.contentType);
+
+    const publicUrl = r2PublicMediaUrl(config.publicBaseUrl, input.storagePath);
+    if (!publicUrl) throw new Error("Invalid R2 category image URL.");
+    return publicUrl;
+  } catch (error) {
+    try {
+      await deleteR2Media(input.storagePath, true);
+    } catch {
+      console.error("Nie udało się posprzątać nieukończonego obrazu kategorii R2.", {
+        categoryId: input.categoryId,
+        imageId: input.imageId,
+      });
+    }
+    throw error;
+  }
+}
+
 export async function assertR2StagingUpload(input: {
   stagingPath: string;
   contentType: string;
   sizeBytes: number;
 }) {
-  if (!input.stagingPath.startsWith("staging/products/") || !isSafeMediaStoragePath(input.stagingPath.slice("staging/".length))) {
+  if (!input.stagingPath.startsWith("staging/") || !isSafeMediaStoragePath(input.stagingPath.slice("staging/".length))) {
     throw new Error("Invalid R2 staging media path.");
   }
 
@@ -86,7 +141,7 @@ export async function finalizeR2StagingUpload(input: {
 }) {
   if (
     input.stagingPath !== `staging/${input.storagePath}` ||
-    !input.stagingPath.startsWith("staging/products/") ||
+    !input.stagingPath.startsWith("staging/") ||
     !isSafeMediaStoragePath(input.storagePath)
   ) {
     throw new Error("Invalid R2 media path.");

@@ -614,15 +614,15 @@ function listFilesRecursively(directory: string): string[] {
 }
 
 function makePng() {
-  const width = 128;
-  const height = 96;
+  const width = 640;
+  const height = 640;
   const scanlines = Buffer.alloc(height * (1 + width * 4));
   for (let y = 0; y < height; y += 1) {
     const rowOffset = y * (1 + width * 4);
     scanlines[rowOffset] = 0;
     for (let x = 0; x < width; x += 1) {
       const offset = rowOffset + 1 + x * 4;
-      const accent = x > 32 && x < 96 && y > 24 && y < 72;
+      const accent = x > 160 && x < 480 && y > 120 && y < 360;
       scanlines[offset] = accent ? 255 : 196;
       scanlines[offset + 1] = accent ? 255 : 93;
       scanlines[offset + 2] = accent ? 255 : 66;

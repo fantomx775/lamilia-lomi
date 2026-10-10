@@ -1,11 +1,11 @@
 import { Download, FileText, LockKeyhole } from "lucide-react";
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
-import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { AmazonLink } from "@/components/amazon-link";
+import { ImageWithFallback } from "@/components/image-with-fallback";
 import { ProductImageGallery } from "@/components/product-image-gallery";
 import { ProductVideoPreview } from "@/components/product-video-preview";
 import { ScrollToFragment } from "@/components/scroll-to-fragment";
@@ -294,14 +294,12 @@ export default async function ProductPage({ params, searchParams }: Props) {
       />
       <section className="mx-auto grid max-w-7xl gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[0.85fr_1.15fr] lg:px-8">
         <div className="space-y-5">
-          <div className="relative aspect-[3/4] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] shadow-[0_18px_46px_rgba(62,52,47,0.12)]">
-            <Image
+          <div className="relative aspect-[8.5/11] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] shadow-[0_18px_46px_rgba(62,52,47,0.12)]">
+            <ImageWithFallback
               src={product.cover.path}
               alt={product.cover.title ?? product.title}
-              fill
-              loading="eager"
-              unoptimized={isMediaProxyPath(product.cover.path)}
-              className="object-cover"
+              priority
+              className="object-contain"
               sizes="(min-width: 1024px) 38vw, 100vw"
             />
           </div>
@@ -311,7 +309,8 @@ export default async function ProductPage({ params, searchParams }: Props) {
           <div className="flex flex-wrap gap-2">
             <Badge>{product.audienceLabel}</Badge>
             {product.categories.map((category) => (
-              <Badge key={category.id} className="bg-white/85">
+              <Badge key={category.id} className="gap-2 bg-white/85">
+                {category.image ? <span className="relative size-5 overflow-hidden rounded-full bg-[var(--color-bg)]"><ImageWithFallback src={category.image.path} alt="" className="object-contain" sizes="20px" /></span> : null}
                 {category.name}
               </Badge>
             ))}

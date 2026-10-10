@@ -27,11 +27,22 @@ export type TaxonomyTranslation = {
   description?: string;
 };
 
+export type CategoryImage = {
+  id: string;
+  path: string;
+  storagePath: string;
+  storageProvider: "supabase" | "r2_public";
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+};
+
 export type Category = {
   id: string;
   slug: string;
   sortOrder: number;
   translations: TaxonomyTranslation[];
+  image?: CategoryImage;
 };
 
 export type Tag = {

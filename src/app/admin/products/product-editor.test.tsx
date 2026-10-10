@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const editorMocks = vi.hoisted(() => {
   const uploadMedia = vi.fn();
-  return { uploadMedia, uploadMediaWithTus: uploadMedia, routerReplace: vi.fn() };
+  return { uploadMedia, uploadMediaWithTus: uploadMedia, routerReplace: vi.fn(), readImageDimensions: vi.fn() };
+});
+
+vi.mock("@/lib/image-ratios", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/image-ratios")>();
+  return { ...actual, readImageDimensions: editorMocks.readImageDimensions };
 });
 
 vi.mock("@/lib/media-upload-client", async (importOriginal) => {
@@ -101,6 +106,7 @@ beforeEach(() => {
   editorMocks.uploadMedia.mockReset();
   editorMocks.uploadMediaWithTus.mockReset();
   editorMocks.routerReplace.mockReset();
+  editorMocks.readImageDimensions.mockReset().mockResolvedValue({ width: 850, height: 1100 });
 });
 
 describe("ProductEditor V2", () => {
@@ -552,6 +558,10 @@ describe("ProductEditor V2", () => {
     const input = view.container.querySelector<HTMLInputElement>("#media-upload-gallery");
     expect(input).not.toBeNull();
     await user.upload(input!, new File(["new image"], "image-c.png", { type: "image/png" }));
+    await waitFor(() => expect(editorMocks.readImageDimensions).toHaveBeenCalled());
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(view.container.textContent).toContain("image-c.png");
     await waitFor(() => expect(galleryPreviewOrder(view)).toContain("image-c.png"));
     expect(galleryPreviewOrder(view)).toEqual([...names, "image-c.png"]);
 
@@ -800,6 +810,23 @@ describe("ProductEditor V2", () => {
     await user.click(view.getByRole("button", { name: "Usuń" }));
     await waitFor(() => expect(view.queryByText("moon-garden-cover.jpg")).not.toBeInTheDocument());
     expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("rejects unsupported image proportions before upload", async () => {
+    editorMocks.readImageDimensions.mockResolvedValue({ width: 600, height: 1200 });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} />,
+    );
+    const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
+
+    await user.upload(input!, new File(["image"], "too-tall.png", { type: "image/png" }));
+
+    expect(await view.findByRole("alert")).toHaveTextContent("8.5:11");
+    expect(editorMocks.uploadMedia).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("retains an uploaded asset path when server cleanup fails so the user can retry deletion", async () => {

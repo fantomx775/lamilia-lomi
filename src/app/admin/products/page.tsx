@@ -11,6 +11,7 @@ export default async function AdminProductsPage() {
     status: product.status,
     audience: product.audience,
     productType: product.productType,
+    coverPath: product.assets.find((asset) => asset.kind === "cover" && asset.isActive !== false)?.path,
   }));
 
   return <ProductsResourceList rows={rows} />;

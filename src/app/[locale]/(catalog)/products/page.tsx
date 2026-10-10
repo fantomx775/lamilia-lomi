@@ -1,6 +1,7 @@
 import { Filter, Search } from "lucide-react";
 import Link from "next/link";
 
+import { ImageWithFallback } from "@/components/image-with-fallback";
 import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,8 +28,10 @@ export default async function ProductsPage({ params, searchParams }: Props) {
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((category) => ({
+      id: category.id,
       slug: category.slug,
       name: getTranslation(category.translations, locale).name,
+      image: category.image,
     }));
   const tags = snapshot.tags.map((tag) => ({
     slug: tag.slug,
@@ -55,6 +58,30 @@ export default async function ProductsPage({ params, searchParams }: Props) {
           product to unlock premium materials.
         </p>
       </div>
+
+      {categories.length ? (
+        <section aria-label="Categories" className="mt-8">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="font-serif text-2xl font-semibold">Categories</h2>
+            {filters.category ? <Link href={`/${locale}/products`} className="text-sm text-[var(--color-terracotta)] underline-offset-4 hover:underline">Clear category</Link> : null}
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+            {categories.map((category) => (
+              <Link
+                key={category.id}
+                href={`/${locale}/products?category=${encodeURIComponent(category.slug)}`}
+                aria-current={filters.category === category.slug ? "true" : undefined}
+                className="group grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-lg border border-[var(--color-border)] bg-white/80 p-2 transition hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+              >
+                <span className="relative aspect-square overflow-hidden rounded-md bg-[var(--color-bg)]">
+                  <ImageWithFallback src={category.image?.path} alt={category.name} className="object-contain p-1" sizes="56px" />
+                </span>
+                <span className="line-clamp-2 text-sm font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{category.name}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <form className="mt-8 grid gap-3 rounded-lg border border-[var(--color-border)] bg-white/65 p-4 md:grid-cols-[1.2fr_repeat(5,minmax(0,1fr))_auto]">
         <label className="relative">

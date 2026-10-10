@@ -45,4 +45,13 @@ describe("R2 media configuration", () => {
     expect(r2PublicMediaUrl("https://media.example.com", "products/../secret.jpg")).toBeNull();
     expect(r2PublicMediaUrl("https://media.example.com", "other/path/image.jpg")).toBeNull();
   });
+
+  it("supports only category image keys in the public CDN namespace", () => {
+    const categoryId = "11111111-1111-4111-8111-111111111111";
+    const imageId = "22222222-2222-4222-8222-222222222222";
+    expect(r2PublicMediaUrl("https://media.example.com", `categories/${categoryId}/image/${imageId}-books.webp`))
+      .toBe(`https://media.example.com/categories/${categoryId}/image/${imageId}-books.webp`);
+    expect(r2PublicMediaUrl("https://media.example.com", `categories/${categoryId}/video/${imageId}-books.webp`)).toBeNull();
+    expect(r2PublicMediaUrl("https://media.example.com", `categories/../image/${imageId}-books.webp`)).toBeNull();
+  });
 });
