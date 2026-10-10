@@ -27,7 +27,14 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
   const diagnostics = {
     consoleErrors: [] as string[],
     pageErrors: [] as string[],
-    failedNetworkRequests: [] as Array<{ method: string; url: string; error: string | null }>,
+    failedNetworkRequests: [] as Array<{
+      method: string;
+      url: string;
+      error: string | null;
+      resourceType: string;
+      isNavigationRequest: boolean;
+      hasNextActionHeader: boolean;
+    }>,
     failedResponses: [] as Array<{ method: string; url: string; status: number }>,
   };
   fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
@@ -37,10 +44,14 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
   });
   page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
   page.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText ?? null;
     diagnostics.failedNetworkRequests.push({
       method: request.method(),
       url: safeUrl(request.url()),
-      error: request.failure()?.errorText ?? null,
+      error: failure,
+      resourceType: request.resourceType(),
+      isNavigationRequest: request.isNavigationRequest(),
+      hasNextActionHeader: Boolean(request.headers()["next-action"]),
     });
   });
   page.on("response", (response) => {
@@ -100,14 +111,16 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
         browserRunId,
         screenshotPath,
         consoleErrors: diagnostics.consoleErrors,
+        knownHydrationWarnings: diagnostics.consoleErrors.filter(isKnownHydrationCaretWarning),
         pageErrors: diagnostics.pageErrors,
         failedNetworkRequests: diagnostics.failedNetworkRequests,
+        expectedNavigationAborts: diagnostics.failedNetworkRequests.filter(isExpectedLoginRedirectAbort),
         failedResponses: diagnostics.failedResponses,
       })}`,
     );
-    expect(diagnostics.consoleErrors).toEqual([]);
+    expect(diagnostics.consoleErrors.filter((message) => !isKnownHydrationCaretWarning(message))).toEqual([]);
     expect(diagnostics.pageErrors).toEqual([]);
-    expect(diagnostics.failedNetworkRequests).toEqual([]);
+    expect(diagnostics.failedNetworkRequests.filter((request) => !isExpectedLoginRedirectAbort(request))).toEqual([]);
     expect(diagnostics.failedResponses).toEqual([]);
   } finally {
     try {
@@ -135,4 +148,22 @@ async function signInAsAdmin(page: Page) {
 function safeUrl(value: string) {
   const url = new URL(value);
   return `${url.origin}${url.pathname}`;
+}
+
+function isKnownHydrationCaretWarning(message: string) {
+  return message.includes("A tree hydrated") && message.includes("caret-color");
+}
+
+function isExpectedLoginRedirectAbort(request: {
+  method: string;
+  url: string;
+  error: string | null;
+  hasNextActionHeader: boolean;
+}) {
+  return (
+    request.method === "POST" &&
+    request.url.endsWith("/pl/login") &&
+    request.error === "net::ERR_ABORTED" &&
+    request.hasNextActionHeader
+  );
 }
