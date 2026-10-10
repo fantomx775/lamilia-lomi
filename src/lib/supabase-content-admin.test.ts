@@ -153,6 +153,29 @@ describe("Supabase content admin mutations", () => {
     expect(mocks.deletedTables).not.toContain("category_translations");
   });
 
+  it("rejects over-limit product text before sending a Supabase write", async () => {
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    const form = new FormData();
+    form.set("title", "T".repeat(141));
+    form.set("shortDescription", "S".repeat(301));
+
+    await expect(saveProductForRequest(form)).resolves.toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining([
+        "admin.validation.product_title_too_long",
+        "admin.validation.product_short_description_too_long",
+      ]),
+    });
+
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
   it("saves a product with existing non-English content intact", async () => {
     const seededProduct = getSeedContentSnapshot().products[0];
     const existingProduct = {

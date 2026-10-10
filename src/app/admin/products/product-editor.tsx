@@ -17,6 +17,12 @@ import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type Admi
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMedia, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
+import {
+  PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH,
+  PRODUCT_TEXT_WARNING_THRESHOLD,
+  PRODUCT_TITLE_MAX_LENGTH,
+  validateProductTextLengths,
+} from "@/lib/product-text";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
@@ -179,6 +185,17 @@ export function ProductEditor({
   const activeAmazonLinks = amazonLinks.filter((link) => !link.removed);
   const usedAmazonMarkets = new Set(activeAmazonLinks.map((link) => link.market));
   const canAddAmazonMarket = amazonMarketOptions.some(({ value }) => !usedAmazonMarkets.has(value));
+  const productTextErrors = validateProductTextLengths(content.title, content.shortDescription);
+  const titleOverLimit = productTextErrors.includes(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_TOO_LONG);
+  const shortDescriptionOverLimit = productTextErrors.includes(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_SHORT_DESCRIPTION_TOO_LONG);
+  const titleError = titleOverLimit
+    ? getAdminErrorMessage(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_TOO_LONG, "pl")
+    : fieldErrors["product-title"]?.[0];
+  const shortDescriptionError = shortDescriptionOverLimit
+    ? getAdminErrorMessage(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_SHORT_DESCRIPTION_TOO_LONG, "pl")
+    : fieldErrors["product-short-description"]?.[0];
+  const titleLimitWarning = getProductTextLimitWarning(content.title.length, PRODUCT_TITLE_MAX_LENGTH);
+  const shortDescriptionLimitWarning = getProductTextLimitWarning(content.shortDescription.length, PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH);
 
   const refreshDirtyState = useCallback(() => {
     const form = formRef.current;
@@ -414,6 +431,24 @@ export function ProductEditor({
   const updateContent = (field: keyof ProductContentDraft, value: string) => {
     markDirty();
     setContent((current) => ({ ...current, [field]: value }));
+
+    const errorTarget = field === "title"
+      ? "product-title"
+      : field === "shortDescription"
+        ? "product-short-description"
+        : undefined;
+    if (errorTarget) {
+      const lengthError = field === "title"
+        ? ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_TOO_LONG
+        : ADMIN_ERROR_CODES.VALIDATION_PRODUCT_SHORT_DESCRIPTION_TOO_LONG;
+      setFieldErrors((current) => {
+        if (!current[errorTarget]) return current;
+        const next = { ...current };
+        delete next[errorTarget];
+        return next;
+      });
+      setSaveErrorCodes((current) => current.filter((code) => code !== lengthError));
+    }
   };
 
   const updateAsset = <K extends keyof AssetDraft>(clientId: string, field: K, value: AssetDraft[K]) => {
@@ -810,6 +845,15 @@ export function ProductEditor({
 
     const form = event.currentTarget;
     const formData = new FormData(form);
+    if (productTextErrors.length) {
+      const mapped = mapProductSaveErrors(productTextErrors, formData, amazonLinks, premiumCodes);
+      setSaveStatus("error");
+      setSaveErrorCodes(productTextErrors);
+      setFieldErrors(mapped.fieldErrors);
+      scheduleAfterRender(() => focusFirstError(mapped.focusTarget));
+      return;
+    }
+
     setIsSaving(true);
     setSaveStatus("idle");
     setSaveErrorCodes([]);
@@ -914,11 +958,21 @@ export function ProductEditor({
       <AdminEditorSection title="Podstawowe informacje" description="Treść produktu jest edytowana po angielsku.">
               <div className="grid min-w-0 gap-5">
                 <div className="grid min-w-0 gap-4">
-                  <Field label="Tytuł" htmlFor="product-title" error={fieldErrors["product-title"]?.[0]}>
-                    <Input id="product-title" name="title" value={content.title} onChange={(event) => updateContent("title", event.target.value)} aria-invalid={Boolean(fieldErrors["product-title"]?.length)} aria-describedby={fieldErrors["product-title"]?.length ? "product-title-error" : undefined} />
+                  <Field label="Tytuł" htmlFor="product-title" error={titleError}>
+                    <Input id="product-title" name="title" value={content.title} maxLength={PRODUCT_TITLE_MAX_LENGTH} onChange={(event) => updateContent("title", event.target.value)} aria-invalid={Boolean(titleError)} aria-describedby={`product-title-help product-title-counter${titleLimitWarning ? " product-title-warning" : ""}${titleError ? " product-title-error" : ""}`} />
+                    <div className="flex items-start justify-between gap-3 text-sm">
+                      <p id="product-title-help" className="min-w-0 leading-5 text-[var(--color-muted)]">Używany w katalogu i na stronie produktu.</p>
+                      <p id="product-title-counter" className={`shrink-0 ${titleOverLimit ? "text-red-800" : titleLimitWarning ? "text-amber-800" : "text-[var(--color-muted)]"}`}>{content.title.length} / {PRODUCT_TITLE_MAX_LENGTH} znaków</p>
+                    </div>
+                    {titleLimitWarning ? <p id="product-title-warning" role="status" className="text-sm text-amber-800">{titleLimitWarning}</p> : null}
                   </Field>
-                  <Field label="Krótki opis" htmlFor="product-short-description" error={fieldErrors["product-short-description"]?.[0]}>
-                    <Input id="product-short-description" name="shortDescription" value={content.shortDescription} onChange={(event) => updateContent("shortDescription", event.target.value)} aria-invalid={Boolean(fieldErrors["product-short-description"]?.length)} aria-describedby={fieldErrors["product-short-description"]?.length ? "product-short-description-error" : undefined} />
+                  <Field label="Krótki opis" htmlFor="product-short-description" error={shortDescriptionError}>
+                    <Textarea id="product-short-description" name="shortDescription" value={content.shortDescription} rows={4} maxLength={PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH} onChange={(event) => updateContent("shortDescription", event.target.value)} className="min-h-28 resize-y" aria-invalid={Boolean(shortDescriptionError)} aria-describedby={`product-short-description-help product-short-description-counter${shortDescriptionLimitWarning ? " product-short-description-warning" : ""}${shortDescriptionError ? " product-short-description-error" : ""}`} />
+                    <div className="flex items-start justify-between gap-3 text-sm">
+                      <p id="product-short-description-help" className="min-w-0 leading-5 text-[var(--color-muted)]">Wyświetlany na kartach i w podglądzie produktu. Używany też jako opis SEO, gdy osobne pole SEO jest puste.</p>
+                      <p id="product-short-description-counter" className={`shrink-0 ${shortDescriptionOverLimit ? "text-red-800" : shortDescriptionLimitWarning ? "text-amber-800" : "text-[var(--color-muted)]"}`}>{content.shortDescription.length} / {PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH} znaków</p>
+                    </div>
+                    {shortDescriptionLimitWarning ? <p id="product-short-description-warning" role="status" className="text-sm text-amber-800">{shortDescriptionLimitWarning}</p> : null}
                   </Field>
                   <Field label="Długi opis" htmlFor="product-long-description">
                     <Textarea id="product-long-description" name="longDescription" value={content.longDescription} onChange={(event) => updateContent("longDescription", event.target.value)} className="min-h-48" />
@@ -1311,6 +1365,20 @@ function DangerZone({
   return <section className="grid gap-4 rounded-lg border border-red-200 bg-red-50/60 p-5"><div><h2 className="font-serif text-2xl font-semibold text-red-950">Strefa niebezpieczna</h2><p className="mt-1 text-sm leading-6 text-red-900/80">Archiwizowanie i usuwanie nie są główną akcją edytora.</p>{disabled ? <p className="mt-2 text-sm text-red-900">Zapisz zmiany przed archiwizacją lub usunięciem produktu.</p> : null}</div><div className="flex flex-wrap gap-2"><form action={archiveAction}><input type="hidden" name="id" value={product.id} /><Button type="submit" variant="outline" disabled={disabled} className="border-red-200 text-red-900 hover:bg-red-100"><Archive className="size-4" aria-hidden />Archiwizuj</Button></form><form action={deleteAction} onSubmit={(event) => { if (!window.confirm("Czy na pewno usunąć ten produkt?")) event.preventDefault(); }}><input type="hidden" name="id" value={product.id} /><button type="submit" disabled={disabled} className={buttonClassName({ variant: "outline", className: "border-red-200 text-red-900 hover:bg-red-100" })}><Trash2 className="size-4" aria-hidden />Usuń produkt</button></form></div></section>;
 }
 
+function getProductTextLimitWarning(length: number, maximum: number) {
+  const remaining = maximum - length;
+  if (remaining < 0 || remaining > PRODUCT_TEXT_WARNING_THRESHOLD) return undefined;
+  if (remaining === 0) return `Osiągnięto limit ${maximum} znaków.`;
+
+  const remainder = remaining % 100;
+  const unit = remaining === 1
+    ? "znak"
+    : remaining % 10 >= 2 && remaining % 10 <= 4 && (remainder < 12 || remainder > 14)
+      ? "znaki"
+      : "znaków";
+  return `Zbliżasz się do limitu. Pozostało ${remaining} ${unit}.`;
+}
+
 type ProductSaveErrorMapping = {
   fieldErrors: Record<string, string[]>;
   premiumErrors: Partial<Record<string, AdminErrorCode>>;
@@ -1336,7 +1404,11 @@ function mapProductSaveErrors(
   for (const code of errors) {
     switch (code) {
       case ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED:
+      case ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_TOO_LONG:
         addFieldError("product-title", code);
+        break;
+      case ADMIN_ERROR_CODES.VALIDATION_PRODUCT_SHORT_DESCRIPTION_TOO_LONG:
+        addFieldError("product-short-description", code);
         break;
       case ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED:
       case ADMIN_ERROR_CODES.CONFLICT_SLUG:
