@@ -1,10 +1,19 @@
 export function parseBackfillArgs(argv) {
-  const args = new Set(argv);
+  const args = new Set();
   const values = new Map();
 
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index].startsWith("--") && argv[index + 1] && !argv[index + 1].startsWith("--")) {
-      values.set(argv[index], argv[index + 1]);
+    const token = argv[index];
+    if (!token.startsWith("--")) continue;
+
+    const separator = token.indexOf("=");
+    const flag = separator === -1 ? token : token.slice(0, separator);
+    args.add(flag);
+    if (separator !== -1) {
+      values.set(flag, token.slice(separator + 1));
+    } else if (argv[index + 1] && !argv[index + 1].startsWith("--")) {
+      values.set(flag, argv[index + 1]);
+      index += 1;
     }
   }
 

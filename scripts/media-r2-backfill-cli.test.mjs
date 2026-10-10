@@ -16,9 +16,20 @@ describe("R2 backfill CLI arguments", () => {
     expect(parseReconcileProductId(args, values)).toBe(productId);
   });
 
+  it("normalizes the equals-form product scope too", () => {
+    const { args, values } = parseBackfillArgs([
+      "--reconcile-public",
+      `--product-id=${productId.toUpperCase()}`,
+      "--apply",
+    ]);
+
+    expect(parseReconcileProductId(args, values)).toBe(productId);
+  });
+
   it.each([
     ["--product-id", "--apply"],
     ["--product-id", ""],
+    ["--product-id="],
     ["--product-id", "not-a-uuid"],
   ])("rejects missing or invalid scoped IDs: %s %s", (...argv) => {
     const { args, values } = parseBackfillArgs(argv);
