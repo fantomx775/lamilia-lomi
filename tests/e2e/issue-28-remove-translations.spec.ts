@@ -138,6 +138,7 @@ test("single-language admin content saves and reloads without changing public UR
 });
 
 async function saveScreenshot(page: import("@playwright/test").Page, directory: string, name: string, projectName: string) {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   await page.screenshot({
     path: path.join(directory, `${name}-${projectName}.png`),
