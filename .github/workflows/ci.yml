@@ -6,6 +6,7 @@ on:
       - main
     types:
       - opened
+      - edited
       - synchronize
       - reopened
       - ready_for_review
@@ -24,6 +25,10 @@ concurrency:
 jobs:
   verify:
     name: Verify
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.draft == false &&
+      (github.event.action != 'edited' || github.event.changes.base.ref.from != null))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
