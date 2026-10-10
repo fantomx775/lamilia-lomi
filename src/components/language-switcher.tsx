@@ -80,11 +80,21 @@ function LocaleForm({
   const isActive = targetLocale === currentLocale;
 
   return (
-    <form action={switchLocaleAction}>
+    <form
+      action={switchLocaleAction}
+      onSubmit={(event) => {
+        const hash = event.currentTarget.elements.namedItem("hash");
+
+        if (hash instanceof HTMLInputElement) {
+          hash.value = window.location.hash;
+        }
+      }}
+    >
       <input type="hidden" name="sourceLocale" value={currentLocale} />
       <input type="hidden" name="targetLocale" value={targetLocale} />
       <input type="hidden" name="pathname" value={pathname} />
       <input type="hidden" name="search" value={search} />
+      <input type="hidden" name="hash" defaultValue="" />
       <button
         type="submit"
         className={`rounded px-2 py-1 text-[var(--color-ink)] transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] ${isActive ? "bg-[var(--color-sage)] font-semibold shadow-sm" : "font-medium hover:bg-[var(--color-blush)]"} ${mobile ? "flex w-full items-center justify-between gap-3" : "inline-flex"}`}

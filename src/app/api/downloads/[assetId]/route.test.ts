@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
+vi.mock("@/lib/config", () => ({
+  getBackendMode: mocks.getBackendMode,
+  getCanonicalAppUrl: () => new URL("https://lamilialomi.com"),
+}));
 vi.mock("@/lib/products-request", () => ({
   getAssetByIdForRequest: mocks.getAssetByIdForRequest,
 }));
@@ -18,7 +21,11 @@ vi.mock("@/lib/analytics", () => ({
   buildBusinessEventPayload: vi.fn(() => ({ event: "premium_file_download" })),
 }));
 vi.mock("@/lib/locale", () => ({ normalizeLocale: vi.fn(() => "en") }));
-vi.mock("@/lib/return-to", () => ({ sanitizeReturnTo: vi.fn((_value, _locale, fallback) => fallback) }));
+vi.mock("@/lib/return-to", () => ({
+  sanitizeReturnTo: vi.fn((value, locale, fallback) =>
+    typeof value === "string" && value.startsWith(`/${locale}/`) ? value : fallback,
+  ),
+}));
 
 import { GET } from "./route";
 
@@ -55,6 +62,68 @@ describe("premium download delivery", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-type")).toContain("application/json");
+  });
+
+  it("sends browser navigation from a guest download to the safe login return path", async () => {
+    mocks.authorizePremiumDownloadForRequest.mockResolvedValue({
+      ok: false,
+      decision: { allowed: false, reason: "guest" },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://lamilialomi.com/api/downloads/asset-1?locale=en&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+        { headers: { accept: "text/html,application/xhtml+xml" } },
+      ),
+      { params: Promise.resolve({ assetId: "asset-1" }) },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("location")).toBe(
+      "https://lamilialomi.com/en/login?returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+  });
+
+  it("uses the canonical origin when a guest download request has a forged host", async () => {
+    mocks.authorizePremiumDownloadForRequest.mockResolvedValue({
+      ok: false,
+      decision: { allowed: false, reason: "guest" },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://attacker.example/api/downloads/asset-1?locale=en&returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+        { headers: { accept: "text/html,application/xhtml+xml" } },
+      ),
+      { params: Promise.resolve({ assetId: "asset-1" }) },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://lamilialomi.com/en/login?returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book",
+    );
+    expect(response.headers.get("location")).not.toContain("attacker.example");
+  });
+
+  it("rejects an external browser return target", async () => {
+    mocks.authorizePremiumDownloadForRequest.mockResolvedValue({
+      ok: false,
+      decision: { allowed: false, reason: "guest" },
+    });
+
+    const response = await GET(
+      new Request(
+        "https://lamilialomi.com/api/downloads/asset-1?locale=en&returnTo=https%3A%2F%2Fevil.example",
+        { headers: { accept: "text/html" } },
+      ),
+      { params: Promise.resolve({ assetId: "asset-1" }) },
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://lamilialomi.com/en/login?returnTo=%2Fen%2Flibrary",
+    );
   });
 
   it("marks authorized redirects as private and no-store", async () => {

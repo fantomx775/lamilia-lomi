@@ -72,6 +72,7 @@ export const getDemoSession = cache(async () => {
 
     return {
       email: context.user.email ?? "",
+      userId: context.user.id,
       role: profile?.role === "admin" ? "admin" : "user",
       emailVerified: Boolean(context.user.email_confirmed_at),
       marketingConsent: Boolean(profile?.marketing_consent),
@@ -220,12 +221,16 @@ export async function getSupabaseAuthContext() {
     return { supabase: null, user: null } as const;
   }
 
-  const context = await getSupabaseUserContextForRequest();
+  try {
+    const context = await getSupabaseUserContextForRequest();
 
-  return {
-    supabase: context?.supabase ?? null,
-    user: context?.user ?? null,
-  } as const;
+    return {
+      supabase: context?.supabase ?? null,
+      user: context?.user ?? null,
+    } as const;
+  } catch {
+    return { supabase: null, user: null } as const;
+  }
 }
 
 export async function setDemoSession(session: DemoSession) {

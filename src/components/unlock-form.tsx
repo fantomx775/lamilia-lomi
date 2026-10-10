@@ -15,6 +15,12 @@ export type UnlockCopy = {
   loginRequiredDescription: string;
   verificationRequired: string;
   verificationRequiredDescription: string;
+  verificationPending: string;
+  verificationPendingDescription: string;
+  verificationPendingDemo: string;
+  verificationPendingDemoDescription: string;
+  resendVerification: string;
+  continueDemoVerification: string;
   verifyDemo: string;
   codeLabel: string;
   codePlaceholder: string;
@@ -37,6 +43,8 @@ type Props = {
   isUnlocked: boolean;
   error?: string;
   alreadyUnlocked?: boolean;
+  verificationPending?: boolean;
+  isDemo?: boolean;
   copy: UnlockCopy;
 };
 
@@ -48,6 +56,8 @@ export function UnlockForm({
   isUnlocked,
   error,
   alreadyUnlocked = false,
+  verificationPending = false,
+  isDemo = false,
   copy,
 }: Props) {
   const redirectTo = `/${locale}/products/${productSlug}`;
@@ -57,12 +67,34 @@ export function UnlockForm({
     return (
       <div className="grid gap-4" data-testid="unlock-guest-state">
         <div className="flex gap-3 rounded-lg bg-[var(--color-blush)]/70 p-4" role="status">
-          <LockKeyhole className="mt-1 size-5 shrink-0 text-[var(--color-terracotta)]" aria-hidden />
+          {verificationPending ? (
+            <MailCheck className="mt-1 size-5 shrink-0 text-[var(--color-terracotta)]" aria-hidden />
+          ) : (
+            <LockKeyhole className="mt-1 size-5 shrink-0 text-[var(--color-terracotta)]" aria-hidden />
+          )}
           <div>
-            <p className="font-medium">{copy.loginRequired}</p>
-            <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
-              {copy.loginRequiredDescription}
+            <p className="font-medium">
+              {verificationPending
+                ? isDemo
+                  ? copy.verificationPendingDemo
+                  : copy.verificationPending
+                : copy.loginRequired}
             </p>
+            <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
+              {verificationPending
+                ? isDemo
+                  ? copy.verificationPendingDemoDescription
+                  : copy.verificationPendingDescription
+                : copy.loginRequiredDescription}
+            </p>
+            {verificationPending ? (
+              <Link
+                className="mt-3 inline-flex text-sm font-medium text-[var(--color-terracotta)] underline underline-offset-4"
+                href={`/${locale}/login?error=verification_required&returnTo=${encodeURIComponent(redirectTo)}`}
+              >
+                {isDemo ? copy.continueDemoVerification : copy.resendVerification}
+              </Link>
+            ) : null}
           </div>
         </div>
         <GuestUnlockActions

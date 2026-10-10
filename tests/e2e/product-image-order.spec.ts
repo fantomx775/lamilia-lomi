@@ -1,7 +1,8 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Page, type Request, type TestInfo } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
+import { isLocalDemoAppTarget } from "./local-target";
 
 test.setTimeout(300_000);
 
@@ -13,7 +14,11 @@ const imageFixtures = [
   { name: "05-purple.png", rgb: [175, 45, 190] },
 ] as const;
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, testInfo) => {
+  test.skip(
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "Gallery ordering E2E uses fixed demo admin credentials and requires a loopback app running the local demo backend.",
+  );
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "ll_cookie_consent",
@@ -29,6 +34,17 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   const requestFailures: string[] = [];
   const expectedNavigationCancellations: string[] = [];
   const mainFrameNavigations: Array<{ at: number; url: string }> = [];
+  type ProductActionContext = {
+    id: number;
+    sourcePath: string;
+    requests: Request[];
+    cancellations: Array<{ request: Request; detail: string }>;
+    expectedRequest?: Request;
+    redirectedTo?: string;
+  };
+  const productActions: ProductActionContext[] = [];
+  const productActionRequests = new WeakMap<Request, ProductActionContext>();
+  let activeProductAction: ProductActionContext | undefined;
   const unexpectedHttpFailures: string[] = [];
   const localUploadFallbacks: string[] = [];
   let productId = "";
@@ -36,12 +52,30 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   let flowFailure: unknown;
   let cleanupFailure: unknown;
 
+  const safeUrlPath = (value: string) => {
+    try {
+      const url = new URL(value);
+      return url.origin + url.pathname;
+    } catch {
+      return "unavailable";
+    }
+  };
+
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("framenavigated", (frame) => {
-    if (frame === page.mainFrame()) mainFrameNavigations.push({ at: Date.now(), url: frame.url() });
+    if (frame === page.mainFrame()) mainFrameNavigations.push({ at: Date.now(), url: safeUrlPath(frame.url()) });
+  });
+  page.on("request", (request) => {
+    const action = activeProductAction;
+    if (!action || request.method() !== "POST") return;
+    const requestUrl = new URL(request.url());
+    if (requestUrl.origin === new URL(page.url()).origin && requestUrl.pathname === action.sourcePath) {
+      productActionRequests.set(request, action);
+      action.requests.push(request);
+    }
   });
   page.on("requestfailed", (request) => {
     const at = Date.now();
@@ -54,12 +88,12 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     }
     const detail = {
       method: request.method(),
-      url: request.url(),
+      url: safeUrlPath(request.url()),
       failure,
       resourceType: request.resourceType(),
       isNavigationRequest: request.isNavigationRequest(),
-      pageUrl: page.url(),
-      frameUrl,
+      pageUrl: safeUrlPath(page.url()),
+      frameUrl: safeUrlPath(frameUrl),
       failedAt: new Date(at).toISOString(),
     };
     const recentNavigation = [...mainFrameNavigations].reverse().find((event) => at - event.at <= 5_000);
@@ -68,7 +102,19 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       failedUrl.search === "?redirectTo=/admin";
     const exactNextDevChunk = request.method() === "GET" && request.resourceType() === "script" &&
       failedUrl.pathname.startsWith("/_next/static/chunks/") && failedUrl.pathname.endsWith(".js");
-    if (failure === "net::ERR_ABORTED" && recentNavigation && (exactLoginPost || exactNextDevChunk)) {
+    const exactProductAction = productActionRequests.get(request);
+    const exactLocalNextDevFont = request.method() === "GET" && request.resourceType() === "font" &&
+      failedUrl.origin === new URL(page.url()).origin &&
+      failedUrl.pathname === "/__nextjs_font/geist-latin.woff2" &&
+      new URL(page.url()).pathname.startsWith("/admin");
+    if (failure === "net::ERR_ABORTED" && exactProductAction) {
+      exactProductAction.cancellations.push({ request, detail: JSON.stringify(detail) });
+      return;
+    }
+    if (
+      failure === "net::ERR_ABORTED" && recentNavigation &&
+      (exactLoginPost || exactNextDevChunk || exactLocalNextDevFont)
+    ) {
       const cancellation = JSON.stringify({ ...detail, adjacentMainFrameNavigation: recentNavigation.url });
       expectedNavigationCancellations.push(cancellation);
       console.log("Expected navigation cancellation: " + cancellation);
@@ -76,6 +122,37 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       requestFailures.push(JSON.stringify(detail));
     }
   });
+
+  const submitProductAction = async (
+    expectedRedirect: (url: URL) => boolean,
+    submit: () => Promise<void>,
+  ) => {
+    const action: ProductActionContext = {
+      id: productActions.length + 1,
+      sourcePath: new URL(page.url()).pathname,
+      requests: [],
+      cancellations: [],
+    };
+    productActions.push(action);
+    activeProductAction = action;
+    try {
+      await Promise.all([page.waitForURL(expectedRedirect), submit()]);
+      const finalUrl = new URL(page.url());
+      action.redirectedTo = finalUrl.origin + finalUrl.pathname + finalUrl.search;
+      if (action.requests.length === 1) {
+        action.expectedRequest = action.requests[0];
+      } else {
+        requestFailures.push(JSON.stringify({
+          productActionId: action.id,
+          productActionPath: action.sourcePath,
+          matchingPostRequestCount: action.requests.length,
+          verifiedRedirect: action.redirectedTo,
+        }));
+      }
+    } finally {
+      if (activeProductAction === action) activeProductAction = undefined;
+    }
+  };
   page.on("response", (response) => {
     if (response.status() < 400) return;
     const request = response.request();
@@ -176,10 +253,10 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     await assertSubmittedGalleryOrder(page, expectedOrder.map((fixture) => fixture.name));
     await capture(page, testInfo, "04-image-removed-and-order-ready-to-save");
 
-    await Promise.all([
-      page.waitForURL((url) => /^\/admin\/products\/[0-9a-f-]+\?saved=1$/i.test(url.pathname + url.search)),
-      page.getByRole("button", { name: "Zapisz" }).click(),
-    ]);
+    await submitProductAction(
+      (url) => /^\/admin\/products\/[0-9a-f-]+\?saved=1$/i.test(url.pathname + url.search),
+      () => page.getByRole("button", { name: "Zapisz" }).click(),
+    );
     productPath = new URL(page.url()).pathname;
     await expect(page.getByText("Zapisano zmiany.", { exact: true })).toBeVisible();
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
@@ -203,10 +280,10 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     await page.getByRole("button", { name: "Przenieś 04-yellow.png niżej" }).click();
     expectedOrder = [imageFixtures[0], imageFixtures[4], imageFixtures[2], imageFixtures[3]];
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
-    await Promise.all([
-      page.waitForURL((url) => url.pathname === productPath && url.searchParams.get("saved") === "1"),
-      page.getByRole("button", { name: "Zapisz" }).click(),
-    ]);
+    await submitProductAction(
+      (url) => url.pathname === productPath && url.searchParams.get("saved") === "1",
+      () => page.getByRole("button", { name: "Zapisz" }).click(),
+    );
     await page.reload();
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     await capture(page, testInfo, "08-existing-image-order-saved-again");
@@ -247,15 +324,14 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       }
 
       if (productPath) {
-        await page.goto(productPath).catch(() => undefined);
         const deleteProduct = page.getByRole("button", { name: "Usuń produkt", exact: true });
-        if (await deleteProduct.isVisible().catch(() => false)) {
-          page.once("dialog", (dialog) => void dialog.accept());
-          await Promise.all([
-            page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
-            deleteProduct.click(),
-          ]);
-        }
+        await page.goto(productPath);
+        await expect(deleteProduct).toBeVisible({ timeout: 15_000 });
+        page.once("dialog", (dialog) => void dialog.accept());
+        await submitProductAction(
+          (url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1",
+          () => deleteProduct.click(),
+        );
       } else if (productId && page.url().includes("/admin/products/new")) {
         for (const fixture of imageFixtures) {
           const preview = page.getByRole("img", { name: "Podgląd " + fixture.name });
@@ -269,6 +345,26 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       await verifyDisposableProductRemoved(productId);
     } catch (error) {
       cleanupFailure = error;
+    }
+
+    for (const action of productActions) {
+      for (const cancellation of action.cancellations) {
+        if (
+          action.redirectedTo &&
+          action.requests.length === 1 &&
+          cancellation.request === action.expectedRequest
+        ) {
+          const detail = JSON.parse(cancellation.detail) as Record<string, unknown>;
+          expectedNavigationCancellations.push(JSON.stringify({
+            ...detail,
+            productActionId: action.id,
+            productActionPath: action.sourcePath,
+            verifiedRedirect: action.redirectedTo,
+          }));
+        } else {
+          requestFailures.push(cancellation.detail);
+        }
+      }
     }
 
     await testInfo.attach("browser-console-and-network.txt", {

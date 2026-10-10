@@ -8,13 +8,18 @@ import { Suspense } from "react";
 import { AmazonLink } from "@/components/amazon-link";
 import { ProductImageGallery } from "@/components/product-image-gallery";
 import { ProductVideoPreview } from "@/components/product-video-preview";
+import { ScrollToFragment } from "@/components/scroll-to-fragment";
 import { UnlockForm } from "@/components/unlock-form";
 import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
 import type { Locale } from "@/i18n/routing";
 import { isMediaProxyPath } from "@/lib/media-upload";
+import {
+  getAccountBoundResumeCode,
+  readAuthResumeIntent,
+} from "@/lib/auth-resume";
 import { getUnlockIntent } from "@/lib/unlock-intent";
-import { getProductDetailAccessForRequest } from "@/lib/session.server";
+import { getProductDetailAccessForRequest, getSupabaseAuthContext } from "@/lib/session.server";
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { createSignedDownloadUrl } from "@/lib/premium-core";
 import {
@@ -54,23 +59,38 @@ async function ProductUnlockSection({
   locale,
   error,
   alreadyUnlocked,
+  verificationPending,
 }: {
   product: LocalizedProductView;
   locale: Locale;
   error?: string;
   alreadyUnlocked: boolean;
+  verificationPending: boolean;
 }) {
-  const [accessResult, unlockIntent, copy] = await Promise.all([
+  const [accessResult, unlockIntent, authResumeIntent, authContext, copy] = await Promise.all([
     getProductDetailAccessForRequest(product.id)
       .then((access) => ({ access }))
       .catch(() => ({ access: null })),
     getUnlockIntent(),
+    readAuthResumeIntent(),
+    getSupabaseAuthContext(),
     getTranslations("Funnel"),
   ]);
   const access = accessResult.access;
   const hasCurrentIntent =
     unlockIntent?.locale === locale && unlockIntent.productSlug === product.slug;
   const backendMode = getBackendMode();
+  const initialCode =
+    backendMode === "supabase" && authContext.user
+      ? getAccountBoundResumeCode(
+          authResumeIntent,
+          authContext.user,
+          locale,
+          product.slug,
+        )
+      : hasCurrentIntent
+        ? unlockIntent?.code
+        : undefined;
   const downloadLinks =
     access?.session?.emailVerified && access.isUnlocked
       ? product.premiumAssets
@@ -103,6 +123,7 @@ async function ProductUnlockSection({
       className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8"
       data-testid="product-unlock-section"
     >
+      <ScrollToFragment targetId="premium" />
       <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
           <p className="text-sm font-medium text-[var(--color-terracotta)]">
@@ -121,16 +142,24 @@ async function ProductUnlockSection({
               <UnlockForm
                 locale={locale}
                 productSlug={product.slug}
-                initialCode={hasCurrentIntent ? unlockIntent?.code : undefined}
+                initialCode={initialCode}
                 session={access.session}
                 isUnlocked={access.isUnlocked}
+                isDemo={backendMode === "local"}
                 error={error}
                 alreadyUnlocked={alreadyUnlocked}
+                verificationPending={verificationPending}
                 copy={{
                   loginRequired: copy("loginRequired"),
                   loginRequiredDescription: copy("loginRequiredDescription"),
                   verificationRequired: copy("verificationRequired"),
                   verificationRequiredDescription: copy("verificationRequiredDescription"),
+                  verificationPending: copy("verificationPending"),
+                  verificationPendingDescription: copy("verificationPendingDescription"),
+                  verificationPendingDemo: copy("verificationPendingDemo"),
+                  verificationPendingDemoDescription: copy("verificationPendingDemoDescription"),
+                  resendVerification: copy("resendVerification"),
+                  continueDemoVerification: copy("continueDemoVerification"),
                   verifyDemo: copy("verifyDemo"),
                   codeLabel: copy("codeLabel"),
                   codePlaceholder: copy("codePlaceholder"),
@@ -376,6 +405,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
           locale={locale}
           error={error}
           alreadyUnlocked={stringParam(query.unlocked) === "already"}
+          verificationPending={stringParam(query.step) === "verify"}
         />
       </Suspense>
     </div>

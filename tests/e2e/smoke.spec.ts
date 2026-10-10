@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { isLocalDemoAppTarget } from "./local-target";
 
 test("guest can browse public product flow", async ({ page }) => {
   await page.goto("/en");
@@ -8,7 +9,7 @@ test("guest can browse public product flow", async ({ page }) => {
   await page.goto("/en/products?q=moon");
   await expect(page.getByRole("link", { name: /Moon Garden Coloring Book/i })).toBeVisible();
 
-  await page.goto("/en/products/moon-garden-coloring-book?code=LOMI-BOOK-2026");
+  await page.goto("/en/products/moon-garden-coloring-book");
   await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   await expect(page.getByText("Log in to unlock premium content")).toBeVisible();
 });
@@ -42,7 +43,11 @@ test("guest can see and download public product files without signing in", async
   await expect(page).toHaveURL(/\/en\/products\/moon-garden-coloring-book$/);
 });
 
-test("demo user can log in and see unlocked library", async ({ page }) => {
+test("demo user can log in and see unlocked library", async ({ page }, testInfo) => {
+  test.skip(
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "The demo login E2E requires a loopback app running the local demo backend.",
+  );
   await page.goto("/en/login?redirectTo=/en/library");
   await page.getByRole("button", { name: "Continue" }).click();
 

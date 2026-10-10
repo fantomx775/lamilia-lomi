@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
+import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
 
@@ -55,6 +56,10 @@ test("product gallery images load through the Next image optimizer without brows
 });
 
 test("admin blocks duplicate normalized premium codes before the save action", async ({ page }, testInfo) => {
+  test.skip(
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "Admin premium-code E2E uses fixed demo credentials and requires a loopback app running the local demo backend.",
+  );
   const serverErrors: string[] = [];
   const saveRequests: string[] = [];
 
@@ -101,6 +106,10 @@ test("admin blocks duplicate normalized premium codes before the save action", a
 });
 
 test("admin saves a product with an uploaded asset and a unique premium code", async ({ page }, testInfo) => {
+  test.skip(
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "Admin product-write E2E uses fixed demo credentials and requires a loopback app running the local demo backend.",
+  );
   const consoleErrors: string[] = [];
   const expectedUploadFallbackErrors: string[] = [];
   const serverErrors: string[] = [];
