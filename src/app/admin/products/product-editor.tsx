@@ -13,6 +13,7 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/admin/rich-text-editor";
 import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type AdminMutationResult } from "@/lib/admin-errors";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMedia, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
@@ -921,7 +922,7 @@ export function ProductEditor({
                     <Input id="product-short-description" name="shortDescription" value={content.shortDescription} onChange={(event) => updateContent("shortDescription", event.target.value)} aria-invalid={Boolean(fieldErrors["product-short-description"]?.length)} aria-describedby={fieldErrors["product-short-description"]?.length ? "product-short-description-error" : undefined} />
                   </Field>
                   <Field label="Długi opis" htmlFor="product-long-description">
-                    <Textarea id="product-long-description" name="longDescription" value={content.longDescription} onChange={(event) => updateContent("longDescription", event.target.value)} className="min-h-48" />
+                    <RichTextEditor id="product-long-description" name="longDescription" label="Długi opis" value={content.longDescription} onChange={(value) => updateContent("longDescription", value)} />
                   </Field>
                   <AdminDisclosure className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-4" summary="SEO i wygląd w Google">
                     <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Puste pole użyje fallbacku: tytułu produktu lub krótkiego opisu.</p>

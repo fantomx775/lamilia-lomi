@@ -1,4 +1,5 @@
 import type { Locale } from "@/i18n/routing";
+import { RichTextContent } from "@/components/rich-text-content";
 import { getStaticPageForRequest } from "@/lib/static-pages";
 
 type Props = {
@@ -12,7 +13,7 @@ export default async function TermsPage({ params }: Props) {
   return (
     <article className="mx-auto max-w-3xl px-4 py-12">
       <h1 className="font-serif text-4xl font-semibold">{page.title}</h1>
-      <p className="prose-lomi mt-6">{page.body}</p>
+      <RichTextContent value={page.body} className="prose-lomi mt-6 space-y-4" />
     </article>
   );
 }
