@@ -77,7 +77,7 @@ export default async function HomePage({ params }: Props) {
               <div className="flex items-center justify-between py-4">
                 <div>
                   <p className="text-sm text-[var(--color-muted)]">
-                    {getAudienceLabel(product!.audience, locale)}
+                    {getAudienceLabel(product!.audience)}
                   </p>
                   <p className="font-serif text-2xl font-semibold">
                     {product!.audience === "kids" ? "Kids" : "Adults"}

@@ -12,9 +12,9 @@ export function getStaticPageFromSnapshot(
   slug: "privacy" | "terms",
   locale: Locale,
 ) {
-  const page =
-    snapshot.staticPages.find((item) => item.slug === slug && item.locale === locale) ??
-    snapshot.staticPages.find((item) => item.slug === slug && item.locale === "en");
+  const page = snapshot.staticPages.find(
+    (item) => item.slug === slug && item.locale === locale,
+  );
 
   if (page) {
     return {

@@ -72,6 +72,122 @@ describe("public media delivery", () => {
     expect(download).not.toHaveBeenCalled();
   });
 
+  it("does not publicly serve legacy non-English media", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider: "r2_public",
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      locale: "pl",
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(404);
+    expect(mocks.r2PublicMediaUrl).not.toHaveBeenCalled();
+    expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
+    expect(mocks.createSignedR2ReadUrl).not.toHaveBeenCalled();
+  });
+
+  it("continues to serve global media with a null locale", async () => {
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: { signedUrl: "https://project.storage.supabase.co/object/sign/public-media/file?token=short" },
+      error: null,
+    });
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      locale: null,
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+    mocks.createServiceRoleClient.mockReturnValue({
+      storage: { from: vi.fn(() => ({ createSignedUrl })) },
+    });
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(307);
+    expect(createSignedUrl).toHaveBeenCalled();
+  });
+
+  it("allows an administrator to preview legacy non-English media on a published product", async () => {
+    const createSignedUrl = vi.fn().mockResolvedValue({
+      data: { signedUrl: "https://project.storage.supabase.co/object/sign/public-media/file?token=short" },
+      error: null,
+    });
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      locale: "pl",
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+    mocks.createServiceRoleClient.mockReturnValue({
+      storage: { from: vi.fn(() => ({ createSignedUrl })) },
+    });
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(createSignedUrl).toHaveBeenCalled();
+  });
+
+  it("does not cache administrator previews of legacy R2-public media", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider: "r2_public",
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      locale: "pl",
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+    mocks.getR2PublicBaseUrl.mockReturnValue("https://media.example.test");
+    mocks.r2PublicMediaUrl.mockReturnValue("https://media.example.test/legacy-cover.jpg");
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://media.example.test/legacy-cover.jpg");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
   it("serves published private-R2 media through a short-lived signed URL", async () => {
     mocks.getBackendMode.mockReturnValue("supabase");
     mocks.getAssetByIdForRequest.mockResolvedValue({

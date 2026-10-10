@@ -31,10 +31,10 @@ test("product gallery images load through the Next image optimizer without brows
     }
   });
 
-  const response = await page.goto(`/pl/products/${productSlug}`);
+  const response = await page.goto(`/en/products/${productSlug}`);
 
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole("heading", { name: "Księżycowy Ogród. Kolorowanka" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   await expect.poll(async () => page.locator("img").evaluateAll((images) =>
     images.filter((image) => image.getAttribute("src")?.includes("/_next/image")).every(
       (image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0,
@@ -75,12 +75,12 @@ test("admin blocks duplicate normalized premium codes before the save action", a
     }
   });
 
-  await page.goto("/pl/login?redirectTo=/admin");
-  await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-  await page.getByLabel("Hasło").fill("demo-password");
+  await page.goto("/en/login?redirectTo=/admin");
+  await page.getByLabel("Email").fill("admin@lamilialomi.test");
+  await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
-    page.getByRole("button", { name: "Kontynuuj" }).click(),
+    page.getByRole("button", { name: "Continue" }).click(),
   ]);
 
   await page.goto("/admin/products/new");
@@ -138,12 +138,12 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
   });
 
   try {
-    await page.goto("/pl/login?redirectTo=/admin");
-    await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-    await page.getByLabel("Hasło").fill("demo-password");
+    await page.goto("/en/login?redirectTo=/admin");
+    await page.getByLabel("Email").fill("admin@lamilialomi.test");
+    await page.getByLabel("Password").fill("demo-password");
     await Promise.all([
       page.waitForURL((url) => url.pathname === "/admin"),
-      page.getByRole("button", { name: "Kontynuuj" }).click(),
+      page.getByRole("button", { name: "Continue" }).click(),
     ]);
 
     await page.goto("/admin/products/new");
