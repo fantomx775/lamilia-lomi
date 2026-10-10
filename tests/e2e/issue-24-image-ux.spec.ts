@@ -140,6 +140,22 @@ test("category image upload, replace, storefront display, and removal work on de
   expect(errors).toEqual([]);
 });
 
+test("shows an actionable warning when category image cleanup is deferred", async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  const categoryId = "11111111-1111-4111-8111-111111111111";
+  page.on("pageerror", (error) => errors.push(error.message));
+
+  await signInAsAdmin(page);
+  await page.goto(`/admin/categories?cleanupDeferred=1&categoryId=${categoryId}`);
+
+  const warning = page.getByRole("alert");
+  await expect(warning).toContainText("Kategorię usunięto, ale jej plik obrazu nie został usunięty");
+  await expect(warning).toContainText(categoryId);
+  await expect(page.getByRole("button", { name: "Zamknij komunikat" })).toBeVisible();
+  await capture(page, "category-cleanup-warning", testInfo);
+  expect(errors).toEqual([]);
+});
+
 async function signInAsAdmin(page: Page) {
   await page.goto("/pl/login?redirectTo=/admin/categories");
   await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
