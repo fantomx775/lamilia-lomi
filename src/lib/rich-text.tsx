@@ -57,6 +57,13 @@ export function sanitizeRichTextValue(value: string): string {
   return parsed.kind === "rich" ? serializeRichTextDocument(parsed.document) : value;
 }
 
+export function getRichTextTextContent(value: string): string {
+  const parsed = parseRichTextValue(value);
+  if (parsed.kind === "plain") return parsed.text;
+
+  return parsed.document.content.map(getRichTextNodeText).join(" ");
+}
+
 export function richTextDocumentForEditor(value: string): RichTextDocument {
   const parsed = parseRichTextValue(value);
   if (parsed.kind === "rich") return parsed.document;
@@ -206,6 +213,14 @@ function sanitizeMarks(value: unknown): RichTextMark[] {
   }
 
   return [...marks.values()].sort((left, right) => MARK_ORDER[left.type] - MARK_ORDER[right.type]);
+}
+
+function getRichTextNodeText(node: RichTextNode): string {
+  if (node.type === "text") return node.text ?? "";
+  if (node.type === "hardBreak") return " ";
+
+  const separator = node.type === "paragraph" || node.type === "heading" ? "" : " ";
+  return node.content?.map(getRichTextNodeText).join(separator) ?? "";
 }
 
 function renderPlainText(value: string): ReactNode {

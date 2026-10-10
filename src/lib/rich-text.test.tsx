@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { RichTextContent } from "@/components/rich-text-content";
 import {
   RICH_TEXT_FORMAT_PREFIX,
+  getRichTextTextContent,
   parseRichTextValue,
   richTextDocumentForEditor,
   sanitizeRichTextHref,
@@ -85,6 +86,29 @@ describe("rich text serialization and rendering", () => {
     expect(rendered).toContain("Still the first paragraph.");
     expect(rendered).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
     expect(rendered).not.toContain("<script>");
+  });
+
+  it("extracts visible rich text while preserving legacy and malformed plain values", () => {
+    const richValue = serializeRichTextDocument({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "A phrase split " },
+            { type: "text", text: "across marks", marks: [{ type: "bold" }] },
+            { type: "text", text: " with a link", marks: [{ type: "link", attrs: { href: "https://metadata-only.example/" } }] },
+          ],
+        },
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Another block" }] },
+      ],
+    });
+    const legacyValue = "Legacy paragraph.\n\nSecond paragraph.";
+    const malformedValue = `${RICH_TEXT_FORMAT_PREFIX}{not-json`;
+
+    expect(getRichTextTextContent(richValue)).toBe("A phrase split across marks with a link Another block");
+    expect(getRichTextTextContent(legacyValue)).toBe(legacyValue);
+    expect(getRichTextTextContent(malformedValue)).toBe(malformedValue);
   });
 
   it("accepts safe external, email, fragment, and local links only", () => {
