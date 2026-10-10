@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
   getBackendMode: vi.fn(),
   from: vi.fn(),
   rpc: vi.fn(),
-  insertedTagTranslations: undefined as unknown,
+  upsertedRows: [] as Array<{ table: string; rows: unknown; options?: unknown }>,
+  deletedTables: [] as string[],
   createServiceRoleClient: vi.fn(),
   storageFrom: vi.fn(),
   storageExists: vi.fn(),
@@ -31,8 +32,11 @@ import {
   archiveProductForRequest,
   assertSupabaseUploadsExist,
   saveProductForRequest,
+  saveCategoryForRequest,
+  savePagesForRequest,
   saveTagForRequest,
 } from "./supabase-content-admin";
+import { getSeedContentSnapshot } from "./content-store";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const assetId = "11111111-1111-4111-8111-111111111199";
@@ -44,7 +48,7 @@ function uploadedCoverForm(slug: string, title: string) {
   form.set("status", "draft");
   form.set("audience", "kids");
   form.set("productType", "coloring-book");
-  form.set("title_en", title);
+  form.set("title", title);
   form.append("assetId", assetId);
   form.append("assetKind", "cover");
   form.append("assetPath", `products/${productId}/cover/${assetId}-cover.jpg`);
@@ -71,13 +75,18 @@ describe("Supabase content admin mutations", () => {
     });
 
     const resolvedQuery = () => Promise.resolve({ error: null });
-    mocks.from.mockImplementation(() => ({
-      upsert: vi.fn(() => resolvedQuery()),
-      delete: vi.fn(() => ({ eq: vi.fn(() => resolvedQuery()) })),
-      insert: vi.fn((rows) => {
-        mocks.insertedTagTranslations = rows;
+    mocks.upsertedRows = [];
+    mocks.deletedTables = [];
+    mocks.from.mockImplementation((table: string) => ({
+      upsert: vi.fn((rows, options) => {
+        mocks.upsertedRows.push({ table, rows, options });
         return resolvedQuery();
       }),
+      delete: vi.fn(() => {
+        mocks.deletedTables.push(table);
+        return { eq: vi.fn(() => resolvedQuery()) };
+      }),
+      insert: vi.fn(() => resolvedQuery()),
     }));
     mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
     mocks.storageExists.mockResolvedValue({ data: true, error: null });
@@ -88,24 +97,122 @@ describe("Supabase content admin mutations", () => {
     });
   });
 
-  it("persists the last visible tag name and description when the drawer has mirrored fields", async () => {
+  it("updates only the English tag translation without deleting other locales", async () => {
+    const tagId = "22222222-2222-4222-8222-222222222222";
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [],
+      tags: [{ id: tagId, slug: "old-name", translations: [
+        { locale: "en", name: "Old name", description: "Old description" },
+        { locale: "pl", name: "Stara nazwa", description: "Polski opis" },
+      ] }],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
     const form = new FormData();
-    form.append("name_en", "Old name");
-    form.append("description_en", "Old description");
-    form.append("name_en", "New name");
-    form.append("description_en", "New description");
+    form.set("id", tagId);
+    form.set("name", "New name");
+    form.set("description", "New description");
     form.set("slug", "new-name");
 
     await expect(saveTagForRequest(form)).resolves.toMatchObject({ ok: true });
 
-    expect(mocks.insertedTagTranslations).toEqual([
-      {
-        tag_id: expect.any(String),
-        locale: "en",
-        name: "New name",
-        description: "New description",
-      },
-    ]);
+    expect(mocks.upsertedRows).toContainEqual({
+      table: "tag_translations",
+      rows: { tag_id: tagId, locale: "en", name: "New name", description: "New description" },
+      options: { onConflict: "tag_id,locale" },
+    });
+    expect(mocks.deletedTables).not.toContain("tag_translations");
+  });
+
+  it("updates only the English category translation", async () => {
+    const categoryId = "33333333-3333-4333-8333-333333333333";
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [{ id: categoryId, slug: "books", sortOrder: 1, translations: [
+        { locale: "en", name: "Books", description: "English books" },
+        { locale: "pl", name: "Książki", description: "Polskie książki" },
+      ] }],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    const form = new FormData();
+    form.set("id", categoryId);
+    form.set("name", "Updated books");
+    form.set("description", "Updated description");
+    form.set("slug", "books");
+
+    await expect(saveCategoryForRequest(form)).resolves.toMatchObject({ ok: true });
+
+    expect(mocks.upsertedRows).toContainEqual({
+      table: "category_translations",
+      rows: { category_id: categoryId, locale: "en", name: "Updated books", description: "Updated description" },
+      options: { onConflict: "category_id,locale" },
+    });
+    expect(mocks.deletedTables).not.toContain("category_translations");
+  });
+
+  it("saves a product with existing non-English content intact", async () => {
+    const seededProduct = getSeedContentSnapshot().products[0];
+    const existingProduct = {
+      ...seededProduct,
+      id: productId,
+      slug: "existing-product",
+      coverAssetId: "",
+      videoAssetId: undefined,
+      assets: [],
+      amazonLinks: [],
+      premiumCodes: [],
+    };
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [existingProduct],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.rpc.mockResolvedValue({ data: { status: "success" }, error: null });
+    const form = new FormData();
+    form.set("id", productId);
+    form.set("slug", "existing-product");
+    form.set("status", "draft");
+    form.set("audience", existingProduct.audience);
+    form.set("productType", existingProduct.productType);
+    form.set("title", "Updated English product");
+    form.set("shortDescription", "Updated English description");
+
+    await expect(saveProductForRequest(form)).resolves.toMatchObject({ ok: true, id: productId });
+
+    const payload = mocks.rpc.mock.calls[0][1] as { product_state: { translations: Array<{ locale: string; title: string }> } };
+    expect(payload.product_state.translations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ locale: "en", title: "Updated English product" }),
+      expect.objectContaining({ locale: "pl", title: seededProduct.translations.find((translation) => translation.locale === "pl")?.title }),
+    ]));
+  });
+
+  it("saves only the English static page while retaining other locale rows", async () => {
+    const seededPages = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "terms");
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [],
+      tags: [],
+      staticPages: seededPages,
+      catalogSettings: { desktopColumns: 4 },
+    });
+    const form = new FormData();
+    form.set("title", "Updated English terms");
+    form.set("body", "Updated English terms body");
+
+    await expect(savePagesForRequest(form, "terms")).resolves.toMatchObject({ ok: true, id: "terms" });
+
+    expect(mocks.upsertedRows.filter((row) => row.table === "static_pages")).toHaveLength(1);
+    expect(mocks.upsertedRows).toContainEqual(expect.objectContaining({
+      table: "static_pages",
+      rows: expect.objectContaining({ slug: "terms", locale: "en", title: "Updated English terms" }),
+      options: { onConflict: "slug,locale" },
+    }));
+    expect(mocks.deletedTables).toHaveLength(0);
   });
 
   it("archives through the update-only RPC without saving a stale product snapshot", async () => {
@@ -164,7 +271,7 @@ describe("Supabase content admin mutations", () => {
     form.set("status", "draft");
     form.set("audience", "kids");
     form.set("productType", "coloring-book");
-    form.set("title_en", "Duplicate code product");
+    form.set("title", "Duplicate code product");
     form.set("premiumCodeId", "22222222-2222-4222-8222-222222222222");
     form.set("premiumCode", "MOON-123");
     form.set("premiumCodeActive", "22222222-2222-4222-8222-222222222222");
@@ -211,7 +318,7 @@ describe("Supabase content admin mutations", () => {
     await expect(saveProductForRequest(firstAttempt)).resolves.toMatchObject({ ok: false });
 
     const retry = uploadedCoverForm("retry-after-ambiguous-save", "Retry");
-    retry.set("title_en", "");
+    retry.set("title", "");
 
     await expect(saveProductForRequest(retry)).resolves.toMatchObject({ ok: false });
 
@@ -225,7 +332,7 @@ describe("Supabase content admin mutations", () => {
     form.set("status", "draft");
     form.set("audience", "kids");
     form.set("productType", "coloring-book");
-    form.set("title_en", "Oversized code product");
+    form.set("title", "Oversized code product");
     form.set("premiumCodeId", "22222222-2222-4222-8222-222222222222");
     form.set("premiumCode", "x".repeat(129));
     form.set("premiumCodeActive", "22222222-2222-4222-8222-222222222222");

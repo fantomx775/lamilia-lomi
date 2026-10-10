@@ -8,13 +8,11 @@ import { createPortal } from "react-dom";
 import { registerProductEditorPopStateGuard } from "@/app/admin/admin-product-editor-history-guard";
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
 import { AdminDisclosure } from "@/components/admin/admin-disclosure";
-import { LocaleTabs } from "@/components/admin/locale-tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { routing, type Locale } from "@/i18n/routing";
 import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type AdminMutationResult } from "@/lib/admin-errors";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMedia, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
@@ -22,7 +20,7 @@ import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premi
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
-type TranslationDraft = {
+type ProductContentDraft = {
   title: string;
   shortDescription: string;
   longDescription: string;
@@ -41,7 +39,6 @@ type AssetDraft = {
   filename: string;
   contentType: string;
   sizeBytes?: number;
-  locale: Locale | "";
   title: string;
   sortOrder: number;
   removed: boolean;
@@ -147,8 +144,7 @@ export function ProductEditor({
     formPermalink,
   );
   const submittedValues = nativeSaveState.values;
-  const [locale, setLocale] = useState<Locale>(() => parseLocale(submittedValue(submittedValues, "editorLocale", "en")));
-  const [translations, setTranslations] = useState<Record<Locale, TranslationDraft>>(() => buildTranslations(product, submittedValues));
+  const [content, setContent] = useState<ProductContentDraft>(() => buildProductContent(product, submittedValues));
   const [assets, setAssets] = useState<AssetDraft[]>(() => buildAssets(product, submittedValues));
   const [draftProductId, setDraftProductId] = useState(() => submittedValue(submittedValues, "id", product?.id ?? createClientId()));
   const [productSlug, setProductSlug] = useState(() => submittedValue(submittedValues, "slug", product?.slug ?? ""));
@@ -176,7 +172,6 @@ export function ProductEditor({
   const assetsRef = useRef(assets);
   const uploadVersionsRef = useRef(new Map<ProductAsset["kind"], number>());
   assetsRef.current = assets;
-  const missingLocales = routing.locales.filter((code) => !translations[code].title.trim());
   const visibleAssets = assets.filter((asset) => !asset.removed && asset.status === "uploaded");
   const coverAsset = visibleAssets.find((asset) => asset.kind === "cover");
   const videoAsset = visibleAssets.find((asset) => asset.kind === "video");
@@ -272,8 +267,7 @@ export function ProductEditor({
     const nextPremiumCodes = buildPremiumCodes(product, submittedValues);
     const errorMapping = mapProductSaveErrors(nativeSaveState.errors, formData, nextAmazonLinks, nextPremiumCodes);
 
-    setLocale(errorMapping.locale ?? parseLocale(submittedValue(submittedValues, "editorLocale", "en")));
-    setTranslations(buildTranslations(product, submittedValues));
+    setContent(buildProductContent(product, submittedValues));
     setAssets(nextAssets);
     setDraftProductId(submittedValue(submittedValues, "id", product?.id ?? createClientId()));
     setProductSlug(submittedValue(submittedValues, "slug", product?.slug ?? ""));
@@ -417,9 +411,9 @@ export function ProductEditor({
     };
   }, []);
 
-  const updateTranslation = (field: keyof TranslationDraft, value: string) => {
+  const updateContent = (field: keyof ProductContentDraft, value: string) => {
     markDirty();
-    setTranslations((current) => ({ ...current, [locale]: { ...current[locale], [field]: value } }));
+    setContent((current) => ({ ...current, [field]: value }));
   };
 
   const updateAsset = <K extends keyof AssetDraft>(clientId: string, field: K, value: AssetDraft[K]) => {
@@ -499,7 +493,6 @@ export function ProductEditor({
       filename: file.name,
       contentType: validatedContentTypes.get(file) ?? file.type,
       sizeBytes: file.size,
-      locale: "" as const,
       title: file.name,
       sortOrder: galleryOrderEnd + index + 1,
       removed: false,
@@ -551,7 +544,6 @@ export function ProductEditor({
             filename: file.name,
             sizeBytes: file.size,
             contentType: currentDraft.contentType,
-            locale: currentDraft.locale || undefined,
           }),
         });
         let payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string; errorCode?: string };
@@ -561,7 +553,6 @@ export function ProductEditor({
           formData.append("productId", draftProductId);
           formData.append("kind", draft.kind);
           formData.append("file", file);
-          if (currentDraft.locale) formData.append("locale", currentDraft.locale);
           response = await fetch("/api/admin/assets", { method: "POST", body: formData });
           payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string; errorCode?: string };
         }
@@ -853,7 +844,6 @@ export function ProductEditor({
           setSaveErrorCodes(result.errors);
           setFieldErrors(mapped.fieldErrors);
           setPremiumErrors(mapped.premiumErrors);
-          if (mapped.locale) setLocale(mapped.locale);
           scheduleAfterRender(() => focusFirstError(mapped.focusTarget));
           return;
         }
@@ -894,19 +884,9 @@ export function ProductEditor({
     <div className="min-w-0 pb-28">
       <form ref={formRef} id="product-editor-form" action={saveFormAction ? nativeSaveFormAction : undefined} onSubmit={handleSave} onChangeCapture={markDirty} className="grid gap-6">
         <input type="hidden" name="id" value={draftProductId} />
-        <input type="hidden" name="editorLocale" value={locale} />
         <input type="hidden" name="coverAssetId" value={coverAsset?.id ?? ""} />
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
         <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
-        {routing.locales.map((code) => (
-          <span key={code}>
-            <input type="hidden" name={`title_${code}`} value={translations[code].title} />
-            <input type="hidden" name={`shortDescription_${code}`} value={translations[code].shortDescription} />
-            <input type="hidden" name={`longDescription_${code}`} value={translations[code].longDescription} />
-            <input type="hidden" name={`seoTitle_${code}`} value={translations[code].seoTitle} />
-            <input type="hidden" name={`seoDescription_${code}`} value={translations[code].seoDescription} />
-          </span>
-        ))}
 
         <fieldset disabled={isSaving} className="m-0 grid min-w-0 gap-6 border-0 p-0">
         <AdminEditorHeader
@@ -931,24 +911,23 @@ export function ProductEditor({
 
         <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
           <main className="grid min-w-0 gap-6">
-            <AdminEditorSection title="Podstawowe informacje" description="Treść produktu jest przechowywana osobno dla każdego języka.">
+      <AdminEditorSection title="Podstawowe informacje" description="Treść produktu jest edytowana po angielsku.">
               <div className="grid min-w-0 gap-5">
-                <LocaleTabs value={locale} onChange={setLocale} missingLocales={missingLocales} id="product-locale-panel" />
-                <div id="product-locale-panel" className="grid min-w-0 gap-4" role="tabpanel">
-                  <Field label="Tytuł" htmlFor={`product-title-${locale}`} error={fieldErrors[`product-title-${locale}`]?.[0]}>
-                    <Input id={`product-title-${locale}`} name={`title_${locale}`} value={translations[locale].title} onChange={(event) => updateTranslation("title", event.target.value)} aria-invalid={Boolean(fieldErrors[`product-title-${locale}`]?.length)} aria-describedby={fieldErrors[`product-title-${locale}`]?.length ? `product-title-${locale}-error` : undefined} />
+                <div className="grid min-w-0 gap-4">
+                  <Field label="Tytuł" htmlFor="product-title" error={fieldErrors["product-title"]?.[0]}>
+                    <Input id="product-title" name="title" value={content.title} onChange={(event) => updateContent("title", event.target.value)} aria-invalid={Boolean(fieldErrors["product-title"]?.length)} aria-describedby={fieldErrors["product-title"]?.length ? "product-title-error" : undefined} />
                   </Field>
-                  <Field label="Krótki opis" htmlFor={`product-short-description-${locale}`} error={fieldErrors[`product-short-description-${locale}`]?.[0]}>
-                    <Input id={`product-short-description-${locale}`} name={`shortDescription_${locale}`} value={translations[locale].shortDescription} onChange={(event) => updateTranslation("shortDescription", event.target.value)} aria-invalid={Boolean(fieldErrors[`product-short-description-${locale}`]?.length)} aria-describedby={fieldErrors[`product-short-description-${locale}`]?.length ? `product-short-description-${locale}-error` : undefined} />
+                  <Field label="Krótki opis" htmlFor="product-short-description" error={fieldErrors["product-short-description"]?.[0]}>
+                    <Input id="product-short-description" name="shortDescription" value={content.shortDescription} onChange={(event) => updateContent("shortDescription", event.target.value)} aria-invalid={Boolean(fieldErrors["product-short-description"]?.length)} aria-describedby={fieldErrors["product-short-description"]?.length ? "product-short-description-error" : undefined} />
                   </Field>
-                  <Field label="Długi opis" htmlFor={`product-long-description-${locale}`}>
-                    <Textarea id={`product-long-description-${locale}`} name={`longDescription_${locale}`} value={translations[locale].longDescription} onChange={(event) => updateTranslation("longDescription", event.target.value)} className="min-h-48" />
+                  <Field label="Długi opis" htmlFor="product-long-description">
+                    <Textarea id="product-long-description" name="longDescription" value={content.longDescription} onChange={(event) => updateContent("longDescription", event.target.value)} className="min-h-48" />
                   </Field>
                   <AdminDisclosure className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-4" summary="SEO i wygląd w Google">
                     <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Puste pole użyje fallbacku: tytułu produktu lub krótkiego opisu.</p>
                     <div className="mt-4 grid gap-4">
-                      <Field label="SEO title" htmlFor={`product-seo-title-${locale}`}><Input id={`product-seo-title-${locale}`} name={`seoTitle_${locale}`} value={translations[locale].seoTitle} onChange={(event) => updateTranslation("seoTitle", event.target.value)} /></Field>
-                      <Field label="SEO description" htmlFor={`product-seo-description-${locale}`}><Textarea id={`product-seo-description-${locale}`} name={`seoDescription_${locale}`} value={translations[locale].seoDescription} onChange={(event) => updateTranslation("seoDescription", event.target.value)} className="min-h-28" /></Field>
+                      <Field label="SEO title" htmlFor="product-seo-title"><Input id="product-seo-title" name="seoTitle" value={content.seoTitle} onChange={(event) => updateContent("seoTitle", event.target.value)} /></Field>
+                      <Field label="SEO description" htmlFor="product-seo-description"><Textarea id="product-seo-description" name="seoDescription" value={content.seoDescription} onChange={(event) => updateContent("seoDescription", event.target.value)} className="min-h-28" /></Field>
                     </div>
                   </AdminDisclosure>
                 </div>
@@ -1170,7 +1149,7 @@ function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }:
     {asset.status === "uploaded" && isImage ? <AssetPreview asset={asset} /> : asset.status === "uploaded" && isVideo ? <AssetVideoPreview asset={asset} /> : <div className="grid size-20 shrink-0 place-items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-terracotta)]">{kind === "video" ? <Video className="size-6" aria-hidden /> : kind.includes("download") ? <FileText className="size-6" aria-hidden /> : <ImagePlus className="size-6" aria-hidden />}</div>}
     <div className="min-w-0">
       <p className="break-words font-medium">{asset.filename || "Nowy plik"}</p>
-      <p className="mt-1 text-xs text-[var(--color-muted)]">{formatBytes(asset.sizeBytes)}{asset.locale ? ` · ${asset.locale.toUpperCase()}` : ""}</p>
+      <p className="mt-1 text-xs text-[var(--color-muted)]">{formatBytes(asset.sizeBytes)}</p>
       <p className={`mt-2 inline-flex items-center gap-1 text-xs ${isFailed ? "text-red-800" : "text-[var(--color-muted)]"}`} role={isUploading || isFailed ? "status" : undefined} aria-live="polite">
         {isUploading ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : isFailed ? <X className="size-3.5" aria-hidden /> : asset.status === "queued" ? <LoaderCircle className="size-3.5" aria-hidden /> : <span className="size-1.5 rounded-full bg-emerald-600" aria-hidden />}
         {asset.status === "uploading" ? "Przesyłanie…" : isFailed ? asset.error || "Upload nie powiódł się." : asset.status === "queued" ? "Oczekuje" : "Przesłano"}
@@ -1247,7 +1226,6 @@ function hiddenAssetFields(asset: AssetDraft, removed = false) {
     <input type="hidden" name="assetFilename" value={asset.filename} />
     <input type="hidden" name="assetContentType" value={asset.contentType} />
     <input type="hidden" name="assetSizeBytes" value={asset.sizeBytes ?? ""} />
-    <input type="hidden" name="assetLocale" value={asset.locale} />
     <input type="hidden" name="assetTitle" value={asset.title || asset.filename} />
     <input type="hidden" name="assetSortOrder" value={asset.sortOrder} />
     <input type="hidden" name="assetUploaded" value={asset.uploaded ? "1" : "0"} />
@@ -1337,7 +1315,6 @@ type ProductSaveErrorMapping = {
   fieldErrors: Record<string, string[]>;
   premiumErrors: Partial<Record<string, AdminErrorCode>>;
   focusTarget?: string;
-  locale?: Locale;
 };
 
 function mapProductSaveErrors(
@@ -1349,7 +1326,6 @@ function mapProductSaveErrors(
   const fieldErrors: Record<string, string[]> = {};
   const premiumErrors: Partial<Record<string, AdminErrorCode>> = {};
   let focusTarget: string | undefined;
-  let locale: Locale | undefined;
 
   const addFieldError = (target: string, code: AdminErrorCode) => {
     const message = getAdminErrorMessage(code, "pl");
@@ -1360,8 +1336,7 @@ function mapProductSaveErrors(
   for (const code of errors) {
     switch (code) {
       case ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED:
-        addFieldError("product-title-en", code);
-        locale = "en";
+        addFieldError("product-title", code);
         break;
       case ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED:
       case ADMIN_ERROR_CODES.CONFLICT_SLUG:
@@ -1369,14 +1344,12 @@ function mapProductSaveErrors(
         break;
       case ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS: {
         let foundTarget = false;
-        if (!String(formData.getAll("title_en").at(-1) ?? "").trim()) {
-          addFieldError("product-title-en", code);
-          locale = "en";
+        if (!String(formData.get("title") ?? "").trim()) {
+          addFieldError("product-title", code);
           foundTarget = true;
         }
-        if (!String(formData.getAll("shortDescription_en").at(-1) ?? "").trim()) {
-          addFieldError("product-short-description-en", code);
-          locale = "en";
+        if (!String(formData.get("shortDescription") ?? "").trim()) {
+          addFieldError("product-short-description", code);
           foundTarget = true;
         }
         if (!String(formData.get("coverAssetId") ?? "").trim()) {
@@ -1456,13 +1429,11 @@ function mapProductSaveErrors(
     focusTarget ??= "product-amazon-links";
   }
 
-  return { fieldErrors, premiumErrors, focusTarget, locale };
+  return { fieldErrors, premiumErrors, focusTarget };
 }
 
 function formSignature(form: HTMLFormElement) {
-  const formData = new FormData(form);
-  formData.delete("editorLocale");
-  return formDataSignature(formData);
+  return formDataSignature(new FormData(form));
 }
 
 function readProductEditorHistoryGuard(state: unknown): ProductEditorHistoryGuard | null {
@@ -1480,19 +1451,7 @@ function withProductEditorHistoryGuard(state: unknown, guard: ProductEditorHisto
 }
 
 function formDataSignature(formData: FormData) {
-  const seenTranslations = new Set<string>();
-  const entries = Array.from(formData.entries()).filter(([name]) => {
-    const isTranslation = routing.locales.some((locale) =>
-      ["title", "shortDescription", "longDescription", "seoTitle", "seoDescription"]
-        .some((field) => name === `${field}_${locale}`),
-    );
-    if (!isTranslation || !seenTranslations.has(name)) {
-      if (isTranslation) seenTranslations.add(name);
-      return true;
-    }
-    return false;
-  });
-  return JSON.stringify(entries.map(([name, value]) => [
+  return JSON.stringify(Array.from(formData.entries()).map(([name, value]) => [
     name,
     value instanceof File ? `${value.name}:${value.size}:${value.lastModified}` : value,
   ]));
@@ -1535,28 +1494,22 @@ function formDataFromProductSaveValues(values: NonNullable<ProductSaveFormState[
   return formData;
 }
 
-function parseLocale(value: string): Locale {
-  return routing.locales.includes(value as Locale) ? value as Locale : "en";
-}
-
 function parseProductStatus(value: string): Product["status"] {
   return value === "published" || value === "archived" ? value : "draft";
 }
 
-function buildTranslations(
+function buildProductContent(
   product?: Product,
   values?: ProductSaveFormState["values"],
-): Record<Locale, TranslationDraft> {
-  return Object.fromEntries(routing.locales.map((locale) => {
-    const translation = product?.translations.find((item) => item.locale === locale);
-    return [locale, {
-      title: submittedValue(values ?? null, `title_${locale}`, translation?.title ?? ""),
-      shortDescription: submittedValue(values ?? null, `shortDescription_${locale}`, translation?.shortDescription ?? ""),
-      longDescription: submittedValue(values ?? null, `longDescription_${locale}`, translation?.longDescription ?? ""),
-      seoTitle: submittedValue(values ?? null, `seoTitle_${locale}`, translation?.seoTitle ?? ""),
-      seoDescription: submittedValue(values ?? null, `seoDescription_${locale}`, translation?.seoDescription ?? ""),
-    }];
-  })) as Record<Locale, TranslationDraft>;
+): ProductContentDraft {
+  const english = product?.translations.find((item) => item.locale === "en");
+  return {
+    title: submittedValue(values ?? null, "title", english?.title ?? ""),
+    shortDescription: submittedValue(values ?? null, "shortDescription", english?.shortDescription ?? ""),
+    longDescription: submittedValue(values ?? null, "longDescription", english?.longDescription ?? ""),
+    seoTitle: submittedValue(values ?? null, "seoTitle", english?.seoTitle ?? ""),
+    seoDescription: submittedValue(values ?? null, "seoDescription", english?.seoDescription ?? ""),
+  };
 }
 
 function buildAssets(
@@ -1582,7 +1535,6 @@ function buildAssets(
         filename: itemValue("assetFilename"),
         contentType: itemValue("assetContentType"),
         sizeBytes: Number.isFinite(sizeBytes) && sizeBytes > 0 ? sizeBytes : undefined,
-        locale: itemValue("assetLocale") as Locale | "",
         title: itemValue("assetTitle"),
         sortOrder: Number(itemValue("assetSortOrder", String(index + 1))) || index + 1,
         removed: removedClientIds.has(clientId) || removedIds.has(id),
@@ -1594,7 +1546,7 @@ function buildAssets(
 
   return (product?.assets ?? [])
     .filter((asset) => asset.isActive !== false)
-    .map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, storagePath: asset.storagePath, storageProvider: asset.storageProvider ?? "supabase", filename: asset.filename, contentType: asset.contentType, sizeBytes: asset.sizeBytes, locale: asset.locale ?? "", title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false, status: "uploaded" as const, uploaded: false }));
+    .map((asset, index) => ({ clientId: `existing-asset-${asset.id}`, id: asset.id, kind: asset.kind, bucket: asset.bucket, path: asset.path, storagePath: asset.storagePath, storageProvider: asset.storageProvider ?? "supabase", filename: asset.filename, contentType: asset.contentType, sizeBytes: asset.sizeBytes, title: asset.title ?? "", sortOrder: asset.sortOrder || index + 1, removed: false, status: "uploaded" as const, uploaded: false }));
 }
 
 function buildAmazonLinks(
@@ -1658,6 +1610,6 @@ function statusClass(status: Product["status"]) {
   return { draft: "border-amber-200 bg-amber-50 text-amber-900", published: "border-emerald-200 bg-emerald-50 text-emerald-900", archived: "border-slate-200 bg-slate-100 text-slate-700" }[status];
 }
 
-function taxonomyLabel(translations: Array<{ locale: Locale; name: string }>, fallback: string) {
-  return translations.find((translation) => translation.locale === "en")?.name || translations[0]?.name || fallback;
+function taxonomyLabel(translations: Array<{ locale: string; name: string }>, fallback: string) {
+  return translations.find((translation) => translation.locale === "en")?.name || fallback;
 }

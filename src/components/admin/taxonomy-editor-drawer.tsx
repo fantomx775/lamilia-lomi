@@ -4,17 +4,15 @@ import { useState, useTransition } from "react";
 
 import { AdminDrawer } from "@/components/admin/admin-drawer";
 import { AdminEditorSection } from "@/components/admin/admin-editor-foundation";
-import { LocaleTabs } from "@/components/admin/locale-tabs";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { routing, type Locale } from "@/i18n/routing";
 import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminMutationResult, type AdminErrorCode } from "@/lib/admin-errors";
 import type { Category, Tag } from "@/lib/types";
 
 type TaxonomyItem = Category | Tag;
 type TaxonomyKind = "category" | "tag";
-type LocaleValue = { name: string; description: string };
+type TaxonomyContent = { name: string; description: string };
 export type SaveAction = (formData: FormData) => Promise<AdminMutationResult>;
 export type DeleteAction = (formData: FormData) => Promise<AdminMutationResult>;
 
@@ -49,7 +47,7 @@ export function TaxonomyEditorDrawer({
       restoreFocusElement={restoreFocusElement}
       bodyClassName="!overflow-hidden !p-0"
       title={item ? `Edytuj ${isCategory ? "kategorię" : "tag"}` : isCategory ? "Nowa kategoria" : "Nowy tag"}
-      description="Uzupełnij nazwy i opisy w wybranych językach."
+      description="Edytuj angielską nazwę i opis używane w katalogu."
     >
       <TaxonomyEditorForm
         key={`${open ? "open" : "closed"}-${item?.id ?? "new"}`}
@@ -72,21 +70,14 @@ function TaxonomyEditorForm({
   saveAction,
   deleteAction,
 }: TaxonomyEditorProps) {
-  const [locale, setLocale] = useState<Locale>("en");
   const [isPending, startTransition] = useTransition();
   const [errors, setErrors] = useState<AdminErrorCode[]>([]);
-  const [values, setValues] = useState<Record<Locale, LocaleValue>>(() =>
-    buildLocaleValues(item),
-  );
+  const [values, setValues] = useState<TaxonomyContent>(() => buildContent(item));
   const isCategory = kind === "category";
   const itemId = item?.id ?? "";
-  const missingLocales = routing.locales.filter((code) => !values[code].name.trim());
 
-  const updateValue = (field: keyof LocaleValue, value: string) => {
-    setValues((current) => ({
-      ...current,
-      [locale]: { ...current[locale], [field]: value },
-    }));
+  const updateValue = (field: keyof TaxonomyContent, value: string) => {
+    setValues((current) => ({ ...current, [field]: value }));
   };
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -139,12 +130,6 @@ function TaxonomyEditorForm({
     <form className="flex h-full min-h-0 flex-col" onSubmit={submit}>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
         <input type="hidden" name="id" value={itemId} />
-        {routing.locales.map((code) => (
-          <span key={code}>
-            <input type="hidden" name={`name_${code}`} value={values[code].name} />
-            <input type="hidden" name={`description_${code}`} value={values[code].description} />
-          </span>
-        ))}
 
         <div className="grid gap-5 pb-5">
           {errors.length ? (
@@ -156,29 +141,26 @@ function TaxonomyEditorForm({
             </div>
           ) : null}
 
-          <AdminEditorSection title="Treść" description="W formularzu widoczny jest jeden język naraz.">
+          <AdminEditorSection title="Treść">
             <div className="grid gap-4">
-              <LocaleTabs value={locale} onChange={setLocale} missingLocales={missingLocales} id="taxonomy-locale-panel" />
-              <div id="taxonomy-locale-panel" className="grid gap-4" role="tabpanel">
-                <Field label="Nazwa" htmlFor={`taxonomy-name-${locale}`}>
-                  <Input
-                    id={`taxonomy-name-${locale}`}
-                    name={`name_${locale}`}
-                    value={values[locale].name}
-                    onChange={(event) => updateValue("name", event.target.value)}
-                    autoFocus={locale === "en" && !item}
-                  />
-                </Field>
-                <Field label="Opis" htmlFor={`taxonomy-description-${locale}`}>
-                  <textarea
-                    id={`taxonomy-description-${locale}`}
-                    name={`description_${locale}`}
-                    value={values[locale].description}
-                    onChange={(event) => updateValue("description", event.target.value)}
-                    className="min-h-28 w-full resize-y rounded-md border border-[var(--color-border)] bg-white px-3 py-3 text-sm leading-6 outline-none transition placeholder:text-[var(--color-muted)] focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]"
-                  />
-                </Field>
-              </div>
+              <Field label="Nazwa" htmlFor="taxonomy-name">
+                <Input
+                  id="taxonomy-name"
+                  name="name"
+                  value={values.name}
+                  onChange={(event) => updateValue("name", event.target.value)}
+                  autoFocus={!item}
+                />
+              </Field>
+              <Field label="Opis" htmlFor="taxonomy-description">
+                <textarea
+                  id="taxonomy-description"
+                  name="description"
+                  value={values.description}
+                  onChange={(event) => updateValue("description", event.target.value)}
+                  className="min-h-28 w-full resize-y rounded-md border border-[var(--color-border)] bg-white px-3 py-3 text-sm leading-6 outline-none transition placeholder:text-[var(--color-muted)] focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]"
+                />
+              </Field>
             </div>
           </AdminEditorSection>
 
@@ -215,13 +197,9 @@ function TaxonomyEditorForm({
   );
 }
 
-function buildLocaleValues(item?: TaxonomyItem): Record<Locale, LocaleValue> {
-  return Object.fromEntries(
-    routing.locales.map((locale) => {
-      const translation = item?.translations.find((value) => value.locale === locale);
-      return [locale, { name: translation?.name ?? "", description: translation?.description ?? "" }];
-    }),
-  ) as Record<Locale, LocaleValue>;
+function buildContent(item?: TaxonomyItem): TaxonomyContent {
+  const english = item?.translations.find((translation) => translation.locale === "en");
+  return { name: english?.name ?? "", description: english?.description ?? "" };
 }
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {

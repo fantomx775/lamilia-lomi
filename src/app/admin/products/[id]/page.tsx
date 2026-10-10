@@ -8,7 +8,6 @@ import {
 } from "@/app/admin/actions";
 import { getAdminContentSnapshot } from "@/lib/content-repository";
 import { formatAdminErrors } from "@/lib/admin-errors";
-import { getTranslation } from "@/lib/products";
 import { getProductByIdForRequest } from "@/lib/products-request";
 import { ProductEditor } from "../product-editor";
 
@@ -31,7 +30,7 @@ export default async function EditProductPage({ params, searchParams }: Props) {
 
   return (
     <ProductEditor
-      title={`Edycja: ${getTranslation(product.translations, "en").title}`}
+      title={`Edycja: ${product.translations.find((translation) => translation.locale === "en")?.title || product.slug}`}
       product={product}
       categories={snapshot.categories}
       tags={snapshot.tags}

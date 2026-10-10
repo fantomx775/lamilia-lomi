@@ -8,7 +8,6 @@ export type AdminPageListRow = {
   id: string;
   title: string;
   slug: string;
-  languageCodes: string[];
   updatedAt: string;
 };
 
@@ -31,11 +30,6 @@ const columns: DataTableColumn<AdminPageListRow>[] = [
     cell: (row) => <span className="font-mono text-xs">{row.slug}</span>,
   },
   {
-    id: "languages",
-    header: "Języki",
-    cell: (row) => formatLanguages(row.languageCodes),
-  },
-  {
     id: "updated",
     header: "Ostatnia aktualizacja",
     cell: (row) => row.updatedAt,
@@ -46,7 +40,7 @@ export function PagesResourceList({ rows }: { rows: AdminPageListRow[] }) {
   return (
     <AdminResourceList
       title="Strony"
-      description="Przeglądaj dostępne wersje językowe stron informacyjnych."
+      description="Przeglądaj strony informacyjne."
       searchPlaceholder="Szukaj stron…"
       searchAriaLabel="Szukaj stron"
       caption="Lista stron"
@@ -54,7 +48,7 @@ export function PagesResourceList({ rows }: { rows: AdminPageListRow[] }) {
       columns={columns}
       getRowId={(row) => row.id}
       getRowHref={(row) => `/admin/pages/${row.slug}`}
-      getSearchText={(row) => [row.title, row.slug, ...row.languageCodes, row.updatedAt].join(" ")}
+      getSearchText={(row) => [row.title, row.slug, row.updatedAt].join(" ")}
       renderMobileCard={(row) => (
         <Link
           href={`/admin/pages/${row.slug}`}
@@ -63,14 +57,10 @@ export function PagesResourceList({ rows }: { rows: AdminPageListRow[] }) {
         >
           <p className="truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
           <p className="mt-1 truncate font-mono text-xs text-[var(--color-muted)]">{row.slug}</p>
-          <p className="mt-4 text-sm text-[var(--color-muted)]">{formatLanguages(row.languageCodes)} · {row.updatedAt}</p>
+          <p className="mt-4 text-sm text-[var(--color-muted)]">{row.updatedAt}</p>
         </Link>
       )}
       emptyState={<p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak stron.</p>}
     />
   );
-}
-
-function formatLanguages(languageCodes: string[]) {
-  return languageCodes.length > 0 ? languageCodes.map((code) => code.toUpperCase()).join(", ") : "—";
 }

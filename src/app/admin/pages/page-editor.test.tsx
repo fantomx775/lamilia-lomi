@@ -12,29 +12,25 @@ import { getSeedContentSnapshot } from "@/lib/content-store";
 afterEach(() => cleanup());
 
 describe("PageEditor", () => {
-  it("loads existing page locales and keeps one body editor visible", async () => {
-    const user = userEvent.setup();
+  it("loads the single content language without language tabs", () => {
     const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "privacy");
     const view = render(<PageEditor slug="privacy" title="Privacy Policy" records={records} />);
 
     expect(view.getByRole("heading", { name: "Treść strony" })).toBeInTheDocument();
-    expect(view.getAllByRole("tabpanel")).toHaveLength(1);
-    expect(view.getByRole("tabpanel").querySelector("textarea")).toHaveValue(records[0].body);
-
-    await user.click(view.getByRole("tab", { name: /PL/ }));
-    expect(view.getByRole("tabpanel").querySelector("textarea")).toHaveValue(records.find((page) => page.locale === "pl")?.body);
+    expect(view.queryByRole("tab")).not.toBeInTheDocument();
+    expect(view.getByLabelText("Treść")).toHaveValue(records.find((page) => page.locale === "en")?.body);
     expect(view.getByText("Klucz strony: privacy")).toBeInTheDocument();
     expect(view.container.querySelector('select[name="slug"]')).not.toBeInTheDocument();
     expect(view.container.querySelector('input[name="slug"]')).toHaveValue("privacy");
   });
 
-  it("submits the shared slug and all locale fields through the provided action", async () => {
+  it("submits only the page content through the provided action", async () => {
     const saveAction = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
     const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "privacy");
     const view = render(<PageEditor slug="privacy" title="Privacy Policy" records={records} saveAction={saveAction} />);
 
-    const title = view.container.querySelector<HTMLInputElement>("#page-title-en");
+    const title = view.container.querySelector<HTMLInputElement>("#page-title");
     expect(title).not.toBeNull();
     await user.clear(title!);
     await user.type(title!, "Updated privacy policy");
@@ -43,7 +39,8 @@ describe("PageEditor", () => {
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
     const formData = saveAction.mock.calls[0][0] as FormData;
     expect(formData.get("slug")).toBe("privacy");
-    expect(formData.get("title_en")).toBe("Updated privacy policy");
-    expect(formData.get("body_pl")).toBe(records.find((page) => page.locale === "pl")?.body);
+    expect(formData.get("title")).toBe("Updated privacy policy");
+    expect(formData.has("title_pl")).toBe(false);
+    expect(formData.has("body_pl")).toBe(false);
   });
 });

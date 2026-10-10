@@ -16,7 +16,6 @@ export type AdminProductListRow = {
   status: ProductStatus;
   audience: Audience;
   productType: string;
-  languageCodes: string[];
 };
 
 const statusLabels: Record<ProductStatus, string> = {
@@ -60,11 +59,6 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
     header: "Typ produktu",
     cell: (row) => formatProductType(row.productType),
   },
-  {
-    id: "languages",
-    header: "Języki",
-    cell: (row) => formatLanguages(row.languageCodes),
-  },
 ];
 
 export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) {
@@ -80,7 +74,7 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
       getRowId={(row) => row.id}
       getRowHref={(row) => `/admin/products/${row.id}`}
       getSearchText={(row) =>
-        [row.title, row.slug, row.status, row.audience, row.productType, ...row.languageCodes].join(" ")
+        [row.title, row.slug, row.status, row.audience, row.productType].join(" ")
       }
       toolbarActions={
         <Link className={buttonClassName({ size: "sm" })} href="/admin/products/new">
@@ -102,7 +96,7 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
             <Badge className={statusClasses[row.status]}>{statusLabels[row.status]}</Badge>
           </div>
           <p className="mt-4 text-sm text-[var(--color-muted)]">
-            {row.audience === "kids" ? "Dzieci" : "Dorośli"} · {formatProductType(row.productType)} · {formatLanguages(row.languageCodes)}
+            {row.audience === "kids" ? "Dzieci" : "Dorośli"} · {formatProductType(row.productType)}
           </p>
         </Link>
       )}
@@ -116,8 +110,4 @@ function formatProductType(value: string) {
     .split("-")
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
-}
-
-function formatLanguages(languageCodes: string[]) {
-  return languageCodes.length > 0 ? languageCodes.map((code) => code.toUpperCase()).join(", ") : "—";
 }

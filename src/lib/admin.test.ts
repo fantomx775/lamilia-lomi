@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildStaticPagesFromFormData,
   buildProductFromFormData,
+  buildCategoryFromFormData,
+  buildTagFromFormData,
   validateProductAssetSubmission,
   validateAssetClassification,
 } from "./admin-content";
@@ -41,9 +43,9 @@ describe("admin behavior", () => {
     const snapshot = getSeedContentSnapshot();
     const form = new FormData();
 
-    form.set("title_en", "Ocean Calm Coloring Book");
-    form.set("shortDescription_en", "A calm test book.");
-    form.set("longDescription_en", "Long calm description.");
+    form.set("title", "Ocean Calm Coloring Book");
+    form.set("shortDescription", "A calm test book.");
+    form.set("longDescription", "Long calm description.");
     form.set("status", "published");
     form.set("audience", "adults");
     form.set("productType", "coloring-book");
@@ -55,7 +57,6 @@ describe("admin behavior", () => {
     form.append("assetPath", "/assets/covers/ocean-calm.png");
     form.append("assetFilename", "ocean-calm.png");
     form.append("assetContentType", "image/png");
-    form.append("assetLocale", "");
     form.append("assetTitle", "Ocean cover");
     form.append("assetSortOrder", "1");
     form.append("assetId", "asset-premium");
@@ -64,7 +65,6 @@ describe("admin behavior", () => {
     form.append("assetPath", "ocean-calm/bonus.pdf");
     form.append("assetFilename", "bonus.pdf");
     form.append("assetContentType", "application/pdf");
-    form.append("assetLocale", "");
     form.append("assetTitle", "Premium PDF");
     form.append("assetSortOrder", "1");
     form.append("amazonId", "amazon-ocean-us");
@@ -79,6 +79,9 @@ describe("admin behavior", () => {
 
     expect(result.errors).toEqual([]);
     expect(result.product.slug).toBe("ocean-calm-coloring-book");
+    expect(result.product.translations).toEqual([
+      expect.objectContaining({ locale: "en", title: "Ocean Calm Coloring Book" }),
+    ]);
     expect(result.product.assets).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: "cover", isPublic: true }),
@@ -108,7 +111,7 @@ describe("admin behavior", () => {
 
   it("normalizes premium assets to the private storage bucket", () => {
     const form = new FormData();
-    form.set("title_en", "Private bonus");
+    form.set("title", "Private bonus");
     form.set("assetKind", "premium_download");
     form.set("assetBucket", "public-media");
     form.set("assetPath", "private/bonus.pdf");
@@ -165,7 +168,7 @@ describe("admin behavior", () => {
 
   it("rejects more than twenty active gallery assets server-side", () => {
     const form = new FormData();
-    form.set("title_en", "Gallery limit");
+    form.set("title", "Gallery limit");
     for (let index = 0; index < 21; index += 1) {
       form.append("assetId", `asset-${index}`);
       form.append("assetKind", "gallery");
@@ -181,7 +184,7 @@ describe("admin behavior", () => {
 
   it("rejects duplicate Amazon markets server-side", () => {
     const form = new FormData();
-    form.set("title_en", "Duplicate market links");
+    form.set("title", "Duplicate market links");
     form.append("amazonId", "amazon-com-1");
     form.append("amazonMarket", "amazon.com");
     form.append("amazonUrl", "https://www.amazon.com/dp/FIRST");
@@ -196,7 +199,7 @@ describe("admin behavior", () => {
 
   it("rejects blank premium rows instead of silently dropping them", () => {
     const form = new FormData();
-    form.set("title_en", "Missing premium code");
+    form.set("title", "Missing premium code");
     form.append("premiumCode", "   ");
 
     const result = buildProductFromFormData(form, { snapshot: getSeedContentSnapshot() });
@@ -207,7 +210,7 @@ describe("admin behavior", () => {
 
   it("accepts a 128-character premium code and rejects the 129th character", () => {
     const atLimit = new FormData();
-    atLimit.set("title_en", "Boundary premium code");
+    atLimit.set("title", "Boundary premium code");
     atLimit.append("premiumCode", "x".repeat(128));
 
     const accepted = buildProductFromFormData(atLimit, { snapshot: getSeedContentSnapshot() });
@@ -216,7 +219,7 @@ describe("admin behavior", () => {
     expect(accepted.product.premiumCodes[0]?.code).toHaveLength(128);
 
     const overLimit = new FormData();
-    overLimit.set("title_en", "Oversized premium code");
+    overLimit.set("title", "Oversized premium code");
     overLimit.append("premiumCode", "x".repeat(129));
 
     const rejected = buildProductFromFormData(overLimit, { snapshot: getSeedContentSnapshot() });
@@ -227,7 +230,7 @@ describe("admin behavior", () => {
   it("rejects a premium code already assigned to another product", () => {
     const snapshot = getSeedContentSnapshot();
     const form = new FormData();
-    form.set("title_en", "Reused premium code");
+    form.set("title", "Reused premium code");
     form.append("premiumCode", snapshot.products[0].premiumCodes[0].code);
 
     const result = buildProductFromFormData(form, { snapshot });
@@ -235,7 +238,7 @@ describe("admin behavior", () => {
     expect(result.errors).toContain(ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING);
   });
 
-  it("preserves existing product locales, taxonomy, assets, markets, and premium codes on edit", () => {
+  it("updates one product language while preserving other content, assets, markets, and codes", () => {
     const snapshot = getSeedContentSnapshot();
     const existing = snapshot.products[0];
     const form = new FormData();
@@ -250,13 +253,12 @@ describe("admin behavior", () => {
     form.set("reviewDelayDays", String(existing.reviewDelayDays));
     form.set("sortOrder", String(existing.sortOrder));
 
-    for (const translation of existing.translations) {
-      form.set(`title_${translation.locale}`, translation.title);
-      form.set(`shortDescription_${translation.locale}`, translation.shortDescription);
-      form.set(`longDescription_${translation.locale}`, translation.longDescription);
-      form.set(`seoTitle_${translation.locale}`, translation.seoTitle ?? "");
-      form.set(`seoDescription_${translation.locale}`, translation.seoDescription ?? "");
-    }
+    const english = existing.translations.find((translation) => translation.locale === "en")!;
+    form.set("title", english.title);
+    form.set("shortDescription", english.shortDescription);
+    form.set("longDescription", english.longDescription);
+    form.set("seoTitle", english.seoTitle ?? "");
+    form.set("seoDescription", english.seoDescription ?? "");
 
     for (const categoryId of existing.categoryIds) form.append("categoryIds", categoryId);
     for (const tagId of existing.tagIds) form.append("tagIds", tagId);
@@ -268,7 +270,6 @@ describe("admin behavior", () => {
       form.append("assetPath", asset.path);
       form.append("assetFilename", asset.filename);
       form.append("assetContentType", asset.contentType);
-      form.append("assetLocale", asset.locale ?? "");
       form.append("assetTitle", asset.title ?? "");
       form.append("assetSortOrder", String(asset.sortOrder));
     }
@@ -318,8 +319,8 @@ describe("admin behavior", () => {
 
     const clearForm = new FormData();
     clearForm.set("id", existing.id);
-    clearForm.set("seoTitle_en", "");
-    clearForm.set("seoDescription_en", "");
+    clearForm.set("seoTitle", "");
+    clearForm.set("seoDescription", "");
 
     const cleared = buildProductFromFormData(clearForm, { existing, snapshot }).product.translations.find(
       (translation) => translation.locale === "en",
@@ -344,17 +345,17 @@ describe("admin behavior", () => {
     });
   });
 
-  it("builds all locale page updates for one immutable page key", () => {
+  it("builds one page update and leaves existing public locale records intact", () => {
     const snapshot = getSeedContentSnapshot();
     const form = new FormData();
     form.set("slug", "privacy");
-    form.set("title_en", "Updated Privacy Policy");
-    form.set("body_en", "Updated privacy body");
+    form.set("title", "Updated Privacy Policy");
+    form.set("body", "Updated privacy body");
 
     const result = buildStaticPagesFromFormData(form, snapshot, "privacy");
 
     expect(result.slug).toBe("privacy");
-    expect(result.pages).toHaveLength(4);
+    expect(result.pages).toHaveLength(1);
     expect(result.pages.every((page) => page.slug === "privacy")).toBe(true);
     expect(result.pages.find((page) => page.locale === "en")).toMatchObject({
       title: "Updated Privacy Policy",
@@ -366,10 +367,39 @@ describe("admin behavior", () => {
         expect.objectContaining({ slug: "terms", locale: "pl", title: "Regulamin" }),
       ]),
     );
+    expect(snapshot.staticPages.find((page) => page.slug === "privacy" && page.locale === "pl")?.body).toContain("LamiliaLomi przechowuje");
 
     form.set("slug", "terms");
     const protectedResult = buildStaticPagesFromFormData(form, snapshot, "privacy");
     expect(protectedResult.slug).toBe("privacy");
     expect(protectedResult.pages.every((page) => page.slug === "privacy")).toBe(true);
+  });
+
+  it("updates English taxonomy content without dropping stored translations", () => {
+    const snapshot = getSeedContentSnapshot();
+    const category = snapshot.categories[0];
+    const categoryForm = new FormData();
+    categoryForm.set("id", category.id);
+    categoryForm.set("name", "Updated books");
+    categoryForm.set("description", "English description");
+    const nextCategory = buildCategoryFromFormData(categoryForm, snapshot, category);
+
+    expect(nextCategory.translations.find((translation) => translation.locale === "en")).toMatchObject({
+      name: "Updated books",
+      description: "English description",
+    });
+    expect(nextCategory.translations.find((translation) => translation.locale === "pl")).toEqual(
+      category.translations.find((translation) => translation.locale === "pl"),
+    );
+
+    const tag = snapshot.tags[0];
+    const tagForm = new FormData();
+    tagForm.set("id", tag.id);
+    tagForm.set("name", "Updated tag");
+    const nextTag = buildTagFromFormData(tagForm, snapshot, tag);
+    expect(nextTag.translations.find((translation) => translation.locale === "en")?.name).toBe("Updated tag");
+    expect(nextTag.translations.find((translation) => translation.locale === "pl")).toEqual(
+      tag.translations.find((translation) => translation.locale === "pl"),
+    );
   });
 });
