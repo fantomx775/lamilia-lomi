@@ -10,7 +10,7 @@ import {
   parseCatalogFilters,
 } from "./products";
 import { serializeRichTextDocument } from "./rich-text";
-import type { ContentSnapshot } from "./types";
+import type { ContentSnapshot, ProductAsset } from "./types";
 import { getSeedContentSnapshot } from "./local-content";
 
 function catalogSnapshotWithLongDescription(longDescription: string): ContentSnapshot {
@@ -38,6 +38,66 @@ function catalogSnapshotWithLongDescription(longDescription: string): ContentSna
         categoryIds: [],
         tagIds: [],
         assets: [],
+        amazonLinks: [],
+        premiumCodes: [],
+      },
+    ],
+    categories: [],
+    tags: [],
+    staticPages: [],
+    catalogSettings: { desktopColumns: 4 },
+  };
+}
+
+function createCoverAsset(
+  id: string,
+  locale: ProductAsset["locale"],
+  sortOrder: number,
+  isActive = true,
+): ProductAsset {
+  return {
+    id,
+    productId: "cover-selection-product",
+    kind: "cover",
+    bucket: "public-media",
+    path: `/assets/covers/${id}.jpg`,
+    filename: `${id}.jpg`,
+    contentType: "image/jpeg",
+    locale,
+    sortOrder,
+    isPublic: true,
+    isActive,
+  };
+}
+
+function createCoverSelectionSnapshot(
+  coverAssetId: string,
+  assets: ProductAsset[],
+): ContentSnapshot {
+  return {
+    products: [
+      {
+        id: "cover-selection-product",
+        slug: "cover-selection-product",
+        status: "published",
+        audience: "adults",
+        productType: "coloring-book",
+        coverAssetId,
+        reviewDelayDays: 14,
+        sortOrder: 1,
+        createdAt: "2026-09-04T00:00:00.000Z",
+        updatedAt: "2026-09-04T00:00:00.000Z",
+        translations: [
+          {
+            locale: "en",
+            title: "Cover selection product",
+            shortDescription: "A product for cover selection tests.",
+            longDescription: "A product for cover selection tests.",
+          },
+        ],
+        categoryIds: [],
+        tagIds: [],
+        assets,
         amazonLinks: [],
         premiumCodes: [],
       },
@@ -232,6 +292,68 @@ describe("product catalog behavior", () => {
     const product = getLocalizedProductViewFromSnapshot(
       snapshot,
       "product-without-cover",
+      "en",
+    );
+
+    expect(product?.cover.path).toBe("/assets/covers/cover-placeholder.svg");
+  });
+
+  it("prefers the selected English cover over other eligible covers", () => {
+    const snapshot = createCoverSelectionSnapshot("selected-english-cover", [
+      createCoverAsset("global-cover", undefined, 1),
+      createCoverAsset("selected-english-cover", "en", 2),
+    ]);
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "cover-selection-product",
+      "en",
+    );
+
+    expect(product?.cover.id).toBe("selected-english-cover");
+  });
+
+  it("prefers the selected global cover over other eligible covers", () => {
+    const snapshot = createCoverSelectionSnapshot("selected-global-cover", [
+      createCoverAsset("selected-global-cover", undefined, 2),
+      createCoverAsset("english-cover", "en", 1),
+    ]);
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "cover-selection-product",
+      "en",
+    );
+
+    expect(product?.cover.id).toBe("selected-global-cover");
+  });
+
+  it("falls back from a selected retired Polish cover to the first eligible cover", () => {
+    const snapshot = createCoverSelectionSnapshot("retired-polish-cover", [
+      createCoverAsset("retired-polish-cover", "pl", 0),
+      createCoverAsset("english-cover", "en", 2),
+      createCoverAsset("global-cover", undefined, 1),
+      createCoverAsset("inactive-english-cover", "en", 0, false),
+    ]);
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "cover-selection-product",
+      "en",
+    );
+
+    expect(product?.cover.id).toBe("global-cover");
+  });
+
+  it("uses the placeholder when no eligible cover exists", () => {
+    const snapshot = createCoverSelectionSnapshot("retired-polish-cover", [
+      createCoverAsset("retired-polish-cover", "pl", 0),
+      createCoverAsset("inactive-english-cover", "en", 1, false),
+    ]);
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "cover-selection-product",
       "en",
     );
 

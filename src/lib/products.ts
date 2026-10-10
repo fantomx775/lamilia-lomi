@@ -110,8 +110,10 @@ export function getLocalizedProductViewFromSnapshot(
     product.assets.filter((asset) => asset.isActive !== false),
     locale,
   );
+  const eligibleCovers = activeAssets.filter((asset) => asset.kind === "cover");
   const cover =
-    activeAssets.find((asset) => asset.id === product.coverAssetId) ??
+    eligibleCovers.find((asset) => asset.id === product.coverAssetId) ??
+    eligibleCovers[0] ??
     createCoverPlaceholder(product);
 
   return {
