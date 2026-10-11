@@ -116,13 +116,14 @@ function configureAboutSettingsDatabase(options: {
     { id: "picture-2", product_type: "picture-book" },
     { id: "picture-3", product_type: "picture-book" },
   ];
+  const productsWithStatus = products.map((product) => ({ status: "published", ...product }));
   const updates: unknown[] = [];
 
   mocks.from.mockImplementation((table: string) => {
     if (table === "products") {
       return {
         select: vi.fn(() => ({
-          in: vi.fn(() => Promise.resolve({ data: products, error: null })),
+          in: vi.fn(() => Promise.resolve({ data: productsWithStatus, error: null })),
         })),
       };
     }
@@ -1005,7 +1006,7 @@ describe("Supabase content admin mutations", () => {
   it("persists six distinct ordered About product IDs in one settings update", async () => {
     const updates = configureAboutSettingsDatabase({
       products: [
-        { id: "coloring-1", product_type: "coloring-book", status: "draft" },
+        { id: "coloring-1", product_type: "coloring-book" },
         { id: "coloring-2", product_type: "coloring-book" },
         { id: "coloring-3", product_type: "coloring-book" },
         { id: "picture-1", product_type: "picture-book" },
@@ -1043,6 +1044,25 @@ describe("Supabase content admin mutations", () => {
       errors: ["admin.validation.invalid_input"],
     });
     expect(mocks.from).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+  });
+
+  it("rejects a newly selected unpublished product when client validation is bypassed", async () => {
+    const updates = configureAboutSettingsDatabase({
+      products: [
+        { id: "coloring-1", product_type: "coloring-book", status: "draft" },
+        { id: "coloring-2", product_type: "coloring-book" },
+        { id: "coloring-3", product_type: "coloring-book" },
+        { id: "picture-1", product_type: "picture-book" },
+        { id: "picture-2", product_type: "picture-book" },
+        { id: "picture-3", product_type: "picture-book" },
+      ],
+    });
+
+    await expect(saveAboutPageSettingsForRequest(aboutSettingsForm())).resolves.toEqual({
+      ok: false,
+      errors: ["admin.validation.invalid_input"],
+    });
     expect(updates).toEqual([]);
   });
 

@@ -684,10 +684,10 @@ export async function saveAboutPageSettingsForRequest(
 async function loadAboutProducts(
   supabase: Awaited<ReturnType<typeof createClient>>,
   productIds: string[],
-): Promise<Array<Pick<Product, "id" | "productType">>> {
+): Promise<Array<Pick<Product, "id" | "productType" | "status">>> {
   const { data, error } = await supabase
     .from("products")
-    .select("id, product_type")
+    .select("id, product_type, status")
     .in("id", productIds);
 
   if (error) {
@@ -697,6 +697,7 @@ async function loadAboutProducts(
   return (data ?? []).map((row) => ({
     id: row.id,
     productType: row.product_type,
+    status: row.status,
   }));
 }
 
@@ -709,14 +710,14 @@ function getAboutProductIds(settings: AboutPageSettings) {
 
 function validateAboutPageProductSelections(
   settings: AboutPageSettings,
-  products: readonly Pick<Product, "id" | "productType">[],
+  products: readonly Pick<Product, "id" | "productType" | "status">[],
   existingSettings: AboutPageSettings,
 ) {
   if (hasDuplicateAboutProductIds(settings)) {
     return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
   }
 
-  const productTypes = new Map(products.map((product) => [product.id, product.productType]));
+  const productsById = new Map(products.map((product) => [product.id, product]));
   const previousIds = new Set(getAboutProductIds(existingSettings));
   const selections = [
     ...settings.favoriteColoringBookIds.map((id) => [id, "coloring-book"] as const),
@@ -725,11 +726,14 @@ function validateAboutPageProductSelections(
 
   for (const [id, expectedType] of selections) {
     if (!id) continue;
-    const productType = productTypes.get(id);
-    if (productType && productType !== expectedType) {
+    const product = productsById.get(id);
+    if (product && product.productType !== expectedType) {
       return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
     }
-    if (!productType && !previousIds.has(id)) {
+    if (product && product.status !== "published" && !previousIds.has(id)) {
+      return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
+    }
+    if (!product && !previousIds.has(id)) {
       return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
     }
   }
