@@ -20,8 +20,10 @@ function redactFreeTextUrls(value) {
   // continuations, while leaving ordinary multiline prose intact.
   return value
     .replace(
-      /https?:\/\/[^\r\n\u2028\u2029]*?[?#][^=?&#\s\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*/gi,
-      (urlOrPath) => urlOrPath.slice(0, urlOrPath.search(/[?#]/)),
+      /https?:\/\/[^\r\n\u2028\u2029]*?(?:[?#]|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#])[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*/gi,
+      (urlOrPath) => urlOrPath
+        .slice(0, urlOrPath.search(/[?#]/))
+        .replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, ""),
     )
     .replace(
       /(?:https?:\/\/|\/)[^\s<>`?#]*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
