@@ -16,10 +16,17 @@ const PRIVATE_RAW_VERIFICATION_RECORD = new WeakMap();
 const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
 
 function redactFreeTextUrls(value) {
-  return value.replace(/(?:https?:\/\/|\/)[^\s<>`]*/gi, (urlOrPath) => {
-    const queryOrFragment = urlOrPath.search(/[?#]/);
-    return queryOrFragment < 0 ? urlOrPath : urlOrPath.slice(0, queryOrFragment);
-  });
+  // Treat a query continued on the next line as part of the URL, while leaving
+  // ordinary multiline prose after it intact.
+  return value.replace(
+    /(?:https?:\/\/|\/)[^\s<>`]*(?:(?:\r\n?|\n)[ \t]*[?&][^\s<>`]*=[^\s<>`]*)*/gi,
+    (urlOrPath) => {
+      const queryOrFragment = urlOrPath.search(/[?#]/);
+      if (queryOrFragment < 0) return urlOrPath;
+      const url = urlOrPath.slice(0, queryOrFragment);
+      return url.replace(/(?:\r\n?|\n)[ \t]*$/, "");
+    },
+  );
 }
 
 function redactStructuredPath(value) {

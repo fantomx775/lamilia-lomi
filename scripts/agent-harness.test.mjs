@@ -2190,6 +2190,41 @@ test("smoke plan validation and verify output redact query strings from persiste
   assert.equal(JSON.stringify(newlineCheckedPlan).includes("secret-token"), false);
 });
 
+test("free-text smoke fields redact multiline URL queries and preserve ordinary multiline text", () => {
+  const filename = "src/app/catalog/page.tsx";
+  const multilineUrl = "https://production.example.test/catalog\n?token=secret-token\n&continuation=continuation-marker";
+  const plan = {
+    status: "PASS",
+    flows: [{
+      name: `catalog flow at ${multilineUrl}\nKeep this flow note`,
+      affectedFiles: [filename],
+      paths: [{
+        path: "/catalog",
+        expectedText: `Catalog heading at ${multilineUrl}\nKeep this expected-text note`,
+      }],
+    }],
+  };
+  const localVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: plan }))],
+  });
+  const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
+
+  assert.equal(checkedPlan.status, "PASS");
+  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note";
+  const safeExpectedText = "Catalog heading at https://production.example.test/catalog\nKeep this expected-text note";
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].name, safeFlowName);
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].expectedText, safeExpectedText);
+  assert.equal(checkedPlan.flows[0].name, safeFlowName);
+  assert.equal(checkedPlan.expectations[0].expectedText, safeExpectedText);
+  const persistedOutput = JSON.stringify({ localVerification, checkedPlan });
+  assert.equal(persistedOutput.includes("secret-token"), false);
+  assert.equal(persistedOutput.includes("continuation-marker"), false);
+  assert.ok(persistedOutput.includes("Keep this flow note"));
+  assert.ok(persistedOutput.includes("Keep this expected-text note"));
+  assert.ok(persistedOutput.includes("https://production.example.test/catalog"));
+});
+
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
   const evidenceComments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
