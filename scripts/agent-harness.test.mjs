@@ -2195,10 +2195,12 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const multilineUrl = "https://production.example.test/catalog\n?token=secret-token\n&continuation=continuation-marker";
   const ampersandContinuation = "https://production.example.test/catalog\n&token=secret-token\n&continuation=continuation-marker";
   const delimiterBeforeKey = "https://production.example.test/catalog?\ntoken=secret-token\n&continuation=continuation-marker";
+  const fragmentContinuation = "https://production.example.test/catalog\n#access_token=fragment-secret\n&continuation=fragment-continuation-marker";
+  const fragmentDelimiterBeforeKey = "https://production.example.test/catalog#\naccess_token=bare-fragment-secret\n&continuation=bare-fragment-continuation-marker";
   const plan = {
     status: "PASS",
     flows: [{
-      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note`,
+      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note\nFragment ${fragmentContinuation}\nKeep this fragment note\nBare fragment ${fragmentDelimiterBeforeKey}\nKeep this bare-fragment note`,
       affectedFiles: [filename],
       paths: [{
         path: "/catalog",
@@ -2213,7 +2215,7 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
 
   assert.equal(checkedPlan.status, "PASS");
-  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note";
+  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note\nFragment https://production.example.test/catalog\nKeep this fragment note\nBare fragment https://production.example.test/catalog\nKeep this bare-fragment note";
   const safeExpectedText = "Catalog heading at https://production.example.test/catalog\nKeep this expected-text note";
   assert.equal(localVerification.record.productionSmokePlan.flows[0].name, safeFlowName);
   assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].expectedText, safeExpectedText);
@@ -2221,8 +2223,14 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   assert.equal(checkedPlan.expectations[0].expectedText, safeExpectedText);
   const persistedOutput = JSON.stringify({ localVerification, checkedPlan });
   assert.equal(persistedOutput.includes("secret-token"), false);
+  assert.equal(persistedOutput.includes("fragment-secret"), false);
+  assert.equal(persistedOutput.includes("bare-fragment-secret"), false);
   assert.equal(persistedOutput.includes("continuation-marker"), false);
+  assert.equal(persistedOutput.includes("fragment-continuation-marker"), false);
+  assert.equal(persistedOutput.includes("bare-fragment-continuation-marker"), false);
   assert.ok(persistedOutput.includes("Keep this flow note"));
+  assert.ok(persistedOutput.includes("Keep this fragment note"));
+  assert.ok(persistedOutput.includes("Keep this bare-fragment note"));
   assert.ok(persistedOutput.includes("Keep this expected-text note"));
   assert.ok(persistedOutput.includes("https://production.example.test/catalog"));
 });

@@ -16,14 +16,14 @@ const PRIVATE_RAW_VERIFICATION_RECORD = new WeakMap();
 const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
 
 function redactFreeTextUrls(value) {
-  // Treat a query continued on the next line as part of the URL, while leaving
-  // ordinary multiline prose after it intact.
+  // Treat a query or fragment continued on the next line as part of the URL,
+  // while leaving ordinary multiline prose after it intact.
   return value.replace(
-    /(?:https?:\/\/|\/)[^\s<>`]*(?:(?:(?:\r\n?|\n)[ \t]*[?&]|(?<=[?&])(?:\r\n?|\n)[ \t]*)[^\s<>`=?&#]+=[^\s<>`]*)*/gi,
+    /(?:https?:\/\/|\/)[^\s<>`]*(?:(?:(?:\r\n?|\n)[ \t]*[?&#]|(?<=[?&#])(?:\r\n?|\n)[ \t]*)[^\s<>`=?&#]+=[^\s<>`]*)*/gi,
     (urlOrPath) => {
       const queryOrFragment = urlOrPath.search(/[?#]/);
       const continuedParameter = urlOrPath.search(/(?:\r\n?|\n)[ \t]*&/);
-      const parameterAfterDelimiter = urlOrPath.search(/[?&](?:\r\n?|\n)[ \t]*[^\s<>`=?&#]+=/);
+      const parameterAfterDelimiter = urlOrPath.search(/[?&#](?:\r\n?|\n)[ \t]*[^\s<>`=?&#]+=/);
       const redactionStart = [queryOrFragment, continuedParameter, parameterAfterDelimiter]
         .filter((index) => index >= 0)
         .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
