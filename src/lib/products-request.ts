@@ -122,10 +122,11 @@ export async function getCategoryOptionsForRequest(locale: Locale) {
   return snapshot.categories
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((category) => ({
-      slug: category.slug,
-      name: getTranslation(category.translations, locale).name,
-    }));
+    .flatMap((category) => {
+      const translation = getTranslation(category.translations, locale);
+
+      return translation ? [{ slug: category.slug, name: translation.name }] : [];
+    });
 }
 
 export async function getTagOptionsForRequest(locale: Locale) {
@@ -138,8 +139,9 @@ function getTagOptionsFromSnapshot(
   snapshot: Awaited<ReturnType<typeof getPublicContentSnapshot>>,
   locale: Locale,
 ) {
-  return snapshot.tags.map((tag) => ({
-    slug: tag.slug,
-    name: getTranslation(tag.translations, locale).name,
-  }));
+  return snapshot.tags.flatMap((tag) => {
+    const translation = getTranslation(tag.translations, locale);
+
+    return translation ? [{ slug: tag.slug, name: translation.name }] : [];
+  });
 }

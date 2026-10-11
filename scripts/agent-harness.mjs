@@ -12,6 +12,113 @@ const STATUS_FIELD = "Status";
 const DONE_STATUS = "Done";
 const VERCEL_DEPLOYMENT_BOT = "vercel[bot]";
 const VERCEL_PROJECT_DEPLOYMENT_HOST = /^lamilia-lomi-[a-z0-9]{9}-fantomxs-projects\.vercel\.app$/i;
+const PRIVATE_RAW_VERIFICATION_RECORD = new WeakMap();
+const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
+
+function redactFreeTextUrls(value) {
+  // Strip query and fragment tails from absolute URLs and relative paths,
+  // including malformed values with spaces before delimiters and continuations.
+  const redactTail = (urlOrPath, matchOffset, source) => {
+    const openingWrapper = source[matchOffset - 1];
+    const closingWrapper = { "<": ">", "\x60": "\x60", '"': '"' }[openingWrapper] ?? "";
+    const sameLineDelimiter = urlOrPath.search(/[?#]/);
+    const continuedDelimiter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#]/);
+    const redactionStart = [sameLineDelimiter, continuedDelimiter]
+      .filter((index) => index >= 0)
+      .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
+    if (!Number.isFinite(redactionStart)) return urlOrPath;
+
+    const wrapperEnd = closingWrapper ? urlOrPath.indexOf(closingWrapper, redactionStart) : -1;
+    const hasBalancedWrapper = wrapperEnd >= 0;
+    const tailEnd = hasBalancedWrapper ? wrapperEnd : urlOrPath.length;
+    const tail = urlOrPath.slice(redactionStart, tailEnd)
+      .replace(/\r\n?/g, "\n")
+      .replace(/[\u2028\u2029]/g, "\n");
+    const content = tail.replace(/^(?:[?#&]|\s)+/, "");
+    const firstLine = content.split("\n", 1)[0].trim();
+    const hasParameter = /^[A-Za-z0-9._~%-]+\s*=/.test(firstLine);
+    const hasWrappedValue = /^(?:<[^>\n]*>|"[^"\n]*"|'[^'\n]*'|\x60[^\x60\n]*\x60)/.test(content);
+    const hasAmpersandContinuation = content.startsWith("&") || /^\s*&/.test(content);
+    const hasSingleOpaqueToken =
+      /^[A-Za-z0-9_~%-]+(?:\.[A-Za-z0-9_~%-]+)*$/.test(firstLine) &&
+      (/[-_~%0-9]/.test(firstLine) || firstLine.length >= 16);
+    if (!(hasParameter || hasWrappedValue || hasAmpersandContinuation || hasSingleOpaqueToken)) return urlOrPath;
+
+    const safeValue = urlOrPath
+      .slice(0, redactionStart)
+      .replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
+    return hasBalancedWrapper
+      ? safeValue + closingWrapper + urlOrPath.slice(wrapperEnd + 1)
+      : safeValue;
+  };
+
+  return value
+    .replace(
+      /(?:https?:\/\/|(?<![/:])\/)[^\r\n\u2028\u2029]*?(?:[?#][ \t]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][ \t]*)(?:\r\n?|\n|\u2028|\u2029)[^\r\n\u2028\u2029]*(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      redactTail,
+    )
+    .replace(
+      /(?:https?:\/\/|(?<![/:])\/)[^\r\n\u2028\u2029]*?(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*)(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      redactTail,
+    )
+    .replace(
+      /(?:https?:\/\/|\/)[^\s<>\x60?#]*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      redactTail,
+    )
+    .replace(
+      /(?<![\w./-])[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*)(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      redactTail,
+    );
+}
+
+function redactStructuredPath(value) {
+  const isAbsoluteWebUrl = /^https?:\/\//i.test(value);
+  if (!value.startsWith("/") && !isAbsoluteWebUrl) {
+    const queryOrFragment = value.search(/[?#]/);
+    return queryOrFragment < 0 ? redactFreeTextUrls(value) : value.slice(0, queryOrFragment);
+  }
+  try {
+    const url = new URL(value, "https://agent-harness.invalid");
+    if (url.origin === "https://agent-harness.invalid") return url.pathname;
+    if (url.protocol === "https:" || url.protocol === "http:") return url.origin + url.pathname;
+  } catch {
+    if (isAbsoluteWebUrl) {
+      const queryOrFragment = value.search(/[?#]/);
+      if (queryOrFragment >= 0) return value.slice(0, queryOrFragment);
+    }
+    // Keep malformed path text private through the free-text URL fallback below.
+  }
+  return redactFreeTextUrls(value);
+}
+
+function redactPersistedData(value, seen = new WeakMap(), contextKey = null) {
+  if (typeof value === "string") {
+    return contextKey === "path" || contextKey === "paths"
+      ? redactStructuredPath(value)
+      : redactFreeTextUrls(value);
+  }
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value);
+
+  const redacted = Array.isArray(value) ? [] : {};
+  seen.set(value, redacted);
+  if (Array.isArray(value)) {
+    for (const item of value) redacted.push(redactPersistedData(item, seen, contextKey));
+  } else {
+    for (const [key, item] of Object.entries(value)) {
+      redacted[key] = redactPersistedData(item, seen, key);
+    }
+    for (const privateValues of [PRIVATE_RAW_VERIFICATION_RECORD, PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN]) {
+      if (privateValues.has(value)) privateValues.set(redacted, privateValues.get(value));
+    }
+  }
+  return redacted;
+}
+
+function attachPrivateValue(target, key, value) {
+  key.set(target, value);
+  return target;
+}
 
 function isVercelActor(actor) {
   return actor?.login?.toLowerCase() === VERCEL_DEPLOYMENT_BOT ||
@@ -1221,7 +1328,7 @@ export function validateLocalVerification({
   const status = malformed
     ? "FAIL"
     : combineEvidenceStatuses([...requiredStatuses, ...optionalStatuses]);
-  return {
+  return attachPrivateValue(redactPersistedData({
     status,
     reviewedSha: headSha,
     record,
@@ -1240,7 +1347,7 @@ export function validateLocalVerification({
         : status === "PASS"
           ? "Required local diff, lint, and test evidence covers the current head SHA."
           : "One or more required local checks are not passing.",
-  };
+  }), PRIVATE_RAW_VERIFICATION_RECORD, record);
 }
 
 function isUiBehaviorFile(filename) {
@@ -1261,13 +1368,29 @@ function isApplicationFlowFile(filename) {
 }
 
 function isValidProductionSmokePath(path) {
-  if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) return false;
+  if (typeof path !== "string" || /[\u0000-\u001f\u007f-\u009f]/.test(path) ||
+    !path.startsWith("/") || path.startsWith("//")) return false;
   try {
     const url = new URL(path, "https://agent-harness.invalid");
     return url.origin === "https://agent-harness.invalid" && !url.username && !url.password;
   } catch {
     return false;
   }
+}
+
+function isValidProductionSmokeOrigin(origin) {
+  if (typeof origin !== "string") return false;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "https:" && url.origin === origin && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function isValidProductionSmokeContentType(contentType) {
+  return typeof contentType === "string" &&
+    /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(contentType);
 }
 
 function isSupportedProductionSmokeStatus(status, path) {
@@ -1279,6 +1402,11 @@ function isSupportedProductionSmokeStatus(status, path) {
 
 function routePatternForFile(filename) {
   const normalized = filename.replace(/^src\//, "");
+  const metadataMatch = normalized.match(/^app\/(robots|sitemap)\.[^/]+$/i);
+  if (metadataMatch) {
+    const route = metadataMatch[1].toLowerCase() === "robots" ? "robots\\.txt" : "sitemap\\.xml";
+    return new RegExp("^/" + route + "/?$");
+  }
   const appMatch = normalized.match(/^app\/(?:(.*)\/)?(?:page|route)\.[^/]+$/i);
   const pagesMatch = normalized.match(/^pages\/(.+)\.[^/]+$/i);
   if (!appMatch && !pagesMatch) return null;
@@ -1308,7 +1436,8 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       details: "No application-flow files changed; the root Production health smoke is sufficient.",
     };
   }
-  const plan = localVerification?.record?.productionSmokePlan;
+  const rawRecord = (localVerification && PRIVATE_RAW_VERIFICATION_RECORD.get(localVerification)) || localVerification?.record;
+  const plan = rawRecord?.productionSmokePlan;
   if (!plan || plan.status !== "PASS" || !Array.isArray(plan.flows) || !plan.flows.length) {
     return {
       status: "BLOCKED",
@@ -1359,22 +1488,29 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       failures.push("Smoke flow " + flow.name + " must identify a matching route module in affectedFiles or routeFiles.");
     }
     for (const expectation of flow.paths) {
+      const hasExpectedText = typeof expectation?.expectedText === "string" && expectation.expectedText.trim();
+      const expectedTextIsValid = expectation?.expectedText === undefined || hasExpectedText;
+      const expectedContentTypeIsValid = expectation?.expectedContentType === undefined ||
+        isValidProductionSmokeContentType(expectation.expectedContentType);
       if (!expectation || !isValidProductionSmokePath(expectation.path) ||
-        typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+        !expectedTextIsValid || !expectedContentTypeIsValid || (!hasExpectedText && expectation.expectedContentType === undefined) ||
+        (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
         (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path))) {
-        failures.push("Smoke flow " + flow.name + " has an invalid absolute path, expected response text, or supported HTTP status.");
+        failures.push("Smoke flow " + flow.name + " has an invalid absolute path, expected response content, HTTPS final origin, or supported HTTP status.");
         continue;
       }
       const pathName = new URL(expectation.path, "https://agent-harness.invalid").pathname;
       if (!routePatterns.some(({ routePattern }) => routePattern.test(pathName))) {
-        failures.push("Smoke path " + expectation.path + " does not match the changed route file(s) in flow " + flow.name + ".");
+        failures.push("Smoke path does not match the changed route file(s) in flow " + flow.name + ".");
         continue;
       }
       validPathNames.push(pathName);
       paths.push(expectation.path);
       expectations.push({
         path: expectation.path,
-        expectedText: expectation.expectedText.trim(),
+        ...(hasExpectedText ? { expectedText: expectation.expectedText.trim() } : {}),
+        ...(expectation.expectedContentType !== undefined ? { expectedContentType: expectation.expectedContentType } : {}),
+        ...(expectation.expectedFinalOrigin !== undefined ? { expectedFinalOrigin: expectation.expectedFinalOrigin } : {}),
         ...(expectation.expectedStatus !== undefined ? { expectedStatus: expectation.expectedStatus } : {}),
         flow: flow.name,
       });
@@ -1395,7 +1531,21 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
     return statuses.size > 1;
   });
   if (conflictingStatuses) failures.push("Smoke plan has conflicting expected HTTP statuses for one path.");
-  return {
+  const conflictingFinalOrigins = uniquePaths.some((path) => {
+    const origins = new Set(expectations
+      .filter((expectation) => expectation.path === path)
+      .map((expectation) => expectation.expectedFinalOrigin ?? null));
+    return origins.size > 1;
+  });
+  if (conflictingFinalOrigins) failures.push("Smoke plan has conflicting expected final origins for one path.");
+  const conflictingContentTypes = uniquePaths.some((path) => {
+    const contentTypes = new Set(expectations
+      .filter((expectation) => expectation.path === path && expectation.expectedContentType !== undefined)
+      .map((expectation) => expectation.expectedContentType.toLowerCase()));
+    return contentTypes.size > 1;
+  });
+  if (conflictingContentTypes) failures.push("Smoke plan has conflicting expected content types for one path.");
+  return attachPrivateValue(redactPersistedData({
     status: failures.length ? "BLOCKED" : "PASS",
     required: true,
     paths: uniquePaths,
@@ -1404,7 +1554,10 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
     details: failures.length
       ? failures.join(" ")
       : affectedFiles.length + " changed application-flow file(s) map to " + uniquePaths.length + " Production route(s) with expected response content.",
-  };
+  }), PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN, {
+    paths: uniquePaths,
+    expectations,
+  });
 }
 
 function isVerificationScreenshot(filename) {
@@ -2273,7 +2426,7 @@ export function assessPullRequestVerification({
     : waitingForEnforcedApproval
       ? "READY_FOR_REVIEW"
       : "BLOCKED";
-  return {
+  return redactPersistedData({
     decision,
     pullRequestNumber: number,
     currentSha: headSha,
@@ -2331,7 +2484,7 @@ export function assessPullRequestVerification({
       blockers: readyForMerge ? [] : [...new Set(mergeBlockers)],
     },
     reasons: readyForMerge ? [] : [...new Set(mergeBlockers)],
-  };
+  });
 }
 
 async function readPullRequestReviewDecision(client, pullRequestNumber) {
@@ -2661,7 +2814,7 @@ export async function waitForProductionDeployment(client, mergeSha, {
   };
 }
 
-export async function runProductionSmoke(environmentUrl, {
+async function runProductionSmokeInternal(environmentUrl, {
   paths = (process.env.AGENT_HARNESS_PRODUCTION_SMOKE_PATHS || "/")
     .split(",").map((path) => path.trim()).filter(Boolean),
   expectations = [],
@@ -2682,10 +2835,31 @@ export async function runProductionSmoke(environmentUrl, {
   }
   if (!Array.isArray(expectations) || expectations.some((expectation) =>
     !expectation || !paths.includes(expectation.path) ||
-    typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+    (expectation.expectedText !== undefined && (typeof expectation.expectedText !== "string" || !expectation.expectedText.trim())) ||
+    (expectation.expectedContentType !== undefined && !isValidProductionSmokeContentType(expectation.expectedContentType)) ||
+    (expectation.expectedText === undefined && expectation.expectedContentType === undefined) ||
+    (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
     (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)),
   )) {
-    return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path and non-empty expected content." };
+    return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path, expected text or exact MIME content type, and a valid HTTPS final origin." };
+  }
+  const conflictingFinalOrigins = paths.some((path) => {
+    const origins = new Set(expectations
+      .filter((expectation) => expectation.path === path)
+      .map((expectation) => expectation.expectedFinalOrigin ?? baseUrl.origin));
+    return origins.size > 1;
+  });
+  if (conflictingFinalOrigins) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke expectations cannot require conflicting final origins for one path." };
+  }
+  const conflictingContentTypes = paths.some((path) => {
+    const contentTypes = new Set(expectations
+      .filter((expectation) => expectation.path === path && expectation.expectedContentType !== undefined)
+      .map((expectation) => expectation.expectedContentType.toLowerCase()));
+    return contentTypes.size > 1;
+  });
+  if (conflictingContentTypes) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke expectations cannot require conflicting content types for one path." };
   }
   const conflictingStatuses = paths.some((path) => {
     const statuses = new Set(expectations
@@ -2709,61 +2883,90 @@ export async function runProductionSmoke(environmentUrl, {
         redirect: "follow",
         signal: AbortSignal.timeout(timeoutMs),
       });
-      const body = await response.text();
       const finalUrl = new URL(response.url || url.href);
+      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
+      const expectedFinalOrigin = expectedForPath[0]?.expectedFinalOrigin ?? baseUrl.origin;
+      const expectedContentType = expectedForPath.find((expectation) => expectation.expectedContentType !== undefined)?.expectedContentType;
+      const responseContentType = response.headers?.get?.("content-type") || null;
+      const mediaType = responseContentType?.split(";", 1)[0].trim().toLowerCase() || null;
+      const expectedTextValues = expectedForPath
+        .filter((expectation) => expectation.expectedText !== undefined)
+        .map((expectation) => expectation.expectedText);
+      const responseBody = typeof response.arrayBuffer === "function"
+        ? Buffer.from(await response.arrayBuffer())
+        : Buffer.from(await response.text(), "utf8");
+      const body = expectedTextValues.length || expectedContentType === undefined
+        ? responseBody.toString("utf8")
+        : "";
+      const responseBodyEmpty = responseBody.length === 0 ||
+        ((expectedTextValues.length > 0 || expectedContentType === undefined) && !body.trim());
+      const expectedTextMatched = expectedTextValues.every((expectedText) => body.includes(expectedText));
+      const expectedContentTypeMatched = expectedContentType === undefined ||
+        mediaType === expectedContentType.toLowerCase();
       const check = {
         path,
         statusCode: response.status,
-        contentType: response.headers?.get?.("content-type") || null,
-        responseBytes: Buffer.byteLength(body),
-        finalUrl: finalUrl.href,
+        contentType: responseContentType,
+        responseBytes: responseBody.length,
+        finalUrl: finalUrl.origin + finalUrl.pathname,
       };
-      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
-      const expectedTextMatched = expectedForPath.every((expectation) => body.includes(expectation.expectedText));
       const expectedStatus = expectedForPath.find((expectation) => expectation.expectedStatus !== undefined)?.expectedStatus;
       const expectedStatusMatched = expectedStatus === undefined || response.status === expectedStatus;
       const responseStatusPassed = expectedStatus === undefined ? response.ok : expectedStatusMatched;
-      if (expectedForPath.length) {
-        check.expectedText = expectedForPath.map((expectation) => expectation.expectedText);
+      if (expectedTextValues.length) {
+        check.expectedText = expectedTextValues;
         check.expectedTextMatched = expectedTextMatched;
+      }
+      if (expectedContentType !== undefined) {
+        check.expectedContentType = expectedContentType;
+        check.expectedContentTypeMatched = expectedContentTypeMatched;
+      }
+      if (expectedForPath.some((expectation) => expectation.expectedFinalOrigin !== undefined)) {
+        check.expectedFinalOrigin = expectedFinalOrigin;
       }
       if (expectedStatus !== undefined) {
         check.expectedStatus = expectedStatus;
         check.expectedStatusMatched = expectedStatusMatched;
       }
       checks.push(check);
-      if (!responseStatusPassed || finalUrl.origin !== baseUrl.origin || !body.trim() || !expectedTextMatched) {
+      if (!responseStatusPassed || finalUrl.origin !== expectedFinalOrigin || responseBodyEmpty ||
+        !expectedTextMatched || !expectedContentTypeMatched) {
         return {
           status: "FAIL",
           checks,
-          details: "Production smoke failed for " + path + " (HTTP " + response.status +
+          details: "Production smoke failed (HTTP " + response.status +
             (expectedStatus !== undefined && !expectedStatusMatched ? ", expected HTTP " + expectedStatus : "") +
-            (finalUrl.origin !== baseUrl.origin ? ", redirected outside the deployment origin" : "") +
-            (!body.trim() ? ", empty response body" : "") +
-            (!expectedTextMatched ? ", expected content was not present" : "") + ").",
+            (finalUrl.origin !== expectedFinalOrigin ? ", final origin did not match the expected origin" : "") +
+            (responseBodyEmpty ? ", empty response body" : "") +
+            (!expectedTextMatched ? ", expected content was not present" : "") +
+            (!expectedContentTypeMatched ? ", expected content type was not present" : "") + ").",
         };
       }
-    } catch (error) {
+    } catch {
       return {
         status: "FAIL",
         checks,
-        details: "Production smoke request failed for " + path + ": " + error.message,
+        details: "Production smoke request failed because of a network error or timeout.",
       };
     }
   }
   return { status: "PASS", checks, details: checks.length + " focused Production smoke path(s) returned the expected status and content." };
 }
 
+export async function runProductionSmoke(environmentUrl, options = {}) {
+  return redactPersistedData(await runProductionSmokeInternal(environmentUrl, options));
+}
+
 function formatDeliveryComment(record) {
-  return DELIVERY_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+  return DELIVERY_MARKER + "\n```json\n" + JSON.stringify(redactPersistedData(record), null, 2) + "\n```";
 }
 
 function formatIssueDeliveryComment(record) {
-  return ISSUE_DELIVERY_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+  return ISSUE_DELIVERY_MARKER + "\n```json\n" + JSON.stringify(redactPersistedData(record), null, 2) + "\n```";
 }
 
 function formatResumeCheckpoint(record) {
-  return RESUME_CHECKPOINT_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+  return RESUME_CHECKPOINT_MARKER + "\n```json\n" + JSON.stringify(redactPersistedData(record), null, 2) + "\n```";
 }
 
 async function recordResumeCheckpoint(client, pullRequestNumber, record) {
@@ -3605,7 +3808,7 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
   };
 }
 
-export async function deliverPullRequest(client, pullRequestNumber, {
+async function deliverPullRequestInternal(client, pullRequestNumber, {
   issueNumber = null,
   productionSmokePaths = null,
   verify = verifyPullRequest,
@@ -3625,11 +3828,12 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     const plan = verification?.productionSmokePlan || verification?.fileScope?.productionSmokePlan ||
       validateProductionSmokePlan({
         files: changedFiles,
-        localVerification: { record: verification?.localVerification?.record },
+        localVerification: verification?.localVerification,
       });
     if (plan.status !== "PASS") return { status: "BLOCKED", details: plan.details || "Production smoke plan is not passing." };
-    const paths = plan.required ? plan.paths : configuredSmokePaths.length ? configuredSmokePaths : ["/"];
-    const expectations = plan.required ? plan.expectations : [];
+    const executionPlan = PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN.get(plan);
+    const paths = plan.required ? executionPlan?.paths ?? plan.paths : configuredSmokePaths.length ? configuredSmokePaths : ["/"];
+    const expectations = plan.required ? executionPlan?.expectations ?? plan.expectations : [];
     if (!Array.isArray(paths) || !paths.length || paths.some((path) => !isValidProductionSmokePath(path))) {
       return { status: "BLOCKED", details: "Production smoke plan contains an invalid same-origin absolute path." };
     }
@@ -3644,12 +3848,33 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     }
     if (expectations.some((expectation) =>
       !expectation || !paths.includes(expectation.path) ||
-      typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+      (expectation.expectedText !== undefined && (typeof expectation.expectedText !== "string" || !expectation.expectedText.trim())) ||
+      (expectation.expectedContentType !== undefined && !isValidProductionSmokeContentType(expectation.expectedContentType)) ||
+      (expectation.expectedText === undefined && expectation.expectedContentType === undefined) ||
+      (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
       (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)),
     )) {
-      return { status: "BLOCKED", details: "Production smoke expectations must name an included path, expected content, and a supported HTTP status." };
+      return { status: "BLOCKED", details: "Production smoke expectations must name an included path, expected text or exact MIME content type, HTTPS final origin, and a supported HTTP status." };
     }
-    return { status: "PASS", paths, expectations, details: plan.details };
+    const conflictingFinalOrigins = paths.some((path) => {
+      const origins = new Set(expectations
+        .filter((expectation) => expectation.path === path)
+        .map((expectation) => expectation.expectedFinalOrigin ?? null));
+      return origins.size > 1;
+    });
+    if (conflictingFinalOrigins) {
+      return { status: "BLOCKED", details: "Production smoke expectations cannot require conflicting final origins for one path." };
+    }
+    const conflictingContentTypes = paths.some((path) => {
+      const contentTypes = new Set(expectations
+        .filter((expectation) => expectation.path === path && expectation.expectedContentType !== undefined)
+        .map((expectation) => expectation.expectedContentType.toLowerCase()));
+      return contentTypes.size > 1;
+    });
+    if (conflictingContentTypes) {
+      return { status: "BLOCKED", details: "Production smoke expectations cannot require conflicting content types for one path." };
+    }
+    return { status: "PASS", paths, expectations, details: redactPersistedData(plan.details) };
   };
   const pullRequestPath = "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number;
   let pullRequest = await client.request(pullRequestPath);
@@ -4089,10 +4314,10 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       } catch {
         // The exact-SHA deployment remains queryable from GitHub on a later run.
       }
-      productionSmoke = await smoke(productionDeployment.deployment.environmentUrl, {
+      productionSmoke = redactPersistedData(await smoke(productionDeployment.deployment.environmentUrl, {
         paths: effectiveSmokePaths,
         expectations: effectiveSmokeExpectations,
-      });
+      }));
       if (productionSmoke.status === "PASS") {
         try {
           await recordResumeCheckpoint(client, number, {
@@ -4138,7 +4363,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     productionDeployment?.status === "FAIL" || productionSmoke?.status === "FAIL" || postDeploymentMigration?.status === "FAIL"
       ? "FAIL"
       : "BLOCKED";
-  const details = [
+  const details = redactPersistedData([
     "Candidate SHA: " + (candidateSha || "unknown"),
     "Merge SHA: " + mergeSha,
     "Reviewed gates: " + (reviewGatesPassed ? "PASS" : "BLOCKED") +
@@ -4149,7 +4374,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     "Production smoke: " + (productionSmoke?.status || "NOT RUN") + " — " + (productionSmoke?.details || "not run"),
     "Post-deployment migration: " + (postDeploymentMigration?.status || "NOT RUN") + " — " + (postDeploymentMigration?.details || "not run"),
     ...(closingReferenceError ? [closingReferenceError] : []),
-  ].join("\n");
+  ].join("\n"));
   const issueOutcomes = [];
   for (const trackedIssue of trackedIssueNumbers) {
     try {
@@ -4266,6 +4491,10 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     completed,
     reasons: completed ? [] : [details, ...(issueOutcome.status === "BLOCKED" ? [issueOutcome.details] : [])],
   };
+}
+
+export async function deliverPullRequest(client, pullRequestNumber, options = {}) {
+  return redactPersistedData(await deliverPullRequestInternal(client, pullRequestNumber, options));
 }
 
 export function statusTransitionBlockers(status, readiness, pullRequests = [], recoveryPlan = null) {

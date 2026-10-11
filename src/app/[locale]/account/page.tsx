@@ -14,9 +14,9 @@ export default async function AccountPage({ params }: Props) {
   const { locale } = await params;
   const session = await getAccountSessionForRequest();
   const nav: DashboardNavItem[] = [
-    { href: `/${locale}/account`, label: locale === "pl" ? "Moje konto" : "Account", icon: "account" },
-    { href: `/${locale}/library`, label: locale === "pl" ? "Moja biblioteka" : "My Library", icon: "library" },
-    { href: `/${locale}/products`, label: locale === "pl" ? "Katalog" : "Catalog", icon: "catalog" },
+    { href: `/${locale}/account`, label: "Account", icon: "account" },
+    { href: `/${locale}/library`, label: "My Library", icon: "library" },
+    { href: `/${locale}/products`, label: "Catalog", icon: "catalog" },
   ];
 
   if (!session) {
@@ -25,14 +25,12 @@ export default async function AccountPage({ params }: Props) {
         <Card>
           <CardHeader>
             <h1 className="font-serif text-3xl font-semibold">
-              {locale === "pl" ? "Moje konto" : "Account"}
+              Account
             </h1>
           </CardHeader>
           <CardContent>
             <p className="text-[var(--color-muted)]">
-              {locale === "pl"
-                ? "Zaloguj się, aby zobaczyć konto."
-                : "Log in to view account details."}
+              Log in to view account details.
             </p>
           </CardContent>
         </Card>
@@ -44,15 +42,15 @@ export default async function AccountPage({ params }: Props) {
     <DashboardShell
       nav={nav}
       title="LamiliaLomi"
-      subtitle={locale === "pl" ? "Panel użytkownika" : "User dashboard"}
+      subtitle="User dashboard"
     >
       <Card>
         <CardHeader>
           <p className="text-sm font-medium text-[var(--color-terracotta)]">
-            {locale === "pl" ? "Panel użytkownika" : "User dashboard"}
+            User dashboard
           </p>
           <h1 className="mt-2 font-serif text-4xl font-semibold">
-            {locale === "pl" ? "Moje konto" : "Account"}
+            Account
           </h1>
           <p className="text-sm text-[var(--color-muted)]">{session.email}</p>
         </CardHeader>

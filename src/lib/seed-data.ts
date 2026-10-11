@@ -24,11 +24,6 @@ export const categories: Category[] = [
         name: "Coloring books",
         description: "Gentle coloring books for creative pauses.",
       },
-      {
-        locale: "pl",
-        name: "Kolorowanki",
-        description: "Spokojne kolorowanki na kreatywne chwile.",
-      },
     ],
   },
   {
@@ -37,7 +32,6 @@ export const categories: Category[] = [
     sortOrder: 2,
     translations: [
       { locale: "en", name: "Picture books" },
-      { locale: "pl", name: "Książki obrazkowe" },
     ],
   },
   {
@@ -46,7 +40,6 @@ export const categories: Category[] = [
     sortOrder: 3,
     translations: [
       { locale: "en", name: "Mindfulness" },
-      { locale: "pl", name: "Uważność" },
     ],
   },
 ];
@@ -57,7 +50,6 @@ export const tags: Tag[] = [
     slug: "printable-bonus",
     translations: [
       { locale: "en", name: "Printable bonus" },
-      { locale: "pl", name: "Bonus do druku" },
     ],
   },
   {
@@ -65,7 +57,6 @@ export const tags: Tag[] = [
     slug: "amazon-kdp",
     translations: [
       { locale: "en", name: "Amazon KDP" },
-      { locale: "pl", name: "Amazon KDP" },
     ],
   },
   {
@@ -73,7 +64,6 @@ export const tags: Tag[] = [
     slug: "calm-evening",
     translations: [
       { locale: "en", name: "Calm evening" },
-      { locale: "pl", name: "Spokojny wieczór" },
     ],
   },
 ];
@@ -151,17 +141,6 @@ export const products: Product[] = [
         seoTitle: "Moon Garden Coloring Book by LamiliaLomi",
         seoDescription:
           "Browse Moon Garden, a calm kids coloring book with printable premium bonuses unlocked by QR code.",
-      },
-      {
-        locale: "pl",
-        title: "Księżycowy Ogród. Kolorowanka",
-        shortDescription:
-          "Delikatna nocna kolorowanka dla dzieci i spokojnych rodzinnych wieczorów.",
-        longDescription:
-          "Księżycowy Ogród prowadzi dzieci przez świat gwiazd, małych domków, sennych kwiatów i łagodnego nieba. Książka papierowa odblokowuje dodatkowe strony do druku oraz bonusowy PDF.",
-        seoTitle: "Księżycowy Ogród LamiliaLomi",
-        seoDescription:
-          "Sprawdź spokojną kolorowankę dla dzieci z materiałami premium odblokowywanymi kodem QR.",
       },
     ],
     categoryIds: [categories[0].id],
@@ -316,14 +295,6 @@ export const products: Product[] = [
           "A soft illustrated story for children who like gentle bedtime worlds.",
         longDescription:
           "Bedtime Forest is a quiet picture story with woodland paths, moonlit windows, and a friendly rhythm for nightly reading.",
-      },
-      {
-        locale: "pl",
-        title: "Dobranoc, Leśny Świecie",
-        shortDescription:
-          "Łagodna ilustrowana opowieść dla dzieci lubiących spokojne wieczory.",
-        longDescription:
-          "Dobranoc, Leśny Świecie to cicha opowieść obrazkowa z leśnymi ścieżkami, światłem w oknach i rytmem dobrym do wieczornego czytania.",
       },
     ],
     categoryIds: [categories[1].id],

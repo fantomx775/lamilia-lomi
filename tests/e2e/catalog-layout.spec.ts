@@ -12,12 +12,12 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
   test.setTimeout(600_000);
 
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto("/pl/login?redirectTo=/admin/settings");
-  await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-  await page.getByLabel("Hasło").fill("demo-password");
+  await page.goto("/en/login?redirectTo=/admin/settings");
+  await page.getByLabel("Email").fill("admin@lamilialomi.test");
+  await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin/settings"),
-    page.getByRole("button", { name: "Kontynuuj" }).click(),
+    page.getByRole("button", { name: "Continue" }).click(),
   ]);
 
   const releaseContentStoreLock = await acquireLocalContentStoreLock();

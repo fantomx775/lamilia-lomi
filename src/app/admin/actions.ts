@@ -234,15 +234,12 @@ async function assertAdmin() {
     console.error("[admin-auth] Could not load the administrator session.", error);
   }
 
-  redirect("/pl/login?error=invalid&returnTo=/admin");
+  redirect("/en/login?error=invalid&returnTo=/admin");
 }
 
 function revalidateContentPaths() {
   revalidatePath("/admin", "layout");
   revalidatePath("/en", "layout");
-  revalidatePath("/pl", "layout");
-  revalidatePath("/de", "layout");
-  revalidatePath("/es", "layout");
   revalidatePath("/sitemap.xml");
 }
 

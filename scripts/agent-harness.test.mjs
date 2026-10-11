@@ -2055,6 +2055,414 @@ test("production smoke plans bind changed route files to valid paths and expecte
   }).status, "PASS");
 });
 
+test("production smoke plans map Next metadata route files to their public endpoints", () => {
+  const cases = [
+    { filename: "src/app/robots.ts", path: "/robots.txt", expectedText: "User-agent:" },
+    { filename: "src/app/sitemap.ts", path: "/sitemap.xml", expectedText: "<urlset" },
+  ];
+
+  for (const { filename, path, expectedText } of cases) {
+    const smokePlan = {
+      status: "PASS",
+      flows: [{
+        name: `Next metadata endpoint ${path}`,
+        affectedFiles: [filename],
+        paths: [{ path, expectedText }],
+      }],
+    };
+    assert.equal(validateProductionSmokePlan({
+      files: [filename],
+      localVerification: { record: { productionSmokePlan: smokePlan } },
+    }).status, "PASS", filename);
+
+    const wrongRoute = structuredClone(smokePlan);
+    wrongRoute.flows[0].paths[0].path = "/en";
+    assert.equal(validateProductionSmokePlan({
+      files: [filename],
+      localVerification: { record: { productionSmokePlan: wrongRoute } },
+    }).status, "BLOCKED", filename);
+  }
+});
+
+test("production smoke plans preserve exact HTTPS origins and MIME expectations", () => {
+  const filename = "src/app/api/media/[assetId]/route.ts";
+  const plan = {
+    status: "PASS",
+    flows: [{
+      name: "public English cover",
+      affectedFiles: [filename],
+      paths: [{
+        path: "/api/media/moon-garden-cover",
+        expectedContentType: "image/png",
+        expectedFinalOrigin: "https://media.lamilialomi.com",
+      }],
+    }],
+  };
+  const verified = validateProductionSmokePlan({
+    files: [filename],
+    localVerification: { record: { productionSmokePlan: plan } },
+  });
+  assert.equal(verified.status, "PASS");
+  assert.deepEqual(verified.expectations, [{
+    path: "/api/media/moon-garden-cover",
+    expectedContentType: "image/png",
+    expectedFinalOrigin: "https://media.lamilialomi.com",
+    flow: "public English cover",
+  }]);
+
+  for (const origin of [
+    "http://media.lamilialomi.com",
+    "https://media.lamilialomi.com/covers",
+    "https://user:password@media.lamilialomi.com",
+    "https://media.lamilialomi.com?signature=secret",
+  ]) {
+    const invalidOriginPlan = structuredClone(plan);
+    invalidOriginPlan.flows[0].paths[0].expectedFinalOrigin = origin;
+    assert.equal(validateProductionSmokePlan({
+      files: [filename],
+      localVerification: { record: { productionSmokePlan: invalidOriginPlan } },
+    }).status, "BLOCKED", origin);
+  }
+
+  const wildcardMimePlan = structuredClone(plan);
+  wildcardMimePlan.flows[0].paths[0].expectedContentType = "image/*";
+  assert.equal(validateProductionSmokePlan({
+    files: [filename],
+    localVerification: { record: { productionSmokePlan: wildcardMimePlan } },
+  }).status, "BLOCKED");
+});
+
+test("smoke plan validation and verify output redact query strings from persisted evidence", () => {
+  const path = "/api/downloads/known-asset?token=secret-token";
+  const filename = "src/app/api/downloads/[assetId]/route.ts";
+  const smokePlan = {
+    status: "PASS",
+    flows: [{
+      name: "guest download response",
+      affectedFiles: [filename],
+      paths: [{ path, expectedText: "guest", expectedStatus: 401 }],
+    }],
+  };
+  const verificationRecord = cleanVerificationRecord({ productionSmokePlan: smokePlan });
+  const comments = [structuredComment(VERIFICATION_MARKER, verificationRecord)];
+  const localVerification = validateLocalVerification({ headSha: CURRENT_SHA, comments });
+  const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
+  const assessment = assessPullRequestVerification({
+    pullRequest: cleanPullRequest(),
+    files: [filename],
+    comments,
+    mergePolicy: cleanMergePolicy(),
+  });
+
+  assert.equal(localVerification.status, "PASS");
+  assert.equal(checkedPlan.status, "PASS");
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].path, "/api/downloads/known-asset");
+  assert.deepEqual(checkedPlan.paths, ["/api/downloads/known-asset"]);
+  assert.equal(JSON.stringify(localVerification).includes("secret-token"), false);
+  assert.equal(JSON.stringify(checkedPlan).includes("secret-token"), false);
+  assert.equal(JSON.stringify(assessment).includes("secret-token"), false);
+
+  const quotedPath = '/api/downloads/known-asset?token="secret-token"';
+  const quotedPlan = structuredClone(smokePlan);
+  quotedPlan.flows[0].name = 'guest response at https://production.example.test/api/downloads/known-asset?token="secret-token"';
+  quotedPlan.flows[0].paths[0].path = quotedPath;
+  const quotedLocalVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: quotedPlan }))],
+  });
+  const quotedCheckedPlan = validateProductionSmokePlan({ files: [filename], localVerification: quotedLocalVerification });
+  assert.equal(quotedCheckedPlan.status, "PASS");
+  assert.deepEqual(quotedCheckedPlan.paths, ["/api/downloads/known-asset"]);
+  assert.equal(quotedCheckedPlan.flows[0].name, "guest response at https://production.example.test/api/downloads/known-asset");
+  assert.equal(JSON.stringify(quotedLocalVerification).includes("secret-token"), false);
+  assert.equal(JSON.stringify(quotedCheckedPlan).includes("secret-token"), false);
+
+  const newlinePath = "/api/downloads/known-asset\n?token=secret-token";
+  const newlinePlan = structuredClone(smokePlan);
+  newlinePlan.flows[0].paths[0].path = newlinePath;
+  const newlineLocalVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: newlinePlan }))],
+  });
+  const newlineCheckedPlan = validateProductionSmokePlan({ files: [filename], localVerification: newlineLocalVerification });
+  assert.equal(newlineCheckedPlan.status, "BLOCKED");
+  assert.equal(JSON.stringify(newlineLocalVerification).includes("secret-token"), false);
+  assert.equal(JSON.stringify(newlineCheckedPlan).includes("secret-token"), false);
+});
+
+test("free-text smoke fields redact multiline URL queries and preserve ordinary multiline text", () => {
+  const filename = "src/app/catalog/page.tsx";
+  const multilineUrl = "https://production.example.test/catalog\n?token=secret-token\n&continuation=continuation-marker";
+  const ampersandContinuation = "https://production.example.test/catalog\n&token=secret-token\n&continuation=continuation-marker";
+  const delimiterBeforeKey = "https://production.example.test/catalog?\ntoken=secret-token\n&continuation=continuation-marker";
+  const fragmentContinuation = "https://production.example.test/catalog\n#access_token=fragment-secret\n&continuation=fragment-continuation-marker";
+  const fragmentDelimiterBeforeKey = "https://production.example.test/catalog#\naccess_token=bare-fragment-secret\n&continuation=bare-fragment-continuation-marker";
+  const bracketWrappedValue = "https://production.example.test/catalog?token=<bracket-marker>";
+  const backtickWrappedValue = "https://production.example.test/catalog?token=`backtick-marker`";
+  const bracketWrappedSpacedValue = "https://production.example.test/catalog?token=<very secret>";
+  const backtickWrappedSpacedValue = "https://production.example.test/catalog?token=`very secret`";
+  const doubleQuoteWrappedSpacedValue = 'https://production.example.test/catalog?token="very secret"';
+  const spacedContinuation = "https://production.example.test/catalog\n?token=<continuation secret>\n&continuation=second secret";
+  const malformedHostQuery = "https://bad host?token=secret-token";
+  const malformedHostFragment = "https://bad host#access_token=fragment-secret";
+  const malformedHostQueryContinuation = "https://bad host\n?token=query-continuation-secret";
+  const malformedHostFragmentContinuation = "https://bad host\u2028#access_token=separator-fragment-secret";
+  const malformedHostOpaqueQuery = "https://bad host?opaque-query-secret";
+  const malformedHostOpaqueFragment = "https://bad host#opaque-fragment-secret";
+  const malformedHostOpaqueQueryContinuation = "https://bad host\n?opaque-query-continuation-secret";
+  const malformedHostOpaqueFragmentContinuation = "https://bad host\u2028#opaque-fragment-continuation-secret";
+  const malformedHostTrailingQueryContinuation = "https://bad host?\nopaque-query-after-delimiter-secret";
+  const malformedHostTrailingFragmentContinuation = "https://bad host#\nopaque-fragment-after-delimiter-secret";
+  const relativeOpaqueQuery = "route /bad host?relative-opaque-query-secret";
+  const relativeOpaqueFragment = "route /bad host#relative-opaque-fragment-secret";
+  const relativeReferenceQuery = "catalog?opaque-relative-secret";
+  const relativeReferenceFragment = "catalog#opaque-relative-fragment-secret";
+  const sameLineProseExamples = [
+    "Visit https://example.test/catalog. Should we keep working? Yes.",
+    "/catalog. Should we keep working? Yes.",
+    "5/10 should be acceptable? Keep the sentence.",
+  ];
+  const lineWrappedProseExamples = [
+    "https://example.test/catalog. Should we ship?\nYes, keep this prose.",
+    "/catalog page is ready?\nKeep this ordinary continuation.",
+  ];
+  const oneWordProseExample = "https://example.test/catalog. Should we ship? Keep";
+  const leadingSpaceTailCases = [
+    {
+      label: "Leading absolute",
+      value: "https://bad host? token=leading-space-absolute-secret",
+      safe: "https://bad host",
+      secret: "leading-space-absolute-secret",
+    },
+    {
+      label: "Leading slash path",
+      value: "/bad host? opaque-leading-space-slash-secret",
+      safe: "/bad host",
+      secret: "opaque-leading-space-slash-secret",
+    },
+    {
+      label: "Leading relative path",
+      value: "catalog? opaque-leading-space-relative-secret",
+      safe: "catalog",
+      secret: "opaque-leading-space-relative-secret",
+    },
+    {
+      label: "Leading absolute fragment",
+      value: "https://bad host# opaque-leading-space-fragment-secret",
+      safe: "https://bad host",
+      secret: "opaque-leading-space-fragment-secret",
+    },
+    {
+      label: "Leading absolute alphabetic token",
+      value: "https://bad host? abcdefghijklmnopqrstuvwx",
+      safe: "https://bad host",
+      secret: "abcdefghijklmnopqrstuvwx",
+    },
+  ];
+  const wrappedOpaqueFragmentCases = [
+    {
+      label: "Backtick-wrapped absolute",
+      value: "See `https://bad host/path#opaque-backtick-fragment-secret` now",
+      safe: "See `https://bad host/path` now",
+      secret: "opaque-backtick-fragment-secret",
+    },
+    {
+      label: "Angle-wrapped absolute",
+      value: "See <https://bad host/path#opaque-angle-fragment-secret> now",
+      safe: "See <https://bad host/path> now",
+      secret: "opaque-angle-fragment-secret",
+    },
+    {
+      label: "Double-quote-wrapped absolute",
+      value: 'See "https://bad host/path#opaque-double-quote-fragment-secret" now',
+      safe: 'See "https://bad host/path" now',
+      secret: "opaque-double-quote-fragment-secret",
+    },
+    {
+      label: "Backtick-wrapped punctuation",
+      value: "`https://bad host/path#opaque-backtick-punctuation-secret`, now.",
+      safe: "`https://bad host/path`, now.",
+      secret: "opaque-backtick-punctuation-secret",
+    },
+    {
+      label: "Angle-wrapped punctuation",
+      value: "<https://bad host/path#opaque-angle-punctuation-secret>, now.",
+      safe: "<https://bad host/path>, now.",
+      secret: "opaque-angle-punctuation-secret",
+    },
+    {
+      label: "Double-quote-wrapped punctuation",
+      value: '"https://bad host/path#opaque-double-quote-punctuation-secret". Now,',
+      safe: '"https://bad host/path". Now,',
+      secret: "opaque-double-quote-punctuation-secret",
+    },
+  ];
+  const lineSeparatorQuery = "https://production.example.test/catalog\u2028?token=line-separator-marker\u2028&continuation=line-separator-continuation";
+  const paragraphSeparatorQuery = "https://production.example.test/catalog\u2029?token=paragraph-separator-marker\u2029&continuation=paragraph-separator-continuation";
+  const plan = {
+    status: "PASS",
+    flows: [{
+      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note\nFragment ${fragmentContinuation}\nKeep this fragment note\nBare fragment ${fragmentDelimiterBeforeKey}\nKeep this bare-fragment note\nBracket ${bracketWrappedValue}\nKeep this bracket note\nBacktick ${backtickWrappedValue}\nKeep this backtick note\nBracket with spaces ${bracketWrappedSpacedValue}\nKeep this bracket-space note\nBacktick with spaces ${backtickWrappedSpacedValue}\nKeep this backtick-space note\nDouble-quoted with spaces ${doubleQuoteWrappedSpacedValue}\nKeep this double-quote-space note\nSpaced continuation ${spacedContinuation}\nKeep this continuation-space note\nMalformed host query ${malformedHostQuery}\nKeep this malformed-query note\nMalformed host query continuation ${malformedHostQueryContinuation}\nKeep this malformed-query-continuation note\nMalformed host opaque query ${malformedHostOpaqueQuery}\nKeep this malformed-opaque-query note\nMalformed host opaque fragment ${malformedHostOpaqueFragment}\nKeep this malformed-opaque-fragment note\nMalformed host opaque query continuation ${malformedHostOpaqueQueryContinuation}\nKeep this malformed-opaque-query-continuation note\nMalformed host opaque fragment continuation ${malformedHostOpaqueFragmentContinuation}\u2028Keep this malformed-opaque-fragment-continuation note\nMalformed host trailing query continuation ${malformedHostTrailingQueryContinuation}\nKeep this malformed-trailing-query-continuation note\nMalformed host trailing fragment continuation ${malformedHostTrailingFragmentContinuation}\nKeep this malformed-trailing-fragment-continuation note\nMalformed host fragment continuation ${malformedHostFragmentContinuation}\u2028Keep this malformed-fragment-continuation note\nLine separator ${lineSeparatorQuery}\u2028Keep this line-separator note\nParagraph separator ${paragraphSeparatorQuery}\u2029Keep this paragraph-separator note`,
+      affectedFiles: [filename],
+      paths: [{
+        path: "/catalog",
+        expectedText: `Catalog heading at ${ampersandContinuation}\nKeep this expected-text note`,
+      }],
+    }],
+  };
+  plan.flows[0].name += "\n" + sameLineProseExamples.join("\n") + "\n" + lineWrappedProseExamples.join("\n") + "\n" + oneWordProseExample;
+  plan.flows[0].name += "\n" + wrappedOpaqueFragmentCases.map(({ label, value }) => label + " " + value).join("\n");
+  const verificationRecord = cleanVerificationRecord({ productionSmokePlan: plan });
+  verificationRecord.checks[0].result = `${malformedHostFragment}\nKeep this malformed-fragment note\n${relativeOpaqueQuery}\nKeep this relative-query note\n${relativeOpaqueFragment}\nKeep this relative-fragment note\nRelative path reference ${relativeReferenceQuery}\n${sameLineProseExamples.join("\n")}`;
+  verificationRecord.checks[0].result += "\nRelative path fragment reference " + relativeReferenceFragment;
+  verificationRecord.checks[0].result += "\n" + leadingSpaceTailCases.map(({ label, value }) => label + " " + value).join("\n");
+  verificationRecord.checks[0].result += "\n" + lineWrappedProseExamples.join("\n") + "\n" + oneWordProseExample;
+  verificationRecord.checks[0].result += "\n" + wrappedOpaqueFragmentCases.map(({ label, value }) => label + " " + value).join("\n");
+  const localVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, verificationRecord)],
+  });
+  const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
+
+  assert.equal(checkedPlan.status, "PASS");
+  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note\nFragment https://production.example.test/catalog\nKeep this fragment note\nBare fragment https://production.example.test/catalog\nKeep this bare-fragment note\nBracket https://production.example.test/catalog\nKeep this bracket note\nBracket with spaces https://production.example.test/catalog\nKeep this bracket-space note\nBacktick with spaces https://production.example.test/catalog\nKeep this backtick-space note\nDouble-quoted with spaces https://production.example.test/catalog\nKeep this double-quote-space note\nSpaced continuation https://production.example.test/catalog\nKeep this continuation-space note\nMalformed host query https://bad host\nKeep this malformed-query note\nMalformed host query continuation https://bad host\nKeep this malformed-query-continuation note\nMalformed host opaque query https://bad host\nKeep this malformed-opaque-query note\nMalformed host opaque fragment https://bad host\nKeep this malformed-opaque-fragment note\nMalformed host opaque query continuation https://bad host\nKeep this malformed-opaque-query-continuation note\nMalformed host opaque fragment continuation https://bad host\u2028Keep this malformed-opaque-fragment-continuation note\nMalformed host trailing query continuation https://bad host\nKeep this malformed-trailing-query-continuation note\nMalformed host trailing fragment continuation https://bad host\nKeep this malformed-trailing-fragment-continuation note\nMalformed host fragment continuation https://bad host\u2028Keep this malformed-fragment-continuation note\nLine separator https://production.example.test/catalog\u2028Keep this line-separator note\nParagraph separator https://production.example.test/catalog\u2029Keep this paragraph-separator note";
+  const safeFlowNameWithBacktickNote = safeFlowName.replace(
+    "Keep this bracket note\nBracket with spaces",
+    "Keep this bracket note\nBacktick https://production.example.test/catalog\nKeep this backtick note\nBracket with spaces",
+  );
+  const expectedFlowName = safeFlowNameWithBacktickNote + "\n" + sameLineProseExamples.join("\n") + "\n" + lineWrappedProseExamples.join("\n") + "\n" + oneWordProseExample + "\n" + wrappedOpaqueFragmentCases.map(({ label, safe }) => label + " " + safe).join("\n");
+  const safeExpectedText = "Catalog heading at https://production.example.test/catalog\nKeep this expected-text note";
+  const expectedCheckResult = [
+    "https://bad host",
+    "Keep this malformed-fragment note",
+    "route /bad host",
+    "Keep this relative-query note",
+    "route /bad host",
+    "Keep this relative-fragment note",
+    "Relative path reference catalog",
+    ...sameLineProseExamples,
+    "Relative path fragment reference catalog",
+    ...leadingSpaceTailCases.map(({ label, safe }) => label + " " + safe),
+    ...lineWrappedProseExamples,
+    oneWordProseExample,
+    ...wrappedOpaqueFragmentCases.map(({ label, safe }) => label + " " + safe),
+  ].join("\n");
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].name, expectedFlowName);
+  assert.equal(localVerification.record.checks[0].result, expectedCheckResult);
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].expectedText, safeExpectedText);
+  assert.equal(checkedPlan.flows[0].name, expectedFlowName);
+  assert.equal(checkedPlan.expectations[0].expectedText, safeExpectedText);
+  const persistedOutput = JSON.stringify({ localVerification, checkedPlan });
+  assert.equal(persistedOutput.includes("secret-token"), false);
+  assert.equal(persistedOutput.includes("fragment-secret"), false);
+  assert.equal(persistedOutput.includes("query-continuation-secret"), false);
+  assert.equal(persistedOutput.includes("separator-fragment-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-query-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-fragment-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-query-continuation-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-fragment-continuation-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-query-after-delimiter-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-fragment-after-delimiter-secret"), false);
+  assert.equal(persistedOutput.includes("relative-opaque-query-secret"), false);
+  assert.equal(persistedOutput.includes("relative-opaque-fragment-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-relative-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-relative-fragment-secret"), false);
+  for (const { secret } of leadingSpaceTailCases) assert.equal(persistedOutput.includes(secret), false);
+  for (const { secret } of wrappedOpaqueFragmentCases) assert.equal(persistedOutput.includes(secret), false);
+  assert.equal(persistedOutput.includes("bare-fragment-secret"), false);
+  assert.equal(persistedOutput.includes("bracket-marker"), false);
+  assert.equal(persistedOutput.includes("backtick-marker"), false);
+  assert.equal(persistedOutput.includes("very secret"), false);
+  assert.equal(persistedOutput.includes("secret>"), false);
+  assert.equal(persistedOutput.includes("secret`"), false);
+  assert.equal(persistedOutput.includes("continuation secret"), false);
+  assert.equal(persistedOutput.includes("second secret"), false);
+  assert.equal(persistedOutput.includes("line-separator-marker"), false);
+  assert.equal(persistedOutput.includes("line-separator-continuation"), false);
+  assert.equal(persistedOutput.includes("paragraph-separator-marker"), false);
+  assert.equal(persistedOutput.includes("paragraph-separator-continuation"), false);
+  assert.equal(persistedOutput.includes("continuation-marker"), false);
+  assert.equal(persistedOutput.includes("fragment-continuation-marker"), false);
+  assert.equal(persistedOutput.includes("bare-fragment-continuation-marker"), false);
+  assert.ok(persistedOutput.includes("Keep this flow note"));
+  assert.ok(persistedOutput.includes("Keep this fragment note"));
+  assert.ok(persistedOutput.includes("Keep this bare-fragment note"));
+  assert.ok(persistedOutput.includes("Keep this bracket note"));
+  assert.ok(persistedOutput.includes("Keep this backtick note"));
+  assert.ok(persistedOutput.includes("Keep this bracket-space note"));
+  assert.ok(persistedOutput.includes("Keep this backtick-space note"));
+  assert.ok(persistedOutput.includes("Keep this double-quote-space note"));
+  assert.ok(persistedOutput.includes("Keep this continuation-space note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-query note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-query-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-opaque-query note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-opaque-fragment note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-opaque-query-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-opaque-fragment-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-trailing-query-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-trailing-fragment-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this relative-query note"));
+  assert.ok(persistedOutput.includes("Keep this relative-fragment note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-fragment note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-fragment-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this line-separator note"));
+  assert.ok(persistedOutput.includes("Keep this paragraph-separator note"));
+  assert.ok(persistedOutput.includes("Keep this expected-text note"));
+  assert.ok(persistedOutput.includes("https://production.example.test/catalog"));
+  for (const prose of sameLineProseExamples) assert.ok(persistedOutput.includes(prose));
+  for (const prose of lineWrappedProseExamples) {
+    assert.ok(localVerification.record.checks[0].result.includes(prose));
+    assert.ok(localVerification.record.productionSmokePlan.flows[0].name.includes(prose));
+  }
+  assert.ok(localVerification.record.checks[0].result.includes(oneWordProseExample));
+  assert.ok(localVerification.record.productionSmokePlan.flows[0].name.includes(oneWordProseExample));
+});
+
+test("invalid relative smoke paths redact queries before validation blocks them", () => {
+  const filename = "src/app/catalog/page.tsx";
+  const invalidPath = "catalog?token=secret-token";
+  const plan = {
+    status: "PASS",
+    flows: [{
+      name: "catalog path response",
+      affectedFiles: [filename],
+      paths: [{ path: invalidPath, expectedText: "Catalog" }],
+    }],
+  };
+  const localVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: plan }))],
+  });
+  const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
+
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].path, "catalog");
+  assert.equal(checkedPlan.status, "BLOCKED");
+  assert.equal(JSON.stringify({ localVerification, checkedPlan }).includes("secret-token"), false);
+});
+
+test("malformed absolute smoke paths redact queries before validation blocks them", () => {
+  const filename = "src/app/catalog/page.tsx";
+  const invalidPath = "https://bad host?token=secret-token";
+  const plan = {
+    status: "PASS",
+    flows: [{
+      name: "catalog path response",
+      affectedFiles: [filename],
+      paths: [{ path: invalidPath, expectedText: "Catalog" }],
+    }],
+  };
+  const localVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: plan }))],
+  });
+  const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
+  const persistedOutput = JSON.stringify({ localVerification, checkedPlan });
+
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].path, "https://bad host");
+  assert.equal(checkedPlan.status, "BLOCKED");
+  assert.equal(persistedOutput.includes("secret-token"), false);
+});
+
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
   const evidenceComments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
@@ -2844,6 +3252,107 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
   assert.equal(expectedFlow.status, "PASS");
   assert.equal(expectedFlow.checks[0].expectedTextMatched, true);
 
+  const externalCover = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{
+      path: "/api/media/moon-garden-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com",
+    }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://media.lamilialomi.com/covers/moon-garden.png?X-Amz-Signature=secret-token",
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x00]).buffer,
+    }),
+  });
+  assert.equal(externalCover.status, "PASS");
+  assert.equal(externalCover.checks[0].responseBytes, 5);
+  assert.equal(externalCover.checks[0].expectedContentTypeMatched, true);
+  assert.equal(externalCover.checks[0].expectedFinalOrigin, "https://media.lamilialomi.com");
+  assert.equal(externalCover.checks[0].finalUrl, "https://media.lamilialomi.com/covers/moon-garden.png");
+  assert.equal(externalCover.checks[0].finalUrl.includes("secret-token"), false);
+
+  const mismatchedFinalOrigin = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{
+      path: "/api/media/moon-garden-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com",
+    }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://other-cdn.example.test/moon-garden.png",
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => Uint8Array.from([0x89, 0x50, 0x4e, 0x47]).buffer,
+    }),
+  });
+  assert.equal(mismatchedFinalOrigin.status, "FAIL");
+  assert.match(mismatchedFinalOrigin.details, /final origin did not match/);
+
+  const emptyBinaryCover = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/empty-cover"],
+    expectations: [{
+      path: "/api/media/empty-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com",
+    }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://media.lamilialomi.com/covers/empty.png",
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }),
+  });
+  assert.equal(emptyBinaryCover.status, "FAIL");
+  assert.match(emptyBinaryCover.details, /empty response body/);
+
+  const externalOriginDeniedByDefault = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{ path: "/api/media/moon-garden-cover", expectedContentType: "image/png" }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://media.lamilialomi.com/covers/moon-garden.png?signature=secret",
+      headers: { get: () => "image/png" },
+      text: async () => "non-empty PNG bytes",
+    }),
+  });
+  assert.equal(externalOriginDeniedByDefault.status, "FAIL");
+  assert.match(externalOriginDeniedByDefault.details, /final origin did not match/);
+  assert.equal(externalOriginDeniedByDefault.checks[0].finalUrl, "https://media.lamilialomi.com/covers/moon-garden.png");
+
+  const invalidFinalOrigin = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{
+      path: "/api/media/moon-garden-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com/covers",
+    }],
+  });
+  assert.equal(invalidFinalOrigin.status, "BLOCKED");
+
+  const wrongContentType = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{
+      path: "/api/media/moon-garden-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com",
+    }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://media.lamilialomi.com/covers/moon-garden.png",
+      headers: { get: () => "image/jpeg" },
+      text: async () => "non-empty image bytes",
+    }),
+  });
+  assert.equal(wrongContentType.status, "FAIL");
+  assert.match(wrongContentType.details, /expected content type/);
+
   const wrongExpectedFlow = await runProductionSmoke("https://production.example.test", {
     paths: ["/products"],
     expectations: [{ path: "/products", expectedText: "Private admin console" }],
@@ -2911,6 +3420,69 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
 
   assert.equal((await runProductionSmoke("http://production.example.test")).status, "BLOCKED");
   assert.equal((await runProductionSmoke("https://production.example.test", { paths: ["//elsewhere.test"] })).status, "BLOCKED");
+});
+
+test("Production smoke keeps query parameters for execution and redacts them from every result path", async () => {
+  const path = '/api/downloads/known-asset?token="secret-token"';
+  const expectations = [{ path, expectedText: "guest", expectedStatus: 401 }];
+  const requestedUrls = [];
+  const makeResponse = (url, { status = 401, body = '{"reason":"guest"}' } = {}) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    url: url.href,
+    headers: { get: () => "application/json" },
+    text: async () => body,
+  });
+
+  const successful = await runProductionSmoke("https://production.example.test", {
+    paths: [path],
+    expectations,
+    fetchImpl: async (url) => {
+      requestedUrls.push(url.href);
+      return makeResponse(url);
+    },
+  });
+  assert.equal(successful.status, "PASS");
+  assert.equal(new URL(requestedUrls[0]).searchParams.get("token"), '"secret-token"');
+  assert.equal(successful.checks[0].path, "/api/downloads/known-asset");
+  assert.equal(JSON.stringify(successful).includes("secret-token"), false);
+
+  const httpFailure = await runProductionSmoke("https://production.example.test", {
+    paths: [path],
+    expectations,
+    fetchImpl: async (url) => {
+      requestedUrls.push(url.href);
+      return makeResponse(url, { status: 503, body: "Unavailable" });
+    },
+  });
+  assert.equal(httpFailure.status, "FAIL");
+  assert.equal(new URL(requestedUrls[1]).searchParams.get("token"), '"secret-token"');
+  assert.equal(JSON.stringify(httpFailure).includes("secret-token"), false);
+
+  const fetchFailure = await runProductionSmoke("https://production.example.test", {
+    paths: [path],
+    expectations,
+    fetchImpl: async (url) => {
+      requestedUrls.push(url.href);
+      throw new Error('fetch failed for "' + url.origin + url.pathname + '?token="secret-token"\ncontinuation-marker""');
+    },
+  });
+  assert.equal(fetchFailure.status, "FAIL");
+  assert.equal(new URL(requestedUrls[2]).searchParams.get("token"), '"secret-token"');
+  assert.equal(fetchFailure.details, "Production smoke request failed because of a network error or timeout.");
+  assert.equal(JSON.stringify(fetchFailure).includes("secret-token"), false);
+  assert.equal(JSON.stringify(fetchFailure).includes("continuation-marker"), false);
+
+  const newlinePath = "/api/downloads/known-asset\n?token=secret-token";
+  const invalidControlPath = await runProductionSmoke("https://production.example.test", {
+    paths: [newlinePath],
+    expectations: [{ path: newlinePath, expectedText: "guest", expectedStatus: 401 }],
+    fetchImpl: async () => {
+      assert.fail("Smoke must reject control characters before fetching.");
+    },
+  });
+  assert.equal(invalidControlPath.status, "BLOCKED");
+  assert.equal(JSON.stringify(invalidControlPath).includes("secret-token"), false);
 });
 
 test("blocks merge when the base SHA changes after verification", async () => {
@@ -3532,26 +4104,38 @@ test("application-flow delivery requires and runs an explicit affected Productio
   assert.equal(missingPath.merged, false);
   assert.equal(missingPathFixture.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
 
-  const verification = async () => ({
-    decision: "READY_FOR_MERGE",
-    currentSha: CURRENT_SHA,
-    fileScope: { files: ["src/app/api/downloads/[assetId]/route.ts"] },
+  const tokenPath = "/api/downloads/known-asset?token=secret-token";
+  const applicationFiles = ["src/app/api/downloads/[assetId]/route.ts"];
+  const verificationComments = [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({
     productionSmokePlan: {
       status: "PASS",
-      required: true,
-      paths: ["/api/downloads/known-asset"],
-      expectations: [{
-        path: "/api/downloads/known-asset",
-        expectedText: "guest",
-        expectedStatus: 401,
+      flows: [{
+        name: "guest download is denied",
+        affectedFiles: applicationFiles,
+        paths: [{ path: tokenPath, expectedText: "guest", expectedStatus: 401 }],
       }],
     },
-    reasons: [],
+  }))];
+  const localVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: verificationComments,
   });
+  const smokePlan = validateProductionSmokePlan({ files: applicationFiles, localVerification });
+  assert.equal(localVerification.status, "PASS");
+  assert.equal(smokePlan.status, "PASS");
+  assert.equal(JSON.stringify(smokePlan).includes("secret-token"), false);
+  const assessment = assessPullRequestVerification({
+    pullRequest: cleanPullRequest(),
+    files: applicationFiles,
+    comments: verificationComments,
+    mergePolicy: cleanMergePolicy(),
+  });
+  const verification = async () => ({ ...assessment, decision: "READY_FOR_MERGE" });
   const fixture = createDeliveryClient();
   let smokePaths = null;
   let smokeExpectations = null;
   const delivered = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
     verify: verification,
     waitForDeployment: async (_client, mergeSha) => ({
       status: "PASS",
@@ -3561,16 +4145,31 @@ test("application-flow delivery requires and runs an explicit affected Productio
     smoke: async (_url, options) => {
       smokePaths = options.paths;
       smokeExpectations = options.expectations;
-      return { status: "PASS", checks: [], details: "Affected product flow passed." };
+      return {
+        status: "PASS",
+        checks: [{ path: options.paths[0], finalUrl: "https://production.example.test/download?token=secret-token" }],
+        details: "Smoke passed for " + options.paths[0],
+      };
     },
   });
   assert.equal(delivered.decision, "DELIVERED");
-  assert.deepEqual(smokePaths, ["/api/downloads/known-asset"]);
+  assert.equal(JSON.stringify(assessment).includes("secret-token"), false);
+  assert.deepEqual(smokePaths, [tokenPath]);
   assert.deepEqual(smokeExpectations, [{
-    path: "/api/downloads/known-asset",
+    path: tokenPath,
     expectedText: "guest",
     expectedStatus: 401,
+    flow: "guest download is denied",
   }]);
+  const persistedComments = fixture.calls
+    .filter(({ path, method }) => path.endsWith("/comments") && method === "POST")
+    .map(({ body }) => body)
+    .join("\n");
+  assert.ok(persistedComments.includes("agent-harness-resume:v1"));
+  assert.ok(persistedComments.includes("agent-harness-delivery:v1"));
+  assert.ok(persistedComments.includes("agent-harness-issue-delivery:v1"));
+  assert.equal(JSON.stringify(delivered).includes("secret-token"), false);
+  assert.equal(persistedComments.includes("secret-token"), false);
 
   for (const configuredPath of ["/catalog", "//elsewhere.test/catalog"]) {
     const invalidFixture = createDeliveryClient();

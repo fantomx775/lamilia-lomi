@@ -5,12 +5,14 @@ import {
   buildProductMetadata,
   getCatalogProducts,
   getCatalogProductsFromSnapshot,
+  getAllProductTypesFromSnapshot,
   getLocalizedProductView,
   getLocalizedProductViewFromSnapshot,
   parseCatalogFilters,
 } from "./products";
 import { serializeRichTextDocument } from "./rich-text";
-import type { ContentSnapshot } from "./types";
+import type { ContentSnapshot, ProductAsset } from "./types";
+import { getSeedContentSnapshot } from "./local-content";
 
 function catalogSnapshotWithLongDescription(longDescription: string): ContentSnapshot {
   return {
@@ -48,16 +50,153 @@ function catalogSnapshotWithLongDescription(longDescription: string): ContentSna
   };
 }
 
+function createCoverAsset(
+  id: string,
+  locale: ProductAsset["locale"],
+  sortOrder: number,
+  isActive = true,
+): ProductAsset {
+  return {
+    id,
+    productId: "cover-selection-product",
+    kind: "cover",
+    bucket: "public-media",
+    path: `/assets/covers/${id}.jpg`,
+    filename: `${id}.jpg`,
+    contentType: "image/jpeg",
+    locale,
+    sortOrder,
+    isPublic: true,
+    isActive,
+  };
+}
+
+function createCoverSelectionSnapshot(
+  coverAssetId: string,
+  assets: ProductAsset[],
+): ContentSnapshot {
+  return {
+    products: [
+      {
+        id: "cover-selection-product",
+        slug: "cover-selection-product",
+        status: "published",
+        audience: "adults",
+        productType: "coloring-book",
+        coverAssetId,
+        reviewDelayDays: 14,
+        sortOrder: 1,
+        createdAt: "2026-09-04T00:00:00.000Z",
+        updatedAt: "2026-09-04T00:00:00.000Z",
+        translations: [
+          {
+            locale: "en",
+            title: "Cover selection product",
+            shortDescription: "A product for cover selection tests.",
+            longDescription: "A product for cover selection tests.",
+          },
+        ],
+        categoryIds: [],
+        tagIds: [],
+        assets,
+        amazonLinks: [],
+        premiumCodes: [],
+      },
+    ],
+    categories: [],
+    tags: [],
+    staticPages: [],
+    catalogSettings: { desktopColumns: 4 },
+  };
+}
+
 describe("product catalog behavior", () => {
+  it("omits product types from published products without English content", () => {
+    const snapshot = catalogSnapshotWithLongDescription("Visible English product.");
+    const nonEnglishOnlyProduct = {
+      ...snapshot.products[0],
+      id: "non-english-only-product",
+      slug: "non-english-only-product",
+      productType: "legacy-polish-only-type",
+      translations: [
+        {
+          locale: "pl" as const,
+          title: "Produkt tylko po polsku",
+          shortDescription: "Polski opis.",
+          longDescription: "Polski opis.",
+        },
+      ],
+    };
+    snapshot.products.push(nonEnglishOnlyProduct);
+
+    expect(getAllProductTypesFromSnapshot(snapshot)).toEqual(["coloring-book"]);
+  });
+
   it("hides draft products from public product lookup", () => {
     expect(getLocalizedProductView("secret-draft-product", "en")).toBeNull();
   });
 
-  it("falls back to English when Polish translation is missing", () => {
+  it("serves English content for retired locale requests", () => {
     const product = getLocalizedProductView("mindful-mandalas-for-adults", "pl");
 
     expect(product?.title).toBe("Mindful Mandalas for Adults");
-    expect(product?.audienceLabel).toBe("Dorośli");
+    expect(product?.audienceLabel).toBe("Adults");
+  });
+
+  it("does not fall back to a stored non-English translation when English is missing", () => {
+    const snapshot = getSeedContentSnapshot();
+    const product = snapshot.products.find(
+      (item) => item.slug === "moon-garden-coloring-book",
+    );
+
+    expect(product).toBeDefined();
+    product!.translations = [
+      {
+        locale: "pl",
+        title: "Nie powinien wyświetlić się polski tytuł",
+        shortDescription: "Polish legacy description",
+        longDescription: "Polish legacy description",
+      },
+    ];
+
+    expect(
+      getLocalizedProductViewFromSnapshot(
+        snapshot,
+        "moon-garden-coloring-book",
+        "pl",
+      ),
+    ).toBeNull();
+  });
+
+  it("does not expose legacy non-English media on English product pages", () => {
+    const snapshot = getSeedContentSnapshot();
+    const product = snapshot.products.find(
+      (item) => item.slug === "moon-garden-coloring-book",
+    );
+
+    expect(product).toBeDefined();
+    product!.coverAssetId = "legacy-polish-cover";
+    product!.assets.push({
+      ...product!.assets[0],
+      id: "legacy-polish-cover",
+      locale: "pl",
+      title: "Polish cover",
+    });
+    product!.assets.push({
+      ...product!.assets[1],
+      id: "legacy-polish-gallery",
+      locale: "pl",
+      title: "Polish gallery image",
+    });
+
+    const view = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "moon-garden-coloring-book",
+      "en",
+    );
+
+    expect(view?.cover.id).not.toBe("legacy-polish-cover");
+    expect(view?.gallery.some((asset) => asset.id === "legacy-polish-gallery")).toBe(false);
   });
 
   it("filters, searches, and sorts catalog results through public query params", () => {
@@ -181,7 +320,69 @@ describe("product catalog behavior", () => {
     expect(product?.cover.path).toBe("/assets/covers/cover-placeholder.svg");
   });
 
-  it("surfaces active public downloads and respects locale fallback", () => {
+  it("prefers the selected English cover over other eligible covers", () => {
+    const snapshot = createCoverSelectionSnapshot("selected-english-cover", [
+      createCoverAsset("global-cover", undefined, 1),
+      createCoverAsset("selected-english-cover", "en", 2),
+    ]);
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "cover-selection-product",
+      "en",
+    );
+
+    expect(product?.cover.id).toBe("selected-english-cover");
+  });
+
+  it("prefers the selected global cover over other eligible covers", () => {
+    const snapshot = createCoverSelectionSnapshot("selected-global-cover", [
+      createCoverAsset("selected-global-cover", undefined, 2),
+      createCoverAsset("english-cover", "en", 1),
+    ]);
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "cover-selection-product",
+      "en",
+    );
+
+    expect(product?.cover.id).toBe("selected-global-cover");
+  });
+
+  it("falls back from a selected retired Polish cover to the first eligible cover", () => {
+    const snapshot = createCoverSelectionSnapshot("retired-polish-cover", [
+      createCoverAsset("retired-polish-cover", "pl", 0),
+      createCoverAsset("english-cover", "en", 2),
+      createCoverAsset("global-cover", undefined, 1),
+      createCoverAsset("inactive-english-cover", "en", 0, false),
+    ]);
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "cover-selection-product",
+      "en",
+    );
+
+    expect(product?.cover.id).toBe("global-cover");
+  });
+
+  it("uses the placeholder when no eligible cover exists", () => {
+    const snapshot = createCoverSelectionSnapshot("retired-polish-cover", [
+      createCoverAsset("retired-polish-cover", "pl", 0),
+      createCoverAsset("inactive-english-cover", "en", 1, false),
+    ]);
+
+    const product = getLocalizedProductViewFromSnapshot(
+      snapshot,
+      "cover-selection-product",
+      "en",
+    );
+
+    expect(product?.cover.path).toBe("/assets/covers/cover-placeholder.svg");
+  });
+
+  it("surfaces English public downloads for retired locale requests", () => {
     const product = getLocalizedProductView("moon-garden-coloring-book", "de");
 
     expect(product?.publicDownloads).toEqual([

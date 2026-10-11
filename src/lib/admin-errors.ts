@@ -1,5 +1,4 @@
-import type { Locale } from "@/i18n/routing";
-import type { ProductAsset } from "@/lib/types";
+import type { ProductAsset, StoredLocale } from "@/lib/types";
 
 export const ADMIN_ERROR_CODES = {
   INTERNAL: "admin.internal",
@@ -199,15 +198,15 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Este slug ya está en uso.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Los cambios entran en conflicto con datos existentes. Actualiza e inténtalo de nuevo.",
   },
-} satisfies Record<Locale, Record<AdminErrorCode, string>>;
+} satisfies Record<StoredLocale, Record<AdminErrorCode, string>>;
 
-export function getAdminErrorMessage(code: string, locale: Locale = "pl") {
+export function getAdminErrorMessage(code: string, locale: StoredLocale = "pl") {
   return isAdminErrorCode(code)
     ? translatedMessages[locale][code]
     : translatedMessages[locale][ADMIN_ERROR_CODES.INTERNAL];
 }
 
-export function formatAdminErrors(value: string | string[] | undefined, locale: Locale = "pl") {
+export function formatAdminErrors(value: string | string[] | undefined, locale: StoredLocale = "pl") {
   const codes = parseAdminErrorCodes(value);
   return codes.map((code) => getAdminErrorMessage(code, locale)).join(" ");
 }
