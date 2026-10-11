@@ -25,6 +25,20 @@ test.describe("Issue 31 local QR and premium workflow", () => {
 
   test("a QR scan survives registration and verification, unlocks My Library, and denies anonymous downloads", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
+    const consoleErrors: string[] = [];
+    const failedRequests: Array<{ url: string; errorText: string }> = [];
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    page.on("pageerror", (error) => consoleErrors.push(error.message));
+    page.on("requestfailed", (request) => {
+      failedRequests.push(
+        {
+          url: `${request.method()} ${request.url()}`,
+          errorText: request.failure()?.errorText ?? "unknown",
+        },
+      );
+    });
     await page.context().clearCookies();
 
     await page.goto(
@@ -83,6 +97,11 @@ test.describe("Issue 31 local QR and premium workflow", () => {
       ok: false,
       reason: "guest",
     });
+    expect(consoleErrors, "browser console errors").toEqual([]);
+    expect(
+      failedRequests.filter(({ errorText }) => !/net::ERR_ABORTED/.test(errorText)),
+      "unexpected browser request failures",
+    ).toEqual([]);
   });
 });
 
