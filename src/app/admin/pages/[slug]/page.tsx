@@ -53,5 +53,5 @@ export default async function EditPage({ params, searchParams }: Props) {
 
   const saveAction = saveStaticPagesAction.bind(null, slug);
 
-  return <PageEditor slug={slug} title={records.find((record) => record.locale === "en")?.title ?? slug} records={records} feedback={feedback} saveAction={saveAction} />;
+  return <PageEditor slug={slug} title={records.find((record) => record.locale === "en")?.title ?? slug} records={records} feedback={feedback} saved={Boolean(query.saved)} saveAction={saveAction} />;
 }

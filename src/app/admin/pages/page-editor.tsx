@@ -1,7 +1,7 @@
 "use client";
 
 import { Save } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
@@ -24,19 +24,33 @@ export function PageEditor({
   title,
   records,
   feedback,
+  saved = false,
   saveAction,
 }: {
   slug: StaticPageRecord["slug"];
   title: string;
   records: StaticPageRecord[];
   feedback?: string;
+  saved?: boolean;
   saveAction?: (formData: FormData) => void | Promise<void>;
 }) {
-  const [initialValue] = useState<PageValue>(() => buildValue(records));
+  const savedValue = useMemo(() => buildValue(records), [records]);
+  const savedValueSignature = JSON.stringify(savedValue);
+  const [baselineValue, setBaselineValue] = useState<PageValue>(() => savedValue);
+  const baselineSignatureRef = useRef(savedValueSignature);
   const isDirtyRef = useRef(false);
-  const [value, setValue] = useState<PageValue>(() => initialValue);
+  const [value, setValue] = useState<PageValue>(() => savedValue);
   const [hasUnappliedHtmlDraft, setHasUnappliedHtmlDraft] = useState(false);
-  const isDirty = hasUnappliedHtmlDraft || value.title !== initialValue.title || value.body !== initialValue.body;
+  const isDirty = hasUnappliedHtmlDraft || value.title !== baselineValue.title || value.body !== baselineValue.body;
+
+  useEffect(() => {
+    if (!saved || savedValueSignature === baselineSignatureRef.current) return;
+    baselineSignatureRef.current = savedValueSignature;
+    setBaselineValue(savedValue);
+    setValue(savedValue);
+    setHasUnappliedHtmlDraft(false);
+    isDirtyRef.current = false;
+  }, [saved, savedValue, savedValueSignature]);
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -95,14 +109,14 @@ export function PageEditor({
   const updateValue = (field: keyof PageValue, value: string) => {
     setValue((current) => {
       const next = { ...current, [field]: value };
-      isDirtyRef.current = hasUnappliedHtmlDraft || next.title !== initialValue.title || next.body !== initialValue.body;
+      isDirtyRef.current = hasUnappliedHtmlDraft || next.title !== baselineValue.title || next.body !== baselineValue.body;
       return next;
     });
   };
 
   const updateHtmlDraftState = (hasDraft: boolean) => {
     setHasUnappliedHtmlDraft(hasDraft);
-    isDirtyRef.current = hasDraft || value.title !== initialValue.title || value.body !== initialValue.body;
+    isDirtyRef.current = hasDraft || value.title !== baselineValue.title || value.body !== baselineValue.body;
   };
 
   const handleSubmit = () => {

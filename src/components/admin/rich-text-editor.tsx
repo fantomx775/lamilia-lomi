@@ -359,7 +359,7 @@ export function RichTextEditor({
         ) : null}
 
         {mode === "html" ? (
-          <div className="grid min-w-0 gap-3 bg-white p-3 sm:p-4" role="tabpanel">
+          <div className="grid min-w-0 gap-3 bg-white p-3 sm:p-4">
             <label className="grid gap-2 text-sm font-medium" htmlFor={id + "-html-source"}>
               Źródło HTML
               <textarea
@@ -400,7 +400,7 @@ export function RichTextEditor({
             </p>
           </div>
         ) : (
-          <div className="min-h-64 bg-white" role="tabpanel">
+          <div className="min-h-64 bg-white">
             <EditorContent editor={editor} />
             {!editor ? <p className="px-4 py-3 text-sm text-[var(--color-muted)]" role="status">Ładowanie edytora…</p> : null}
           </div>

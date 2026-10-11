@@ -26,6 +26,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     failedResponses: [] as Array<{ method: string; url: string; status: number }>,
     postResponses: [] as Array<{ path: string; status: number }>,
   };
+  const attemptedHtmlResourceRequests: string[] = [];
 
   fs.mkdirSync(screenshotDirectory, { recursive: true });
   page.on("console", (message) => {
@@ -47,6 +48,12 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       status: response.status(),
     });
   });
+  page.on("request", (request) => {
+    if (request.url().startsWith("https://rich-text-resource.invalid/")) {
+      attemptedHtmlResourceRequests.push(request.url());
+    }
+  });
+  await page.route("https://rich-text-resource.invalid/**", (route) => route.abort());
 
   try {
     await page.addInitScript(() => {
@@ -65,7 +72,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
     const productField = page.locator('#product-editor-form input[name="longDescription"]');
     const originalProductValue = await productField.inputValue();
-    const productHtml = '<h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><script>window.__issue51Executed = true</script><p onclick="window.__issue51Executed = true">Safe paragraph.</p>';
+    const productHtml = '<h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><img src="https://rich-text-resource.invalid/tracker.png" alt="Product diagram"><iframe src="https://rich-text-resource.invalid/frame"></iframe><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><script>window.__issue51Executed = true</script><p onclick="window.__issue51Executed = true">Safe paragraph.</p>';
     await page.getByRole("button", { name: "HTML" }).click();
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(productHtml);
     await page.getByRole("button", { name: "Rich Text" }).click();
@@ -75,6 +82,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     expect(await page.evaluate(() => (window as Window & { __issue51Executed?: boolean }).__issue51Executed)).toBe(false);
     await saveScreenshot(page, screenshotDirectory, `product-editor-html-warning-${testInfo.project.name}.png`, page.getByRole("textbox", { name: "Źródło HTML" }));
     await page.getByRole("button", { name: "Użyj obsługiwanej treści" }).click();
+    expect(attemptedHtmlResourceRequests).toEqual([]);
     await expect(productEditor.locator("h2")).toHaveText("Issue 51 product summary");
     await expect(productEditor.locator("u")).toHaveText("Underlined product copy");
     await expect(productEditor.locator("blockquote")).toContainText("Product quotation.");
@@ -125,6 +133,9 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
 
     await page.goto("/admin/pages/terms");
     const termsEditor = page.getByRole("textbox", { name: "Treść" });
+    const termsTitle = page.getByRole("textbox", { name: "Tytuł" });
+    const originalTermsTitle = await termsTitle.inputValue();
+    await termsTitle.fill("Issue 51 saved terms title");
     const termsHtml = "<h2>Issue 51 Terms</h2><p>Terms copied from the HTML source.</p><ol><li><p>Keep account details current.</p></li><li><p>Use the account responsibly.</p></li></ol><hr>";
     await page.getByRole("button", { name: "HTML" }).click();
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(termsHtml);
@@ -137,6 +148,13 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     const termsSaveResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/pages/terms");
     await page.getByRole("button", { name: "Zapisz" }).first().click();
     expect((await termsSaveResponse).status()).toBe(200);
+    await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
+    await termsTitle.fill(originalTermsTitle);
+    const unsavedNavigation = page.waitForEvent("dialog");
+    await page.getByRole("link", { name: "Strony" }).click();
+    const navigationDialog = await unsavedNavigation;
+    expect(navigationDialog.message()).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
+    await navigationDialog.dismiss();
     await page.reload();
     await expect(page.locator('#page-editor-form input[name="body"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/terms");
@@ -205,6 +223,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       flows: ["product-description", "terms", "privacy"],
       consoleErrors: diagnostics.consoleErrors,
       pageErrors: diagnostics.pageErrors,
+      attemptedHtmlResourceRequests,
       failedNetworkRequests: inspectedNetworkRequests,
       failedResponses: diagnostics.failedResponses,
       postResponses: diagnostics.postResponses,

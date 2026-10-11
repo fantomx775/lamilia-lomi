@@ -18,6 +18,9 @@ describe("PageEditor", () => {
 
     expect(view.getByRole("heading", { name: "Treść strony" })).toBeInTheDocument();
     expect(view.queryByRole("tab")).not.toBeInTheDocument();
+    expect(view.getByRole("group", { name: "Tryb edycji" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "Rich Text" })).toHaveAttribute("aria-pressed", "true");
+    expect(view.queryByRole("tabpanel")).not.toBeInTheDocument();
     expect(view.getByRole("textbox", { name: "Treść" })).toHaveTextContent(records.find((page) => page.locale === "en")?.body ?? "");
     expect(view.getByText("Klucz strony: privacy")).toBeInTheDocument();
     expect(view.container.querySelector('select[name="slug"]')).not.toBeInTheDocument();
@@ -43,6 +46,33 @@ describe("PageEditor", () => {
     expect(formData.get("body")).toBe(records.find((page) => page.locale === "en")?.body);
     expect(formData.has("title_pl")).toBe(false);
     expect(formData.has("body_pl")).toBe(false);
+  });
+
+  it("uses successfully saved page content as the new unsaved-change baseline", async () => {
+    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "privacy");
+    const originalTitle = records.find((page) => page.locale === "en")?.title ?? "";
+    const savedTitle = "Saved privacy title";
+    const view = render(<PageEditor slug="privacy" title="Privacy Policy" records={records} saveAction={saveAction} />);
+    const title = view.container.querySelector<HTMLInputElement>("#page-title");
+
+    await user.clear(title!);
+    await user.type(title!, savedTitle);
+    await user.click(view.getAllByRole("button", { name: "Zapisz" })[0]);
+    await waitFor(() => expect(saveAction).toHaveBeenCalled());
+
+    const savedRecords = records.map((record) => record.locale === "en" ? { ...record, title: savedTitle } : record);
+    view.rerender(<PageEditor slug="privacy" title="Privacy Policy" records={savedRecords} feedback="Zapisano zmiany." saved saveAction={saveAction} />);
+    await waitFor(() => expect(view.queryByText("Masz niezapisane zmiany.")).not.toBeInTheDocument());
+
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await user.clear(title!);
+    await user.type(title!, originalTitle);
+    await waitFor(() => expect(view.getByText("Masz niezapisane zmiany.")).toBeInTheDocument());
+    await user.click(view.getByRole("link", { name: "Strony" }));
+    expect(confirm).toHaveBeenCalledWith("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
+    confirm.mockRestore();
   });
 
   it("keeps unsafe HTML drafts unchanged until the user accepts the supported conversion", async () => {

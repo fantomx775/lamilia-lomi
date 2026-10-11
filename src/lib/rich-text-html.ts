@@ -15,6 +15,20 @@ const DROPPED_CONTENT_TAGS = new Set(["script", "style", "template"]);
 const MAX_HTML_SOURCE_LENGTH = 100_000;
 const MAX_HTML_DEPTH = 32;
 const MAX_HTML_NODES = 10_000;
+const FETCHABLE_ATTRIBUTES = new Set([
+  "background",
+  "codebase",
+  "data",
+  "href",
+  "manifest",
+  "poster",
+  "src",
+  "srcdoc",
+  "srcset",
+  "style",
+  "xlink:href",
+]);
+const RAW_TEXT_TAGS = new Set(["iframe", "noembed", "noframes", "plaintext", "script", "style", "textarea", "title", "xmp"]);
 
 export type RichTextHtmlWarning = {
   code: "invalid-markup" | "unsafe-link" | "unsupported-attribute" | "unsupported-element";
@@ -60,7 +74,13 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
     return { document: { type: "doc", content: [] }, warnings: [...warningMap.values()], canConvert: false };
   }
 
-  const parsed = new DOMParser().parseFromString(source, "text/html");
+  const parserSafeSource = removeFetchableAttributes(source, (tag, attribute) => {
+    addWarning(
+      "unsupported-attribute",
+      "The " + attribute + " attribute on <" + tag + "> will be removed.",
+    );
+  });
+  const parsed = new DOMParser().parseFromString(parserSafeSource, "text/html");
   if (parsed.querySelector("parsererror")) {
     addWarning("invalid-markup", "The HTML source could not be parsed. Review it before converting.");
   }
@@ -239,6 +259,161 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
     addWarning("unsupported-element", "Some nested content cannot be represented and will be removed during conversion.");
   }
   return { document, warnings: [...warningMap.values()], canConvert: true };
+}
+
+function removeFetchableAttributes(
+  source: string,
+  onRemovedAttribute: (tag: string, attribute: string) => void,
+): string {
+  const lowerSource = source.toLowerCase();
+  let result = "";
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const tagStart = source.indexOf("<", cursor);
+    if (tagStart < 0) {
+      result += source.slice(cursor);
+      break;
+    }
+
+    result += source.slice(cursor, tagStart);
+    if (source.startsWith("<!--", tagStart)) {
+      const commentEnd = source.indexOf("-->", tagStart + 4);
+      const end = commentEnd < 0 ? source.length : commentEnd + 3;
+      result += source.slice(tagStart, end);
+      cursor = end;
+      continue;
+    }
+
+    const tagEnd = findHtmlTagEnd(source, tagStart);
+    if (tagEnd < 0) {
+      result += source.slice(tagStart);
+      break;
+    }
+
+    const rawTag = source.slice(tagStart, tagEnd + 1);
+    const tagMatch = /^<\s*([a-z][a-z0-9:-]*)\b/i.exec(rawTag);
+    if (!tagMatch || /^<\s*\//.test(rawTag)) {
+      result += rawTag;
+      cursor = tagEnd + 1;
+      continue;
+    }
+
+    const tagName = tagMatch[1].toLowerCase();
+    result += stripFetchableAttributesFromTag(rawTag, tagMatch[0].length, tagName, onRemovedAttribute);
+    cursor = tagEnd + 1;
+
+    if (!RAW_TEXT_TAGS.has(tagName)) continue;
+
+    const closeStart = findRawTextClose(lowerSource, tagName, cursor);
+    const contentEnd = closeStart < 0 ? source.length : closeStart;
+    if (tagName === "style") {
+      result += " ";
+    } else {
+      result += source.slice(cursor, contentEnd);
+    }
+
+    if (closeStart < 0) {
+      cursor = source.length;
+      break;
+    }
+
+    const closeEnd = findHtmlTagEnd(source, closeStart);
+    if (closeEnd < 0) {
+      result += source.slice(closeStart);
+      cursor = source.length;
+      break;
+    }
+    result += source.slice(closeStart, closeEnd + 1);
+    cursor = closeEnd + 1;
+  }
+
+  return result;
+}
+
+function stripFetchableAttributesFromTag(
+  rawTag: string,
+  prefixLength: number,
+  tagName: string,
+  onRemovedAttribute: (tag: string, attribute: string) => void,
+): string {
+  let result = rawTag.slice(0, prefixLength);
+  let cursor = prefixLength;
+  const tagContentEnd = rawTag.length - 1;
+
+  while (cursor < tagContentEnd) {
+    if (/\s|\//.test(rawTag[cursor])) {
+      result += rawTag[cursor];
+      cursor += 1;
+      continue;
+    }
+
+    const attributeStart = cursor;
+    while (cursor < tagContentEnd && !/[\s=/>]/.test(rawTag[cursor])) cursor += 1;
+    if (cursor === attributeStart) {
+      result += rawTag[cursor];
+      cursor += 1;
+      continue;
+    }
+
+    const attribute = rawTag.slice(attributeStart, cursor);
+    const attributeName = attribute.toLowerCase();
+    let attributeEnd = cursor;
+    let valueCursor = cursor;
+    while (valueCursor < tagContentEnd && /\s/.test(rawTag[valueCursor])) valueCursor += 1;
+    if (rawTag[valueCursor] === "=") {
+      valueCursor += 1;
+      while (valueCursor < tagContentEnd && /\s/.test(rawTag[valueCursor])) valueCursor += 1;
+      const quote = rawTag[valueCursor];
+      if (quote === "\"" || quote === "'") {
+        valueCursor += 1;
+        while (valueCursor < tagContentEnd && rawTag[valueCursor] !== quote) valueCursor += 1;
+        if (valueCursor < tagContentEnd) valueCursor += 1;
+      } else {
+        while (valueCursor < tagContentEnd && !/[\s>]/.test(rawTag[valueCursor])) valueCursor += 1;
+      }
+      attributeEnd = valueCursor;
+    }
+
+    const shouldRemove = FETCHABLE_ATTRIBUTES.has(attributeName) && !(attributeName === "href" && tagName === "a");
+    if (shouldRemove) {
+      onRemovedAttribute(tagName, attributeName);
+      cursor = attributeEnd;
+    } else {
+      result += rawTag.slice(attributeStart, attributeEnd);
+      cursor = attributeEnd;
+    }
+  }
+
+  return result + rawTag.slice(tagContentEnd);
+}
+
+function findHtmlTagEnd(source: string, start: number): number {
+  let quote: "\"" | "'" | null = null;
+  for (let index = start + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === quote) quote = null;
+    } else if (character === "\"" || character === "'") {
+      quote = character;
+    } else if (character === ">") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function findRawTextClose(lowerSource: string, tagName: string, start: number): number {
+  const closePrefix = "</" + tagName;
+  let cursor = start;
+  while (cursor < lowerSource.length) {
+    const closeStart = lowerSource.indexOf(closePrefix, cursor);
+    if (closeStart < 0) return -1;
+    const nextCharacter = lowerSource[closeStart + closePrefix.length];
+    if (nextCharacter === ">" || nextCharacter === "/" || /\s/.test(nextCharacter ?? "")) return closeStart;
+    cursor = closeStart + closePrefix.length;
+  }
+  return -1;
 }
 
 function addMark(marks: RichTextMark[], mark: RichTextMark): RichTextMark[] {
