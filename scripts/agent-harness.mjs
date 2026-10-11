@@ -18,15 +18,23 @@ const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
 function redactFreeTextUrls(value) {
   // Strip query and fragment tails from absolute URLs and relative paths,
   // including malformed values with spaces before delimiters and continuations.
-  const redactTail = (urlOrPath) => {
-    const sameLineDelimiter = urlOrPath.search(/[?#]/);
-    const continuedDelimiter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#]/);
+  const redactTail = (urlOrPath, matchOffset, source) => {
+    const openingWrapper = source[matchOffset - 1];
+    const closingWrapper = openingWrapper === "<"
+      ? ">"
+      : openingWrapper === "\x60" || openingWrapper === '"'
+        ? openingWrapper
+        : "";
+    const hasBalancedWrapper = closingWrapper && urlOrPath.endsWith(closingWrapper);
+    const valueToRedact = hasBalancedWrapper ? urlOrPath.slice(0, -1) : urlOrPath;
+    const sameLineDelimiter = valueToRedact.search(/[?#]/);
+    const continuedDelimiter = valueToRedact.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#]/);
     const redactionStart = [sameLineDelimiter, continuedDelimiter]
       .filter((index) => index >= 0)
       .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
     if (!Number.isFinite(redactionStart)) return urlOrPath;
 
-    const tail = urlOrPath.slice(redactionStart)
+    const tail = valueToRedact.slice(redactionStart)
       .replace(/\r\n?/g, "\n")
       .replace(/[\u2028\u2029]/g, "\n");
     const content = tail.replace(/^(?:[?#&]|\s)+/, "");
@@ -39,9 +47,10 @@ function redactFreeTextUrls(value) {
       (/[-_~%0-9]/.test(firstLine) || firstLine.length >= 16);
     if (!(hasParameter || hasWrappedValue || hasAmpersandContinuation || hasSingleOpaqueToken)) return urlOrPath;
 
-    return urlOrPath
+    const safeValue = valueToRedact
       .slice(0, redactionStart)
       .replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
+    return hasBalancedWrapper ? safeValue + closingWrapper : safeValue;
   };
 
   return value
