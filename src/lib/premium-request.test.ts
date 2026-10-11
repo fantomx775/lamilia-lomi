@@ -349,4 +349,77 @@ describe("redeemPremiumCodeForRequest in local mode", () => {
     );
     expect(mocks.saveContentSnapshot).toHaveBeenCalledTimes(1);
   });
+
+  it("does not let one account claim two codes for the same product concurrently", async () => {
+    type LocalSnapshot = {
+      products: Array<{
+        id: string;
+        premiumCodes: Array<{
+          id: string;
+          productId: string;
+          code: string;
+          active: boolean;
+          redeemedAt?: string;
+          redeemedBy?: string;
+        }>;
+      }>;
+    };
+    const productId = "local-product-1";
+    const owner = {
+      email: "reader@example.com",
+      emailVerified: true,
+      unlockedProductIds: [] as string[],
+    };
+    const state: { snapshot: LocalSnapshot } = {
+      snapshot: {
+        products: [{
+          id: productId,
+          premiumCodes: [
+            {
+              id: "local-premium-code-1",
+              productId,
+              code: "LOCAL-SAME-ACCOUNT-TEST-1",
+              active: true,
+            },
+            {
+              id: "local-premium-code-2",
+              productId,
+              code: "LOCAL-SAME-ACCOUNT-TEST-2",
+              active: true,
+            },
+          ],
+        }],
+      },
+    };
+    mocks.getBackendMode.mockReturnValue("local");
+    mocks.getProductBySlug.mockReturnValue({ id: productId });
+    mocks.getContentSnapshot.mockImplementation(() => state.snapshot);
+    mocks.saveContentSnapshot.mockImplementation((snapshot: typeof state.snapshot) => {
+      state.snapshot = snapshot;
+    });
+    mocks.getDemoSession.mockResolvedValue(owner);
+    mocks.saveContentSnapshot.mockClear();
+
+    const results = await Promise.all([
+      redeemPremiumCodeForRequest({
+        productSlug: "local-product",
+        productId,
+        code: "LOCAL-SAME-ACCOUNT-TEST-1",
+      }),
+      redeemPremiumCodeForRequest({
+        productSlug: "local-product",
+        productId,
+        code: "LOCAL-SAME-ACCOUNT-TEST-2",
+      }),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual([
+      "already_unlocked",
+      "success",
+    ]);
+    expect(mocks.saveContentSnapshot).toHaveBeenCalledTimes(1);
+    expect(
+      state.snapshot.products[0]?.premiumCodes.filter((code) => code.redeemedAt),
+    ).toHaveLength(1);
+  });
 });

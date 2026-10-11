@@ -90,11 +90,13 @@ export async function redeemPremiumCodeForRequest(input: {
       return { ok: false, status: "auth_required" };
     }
 
-    if (matchingCode.redeemedAt) {
-      if (matchingCode.redeemedBy !== redeemerId) {
-        return { ok: false, status: "already_used" };
-      }
+    const existingRedemption = snapshot.products
+      .find((item) => item.id === product.id)
+      ?.premiumCodes.find(
+        (code) => code.redeemedAt && code.redeemedBy === redeemerId,
+      );
 
+    if (existingRedemption) {
       await setDemoSession({
         ...session,
         unlockedProductIds: [...new Set([...session.unlockedProductIds, product.id])],
@@ -107,6 +109,10 @@ export async function redeemPremiumCodeForRequest(input: {
         premiumCodeId: matchingCode.id,
         normalizedCode,
       };
+    }
+
+    if (matchingCode.redeemedAt) {
+      return { ok: false, status: "already_used" };
     }
 
     if (!matchingCode.active) {

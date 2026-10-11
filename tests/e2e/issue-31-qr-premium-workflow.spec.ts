@@ -1,12 +1,15 @@
+import fs from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
+import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
 const productId = "11111111-1111-4111-8111-111111111111";
 const premiumCode = "LOMI-BOOK-2026";
+let restoreLocalContentStore: (() => void) | undefined;
 
 test.describe("Issue 31 local QR and premium workflow", () => {
   test.beforeEach(async ({ page }, testInfo) => {
@@ -14,6 +17,21 @@ test.describe("Issue 31 local QR and premium workflow", () => {
       !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
       "Issue 31 local QR coverage requires a loopback app running the local demo backend.",
     );
+    const releaseContentStoreLock = await acquireLocalContentStoreLock();
+    const contentStorePath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
+    const hadContentStore = fs.existsSync(contentStorePath);
+    const originalContentStore = hadContentStore ? fs.readFileSync(contentStorePath) : undefined;
+    restoreLocalContentStore = () => {
+      try {
+        if (hadContentStore && originalContentStore) {
+          fs.writeFileSync(contentStorePath, originalContentStore);
+        } else if (!hadContentStore && fs.existsSync(contentStorePath)) {
+          fs.rmSync(contentStorePath);
+        }
+      } finally {
+        releaseContentStoreLock();
+      }
+    };
     await page.addInitScript(() => {
       if (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
         window.localStorage.setItem(
@@ -22,6 +40,11 @@ test.describe("Issue 31 local QR and premium workflow", () => {
         );
       }
     });
+  });
+
+  test.afterEach(() => {
+    restoreLocalContentStore?.();
+    restoreLocalContentStore = undefined;
   });
 
   test("a QR scan survives registration and verification, unlocks My Library, and denies anonymous downloads", async ({ page }, testInfo) => {
