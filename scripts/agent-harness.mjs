@@ -15,12 +15,30 @@ const VERCEL_PROJECT_DEPLOYMENT_HOST = /^lamilia-lomi-[a-z0-9]{9}-fantomxs-proje
 const PRIVATE_RAW_VERIFICATION_RECORD = new WeakMap();
 const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
 
-function redactPersistedData(value, seen = new WeakMap()) {
+function redactFreeTextUrls(value) {
+  return value.replace(/(?:https?:\/\/|\/)[^\s<>`]*/gi, (urlOrPath) => {
+    const queryOrFragment = urlOrPath.search(/[?#]/);
+    return queryOrFragment < 0 ? urlOrPath : urlOrPath.slice(0, queryOrFragment);
+  });
+}
+
+function redactStructuredPath(value) {
+  if (!value.startsWith("/") && !/^https?:\/\//i.test(value)) return redactFreeTextUrls(value);
+  try {
+    const url = new URL(value, "https://agent-harness.invalid");
+    if (url.origin === "https://agent-harness.invalid") return url.pathname;
+    if (url.protocol === "https:" || url.protocol === "http:") return url.origin + url.pathname;
+  } catch {
+    // Keep malformed path text private through the free-text URL fallback below.
+  }
+  return redactFreeTextUrls(value);
+}
+
+function redactPersistedData(value, seen = new WeakMap(), contextKey = null) {
   if (typeof value === "string") {
-    return value.replace(/(?:https?:\/\/|\/)[^\s"'<>`]*/gi, (urlOrPath) => {
-      const queryOrFragment = urlOrPath.search(/[?#]/);
-      return queryOrFragment < 0 ? urlOrPath : urlOrPath.slice(0, queryOrFragment);
-    });
+    return contextKey === "path" || contextKey === "paths"
+      ? redactStructuredPath(value)
+      : redactFreeTextUrls(value);
   }
   if (!value || typeof value !== "object") return value;
   if (seen.has(value)) return seen.get(value);
@@ -28,10 +46,10 @@ function redactPersistedData(value, seen = new WeakMap()) {
   const redacted = Array.isArray(value) ? [] : {};
   seen.set(value, redacted);
   if (Array.isArray(value)) {
-    for (const item of value) redacted.push(redactPersistedData(item, seen));
+    for (const item of value) redacted.push(redactPersistedData(item, seen, contextKey));
   } else {
     for (const [key, item] of Object.entries(value)) {
-      redacted[key] = redactPersistedData(item, seen);
+      redacted[key] = redactPersistedData(item, seen, key);
     }
     for (const privateValues of [PRIVATE_RAW_VERIFICATION_RECORD, PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN]) {
       if (privateValues.has(value)) privateValues.set(redacted, privateValues.get(value));
@@ -1293,7 +1311,8 @@ function isApplicationFlowFile(filename) {
 }
 
 function isValidProductionSmokePath(path) {
-  if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) return false;
+  if (typeof path !== "string" || /[\u0000-\u001f\u007f-\u009f]/.test(path) ||
+    !path.startsWith("/") || path.startsWith("//")) return false;
   try {
     const url = new URL(path, "https://agent-harness.invalid");
     return url.origin === "https://agent-harness.invalid" && !url.username && !url.password;
@@ -1425,7 +1444,7 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       }
       const pathName = new URL(expectation.path, "https://agent-harness.invalid").pathname;
       if (!routePatterns.some(({ routePattern }) => routePattern.test(pathName))) {
-        failures.push("Smoke path " + expectation.path + " does not match the changed route file(s) in flow " + flow.name + ".");
+        failures.push("Smoke path does not match the changed route file(s) in flow " + flow.name + ".");
         continue;
       }
       validPathNames.push(pathName);
@@ -2858,7 +2877,7 @@ async function runProductionSmokeInternal(environmentUrl, {
         return {
           status: "FAIL",
           checks,
-          details: "Production smoke failed for " + path + " (HTTP " + response.status +
+          details: "Production smoke failed (HTTP " + response.status +
             (expectedStatus !== undefined && !expectedStatusMatched ? ", expected HTTP " + expectedStatus : "") +
             (finalUrl.origin !== expectedFinalOrigin ? ", final origin did not match the expected origin" : "") +
             (responseBodyEmpty ? ", empty response body" : "") +
@@ -2870,7 +2889,7 @@ async function runProductionSmokeInternal(environmentUrl, {
       return {
         status: "FAIL",
         checks,
-        details: "Production smoke request failed for " + path + ": " + error.message,
+        details: "Production smoke request failed: " + error.message,
       };
     }
   }

@@ -2161,6 +2161,31 @@ test("smoke plan validation and verify output redact query strings from persiste
   assert.equal(JSON.stringify(localVerification).includes("secret-token"), false);
   assert.equal(JSON.stringify(checkedPlan).includes("secret-token"), false);
   assert.equal(JSON.stringify(assessment).includes("secret-token"), false);
+
+  const quotedPath = '/api/downloads/known-asset?token="secret-token"';
+  const quotedPlan = structuredClone(smokePlan);
+  quotedPlan.flows[0].paths[0].path = quotedPath;
+  const quotedLocalVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: quotedPlan }))],
+  });
+  const quotedCheckedPlan = validateProductionSmokePlan({ files: [filename], localVerification: quotedLocalVerification });
+  assert.equal(quotedCheckedPlan.status, "PASS");
+  assert.deepEqual(quotedCheckedPlan.paths, ["/api/downloads/known-asset"]);
+  assert.equal(JSON.stringify(quotedLocalVerification).includes("secret-token"), false);
+  assert.equal(JSON.stringify(quotedCheckedPlan).includes("secret-token"), false);
+
+  const newlinePath = "/api/downloads/known-asset\n?token=secret-token";
+  const newlinePlan = structuredClone(smokePlan);
+  newlinePlan.flows[0].paths[0].path = newlinePath;
+  const newlineLocalVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: newlinePlan }))],
+  });
+  const newlineCheckedPlan = validateProductionSmokePlan({ files: [filename], localVerification: newlineLocalVerification });
+  assert.equal(newlineCheckedPlan.status, "BLOCKED");
+  assert.equal(JSON.stringify(newlineLocalVerification).includes("secret-token"), false);
+  assert.equal(JSON.stringify(newlineCheckedPlan).includes("secret-token"), false);
 });
 
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
@@ -3123,7 +3148,7 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
 });
 
 test("Production smoke keeps query parameters for execution and redacts them from every result path", async () => {
-  const path = "/api/downloads/known-asset?token=secret-token";
+  const path = '/api/downloads/known-asset?token="secret-token"';
   const expectations = [{ path, expectedText: "guest", expectedStatus: 401 }];
   const requestedUrls = [];
   const makeResponse = (url, { status = 401, body = '{"reason":"guest"}' } = {}) => ({
@@ -3143,7 +3168,7 @@ test("Production smoke keeps query parameters for execution and redacts them fro
     },
   });
   assert.equal(successful.status, "PASS");
-  assert.equal(new URL(requestedUrls[0]).searchParams.get("token"), "secret-token");
+  assert.equal(new URL(requestedUrls[0]).searchParams.get("token"), '"secret-token"');
   assert.equal(successful.checks[0].path, "/api/downloads/known-asset");
   assert.equal(JSON.stringify(successful).includes("secret-token"), false);
 
@@ -3156,7 +3181,7 @@ test("Production smoke keeps query parameters for execution and redacts them fro
     },
   });
   assert.equal(httpFailure.status, "FAIL");
-  assert.equal(new URL(requestedUrls[1]).searchParams.get("token"), "secret-token");
+  assert.equal(new URL(requestedUrls[1]).searchParams.get("token"), '"secret-token"');
   assert.equal(JSON.stringify(httpFailure).includes("secret-token"), false);
 
   const fetchFailure = await runProductionSmoke("https://production.example.test", {
@@ -3164,12 +3189,23 @@ test("Production smoke keeps query parameters for execution and redacts them fro
     expectations,
     fetchImpl: async (url) => {
       requestedUrls.push(url.href);
-      throw new Error("fetch failed for " + url.href);
+      throw new Error('fetch failed for "' + url.origin + url.pathname + '?token="secret-token""');
     },
   });
   assert.equal(fetchFailure.status, "FAIL");
-  assert.equal(new URL(requestedUrls[2]).searchParams.get("token"), "secret-token");
+  assert.equal(new URL(requestedUrls[2]).searchParams.get("token"), '"secret-token"');
   assert.equal(JSON.stringify(fetchFailure).includes("secret-token"), false);
+
+  const newlinePath = "/api/downloads/known-asset\n?token=secret-token";
+  const invalidControlPath = await runProductionSmoke("https://production.example.test", {
+    paths: [newlinePath],
+    expectations: [{ path: newlinePath, expectedText: "guest", expectedStatus: 401 }],
+    fetchImpl: async () => {
+      assert.fail("Smoke must reject control characters before fetching.");
+    },
+  });
+  assert.equal(invalidControlPath.status, "BLOCKED");
+  assert.equal(JSON.stringify(invalidControlPath).includes("secret-token"), false);
 });
 
 test("blocks merge when the base SHA changes after verification", async () => {
