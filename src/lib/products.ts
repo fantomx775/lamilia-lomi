@@ -277,8 +277,7 @@ export function getAllProductTypes() {
 export function getAllProductTypesFromSnapshot(snapshot: ContentSnapshot) {
   return Array.from(
     new Set(
-      snapshot
-        .products.filter(isPublicProduct)
+      getPublishedProductViewsFromSnapshot(snapshot, defaultLocale)
         .map((product) => product.productType),
     ),
   );

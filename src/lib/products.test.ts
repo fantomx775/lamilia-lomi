@@ -5,6 +5,7 @@ import {
   buildProductMetadata,
   getCatalogProducts,
   getCatalogProductsFromSnapshot,
+  getAllProductTypesFromSnapshot,
   getLocalizedProductView,
   getLocalizedProductViewFromSnapshot,
   parseCatalogFilters,
@@ -110,6 +111,27 @@ function createCoverSelectionSnapshot(
 }
 
 describe("product catalog behavior", () => {
+  it("omits product types from published products without English content", () => {
+    const snapshot = catalogSnapshotWithLongDescription("Visible English product.");
+    const nonEnglishOnlyProduct = {
+      ...snapshot.products[0],
+      id: "non-english-only-product",
+      slug: "non-english-only-product",
+      productType: "legacy-polish-only-type",
+      translations: [
+        {
+          locale: "pl" as const,
+          title: "Produkt tylko po polsku",
+          shortDescription: "Polski opis.",
+          longDescription: "Polski opis.",
+        },
+      ],
+    };
+    snapshot.products.push(nonEnglishOnlyProduct);
+
+    expect(getAllProductTypesFromSnapshot(snapshot)).toEqual(["coloring-book"]);
+  });
+
   it("hides draft products from public product lookup", () => {
     expect(getLocalizedProductView("secret-draft-product", "en")).toBeNull();
   });
