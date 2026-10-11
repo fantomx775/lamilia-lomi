@@ -12,6 +12,38 @@ const STATUS_FIELD = "Status";
 const DONE_STATUS = "Done";
 const VERCEL_DEPLOYMENT_BOT = "vercel[bot]";
 const VERCEL_PROJECT_DEPLOYMENT_HOST = /^lamilia-lomi-[a-z0-9]{9}-fantomxs-projects\.vercel\.app$/i;
+const PRIVATE_RAW_VERIFICATION_RECORD = new WeakMap();
+const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
+
+function redactPersistedData(value, seen = new WeakMap()) {
+  if (typeof value === "string") {
+    return value.replace(/(?:https?:\/\/|\/)[^\s"'<>`]*/gi, (urlOrPath) => {
+      const queryOrFragment = urlOrPath.search(/[?#]/);
+      return queryOrFragment < 0 ? urlOrPath : urlOrPath.slice(0, queryOrFragment);
+    });
+  }
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value);
+
+  const redacted = Array.isArray(value) ? [] : {};
+  seen.set(value, redacted);
+  if (Array.isArray(value)) {
+    for (const item of value) redacted.push(redactPersistedData(item, seen));
+  } else {
+    for (const [key, item] of Object.entries(value)) {
+      redacted[key] = redactPersistedData(item, seen);
+    }
+    for (const privateValues of [PRIVATE_RAW_VERIFICATION_RECORD, PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN]) {
+      if (privateValues.has(value)) privateValues.set(redacted, privateValues.get(value));
+    }
+  }
+  return redacted;
+}
+
+function attachPrivateValue(target, key, value) {
+  key.set(target, value);
+  return target;
+}
 
 function isVercelActor(actor) {
   return actor?.login?.toLowerCase() === VERCEL_DEPLOYMENT_BOT ||
@@ -1221,7 +1253,7 @@ export function validateLocalVerification({
   const status = malformed
     ? "FAIL"
     : combineEvidenceStatuses([...requiredStatuses, ...optionalStatuses]);
-  return {
+  return attachPrivateValue(redactPersistedData({
     status,
     reviewedSha: headSha,
     record,
@@ -1240,7 +1272,7 @@ export function validateLocalVerification({
         : status === "PASS"
           ? "Required local diff, lint, and test evidence covers the current head SHA."
           : "One or more required local checks are not passing.",
-  };
+  }), PRIVATE_RAW_VERIFICATION_RECORD, record);
 }
 
 function isUiBehaviorFile(filename) {
@@ -1328,7 +1360,8 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       details: "No application-flow files changed; the root Production health smoke is sufficient.",
     };
   }
-  const plan = localVerification?.record?.productionSmokePlan;
+  const rawRecord = (localVerification && PRIVATE_RAW_VERIFICATION_RECORD.get(localVerification)) || localVerification?.record;
+  const plan = rawRecord?.productionSmokePlan;
   if (!plan || plan.status !== "PASS" || !Array.isArray(plan.flows) || !plan.flows.length) {
     return {
       status: "BLOCKED",
@@ -1436,7 +1469,7 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
     return contentTypes.size > 1;
   });
   if (conflictingContentTypes) failures.push("Smoke plan has conflicting expected content types for one path.");
-  return {
+  return attachPrivateValue(redactPersistedData({
     status: failures.length ? "BLOCKED" : "PASS",
     required: true,
     paths: uniquePaths,
@@ -1445,7 +1478,10 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
     details: failures.length
       ? failures.join(" ")
       : affectedFiles.length + " changed application-flow file(s) map to " + uniquePaths.length + " Production route(s) with expected response content.",
-  };
+  }), PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN, {
+    paths: uniquePaths,
+    expectations,
+  });
 }
 
 function isVerificationScreenshot(filename) {
@@ -2314,7 +2350,7 @@ export function assessPullRequestVerification({
     : waitingForEnforcedApproval
       ? "READY_FOR_REVIEW"
       : "BLOCKED";
-  return {
+  return redactPersistedData({
     decision,
     pullRequestNumber: number,
     currentSha: headSha,
@@ -2372,7 +2408,7 @@ export function assessPullRequestVerification({
       blockers: readyForMerge ? [] : [...new Set(mergeBlockers)],
     },
     reasons: readyForMerge ? [] : [...new Set(mergeBlockers)],
-  };
+  });
 }
 
 async function readPullRequestReviewDecision(client, pullRequestNumber) {
@@ -2702,7 +2738,7 @@ export async function waitForProductionDeployment(client, mergeSha, {
   };
 }
 
-export async function runProductionSmoke(environmentUrl, {
+async function runProductionSmokeInternal(environmentUrl, {
   paths = (process.env.AGENT_HARNESS_PRODUCTION_SMOKE_PATHS || "/")
     .split(",").map((path) => path.trim()).filter(Boolean),
   expectations = [],
@@ -2841,16 +2877,20 @@ export async function runProductionSmoke(environmentUrl, {
   return { status: "PASS", checks, details: checks.length + " focused Production smoke path(s) returned the expected status and content." };
 }
 
+export async function runProductionSmoke(environmentUrl, options = {}) {
+  return redactPersistedData(await runProductionSmokeInternal(environmentUrl, options));
+}
+
 function formatDeliveryComment(record) {
-  return DELIVERY_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+  return DELIVERY_MARKER + "\n```json\n" + JSON.stringify(redactPersistedData(record), null, 2) + "\n```";
 }
 
 function formatIssueDeliveryComment(record) {
-  return ISSUE_DELIVERY_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+  return ISSUE_DELIVERY_MARKER + "\n```json\n" + JSON.stringify(redactPersistedData(record), null, 2) + "\n```";
 }
 
 function formatResumeCheckpoint(record) {
-  return RESUME_CHECKPOINT_MARKER + "\n```json\n" + JSON.stringify(record, null, 2) + "\n```";
+  return RESUME_CHECKPOINT_MARKER + "\n```json\n" + JSON.stringify(redactPersistedData(record), null, 2) + "\n```";
 }
 
 async function recordResumeCheckpoint(client, pullRequestNumber, record) {
@@ -3692,7 +3732,7 @@ async function updateTrackedIssueAfterDelivery(client, issueNumber, {
   };
 }
 
-export async function deliverPullRequest(client, pullRequestNumber, {
+async function deliverPullRequestInternal(client, pullRequestNumber, {
   issueNumber = null,
   productionSmokePaths = null,
   verify = verifyPullRequest,
@@ -3712,11 +3752,12 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     const plan = verification?.productionSmokePlan || verification?.fileScope?.productionSmokePlan ||
       validateProductionSmokePlan({
         files: changedFiles,
-        localVerification: { record: verification?.localVerification?.record },
+        localVerification: verification?.localVerification,
       });
     if (plan.status !== "PASS") return { status: "BLOCKED", details: plan.details || "Production smoke plan is not passing." };
-    const paths = plan.required ? plan.paths : configuredSmokePaths.length ? configuredSmokePaths : ["/"];
-    const expectations = plan.required ? plan.expectations : [];
+    const executionPlan = PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN.get(plan);
+    const paths = plan.required ? executionPlan?.paths ?? plan.paths : configuredSmokePaths.length ? configuredSmokePaths : ["/"];
+    const expectations = plan.required ? executionPlan?.expectations ?? plan.expectations : [];
     if (!Array.isArray(paths) || !paths.length || paths.some((path) => !isValidProductionSmokePath(path))) {
       return { status: "BLOCKED", details: "Production smoke plan contains an invalid same-origin absolute path." };
     }
@@ -3757,7 +3798,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     if (conflictingContentTypes) {
       return { status: "BLOCKED", details: "Production smoke expectations cannot require conflicting content types for one path." };
     }
-    return { status: "PASS", paths, expectations, details: plan.details };
+    return { status: "PASS", paths, expectations, details: redactPersistedData(plan.details) };
   };
   const pullRequestPath = "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number;
   let pullRequest = await client.request(pullRequestPath);
@@ -4197,10 +4238,10 @@ export async function deliverPullRequest(client, pullRequestNumber, {
       } catch {
         // The exact-SHA deployment remains queryable from GitHub on a later run.
       }
-      productionSmoke = await smoke(productionDeployment.deployment.environmentUrl, {
+      productionSmoke = redactPersistedData(await smoke(productionDeployment.deployment.environmentUrl, {
         paths: effectiveSmokePaths,
         expectations: effectiveSmokeExpectations,
-      });
+      }));
       if (productionSmoke.status === "PASS") {
         try {
           await recordResumeCheckpoint(client, number, {
@@ -4246,7 +4287,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     productionDeployment?.status === "FAIL" || productionSmoke?.status === "FAIL" || postDeploymentMigration?.status === "FAIL"
       ? "FAIL"
       : "BLOCKED";
-  const details = [
+  const details = redactPersistedData([
     "Candidate SHA: " + (candidateSha || "unknown"),
     "Merge SHA: " + mergeSha,
     "Reviewed gates: " + (reviewGatesPassed ? "PASS" : "BLOCKED") +
@@ -4257,7 +4298,7 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     "Production smoke: " + (productionSmoke?.status || "NOT RUN") + " — " + (productionSmoke?.details || "not run"),
     "Post-deployment migration: " + (postDeploymentMigration?.status || "NOT RUN") + " — " + (postDeploymentMigration?.details || "not run"),
     ...(closingReferenceError ? [closingReferenceError] : []),
-  ].join("\n");
+  ].join("\n"));
   const issueOutcomes = [];
   for (const trackedIssue of trackedIssueNumbers) {
     try {
@@ -4374,6 +4415,10 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     completed,
     reasons: completed ? [] : [details, ...(issueOutcome.status === "BLOCKED" ? [issueOutcome.details] : [])],
   };
+}
+
+export async function deliverPullRequest(client, pullRequestNumber, options = {}) {
+  return redactPersistedData(await deliverPullRequestInternal(client, pullRequestNumber, options));
 }
 
 export function statusTransitionBlockers(status, readiness, pullRequests = [], recoveryPlan = null) {

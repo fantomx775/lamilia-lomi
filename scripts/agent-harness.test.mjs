@@ -2132,6 +2132,37 @@ test("production smoke plans preserve exact HTTPS origins and MIME expectations"
   }).status, "BLOCKED");
 });
 
+test("smoke plan validation and verify output redact query strings from persisted evidence", () => {
+  const path = "/api/downloads/known-asset?token=secret-token";
+  const filename = "src/app/api/downloads/[assetId]/route.ts";
+  const smokePlan = {
+    status: "PASS",
+    flows: [{
+      name: "guest download response",
+      affectedFiles: [filename],
+      paths: [{ path, expectedText: "guest", expectedStatus: 401 }],
+    }],
+  };
+  const verificationRecord = cleanVerificationRecord({ productionSmokePlan: smokePlan });
+  const comments = [structuredComment(VERIFICATION_MARKER, verificationRecord)];
+  const localVerification = validateLocalVerification({ headSha: CURRENT_SHA, comments });
+  const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
+  const assessment = assessPullRequestVerification({
+    pullRequest: cleanPullRequest(),
+    files: [filename],
+    comments,
+    mergePolicy: cleanMergePolicy(),
+  });
+
+  assert.equal(localVerification.status, "PASS");
+  assert.equal(checkedPlan.status, "PASS");
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].path, "/api/downloads/known-asset");
+  assert.deepEqual(checkedPlan.paths, ["/api/downloads/known-asset"]);
+  assert.equal(JSON.stringify(localVerification).includes("secret-token"), false);
+  assert.equal(JSON.stringify(checkedPlan).includes("secret-token"), false);
+  assert.equal(JSON.stringify(assessment).includes("secret-token"), false);
+});
+
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
   const evidenceComments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
@@ -3091,6 +3122,56 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
   assert.equal((await runProductionSmoke("https://production.example.test", { paths: ["//elsewhere.test"] })).status, "BLOCKED");
 });
 
+test("Production smoke keeps query parameters for execution and redacts them from every result path", async () => {
+  const path = "/api/downloads/known-asset?token=secret-token";
+  const expectations = [{ path, expectedText: "guest", expectedStatus: 401 }];
+  const requestedUrls = [];
+  const makeResponse = (url, { status = 401, body = '{"reason":"guest"}' } = {}) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    url: url.href,
+    headers: { get: () => "application/json" },
+    text: async () => body,
+  });
+
+  const successful = await runProductionSmoke("https://production.example.test", {
+    paths: [path],
+    expectations,
+    fetchImpl: async (url) => {
+      requestedUrls.push(url.href);
+      return makeResponse(url);
+    },
+  });
+  assert.equal(successful.status, "PASS");
+  assert.equal(new URL(requestedUrls[0]).searchParams.get("token"), "secret-token");
+  assert.equal(successful.checks[0].path, "/api/downloads/known-asset");
+  assert.equal(JSON.stringify(successful).includes("secret-token"), false);
+
+  const httpFailure = await runProductionSmoke("https://production.example.test", {
+    paths: [path],
+    expectations,
+    fetchImpl: async (url) => {
+      requestedUrls.push(url.href);
+      return makeResponse(url, { status: 503, body: "Unavailable" });
+    },
+  });
+  assert.equal(httpFailure.status, "FAIL");
+  assert.equal(new URL(requestedUrls[1]).searchParams.get("token"), "secret-token");
+  assert.equal(JSON.stringify(httpFailure).includes("secret-token"), false);
+
+  const fetchFailure = await runProductionSmoke("https://production.example.test", {
+    paths: [path],
+    expectations,
+    fetchImpl: async (url) => {
+      requestedUrls.push(url.href);
+      throw new Error("fetch failed for " + url.href);
+    },
+  });
+  assert.equal(fetchFailure.status, "FAIL");
+  assert.equal(new URL(requestedUrls[2]).searchParams.get("token"), "secret-token");
+  assert.equal(JSON.stringify(fetchFailure).includes("secret-token"), false);
+});
+
 test("blocks merge when the base SHA changes after verification", async () => {
   const fixture = createDeliveryClient({ baseShaOnPreMerge: "d".repeat(40) });
   const result = await deliverPullRequest(fixture.client, 52, {
@@ -3710,28 +3791,38 @@ test("application-flow delivery requires and runs an explicit affected Productio
   assert.equal(missingPath.merged, false);
   assert.equal(missingPathFixture.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
 
-  const verification = async () => ({
-    decision: "READY_FOR_MERGE",
-    currentSha: CURRENT_SHA,
-    fileScope: { files: ["src/app/api/downloads/[assetId]/route.ts"] },
+  const tokenPath = "/api/downloads/known-asset?token=secret-token";
+  const applicationFiles = ["src/app/api/downloads/[assetId]/route.ts"];
+  const verificationComments = [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({
     productionSmokePlan: {
       status: "PASS",
-      required: true,
-      paths: ["/api/downloads/known-asset"],
-      expectations: [{
-        path: "/api/downloads/known-asset",
-        expectedText: "guest",
-        expectedContentType: "application/json",
-        expectedFinalOrigin: "https://production.example.test",
-        expectedStatus: 401,
+      flows: [{
+        name: "guest download is denied",
+        affectedFiles: applicationFiles,
+        paths: [{ path: tokenPath, expectedText: "guest", expectedStatus: 401 }],
       }],
     },
-    reasons: [],
+  }))];
+  const localVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: verificationComments,
   });
+  const smokePlan = validateProductionSmokePlan({ files: applicationFiles, localVerification });
+  assert.equal(localVerification.status, "PASS");
+  assert.equal(smokePlan.status, "PASS");
+  assert.equal(JSON.stringify(smokePlan).includes("secret-token"), false);
+  const assessment = assessPullRequestVerification({
+    pullRequest: cleanPullRequest(),
+    files: applicationFiles,
+    comments: verificationComments,
+    mergePolicy: cleanMergePolicy(),
+  });
+  const verification = async () => ({ ...assessment, decision: "READY_FOR_MERGE" });
   const fixture = createDeliveryClient();
   let smokePaths = null;
   let smokeExpectations = null;
   const delivered = await deliverPullRequest(fixture.client, 52, {
+    issueNumber: 7,
     verify: verification,
     waitForDeployment: async (_client, mergeSha) => ({
       status: "PASS",
@@ -3741,18 +3832,31 @@ test("application-flow delivery requires and runs an explicit affected Productio
     smoke: async (_url, options) => {
       smokePaths = options.paths;
       smokeExpectations = options.expectations;
-      return { status: "PASS", checks: [], details: "Affected product flow passed." };
+      return {
+        status: "PASS",
+        checks: [{ path: options.paths[0], finalUrl: "https://production.example.test/download?token=secret-token" }],
+        details: "Smoke passed for " + options.paths[0],
+      };
     },
   });
   assert.equal(delivered.decision, "DELIVERED");
-  assert.deepEqual(smokePaths, ["/api/downloads/known-asset"]);
+  assert.equal(JSON.stringify(assessment).includes("secret-token"), false);
+  assert.deepEqual(smokePaths, [tokenPath]);
   assert.deepEqual(smokeExpectations, [{
-    path: "/api/downloads/known-asset",
+    path: tokenPath,
     expectedText: "guest",
-    expectedContentType: "application/json",
-    expectedFinalOrigin: "https://production.example.test",
     expectedStatus: 401,
+    flow: "guest download is denied",
   }]);
+  const persistedComments = fixture.calls
+    .filter(({ path, method }) => path.endsWith("/comments") && method === "POST")
+    .map(({ body }) => body)
+    .join("\n");
+  assert.ok(persistedComments.includes("agent-harness-resume:v1"));
+  assert.ok(persistedComments.includes("agent-harness-delivery:v1"));
+  assert.ok(persistedComments.includes("agent-harness-issue-delivery:v1"));
+  assert.equal(JSON.stringify(delivered).includes("secret-token"), false);
+  assert.equal(persistedComments.includes("secret-token"), false);
 
   for (const configuredPath of ["/catalog", "//elsewhere.test/catalog"]) {
     const invalidFixture = createDeliveryClient();
