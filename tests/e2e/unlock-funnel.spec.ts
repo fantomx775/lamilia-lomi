@@ -1,13 +1,45 @@
-import { expect, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { expect, test, type Page } from "@playwright/test";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
 const premiumAssetId = "asset-moon-premium-pdf";
 const secondProductSlug = "bedtime-forest-picture-book";
+const browserRunId = process.env.LAMILIA_BROWSER_RUN_ID ?? `pr-45-unlock-${Date.now()}`;
+const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const diagnosticsByPage = new WeakMap<Page, { consoleErrors: string[]; failedNetworkRequests: string[] }>();
 
 // This suite exercises local demo accounts and fixed email addresses. Keep it
 // away from externally configured Playwright targets.
 test.describe("Local demo unlock funnel", () => {
+  test.beforeEach(async ({ page }) => {
+    const diagnostics = { consoleErrors: [] as string[], failedNetworkRequests: [] as string[] };
+    diagnosticsByPage.set(page, diagnostics);
+    page.on("console", (message) => {
+      if (message.type() === "error") diagnostics.consoleErrors.push(message.text());
+    });
+    page.on("requestfailed", (request) => {
+      diagnostics.failedNetworkRequests.push(
+        `${request.method()} ${new URL(request.url()).pathname}`,
+      );
+    });
+  });
+
+  test.afterEach(async ({ page }, testInfo) => {
+    const diagnostics = diagnosticsByPage.get(page);
+    if (!diagnostics) return;
+    console.log(
+      `PR45_BROWSER_DIAGNOSTICS ${JSON.stringify({
+        testedSha,
+        runId: browserRunId,
+        project: testInfo.project.name,
+        test: testInfo.title,
+        consoleErrors: diagnostics.consoleErrors,
+        failedNetworkRequests: diagnostics.failedNetworkRequests,
+      })}`,
+    );
+  });
+
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),

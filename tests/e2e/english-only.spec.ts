@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 test("public pages use English only and retired locale links reach English", async ({ page }, testInfo) => {
   const browserRunId = process.env.LAMILIA_BROWSER_RUN_ID ?? `issue-42-${Date.now()}`;
+  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const screenshotDirectory = path.resolve(process.cwd(), "docs", "verification", "issue-42");
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
@@ -31,17 +33,6 @@ test("public pages use English only and retired locale links reach English", asy
   await expect(header.getByText("ES", { exact: true })).toHaveCount(0);
   await expect(header.locator('[aria-label^="Language:"]')).toHaveCount(0);
   await expect(page.getByText("Kids", { exact: true }).first()).toBeVisible();
-
-  const screenshotName = testInfo.project.name === "mobile"
-    ? "english-home-mobile.png"
-    : "english-home-desktop.png";
-  await page.evaluate(() => document.fonts.ready.then(() => undefined));
-  await page.screenshot({
-    path: path.join(screenshotDirectory, screenshotName),
-    fullPage: true,
-    animations: "disabled",
-  });
-  console.log(`BROWSER_EVIDENCE runId=${browserRunId} screenshot=${screenshotName}`);
 
   for (const locale of ["pl", "de", "es"]) {
     const response = await page.request.get(`/${locale}/products?q=moon`, {
@@ -76,7 +67,69 @@ test("public pages use English only and retired locale links reach English", asy
   expect(sitemapXml).toContain("/en/products/moon-garden-coloring-book");
   expect(sitemapXml).not.toMatch(/\/(?:pl|de|es)\//);
 
+  await page.goto("/en");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+
+  // Full-page screenshots do not always trigger native lazy loading for images
+  // below the viewport. Load each image before capturing the evidence so the
+  // committed screenshot shows the same cover cards as the tested page.
+  await page.locator("img").evaluateAll(async (images) => {
+    const imageElements = images.filter(
+      (image): image is HTMLImageElement => image instanceof HTMLImageElement,
+    );
+    for (const image of imageElements) {
+      image.scrollIntoView({ block: "center" });
+      if (!image.complete) {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = window.setTimeout(
+            () => reject(new Error(`Timed out loading screenshot image: ${image.currentSrc}`)),
+            15_000,
+          );
+          image.addEventListener("load", () => {
+            window.clearTimeout(timeout);
+            resolve();
+          }, { once: true });
+          image.addEventListener("error", () => {
+            window.clearTimeout(timeout);
+            reject(new Error(`Failed to load screenshot image: ${image.currentSrc}`));
+          }, { once: true });
+        });
+      }
+      if (image.naturalWidth === 0) {
+        throw new Error(`Screenshot image has no natural width: ${image.currentSrc}`);
+      }
+    }
+  });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  const screenshotName = testInfo.project.name === "mobile"
+    ? "english-home-mobile.png"
+    : "english-home-desktop.png";
+  await page.screenshot({
+    path: path.join(screenshotDirectory, screenshotName),
+    fullPage: true,
+    animations: "disabled",
+  });
+  console.log(
+    `PR45_BROWSER_SCREENSHOT ${JSON.stringify({
+      testedSha,
+      runId: browserRunId,
+      path: path.join("docs", "verification", "issue-42", screenshotName),
+      project: testInfo.project.name,
+    })}`,
+  );
+
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
   expect(failedRequests).toEqual([]);
+  console.log(
+    `PR45_BROWSER_DIAGNOSTICS ${JSON.stringify({
+      testedSha,
+      runId: browserRunId,
+      project: testInfo.project.name,
+      consoleErrors,
+      pageErrors,
+      failedNetworkRequests: failedRequests,
+    })}`,
+  );
 });
