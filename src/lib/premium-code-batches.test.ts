@@ -42,9 +42,10 @@ describe("premium code batches", () => {
     const csv = exportPremiumCodesToCsv(fixture, new URL("https://print.lamilialomi.test/base"));
 
     expect(csv.startsWith("\uFEFF\"product_title\",\"product_slug\",\"premium_code\",\"status\"")).toBe(true);
-    expect(csv).toContain("\"unused\",\"yes\",\"\",\"https://print.lamilialomi.test/api/unlock/en/printed-book?code=LL-UNUSED\"");
+    expect(csv).toContain(`"unused","yes","","https://print.lamilialomi.test/api/unlock/en/printed-book?productId=${product.id}&code=LL-UNUSED"`);
     expect(csv).toContain("\"disabled\",\"no\",\"\",\"\"");
     expect(csv).toContain("\"redeemed\",\"yes\",\"2026-10-10T12:00:00.000Z\"");
+    expect(csv.split("\r\n").find((row) => row.includes("LL-REDEEMED"))).toMatch(/,\"\"$/);
     expect(csv).toContain("\"'=HYPERLINK(\"\"https://bad.example\"\")\"");
     expect(csv.endsWith("\r\n")).toBe(true);
   });

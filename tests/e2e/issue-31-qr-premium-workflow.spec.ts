@@ -5,6 +5,7 @@ import { expect, test } from "@playwright/test";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
+const productId = "11111111-1111-4111-8111-111111111111";
 const premiumCode = "LOMI-BOOK-2026";
 
 test.describe("Issue 31 local QR and premium workflow", () => {
@@ -43,7 +44,7 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     await page.context().clearCookies();
 
     await page.goto(
-      `/api/unlock/en/${productSlug}?code=${encodeURIComponent(premiumCode)}`,
+      `/api/unlock/en/${productSlug}?productId=${productId}&code=${encodeURIComponent(premiumCode)}`,
     );
     await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
     await expect(page.getByRole("button", { name: "Essential", exact: true })).toBeHidden();
@@ -84,7 +85,7 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     await saveEvidenceScreenshot(page, testInfo, "qr-my-library");
 
     await page.goto(
-      `/api/unlock/en/${productSlug}?code=${encodeURIComponent(premiumCode)}`,
+      `/api/unlock/en/${productSlug}?productId=${productId}&code=${encodeURIComponent(premiumCode)}`,
     );
     await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
     await expect(page.getByTestId("unlock-success-state")).toBeVisible();

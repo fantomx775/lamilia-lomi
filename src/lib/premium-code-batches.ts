@@ -55,8 +55,8 @@ export function exportPremiumCodesToCsv(product: Product, appUrl = getCanonicalA
       const status = code.redeemedAt
         ? code.active ? "redeemed" : "redeemed_disabled"
         : code.active ? "unused" : "disabled";
-      const qrPayload = code.active
-        ? buildQrPayload(appUrl, product.slug, code.code)
+      const qrPayload = code.active && !code.redeemedAt
+        ? buildQrPayload(appUrl, product.slug, product.id, code.code)
         : "";
 
       return [
@@ -85,8 +85,9 @@ function formatGeneratedCode(hex: string) {
   return `LL-${groups.join("-")}`;
 }
 
-function buildQrPayload(appUrl: URL, slug: string, code: string) {
+function buildQrPayload(appUrl: URL, slug: string, productId: string, code: string) {
   const payload = new URL(`/api/unlock/en/${encodeURIComponent(slug)}`, appUrl);
+  payload.searchParams.set("productId", productId);
   payload.searchParams.set("code", code);
   return payload.toString();
 }
