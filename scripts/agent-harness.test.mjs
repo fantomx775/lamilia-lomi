@@ -2207,12 +2207,20 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const malformedHostFragment = "https://bad host#access_token=fragment-secret";
   const malformedHostQueryContinuation = "https://bad host\n?token=query-continuation-secret";
   const malformedHostFragmentContinuation = "https://bad host\u2028#access_token=separator-fragment-secret";
+  const malformedHostOpaqueQuery = "https://bad host?opaque-query-secret";
+  const malformedHostOpaqueFragment = "https://bad host#opaque-fragment-secret";
+  const malformedHostOpaqueQueryContinuation = "https://bad host\n?opaque-query-continuation-secret";
+  const malformedHostOpaqueFragmentContinuation = "https://bad host\u2028#opaque-fragment-continuation-secret";
+  const malformedHostTrailingQueryContinuation = "https://bad host?\nopaque-query-after-delimiter-secret";
+  const malformedHostTrailingFragmentContinuation = "https://bad host#\nopaque-fragment-after-delimiter-secret";
+  const relativeOpaqueQuery = "route /bad host?relative-opaque-query-secret";
+  const relativeOpaqueFragment = "route /bad host#relative-opaque-fragment-secret";
   const lineSeparatorQuery = "https://production.example.test/catalog\u2028?token=line-separator-marker\u2028&continuation=line-separator-continuation";
   const paragraphSeparatorQuery = "https://production.example.test/catalog\u2029?token=paragraph-separator-marker\u2029&continuation=paragraph-separator-continuation";
   const plan = {
     status: "PASS",
     flows: [{
-      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note\nFragment ${fragmentContinuation}\nKeep this fragment note\nBare fragment ${fragmentDelimiterBeforeKey}\nKeep this bare-fragment note\nBracket ${bracketWrappedValue}\nKeep this bracket note\nBacktick ${backtickWrappedValue}\nKeep this backtick note\nBracket with spaces ${bracketWrappedSpacedValue}\nKeep this bracket-space note\nBacktick with spaces ${backtickWrappedSpacedValue}\nKeep this backtick-space note\nDouble-quoted with spaces ${doubleQuoteWrappedSpacedValue}\nKeep this double-quote-space note\nSpaced continuation ${spacedContinuation}\nKeep this continuation-space note\nMalformed host query ${malformedHostQuery}\nKeep this malformed-query note\nMalformed host query continuation ${malformedHostQueryContinuation}\nKeep this malformed-query-continuation note\nMalformed host fragment continuation ${malformedHostFragmentContinuation}\u2028Keep this malformed-fragment-continuation note\nLine separator ${lineSeparatorQuery}\u2028Keep this line-separator note\nParagraph separator ${paragraphSeparatorQuery}\u2029Keep this paragraph-separator note`,
+      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note\nFragment ${fragmentContinuation}\nKeep this fragment note\nBare fragment ${fragmentDelimiterBeforeKey}\nKeep this bare-fragment note\nBracket ${bracketWrappedValue}\nKeep this bracket note\nBacktick ${backtickWrappedValue}\nKeep this backtick note\nBracket with spaces ${bracketWrappedSpacedValue}\nKeep this bracket-space note\nBacktick with spaces ${backtickWrappedSpacedValue}\nKeep this backtick-space note\nDouble-quoted with spaces ${doubleQuoteWrappedSpacedValue}\nKeep this double-quote-space note\nSpaced continuation ${spacedContinuation}\nKeep this continuation-space note\nMalformed host query ${malformedHostQuery}\nKeep this malformed-query note\nMalformed host query continuation ${malformedHostQueryContinuation}\nKeep this malformed-query-continuation note\nMalformed host opaque query ${malformedHostOpaqueQuery}\nKeep this malformed-opaque-query note\nMalformed host opaque fragment ${malformedHostOpaqueFragment}\nKeep this malformed-opaque-fragment note\nMalformed host opaque query continuation ${malformedHostOpaqueQueryContinuation}\nKeep this malformed-opaque-query-continuation note\nMalformed host opaque fragment continuation ${malformedHostOpaqueFragmentContinuation}\u2028Keep this malformed-opaque-fragment-continuation note\nMalformed host trailing query continuation ${malformedHostTrailingQueryContinuation}\nKeep this malformed-trailing-query-continuation note\nMalformed host trailing fragment continuation ${malformedHostTrailingFragmentContinuation}\nKeep this malformed-trailing-fragment-continuation note\nMalformed host fragment continuation ${malformedHostFragmentContinuation}\u2028Keep this malformed-fragment-continuation note\nLine separator ${lineSeparatorQuery}\u2028Keep this line-separator note\nParagraph separator ${paragraphSeparatorQuery}\u2029Keep this paragraph-separator note`,
       affectedFiles: [filename],
       paths: [{
         path: "/catalog",
@@ -2221,7 +2229,7 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
     }],
   };
   const verificationRecord = cleanVerificationRecord({ productionSmokePlan: plan });
-  verificationRecord.checks[0].result = `${malformedHostFragment}\nKeep this malformed-fragment note`;
+  verificationRecord.checks[0].result = `${malformedHostFragment}\nKeep this malformed-fragment note\n${relativeOpaqueQuery}\nKeep this relative-query note\n${relativeOpaqueFragment}\nKeep this relative-fragment note`;
   const localVerification = validateLocalVerification({
     headSha: CURRENT_SHA,
     comments: [structuredComment(VERIFICATION_MARKER, verificationRecord)],
@@ -2229,18 +2237,30 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
 
   assert.equal(checkedPlan.status, "PASS");
-  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note\nFragment https://production.example.test/catalog\nKeep this fragment note\nBare fragment https://production.example.test/catalog\nKeep this bare-fragment note\nBracket https://production.example.test/catalog\nKeep this bracket note\nBacktick https://production.example.test/catalog\nKeep this backtick note\nBracket with spaces https://production.example.test/catalog\nKeep this bracket-space note\nBacktick with spaces https://production.example.test/catalog\nKeep this backtick-space note\nDouble-quoted with spaces https://production.example.test/catalog\nKeep this double-quote-space note\nSpaced continuation https://production.example.test/catalog\nKeep this continuation-space note\nMalformed host query https://bad host\nKeep this malformed-query note\nMalformed host query continuation https://bad host\nKeep this malformed-query-continuation note\nMalformed host fragment continuation https://bad host\u2028Keep this malformed-fragment-continuation note\nLine separator https://production.example.test/catalog\u2028Keep this line-separator note\nParagraph separator https://production.example.test/catalog\u2029Keep this paragraph-separator note";
+  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note\nFragment https://production.example.test/catalog\nKeep this fragment note\nBare fragment https://production.example.test/catalog\nKeep this bare-fragment note\nBracket https://production.example.test/catalog\nKeep this bracket note\nBracket with spaces https://production.example.test/catalog\nKeep this bracket-space note\nBacktick with spaces https://production.example.test/catalog\nKeep this backtick-space note\nDouble-quoted with spaces https://production.example.test/catalog\nKeep this double-quote-space note\nSpaced continuation https://production.example.test/catalog\nKeep this continuation-space note\nMalformed host query https://bad host\nKeep this malformed-query note\nMalformed host query continuation https://bad host\nKeep this malformed-query-continuation note\nMalformed host opaque query https://bad host\nKeep this malformed-opaque-query note\nMalformed host opaque fragment https://bad host\nKeep this malformed-opaque-fragment note\nMalformed host opaque query continuation https://bad host\nKeep this malformed-opaque-query-continuation note\nMalformed host opaque fragment continuation https://bad host\u2028Keep this malformed-opaque-fragment-continuation note\nMalformed host trailing query continuation https://bad host\nKeep this malformed-trailing-query-continuation note\nMalformed host trailing fragment continuation https://bad host\nKeep this malformed-trailing-fragment-continuation note\nMalformed host fragment continuation https://bad host\u2028Keep this malformed-fragment-continuation note\nLine separator https://production.example.test/catalog\u2028Keep this line-separator note\nParagraph separator https://production.example.test/catalog\u2029Keep this paragraph-separator note";
+  const safeFlowNameWithBacktickNote = safeFlowName.replace(
+    "Keep this bracket note\nBracket with spaces",
+    "Keep this bracket note\nBacktick https://production.example.test/catalog\nKeep this backtick note\nBracket with spaces",
+  );
   const safeExpectedText = "Catalog heading at https://production.example.test/catalog\nKeep this expected-text note";
-  assert.equal(localVerification.record.productionSmokePlan.flows[0].name, safeFlowName);
-  assert.equal(localVerification.record.checks[0].result, "https://bad host\nKeep this malformed-fragment note");
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].name, safeFlowNameWithBacktickNote);
+  assert.equal(localVerification.record.checks[0].result, "https://bad host\nKeep this malformed-fragment note\nroute /bad host\nKeep this relative-query note\nroute /bad host\nKeep this relative-fragment note");
   assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].expectedText, safeExpectedText);
-  assert.equal(checkedPlan.flows[0].name, safeFlowName);
+  assert.equal(checkedPlan.flows[0].name, safeFlowNameWithBacktickNote);
   assert.equal(checkedPlan.expectations[0].expectedText, safeExpectedText);
   const persistedOutput = JSON.stringify({ localVerification, checkedPlan });
   assert.equal(persistedOutput.includes("secret-token"), false);
   assert.equal(persistedOutput.includes("fragment-secret"), false);
   assert.equal(persistedOutput.includes("query-continuation-secret"), false);
   assert.equal(persistedOutput.includes("separator-fragment-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-query-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-fragment-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-query-continuation-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-fragment-continuation-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-query-after-delimiter-secret"), false);
+  assert.equal(persistedOutput.includes("opaque-fragment-after-delimiter-secret"), false);
+  assert.equal(persistedOutput.includes("relative-opaque-query-secret"), false);
+  assert.equal(persistedOutput.includes("relative-opaque-fragment-secret"), false);
   assert.equal(persistedOutput.includes("bare-fragment-secret"), false);
   assert.equal(persistedOutput.includes("bracket-marker"), false);
   assert.equal(persistedOutput.includes("backtick-marker"), false);
@@ -2267,6 +2287,14 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   assert.ok(persistedOutput.includes("Keep this continuation-space note"));
   assert.ok(persistedOutput.includes("Keep this malformed-query note"));
   assert.ok(persistedOutput.includes("Keep this malformed-query-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-opaque-query note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-opaque-fragment note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-opaque-query-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-opaque-fragment-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-trailing-query-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this malformed-trailing-fragment-continuation note"));
+  assert.ok(persistedOutput.includes("Keep this relative-query note"));
+  assert.ok(persistedOutput.includes("Keep this relative-fragment note"));
   assert.ok(persistedOutput.includes("Keep this malformed-fragment note"));
   assert.ok(persistedOutput.includes("Keep this malformed-fragment-continuation note"));
   assert.ok(persistedOutput.includes("Keep this line-separator note"));

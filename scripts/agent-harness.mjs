@@ -16,14 +16,27 @@ const PRIVATE_RAW_VERIFICATION_RECORD = new WeakMap();
 const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
 
 function redactFreeTextUrls(value) {
-  // Strip query and fragment tails, including wrapped values and line
-  // continuations, while leaving ordinary multiline prose intact.
+  // Strip query and fragment tails from absolute URLs and relative paths,
+  // including malformed values with spaces before delimiters and continuations.
+  const redactTail = (urlOrPath) => {
+    const sameLineDelimiter = urlOrPath.search(/[?#]/);
+    const continuedDelimiter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#]/);
+    const redactionStart = [sameLineDelimiter, continuedDelimiter]
+      .filter((index) => index >= 0)
+      .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
+    return urlOrPath
+      .slice(0, redactionStart)
+      .replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
+  };
+
   return value
     .replace(
-      /https?:\/\/[^\r\n\u2028\u2029]*?(?:[?#]|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#])[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*/gi,
-      (urlOrPath) => urlOrPath
-        .slice(0, urlOrPath.search(/[?#]/))
-        .replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, ""),
+      /(?:https?:\/\/|(?<![/:])\/)[^\r\n\u2028\u2029]*?(?:[?#][ \t]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][ \t]*)(?:\r\n?|\n|\u2028|\u2029)[^\r\n\u2028\u2029]*(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      redactTail,
+    )
+    .replace(
+      /(?:https?:\/\/|(?<![/:])\/)[^\r\n\u2028\u2029]*?(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*)(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      redactTail,
     )
     .replace(
       /(?:https?:\/\/|\/)[^\s<>`?#]*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
