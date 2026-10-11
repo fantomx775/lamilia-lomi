@@ -30,12 +30,12 @@ describe("About page settings persistence", () => {
       favorite_picture_book_ids: ["", "", ""],
     };
     const products = [
-      { id: "coloring-1", product_type: "coloring-book" },
-      { id: "coloring-2", product_type: "coloring-book" },
-      { id: "coloring-3", product_type: "coloring-book" },
-      { id: "picture-1", product_type: "picture-book" },
-      { id: "picture-2", product_type: "picture-book" },
-      { id: "picture-3", product_type: "picture-book" },
+      { id: "coloring-1", product_type: "coloring-book", status: "published" },
+      { id: "coloring-2", product_type: "coloring-book", status: "published" },
+      { id: "coloring-3", product_type: "coloring-book", status: "published" },
+      { id: "picture-1", product_type: "picture-book", status: "published" },
+      { id: "picture-2", product_type: "picture-book", status: "published" },
+      { id: "picture-3", product_type: "picture-book", status: "published" },
     ];
     const from = vi.fn(() => {
       let updateValues: {

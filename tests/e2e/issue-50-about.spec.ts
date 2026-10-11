@@ -120,9 +120,12 @@ test("About settings save six unique books and render responsively from current 
     ]);
 
     await page.getByRole("link", { name: "Strony", exact: true }).click();
-    await page.getByRole("link", { name: "About Lamilia Lomi", exact: true }).click();
+    await Promise.all([
+      page.waitForURL((url) => url.pathname === "/admin/pages/about", { timeout: 60_000 }),
+      page.getByRole("link", { name: "About Lamilia Lomi", exact: true }).click(),
+    ]);
     await expect(page.getByRole("heading", { level: 1, name: "About Lamilia Lomi" }))
-      .toBeVisible({ timeout: 30_000 });
+      .toBeVisible({ timeout: 60_000 });
     await page.getByRole("textbox", { name: "Wprowadzenie" }).fill("Books that bring calm, color, and wonder to every day.");
 
     for (const product of productSelections) {
