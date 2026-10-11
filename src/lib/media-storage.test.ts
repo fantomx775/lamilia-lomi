@@ -42,6 +42,7 @@ vi.mock("./media-r2", () => ({
 import {
   cleanupNewMediaFromFormData,
   cleanupPersistedMedia,
+  finalizeR2MediaUploads,
   createSignedMediaUpload,
   reconcileR2Publication,
   removeUploadedMedia,
@@ -150,6 +151,35 @@ describe("persisted media cleanup", () => {
     mocks.assertR2PrivateObject.mockResolvedValue({ ContentLength: 1024, ContentType: "image/jpeg" });
     mocks.assertR2PublicObject.mockResolvedValue({ ContentLength: 1024, ContentType: "image/jpeg" });
     mocks.getR2StorageConfig.mockReturnValue({ publicBaseUrl: "https://media.example.com" });
+  });
+
+  it("passes the validated Supabase checksum to new R2 image finalization", async () => {
+    const id = "new-r2-image";
+    const storagePath = "products/" + productId + "/cover/new.jpg";
+    const expectedSha256 = "a".repeat(64);
+    mocks.r2StagingPath.mockImplementation((path: string) => "staging/" + path);
+
+    await finalizeR2MediaUploads([
+      { ...asset(id, storagePath), storageProvider: "r2_private", sizeBytes: 1024 },
+    ], new Set([id]), new Map([[id, expectedSha256]]));
+
+    expect(mocks.finalizeR2StagingUpload).toHaveBeenCalledWith({
+      stagingPath: "staging/" + storagePath,
+      storagePath,
+      contentType: "image/jpeg",
+      sizeBytes: 1024,
+      expectedSha256,
+    });
+  });
+
+  it("fails closed when a new R2 image has no validated mirror checksum", async () => {
+    const id = "new-r2-image";
+    const storagePath = "products/" + productId + "/cover/new.jpg";
+
+    await expect(finalizeR2MediaUploads([
+      { ...asset(id, storagePath), storageProvider: "r2_private", sizeBytes: 1024 },
+    ], new Set([id]))).rejects.toThrow("validated Supabase image checksum");
+    expect(mocks.finalizeR2StagingUpload).not.toHaveBeenCalled();
   });
 
   it("retains a removed Supabase object as the rollback source", async () => {

@@ -10,6 +10,19 @@ import { createSignedR2Upload } from "@/lib/media-r2";
 import { getDemoSession } from "@/lib/session.server";
 import { getCurrentAccessToken } from "@/lib/supabase/server";
 import { ADMIN_ERROR_CODES, getAdminErrorMessage, mapAdminError, type AdminErrorCode } from "@/lib/admin-errors";
+import { validateImageUploadBytes } from "@/lib/image-upload-validation";
+
+export async function GET() {
+  try {
+    if (!hasAdminAccess(await getDemoSession())) {
+      return adminErrorResponse(ADMIN_ERROR_CODES.AUTHORIZATION_DENIED, 403);
+    }
+    return new NextResponse(null, { status: 405 });
+  } catch (error) {
+    const errorCode = mapAdminError(error, "administrator session");
+    return adminErrorResponse(errorCode, 500);
+  }
+}
 
 export async function POST(request: Request) {
   let session;
@@ -55,13 +68,26 @@ async function createLocalUpload(request: Request) {
     return adminErrorResponse(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE, 400, validation.error);
   }
 
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (kindValue === "cover" || kindValue === "gallery") {
+    const imageValidation = await validateImageUploadBytes({
+      kind: kindValue,
+      filename: file.name,
+      expectedContentType: validation.contentType,
+      bytes,
+    });
+    if (!imageValidation.ok) {
+      return adminErrorResponse(imageValidation.errorCode, 400);
+    }
+  }
+
   try {
     const stored = await storeMediaFile({
       productId,
       kind: kindValue,
       filename: file.name,
       contentType: validation.contentType,
-      bytes: new Uint8Array(await file.arrayBuffer()),
+      bytes,
     });
     const id = randomUUID();
 

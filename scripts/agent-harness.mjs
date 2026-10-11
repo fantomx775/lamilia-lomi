@@ -1396,8 +1396,17 @@ function isValidProductionSmokeContentType(contentType) {
 function isSupportedProductionSmokeStatus(status, path) {
   if (!Number.isInteger(status)) return false;
   if (status >= 200 && status < 300) return true;
-  if (![401, 403].includes(status) || !isValidProductionSmokePath(path)) return false;
+  if (![401, 403, 404].includes(status) || !isValidProductionSmokePath(path)) return false;
   return new URL(path, "https://agent-harness.invalid").pathname.startsWith("/api/");
+}
+
+function isValidProductionSmokeExpectationStatus(expectation) {
+  if (expectation?.expectedStatus === undefined) return true;
+  if (!isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)) return false;
+  if (expectation.expectedStatus === 404) {
+    return typeof expectation.expectedText === "string" && Boolean(expectation.expectedText.trim());
+  }
+  return true;
 }
 
 function routePatternForFile(filename) {
@@ -1495,7 +1504,7 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       if (!expectation || !isValidProductionSmokePath(expectation.path) ||
         !expectedTextIsValid || !expectedContentTypeIsValid || (!hasExpectedText && expectation.expectedContentType === undefined) ||
         (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
-        (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path))) {
+        !isValidProductionSmokeExpectationStatus(expectation)) {
         failures.push("Smoke flow " + flow.name + " has an invalid absolute path, expected response content, HTTPS final origin, or supported HTTP status.");
         continue;
       }
@@ -2839,7 +2848,7 @@ async function runProductionSmokeInternal(environmentUrl, {
     (expectation.expectedContentType !== undefined && !isValidProductionSmokeContentType(expectation.expectedContentType)) ||
     (expectation.expectedText === undefined && expectation.expectedContentType === undefined) ||
     (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
-    (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)),
+    !isValidProductionSmokeExpectationStatus(expectation),
   )) {
     return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path, expected text or exact MIME content type, and a valid HTTPS final origin." };
   }
@@ -3852,7 +3861,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
       (expectation.expectedContentType !== undefined && !isValidProductionSmokeContentType(expectation.expectedContentType)) ||
       (expectation.expectedText === undefined && expectation.expectedContentType === undefined) ||
       (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
-      (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)),
+      !isValidProductionSmokeExpectationStatus(expectation),
     )) {
       return { status: "BLOCKED", details: "Production smoke expectations must name an included path, expected text or exact MIME content type, HTTPS final origin, and a supported HTTP status." };
     }

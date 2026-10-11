@@ -16,7 +16,10 @@ const nextConfig: NextConfig = {
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     minimumCacheTTL: 60,
     remotePatterns: r2PublicBaseUrl
-      ? [{ protocol: "https", hostname: new URL(r2PublicBaseUrl).hostname, pathname: "/products/**" }]
+      ? [
+        { protocol: "https", hostname: new URL(r2PublicBaseUrl).hostname, pathname: "/products/**" },
+        { protocol: "https", hostname: new URL(r2PublicBaseUrl).hostname, pathname: "/categories/**" },
+      ]
       : [],
   },
 };

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { getBackendMode } from "@/lib/config";
 import { createClient, getCurrentAccessToken } from "@/lib/supabase/server";
@@ -15,6 +15,7 @@ import {
   deleteProduct,
   deleteTag,
   saveCategoryFromFormData,
+  updateCategoryImageInSnapshot,
   saveProductFromFormData,
   validateProductAssetSubmission,
   validateProductMediaSubmission,
@@ -31,7 +32,9 @@ import {
   reconcileR2Publication,
   revokeR2PublicAssetsBeforeMutation,
 } from "./media-storage";
-import { mediaBucketForKind } from "./media-upload";
+import { mediaBucketForKind, validateMediaFile } from "./media-upload";
+import { removeCategoryImageStorage, storeCategoryImage } from "./category-image-storage";
+import { validateImageUploadBytes } from "./image-upload-validation";
 import { createServiceRoleClient } from "./supabase/admin";
 import {
   ADMIN_ERROR_CODES,
@@ -41,7 +44,7 @@ import {
   type AdminMutationResult,
   type DatabaseErrorLike,
 } from "./admin-errors";
-import type { CatalogDesktopColumns, Product } from "./types";
+import type { CategoryImage, CatalogDesktopColumns, Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
   let storageAuthorizationToken: string | null | undefined;
@@ -118,11 +121,18 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
           : [],
       ),
     );
-    await assertSupabaseUploadsExist(
-      product.assets.filter((asset) => product.status === "published" || !existing?.assets.some((previous) => previous.id === asset.id)),
-      storageAuthorizationToken,
+    const newAssetIds = new Set(
+      product.assets
+        .filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id))
+        .map((asset) => asset.id),
     );
-    await finalizeR2MediaUploads(product.assets, uploadedIds);
+    const imageAssetIdsToValidate = new Set([...newAssetIds, ...uploadedIds]);
+    const validatedImageSha256ByAssetId = await assertSupabaseUploadsExist(
+      product.assets.filter((asset) => product.status === "published" || imageAssetIdsToValidate.has(asset.id)),
+      storageAuthorizationToken,
+      imageAssetIdsToValidate,
+    );
+    await finalizeR2MediaUploads(product.assets, uploadedIds, validatedImageSha256ByAssetId);
     const revokedPublicAssetIds = await revokeR2PublicAssetsBeforeMutation({
       previousAssets,
       nextAssets: product.assets,
@@ -336,20 +346,135 @@ export async function saveCategoryForRequest(formData: FormData): Promise<AdminM
   });
 }
 
-export async function deleteCategoryForRequest(categoryId: string): Promise<AdminMutationResult> {
-  return runAdminMutation("category deletion", async () => {
-    if (getBackendMode() === "local") {
-      return deleteCategory(categoryId);
+export async function saveCategoryImageForRequest(input: {
+  categoryId: string;
+  imageId: string;
+  filename: string;
+  contentType: string;
+  bytes: Uint8Array;
+}): Promise<AdminMutationResult> {
+  return runAdminMutation("category image", async () => {
+    const backendMode = getBackendMode();
+    const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
+    const snapshot = await getAdminContentSnapshot();
+    const existing = snapshot.categories.find((category) => category.id === input.categoryId);
+    if (!existing) return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+
+    const image = await storeCategoryImage({
+      ...input,
+      authorizationToken,
+    });
+
+    try {
+      if (backendMode === "local") {
+        const result = updateCategoryImageInSnapshot(input.categoryId, image);
+        if (!result.ok) {
+          const cleanedUp = await removeCategoryImageStorage({ categoryId: input.categoryId, image });
+          return cleanedUp ? result : {
+            ...result,
+            cleanupDeferred: true,
+            id: input.categoryId,
+            cleanupImageId: image.id,
+          };
+        }
+      } else {
+        const supabase = await createClient();
+        const { data, error } = await supabase
+          .from("categories")
+          .update(categoryImageDatabaseFields(image))
+          .eq("id", input.categoryId)
+          .select("id")
+          .maybeSingle();
+        if (error) throw new AdminDatabaseError("category image update", error);
+        if (!data) {
+          const cleanedUp = await cleanupCategoryImageSafely({ categoryId: input.categoryId, image, authorizationToken });
+          return cleanedUp
+            ? { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] }
+            : {
+              ok: false,
+              errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE],
+              cleanupDeferred: true,
+              id: input.categoryId,
+              cleanupImageId: image.id,
+            };
+        }
+      }
+    } catch (error) {
+      if (
+        backendMode === "local" ||
+        (error instanceof AdminDatabaseError && isDefinitivePostgresFailure(error.databaseError))
+      ) {
+        await cleanupCategoryImageSafely({ categoryId: input.categoryId, image, authorizationToken });
+      }
+      throw error;
     }
 
+    const cleanupDeferred = existing.image
+      ? !await cleanupCategoryImageSafely({ categoryId: input.categoryId, image: existing.image, authorizationToken })
+      : false;
+    return { ok: true, id: input.categoryId, categoryImage: image, cleanupDeferred };
+  });
+}
+
+export async function removeCategoryImageForRequest(categoryId: string): Promise<AdminMutationResult> {
+  return runAdminMutation("category image removal", async () => {
+    const backendMode = getBackendMode();
+    const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
     const snapshot = await getAdminContentSnapshot();
-    if (!snapshot.categories.some((category) => category.id === categoryId)) {
+    const existing = snapshot.categories.find((category) => category.id === categoryId);
+    if (!existing) return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+    if (!existing.image) return { ok: true, id: categoryId, cleanupDeferred: false };
+
+    if (backendMode === "local") {
+      const result = updateCategoryImageInSnapshot(categoryId, undefined);
+      if (!result.ok) return result;
+    } else {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("categories")
+        .update(categoryImageDatabaseFields(null))
+        .eq("id", categoryId)
+        .select("id")
+        .maybeSingle();
+      if (error) throw new AdminDatabaseError("category image removal", error);
+      if (!data) throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE);
+    }
+
+    const cleanupDeferred = !await cleanupCategoryImageSafely({
+      categoryId,
+      image: existing.image,
+      authorizationToken,
+    });
+    return { ok: true, id: categoryId, cleanupDeferred };
+  });
+}
+
+export async function deleteCategoryForRequest(categoryId: string): Promise<AdminMutationResult> {
+  return runAdminMutation("category deletion", async () => {
+    const backendMode = getBackendMode();
+    const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
+    const snapshot = await getAdminContentSnapshot();
+    const category = snapshot.categories.find((entry) => entry.id === categoryId);
+    if (!category) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
     }
 
-    const supabase = await createClient();
-    await run(supabase.from("categories").delete().eq("id", categoryId), "category deletion");
-    return { ok: true, id: categoryId };
+    if (backendMode === "local") {
+      const result = deleteCategory(categoryId);
+      if (!result.ok) return result;
+    } else {
+      const supabase = await createClient();
+      await run(supabase.from("categories").delete().eq("id", categoryId), "category deletion");
+    }
+
+    const cleanupDeferred = category.image
+      ? !await cleanupCategoryImageSafely({
+        categoryId,
+        image: category.image,
+        authorizationToken,
+      })
+      : false;
+    return { ok: true, id: categoryId, cleanupDeferred };
   });
 }
 
@@ -489,8 +614,10 @@ async function run(query: PromiseLike<{ error: DatabaseErrorLike | null }>, labe
 export async function assertSupabaseUploadsExist(
   assets: Product["assets"],
   storageAuthorizationToken?: string | null,
-) {
-  if (!assets.length) return;
+  imageAssetIdsToValidate: ReadonlySet<string> = new Set(),
+): Promise<Map<string, string>> {
+  const validatedImageSha256ByAssetId = new Map<string, string>();
+  if (!assets.length) return validatedImageSha256ByAssetId;
 
   const storage = createServiceRoleClient({
     storageAuthorizationToken: storageAuthorizationToken ?? undefined,
@@ -505,9 +632,8 @@ export async function assertSupabaseUploadsExist(
       throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH);
     }
 
-    const { data, error } = await storage
-      .from(mediaBucketForKind(asset.kind))
-      .exists(storagePath);
+    const bucket = storage.from(mediaBucketForKind(asset.kind));
+    const { data, error } = await bucket.exists(storagePath);
 
     if (error) {
       throw new AdminDatabaseError("asset upload lookup", error);
@@ -516,7 +642,82 @@ export async function assertSupabaseUploadsExist(
     if (data !== true) {
       throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD);
     }
+
+    if (
+      !imageAssetIdsToValidate.has(asset.id) ||
+      (asset.kind !== "cover" && asset.kind !== "gallery")
+    ) continue;
+
+    const expectedUploadPrefix = `products/${asset.productId}/${asset.kind}/${asset.id}-`;
+    if (!storagePath.startsWith(expectedUploadPrefix)) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH);
+    }
+
+    const metadataValidation = validateMediaFile(asset.kind, {
+      name: asset.filename,
+      size: asset.sizeBytes ?? 0,
+      type: asset.contentType,
+    });
+    if (!metadataValidation.ok) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+
+    const { data: fileInfo, error: infoError } = await bucket.info(storagePath);
+    if (infoError) {
+      throw new AdminDatabaseError("asset image metadata", infoError);
+    }
+    const storageContentType = fileInfo?.contentType ?? fileInfo?.metadata?.mimetype;
+    if (
+      !fileInfo ||
+      !Number.isSafeInteger(fileInfo.size) ||
+      fileInfo.size !== asset.sizeBytes ||
+      storageContentType !== asset.contentType
+    ) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+    const storageFileValidation = validateMediaFile(asset.kind, {
+      name: asset.filename,
+      size: fileInfo.size ?? 0,
+      type: storageContentType,
+    });
+    if (!storageFileValidation.ok) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+
+    const { data: file, error: downloadError } = await bucket.download(storagePath);
+    if (downloadError) {
+      throw new AdminDatabaseError("asset image validation", downloadError);
+    }
+    if (!file) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD);
+    }
+
+    if (!Number.isSafeInteger(file.size) || asset.sizeBytes !== file.size) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+    const downloadedFileValidation = validateMediaFile(asset.kind, {
+      name: asset.filename,
+      size: file.size,
+      type: asset.contentType,
+    });
+    if (!downloadedFileValidation.ok) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    const imageValidation = await validateImageUploadBytes({
+      kind: asset.kind,
+      filename: asset.filename,
+      expectedContentType: asset.contentType,
+      bytes,
+    });
+    if (!imageValidation.ok) {
+      throw new AdminApplicationError(imageValidation.errorCode);
+    }
+    validatedImageSha256ByAssetId.set(asset.id, createHash("sha256").update(bytes).digest("hex"));
   }
+  return validatedImageSha256ByAssetId;
 }
 
 function isDefinitivePostgresFailure(error: DatabaseErrorLike) {
@@ -528,6 +729,34 @@ function isDefinitivePostgresFailure(error: DatabaseErrorLike) {
   // outcome unknown. Keep uploaded media until a later reconciliation proves
   // whether the product row references it.
   return !error.code.startsWith("08") && error.code !== "40003";
+}
+
+function categoryImageDatabaseFields(image: CategoryImage | null) {
+  return {
+    image_asset_id: image?.id ?? null,
+    image_storage_path: image?.storagePath ?? null,
+    image_storage_provider: image?.storageProvider ?? null,
+    image_filename: image?.filename ?? null,
+    image_content_type: image?.contentType ?? null,
+    image_size_bytes: image?.sizeBytes ?? null,
+  };
+}
+
+async function cleanupCategoryImageSafely(input: {
+  categoryId: string;
+  image: CategoryImage;
+  authorizationToken?: string | null;
+}) {
+  try {
+    return await removeCategoryImageStorage(input);
+  } catch (error) {
+    console.error("Nie udało się posprzątać obrazu kategorii; wymaga kontrolowanego sprzątania.", {
+      categoryId: input.categoryId,
+      imageId: input.image.id,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+    return false;
+  }
 }
 
 function stringField(formData: FormData, key: string) {

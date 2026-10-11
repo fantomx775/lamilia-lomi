@@ -1,0 +1,39 @@
+# Issue #24: Image UX verification
+
+## Browser evidence
+
+The local Playwright run associated with the historical screenshots passed 8/8 tests with `--workers=1` on code SHA `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351` on 2026-10-11. It covered the three focused specs for category image UX, product gallery preview, and product image ordering on Chromium desktop (1280×720) and Pixel 7 mobile emulation (412×839). The cleanup-warning assertion visits a URL with `cleanupDeferred=1` and checks the displayed state; that assertion does not simulate a failed cleanup. Screenshots captured from candidate `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351` are under `candidate-fe5a3f30/`, grouped by flow and viewport. The UI behavior shown here is unchanged in later commits; the latest application-code follow-up adds read-only GET authorization probes for Production smoke.
+
+The reviewed screenshots from the committed capture run are:
+
+- `candidate-fe5a3f30/category-image-ux/{chromium,mobile}/`: category upload, storefront rendering, admin thumbnails, and deferred-cleanup warning.
+- `candidate-fe5a3f30/product-gallery/{chromium,mobile}/`: full-size gallery preview.
+- `candidate-fe5a3f30/product-image-order/{chromium,mobile}/`: upload, reorder, save, reload, and edit states.
+
+Visual review of the committed desktop and mobile captures confirmed category images and product covers retain their proportions, gallery preview shows the full image, and storefront and admin thumbnails load. The cleanup warning is readable on both viewports. The first and last order arrows are disabled at their respective ends and cannot receive a center hit; enabled-arrow checks and saved-order persistence after reload passed. Some captures show the local Next.js development badge. The 8/8 run reported no failed tests or page errors.
+
+The taxonomy drawer race—where the category disappears after upload and cleanup of the new image fails—is covered by the focused component/API regression with mocked responses, including the returned and displayed category/image IDs. The Playwright cleanup-warning test verifies the warning display using query parameters; it does not reproduce the taxonomy drawer race.
+
+## Server-side image validation
+
+- Local multipart cover/gallery uploads are fully decoded with Sharp and checked against the accepted 1:1 or 8.5:11 ratios and minimum dimensions before storage. EXIF-oriented images use display dimensions from Sharp autoOrient metadata; an orientation-6 JPEG regression proves the displayed 8.5:11 cover ratio is accepted.
+- Supabase signed/TUS uploads are validated at product save. The server uses the asset's bound product/asset Storage path, checks Storage `info()` size and MIME against the submitted metadata and the 20 MiB cap before downloading, then checks the downloaded size and fully decodes the bytes before the product mutation RPC. It computes SHA-256 from that same validated byte buffer and passes it to R2 finalization. No arbitrary payload URL is fetched. Existing assets not marked as uploaded continue to use the existing database snapshot policy.
+- A retry after a committed save with a lost response can still submit `assetUploaded=1` for an asset already present in the database snapshot. The save path now validates and hashes the union of database-new asset IDs and submitted-upload IDs, then preserves the submitted IDs for idempotent R2 finalization. A request-level regression verifies the existing Supabase mirror is downloaded and its checksum reaches the finalizer.
+- R2 finalization checks size/MIME and reads staging bytes with an explicit range and bounded stream. The staging SHA-256 must match the validated Supabase mirror before copy, and the finalized private object is checked again before staging deletion. When staging is absent, retry verifies the existing private object's SHA-256 before allowing product save. Regressions cover same-size/MIME byte mismatch on staging and retry, matching bytes, over-limit objects, and overlong streamed responses.
+- Regression coverage includes an invalid-ratio direct API upload, an invalid-ratio signed-upload bypass, rejection of an oversized Storage object before download, and the image decoder's pseudo-PNG/truncated-file cases.
+- If a category disappears between image upload and metadata update, successful exact-object cleanup still returns not-found. If cleanup fails, the result and 404 API response include cleanupDeferred plus category/image IDs; the UI displays the operator warning. The local backend now returns the same deferred-cleanup signal when its category update loses the race and unlink fails. Cleanup for ambiguous database outcomes remains deferred under the existing policy.
+
+## Checks
+
+- Before the latest retry/local-cleanup review follow-up, focused Vitest passed 6 files / 84 tests, covering R2 byte parity/retries, product media finalization, Supabase content mutations, EXIF dimensions, category-image API responses, and the taxonomy drawer warning.
+- The retry/local-cleanup follow-up on code candidate `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351` passed focused Vitest (2 files / 57 tests across `supabase-content-admin.test.ts` and `media-storage.test.ts`), changed-file ESLint, `tsc --noEmit --pretty false`, and `git diff --check`. The corresponding focused Playwright run passed 8/8 across desktop and mobile.
+- `npm run build` passed with `LAMILIA_BACKEND=local` and `NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000`.
+- A separate Playwright rerun on candidate `f162ce9c9bfbb52ee58909a3a7a23ad399b173e9` passed 8/8 after the final application-code changes. Fresh desktop/mobile captures from the category-image and product-image-order specs are under `C:\Users\user\.codex\verification-runs\issue24-f162ce9\`. The product-gallery spec also passed; its screenshots remain in Playwright per-test artifacts. The committed screenshots above are the reviewed captures from `fe5a3f30`. The application code is unchanged between these runs.
+- Local migration verification used the isolated project `lamilia-pr46-candidate-4e51b03` with Supabase seed SQL disabled; the foundation migration still inserted its fixture records. `supabase start --workdir $scratch --network-id ac233751bf5b932233b9fb907671d05ec1214e48311417a056c34ef3a72eb047` exited 0; its log recorded the foundation migration and `20261010184114_category_image_media`. `supabase migration list --local --workdir $scratch` showed both IDs. Schema queries confirmed the six nullable `image_*` columns and three image constraints. `supabase db query --local --workdir $scratch --file $sqlPath` exited 0 for a single `DO` assertion block: legacy NULL metadata and valid providers passed; unsupported provider, incomplete metadata, `text/plain`, and zero size raised the expected CHECK violations. The deterministic fixture rows were removed, and the local Supabase stack and isolated network were stopped/removed. No Production database was changed by this local verification.
+- The category-image API and image decoder tests use generated fixtures/mocked storage. No live R2 account or assets were used.
+
+## Current candidate captures
+
+The current focused Playwright run captured desktop and mobile category upload, storefront, admin-thumbnail, and cleanup-warning states under `pr46-final/category-image-ux/`. The E2E test uses a stable synthetic category name and removes leftover categories created by its earlier timestamp-based fixture. The focused run also covers the product gallery and save/reload ordering flows. The cleanup-warning screenshot is a UI-state assertion; it does not simulate a failed storage cleanup.
+
+Before merging, Production migration `20261010184114_category_image_media.sql` was applied and verified. It adds six nullable category-image columns and three consistency constraints; the three existing categories remain and no category-image objects are present. R2 configuration and objects were not changed by this PR.

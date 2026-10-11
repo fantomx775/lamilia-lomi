@@ -1946,6 +1946,49 @@ test("production smoke plans bind changed route files to valid paths and expecte
     flow: "guest download is denied",
   }]);
 
+  const expectedMissingImagePlan = validateProductionSmokePlan({
+    files: ["src/app/api/category-media/[categoryId]/route.ts"],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "category image may be absent",
+        affectedFiles: ["src/app/api/category-media/[categoryId]/route.ts"],
+        paths: [{
+          path: "/api/category-media/known-category",
+          expectedText: "Nie znaleziono obrazu kategorii.",
+          expectedStatus: 404,
+        }],
+      }],
+    } } },
+  });
+  assert.equal(expectedMissingImagePlan.status, "PASS");
+
+  const missingTextForNotFound = validateProductionSmokePlan({
+    files: ["src/app/api/category-media/[categoryId]/route.ts"],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "unexplained missing category image",
+        affectedFiles: ["src/app/api/category-media/[categoryId]/route.ts"],
+        paths: [{ path: "/api/category-media/known-category", expectedStatus: 404 }],
+      }],
+    } } },
+  });
+  assert.equal(missingTextForNotFound.status, "BLOCKED");
+
+  const pageNotFoundStatus = validateProductionSmokePlan({
+    files: ["src/app/products/page.tsx"],
+    localVerification: { record: { productionSmokePlan: {
+      status: "PASS",
+      flows: [{
+        name: "missing page",
+        affectedFiles: ["src/app/products/page.tsx"],
+        paths: [{ path: "/products", expectedText: "not found", expectedStatus: 404 }],
+      }],
+    } } },
+  });
+  assert.equal(pageNotFoundStatus.status, "BLOCKED");
+
   const unauthorizedPageStatus = validateProductionSmokePlan({
     files: ["src/app/products/page.tsx"],
     localVerification: { record: { productionSmokePlan: {
@@ -3384,6 +3427,30 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
   });
   assert.equal(expectedAuthorizationDenial.status, "PASS");
   assert.equal(expectedAuthorizationDenial.checks[0].expectedStatusMatched, true);
+
+  const expectedMissingImage = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/category-media/known-category"],
+    expectations: [{
+      path: "/api/category-media/known-category",
+      expectedText: "Nie znaleziono obrazu kategorii.",
+      expectedStatus: 404,
+    }],
+    fetchImpl: async (url) => ({
+      ok: false,
+      status: 404,
+      url: url.href,
+      headers: { get: () => "application/json" },
+      text: async () => '{"error":"Nie znaleziono obrazu kategorii."}',
+    }),
+  });
+  assert.equal(expectedMissingImage.status, "PASS");
+  assert.equal(expectedMissingImage.checks[0].expectedStatusMatched, true);
+
+  const missingTextForNotFoundSmoke = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/category-media/known-category"],
+    expectations: [{ path: "/api/category-media/known-category", expectedContentType: "application/json", expectedStatus: 404 }],
+  });
+  assert.equal(missingTextForNotFoundSmoke.status, "BLOCKED");
 
   const unexpectedAuthorizationDenial = await runProductionSmoke("https://production.example.test", {
     paths: ["/products"],

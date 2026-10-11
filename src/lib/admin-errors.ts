@@ -1,4 +1,4 @@
-import type { ProductAsset, StoredLocale } from "@/lib/types";
+import type { CategoryImage, ProductAsset, StoredLocale } from "@/lib/types";
 
 export const ADMIN_ERROR_CODES = {
   INTERNAL: "admin.internal",
@@ -20,6 +20,7 @@ export const ADMIN_ERROR_CODES = {
   VALIDATION_ASSET_UPLOAD_INCOMPLETE: "admin.validation.asset_upload_incomplete",
   VALIDATION_ASSET_PATH: "admin.validation.asset_path",
   VALIDATION_ASSET_FILE: "admin.validation.asset_file",
+  VALIDATION_IMAGE_DIMENSIONS: "admin.validation.image_dimensions",
   VALIDATION_ASSET_VISIBILITY: "admin.validation.asset_visibility",
   VALIDATION_COVER_DUPLICATE: "admin.validation.cover_duplicate",
   VALIDATION_VIDEO_DUPLICATE: "admin.validation.video_duplicate",
@@ -36,7 +37,7 @@ export const ADMIN_ERROR_CODES = {
 export type AdminErrorCode = (typeof ADMIN_ERROR_CODES)[keyof typeof ADMIN_ERROR_CODES];
 
 export type AdminMutationResult =
-  | { ok: true; id: string }
+  | { ok: true; id: string; categoryImage?: CategoryImage; cleanupDeferred?: boolean }
   | {
       ok: false;
       errors: AdminErrorCode[];
@@ -45,6 +46,9 @@ export type AdminMutationResult =
         kind: ProductAsset["kind"];
         storagePath: string;
       }>;
+      cleanupDeferred?: boolean;
+      id?: string;
+      cleanupImageId?: string;
     };
 
 export type DatabaseErrorLike = {
@@ -100,6 +104,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_UPLOAD_INCOMPLETE]: "Finish uploading each new file before saving.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH]: "One of the uploaded file paths is invalid.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE]: "One of the uploaded files is invalid.",
+    [ADMIN_ERROR_CODES.VALIDATION_IMAGE_DIMENSIONS]: "Cover and gallery images must be valid 1:1 or portrait 8.5:11 images at the required minimum size.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_VISIBILITY]: "The file visibility does not match its purpose.",
     [ADMIN_ERROR_CODES.VALIDATION_COVER_DUPLICATE]: "Only one cover is allowed.",
     [ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE]: "Only one video is allowed.",
@@ -132,6 +137,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_UPLOAD_INCOMPLETE]: "Zakończ przesyłanie każdego nowego pliku przed zapisem.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH]: "Jedna ze ścieżek przesłanych plików jest nieprawidłowa.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE]: "Jeden z przesłanych plików jest nieprawidłowy.",
+    [ADMIN_ERROR_CODES.VALIDATION_IMAGE_DIMENSIONS]: "Okładka i obrazy galerii muszą być prawidłowymi obrazami 1:1 lub pionowymi 8.5:11 o wymaganym minimalnym rozmiarze.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_VISIBILITY]: "Widoczność pliku nie pasuje do jego przeznaczenia.",
     [ADMIN_ERROR_CODES.VALIDATION_COVER_DUPLICATE]: "Może istnieć tylko jedna okładka.",
     [ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE]: "Może istnieć tylko jedno wideo.",
@@ -164,6 +170,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_UPLOAD_INCOMPLETE]: "Schließe jede neue Dateiübertragung vor dem Speichern ab.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH]: "Einer der hochgeladenen Dateipfade ist ungültig.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE]: "Eine der hochgeladenen Dateien ist ungültig.",
+    [ADMIN_ERROR_CODES.VALIDATION_IMAGE_DIMENSIONS]: "Titel- und Galeriebilder müssen gültige 1:1- oder Hochformat-8.5:11-Bilder mit der erforderlichen Mindestgröße sein.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_VISIBILITY]: "Die Dateisichtbarkeit passt nicht zum Verwendungszweck.",
     [ADMIN_ERROR_CODES.VALIDATION_COVER_DUPLICATE]: "Es ist nur ein Cover erlaubt.",
     [ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE]: "Es ist nur ein Video erlaubt.",
@@ -196,6 +203,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_UPLOAD_INCOMPLETE]: "Termina de subir cada archivo nuevo antes de guardar.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH]: "Una de las rutas de archivo subidas no es válida.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE]: "Uno de los archivos subidos no es válido.",
+    [ADMIN_ERROR_CODES.VALIDATION_IMAGE_DIMENSIONS]: "Las portadas y las imágenes de galería deben ser imágenes válidas 1:1 o verticales 8.5:11 con el tamaño mínimo requerido.",
     [ADMIN_ERROR_CODES.VALIDATION_ASSET_VISIBILITY]: "La visibilidad del archivo no coincide con su uso.",
     [ADMIN_ERROR_CODES.VALIDATION_COVER_DUPLICATE]: "Solo se permite una portada.",
     [ADMIN_ERROR_CODES.VALIDATION_VIDEO_DUPLICATE]: "Solo se permite un vídeo.",

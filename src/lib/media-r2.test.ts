@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -40,10 +41,23 @@ import {
   demoteR2PublicObject,
   finalizeR2StagingUpload,
   promoteR2PrivateObject,
+  uploadR2CategoryImage,
   verifyPublicDelivery,
 } from "./media-r2";
 
 const storagePath = "products/11111111-1111-4111-8111-111111111111/cover/11111111-1111-4111-8111-111111111199-cover.jpg";
+
+function sha256(bytes: Uint8Array) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function streamedBody(bytes: Uint8Array) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield bytes;
+    },
+  };
+}
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -135,6 +149,143 @@ describe("R2 product image storage", () => {
     expect(mocks.send.mock.calls[3][0]).toMatchObject({
       input: { Bucket: "lamilia-private", Key: `staging/${storagePath}` },
     });
+  });
+
+  it("verifies the R2 staging and finalized bytes against the validated Supabase mirror", async () => {
+    const bytes = Buffer.alloc(1024, 7);
+    const expectedSha256 = sha256(bytes);
+    mocks.send.mockImplementation(async (command) => {
+      if ((command as { name?: string }).name === "GetObjectCommand") {
+        return { ContentLength: 1024, Body: streamedBody(bytes) };
+      }
+      return { ContentLength: 1024, ContentType: "image/jpeg", ETag: "same" };
+    });
+
+    await finalizeR2StagingUpload({
+      stagingPath: "staging/" + storagePath,
+      storagePath,
+      contentType: "image/jpeg",
+      sizeBytes: bytes.byteLength,
+      expectedSha256,
+    });
+
+    const calls = mocks.send.mock.calls.map(([command]) => command as { name: string; input: Record<string, unknown> });
+    expect(calls.map(({ name }) => name)).toEqual([
+      "HeadObjectCommand",
+      "GetObjectCommand",
+      "CopyObjectCommand",
+      "HeadObjectCommand",
+      "GetObjectCommand",
+      "DeleteObjectCommand",
+    ]);
+    expect(calls[1].input).toMatchObject({ Key: "staging/" + storagePath, Range: "bytes=0-1023" });
+    expect(calls[4].input).toMatchObject({ Key: storagePath, Range: "bytes=0-1023" });
+  });
+
+  it("rejects a same-size, same-MIME staging object with different bytes", async () => {
+    const validatedMirror = Buffer.alloc(1024, 7);
+    const differentStagingBytes = Buffer.alloc(1024, 8);
+    mocks.send.mockImplementation(async (command) => {
+      if ((command as { name?: string }).name === "GetObjectCommand") {
+        return { ContentLength: 1024, Body: streamedBody(differentStagingBytes) };
+      }
+      return { ContentLength: 1024, ContentType: "image/jpeg", ETag: "same" };
+    });
+
+    await expect(finalizeR2StagingUpload({
+      stagingPath: "staging/" + storagePath,
+      storagePath,
+      contentType: "image/jpeg",
+      sizeBytes: validatedMirror.byteLength,
+      expectedSha256: sha256(validatedMirror),
+    })).rejects.toThrow("do not match the validated Supabase image");
+
+    expect(mocks.send.mock.calls.map(([command]) => (command as { name: string }).name)).toEqual([
+      "HeadObjectCommand",
+      "GetObjectCommand",
+    ]);
+  });
+
+  it("stops an R2 read that yields more bytes than the validated image", async () => {
+    const bytes = Buffer.alloc(1024, 7);
+    mocks.send.mockImplementation(async (command) => {
+      if ((command as { name?: string }).name === "GetObjectCommand") {
+        return { ContentLength: 1024, Body: streamedBody(Buffer.alloc(1025, 7)) };
+      }
+      return { ContentLength: 1024, ContentType: "image/jpeg", ETag: "same" };
+    });
+
+    await expect(finalizeR2StagingUpload({
+      stagingPath: "staging/" + storagePath,
+      storagePath,
+      contentType: "image/jpeg",
+      sizeBytes: bytes.byteLength,
+      expectedSha256: sha256(bytes),
+    })).rejects.toThrow("byte read exceeded");
+
+    expect(mocks.send.mock.calls.map(([command]) => (command as { name: string }).name)).toEqual([
+      "HeadObjectCommand",
+      "GetObjectCommand",
+    ]);
+  });
+
+  it("rejects checksum reads above the upload limit before contacting R2", async () => {
+    await expect(finalizeR2StagingUpload({
+      stagingPath: "staging/" + storagePath,
+      storagePath,
+      contentType: "image/jpeg",
+      sizeBytes: 20 * 1024 * 1024 + 1,
+      expectedSha256: "a".repeat(64),
+    })).rejects.toThrow("allowed byte limit");
+
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it("checks the finalized private bytes against the mirror when staging is gone", async () => {
+    const bytes = Buffer.alloc(1024, 7);
+    mocks.send
+      .mockRejectedValueOnce({ name: "NotFound", $metadata: { httpStatusCode: 404 } })
+      .mockResolvedValueOnce({ ContentLength: 1024, ContentType: "image/jpeg" })
+      .mockResolvedValueOnce({ ContentLength: 1024, Body: streamedBody(bytes) });
+
+    await finalizeR2StagingUpload({
+      stagingPath: "staging/" + storagePath,
+      storagePath,
+      contentType: "image/jpeg",
+      sizeBytes: bytes.byteLength,
+      expectedSha256: sha256(bytes),
+    });
+
+    expect(mocks.send.mock.calls.map(([command]) => (command as { name: string }).name)).toEqual([
+      "HeadObjectCommand",
+      "HeadObjectCommand",
+      "GetObjectCommand",
+    ]);
+    expect(mocks.send.mock.calls[2][0]).toMatchObject({
+      input: { Key: storagePath, Range: "bytes=0-1023" },
+    });
+  });
+
+  it("rejects a same-size, same-MIME finalized retry with different bytes", async () => {
+    const validatedMirror = Buffer.alloc(1024, 7);
+    const differentFinalBytes = Buffer.alloc(1024, 8);
+    mocks.send
+      .mockRejectedValueOnce({ name: "NotFound", $metadata: { httpStatusCode: 404 } })
+      .mockResolvedValueOnce({ ContentLength: 1024, ContentType: "image/jpeg" })
+      .mockResolvedValueOnce({ ContentLength: 1024, Body: streamedBody(differentFinalBytes) });
+
+    await expect(finalizeR2StagingUpload({
+      stagingPath: "staging/" + storagePath,
+      storagePath,
+      contentType: "image/jpeg",
+      sizeBytes: validatedMirror.byteLength,
+      expectedSha256: sha256(validatedMirror),
+    })).rejects.toThrow("do not match the validated Supabase image");
+    expect(mocks.send.mock.calls.map(([command]) => (command as { name: string }).name)).toEqual([
+      "HeadObjectCommand",
+      "HeadObjectCommand",
+      "GetObjectCommand",
+    ]);
   });
 
   it("treats an already finalized private object as a successful retry when staging is gone", async () => {
@@ -240,5 +391,45 @@ describe("R2 product image storage", () => {
       contentType: "image/jpeg",
       sha256: "f".repeat(64),
     })).rejects.toThrow("bytes that do not match");
+  });
+
+  it("uploads category images through private staging and verifies the public CDN copy", async () => {
+    const categoryId = "22222222-2222-4222-8222-222222222222";
+    const imageId = "33333333-3333-4333-8333-333333333333";
+    const categoryPath = `categories/${categoryId}/image/${imageId}-books.webp`;
+    const bytes = Buffer.from([1, 2, 3, 4]);
+    mocks.send.mockImplementation(async (command) => {
+      const name = (command as { name?: string }).name;
+      if (name === "GetObjectCommand") {
+        return { ContentLength: bytes.length, ContentType: "image/webp", Body: { transformToByteArray: async () => bytes } };
+      }
+      return { ContentLength: bytes.length, ContentType: "image/webp" };
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(bytes, {
+      status: 200,
+      headers: { "content-length": String(bytes.length), "content-type": "image/webp" },
+    })));
+
+    await expect(uploadR2CategoryImage({
+      categoryId,
+      imageId,
+      storagePath: categoryPath,
+      contentType: "image/webp",
+      bytes,
+    })).resolves.toBe(`https://media.example.com/${categoryPath}`);
+
+    expect(mocks.send.mock.calls[0][0]).toMatchObject({
+      input: {
+        Bucket: "lamilia-private",
+        Key: `staging/${categoryPath}`,
+        ContentType: "image/webp",
+        ContentLength: bytes.length,
+      },
+    });
+    expect(mocks.send.mock.calls.some(([command]) =>
+      (command as { name?: string }).name === "CopyObjectCommand" &&
+      (command as { input?: { Bucket?: string } }).input?.Bucket === "lamilia-public",
+    )).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(`https://media.example.com/${categoryPath}`, expect.objectContaining({ method: "GET" }));
   });
 });

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
 
 const mocks = vi.hoisted(() => ({
   createSignedMediaUpload: vi.fn(),
@@ -9,9 +10,11 @@ const mocks = vi.hoisted(() => ({
   getDemoSession: vi.fn(),
   removeUploadedMedia: vi.fn(),
   storeMediaFile: vi.fn(),
+  hasAdminAccess: vi.fn(() => true),
 }));
 
-vi.mock("@/lib/auth", () => ({ hasAdminAccess: vi.fn(() => true) }));
+vi.mock("@/lib/auth", () => ({ hasAdminAccess: mocks.hasAdminAccess }));
+vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
 vi.mock("@/lib/media-r2-config", () => ({ getMediaUploadProvider: mocks.getMediaUploadProvider }));
 vi.mock("@/lib/media-r2", () => ({ createSignedR2Upload: mocks.createSignedR2Upload }));
@@ -23,15 +26,40 @@ vi.mock("@/lib/media-storage", () => ({
 vi.mock("@/lib/session.server", () => ({ getDemoSession: mocks.getDemoSession }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentAccessToken: mocks.getCurrentAccessToken }));
 
-import { DELETE, POST } from "./route";
+import { DELETE, GET, POST } from "./route";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 
 const productId = "11111111-1111-4111-8111-111111111111";
+let squareJpeg = new Uint8Array();
+let invalidRatioJpeg = new Uint8Array();
+
+beforeAll(async () => {
+  squareJpeg = new Uint8Array(await sharp({
+    create: { width: 800, height: 800, channels: 3, background: { r: 50, g: 60, b: 70 } },
+  }).jpeg().toBuffer());
+  invalidRatioJpeg = new Uint8Array(await sharp({
+    create: { width: 800, height: 1000, channels: 3, background: { r: 50, g: 60, b: 70 } },
+  }).jpeg().toBuffer());
+});
 
 describe("admin media upload setup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hasAdminAccess.mockReturnValue(true);
     mocks.getMediaUploadProvider.mockReturnValue("supabase");
+  });
+
+  it("denies an unauthenticated GET smoke probe without entering upload handling", async () => {
+    mocks.hasAdminAccess.mockReturnValue(false);
+    mocks.getDemoSession.mockResolvedValue(null);
+
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload.errorCode).toBe(ADMIN_ERROR_CODES.AUTHORIZATION_DENIED);
+    expect(mocks.storeMediaFile).not.toHaveBeenCalled();
+    expect(mocks.createSignedMediaUpload).not.toHaveBeenCalled();
   });
 
   it("prepares a private R2 upload and a Supabase rollback mirror for cover images", async () => {
@@ -131,7 +159,7 @@ describe("admin media upload setup", () => {
     formData.append("productId", "product-id");
     formData.append("kind", "cover");
     formData.append("locale", "pl");
-    formData.append("file", new File(["cover"], "cover.jpg", { type: "image/jpeg" }));
+    formData.append("file", new File([squareJpeg], "cover.jpg", { type: "image/jpeg" }));
 
     const response = await POST(new Request("https://lamilialomi.com/api/admin/assets", {
       method: "POST",
@@ -142,6 +170,25 @@ describe("admin media upload setup", () => {
     expect(response.status).toBe(200);
     expect(payload.asset).toMatchObject({ filename: "cover.jpg", uploaded: true, locale: "en" });
     expect(mocks.storeMediaFile).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-id", kind: "cover" }));
+  });
+
+  it("rejects invalid image dimensions on the direct local multipart upload endpoint", async () => {
+    mocks.getBackendMode.mockReturnValue("local");
+    mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    const formData = new FormData();
+    formData.append("productId", "product-id");
+    formData.append("kind", "cover");
+    formData.append("file", new File([invalidRatioJpeg], "cover.jpg", { type: "image/jpeg" }));
+
+    const response = await POST(new Request("https://lamilialomi.com/api/admin/assets", {
+      method: "POST",
+      body: formData,
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.errorCode).toBe(ADMIN_ERROR_CODES.VALIDATION_IMAGE_DIMENSIONS);
+    expect(mocks.storeMediaFile).not.toHaveBeenCalled();
   });
 
   it("defers cloud media cleanup in the private-serving revocation state", async () => {
