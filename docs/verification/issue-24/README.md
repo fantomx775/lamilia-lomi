@@ -12,12 +12,21 @@ The reviewed screenshots in this directory come from the final run:
 
 Visual review confirmed category images and product covers retain their proportions, gallery preview shows the full image, and storefront and admin thumbnails load. The cleanup warning is readable on both viewports. The first and last order arrows are disabled at their respective ends and cannot receive a center hit; enabled-arrow checks and saved-order persistence after reload passed. Some captures show the local Next.js development badge. The known hydration warning involving `caret-color` on the category search input recurred; there were no page errors, unexpected failed requests, or broken image loads.
 
+The follow-up server-side validation changes do not alter the UI. The browser evidence above remains applicable; Playwright was not rerun for this backend-only review fix.
+
+## Server-side image validation
+
+- Local multipart cover/gallery uploads are fully decoded with Sharp and checked against the accepted 1:1 or 8.5:11 ratios and minimum dimensions before storage.
+- Supabase signed/TUS uploads are validated at product save. The server uses the new asset's bound product/asset Storage path, checks Storage `info()` size and MIME against the submitted metadata and the 20 MiB cap before downloading, then checks the downloaded size and fully decodes the bytes before the product mutation RPC. No arbitrary payload URL is fetched. Existing assets continue to use the existing database snapshot policy.
+- Regression coverage includes an invalid-ratio direct API upload, an invalid-ratio signed-upload bypass, rejection of an oversized Storage object before download, and the image decoder's pseudo-PNG/truncated-file cases.
+- If a category disappears between image upload and metadata update, the exact new image object is removed before returning not-found. Cleanup for ambiguous database outcomes remains deferred under the existing policy.
+
 ## Checks
 
-- Focused Vitest: 2 files, 6 tests passed (`image-file-dimensions` and the category-image API route).
-- Changed-file ESLint passed; `tsc --noEmit --pretty false` passed.
+- Focused Vitest: 4 files, 38 tests passed (asset upload route, Supabase content mutations, image decoder, and category-image API route).
+- Changed-file ESLint, `tsc --noEmit --pretty false`, and `git diff --check` passed.
 - `npm run build` passed with `LAMILIA_BACKEND=local` and `NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000`.
-- Focused Playwright passed 8/8 as described above. `git diff --check` is run during final candidate preparation.
+- Focused Playwright passed 8/8 in the browser run described above; it was not rerun after this server-only validation change.
 - The exact migration `20261010184114_category_image_media.sql` was applied successfully to an isolated local Supabase database. Because an older foundation migration fails with SQLSTATE `42501` (`must be owner of table objects` while changing `storage.objects`), the target migration was checked against a minimal local `public.categories (id, slug)` fixture instead of claiming a full historical migration-chain pass. The CLI returned `ALTER TABLE`; a separate assertion block passed and confirmed all six nullable, typed media columns and all three CHECK constraints. Assertions accepted valid metadata and rejected an invalid provider, partial metadata, zero size, and SVG MIME; the fixture ended with zero rows.
 - The category-image API and image decoder tests use generated fixtures/mocked storage. No live R2 account or assets were used.
 

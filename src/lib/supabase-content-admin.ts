@@ -32,8 +32,9 @@ import {
   reconcileR2Publication,
   revokeR2PublicAssetsBeforeMutation,
 } from "./media-storage";
-import { mediaBucketForKind } from "./media-upload";
+import { mediaBucketForKind, validateMediaFile } from "./media-upload";
 import { removeCategoryImageStorage, storeCategoryImage } from "./category-image-storage";
+import { validateImageUploadBytes } from "./image-upload-validation";
 import { createServiceRoleClient } from "./supabase/admin";
 import {
   ADMIN_ERROR_CODES,
@@ -120,9 +121,15 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
           : [],
       ),
     );
+    const newAssetIds = new Set(
+      product.assets
+        .filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id))
+        .map((asset) => asset.id),
+    );
     await assertSupabaseUploadsExist(
       product.assets.filter((asset) => product.status === "published" || !existing?.assets.some((previous) => previous.id === asset.id)),
       storageAuthorizationToken,
+      newAssetIds,
     );
     await finalizeR2MediaUploads(product.assets, uploadedIds);
     const revokedPublicAssetIds = await revokeR2PublicAssetsBeforeMutation({
@@ -373,7 +380,10 @@ export async function saveCategoryImageForRequest(input: {
           .select("id")
           .maybeSingle();
         if (error) throw new AdminDatabaseError("category image update", error);
-        if (!data) throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE);
+        if (!data) {
+          await cleanupCategoryImageSafely({ categoryId: input.categoryId, image, authorizationToken });
+          throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE);
+        }
       }
     } catch (error) {
       if (
@@ -590,6 +600,7 @@ async function run(query: PromiseLike<{ error: DatabaseErrorLike | null }>, labe
 export async function assertSupabaseUploadsExist(
   assets: Product["assets"],
   storageAuthorizationToken?: string | null,
+  imageAssetIdsToValidate: ReadonlySet<string> = new Set(),
 ) {
   if (!assets.length) return;
 
@@ -606,9 +617,8 @@ export async function assertSupabaseUploadsExist(
       throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH);
     }
 
-    const { data, error } = await storage
-      .from(mediaBucketForKind(asset.kind))
-      .exists(storagePath);
+    const bucket = storage.from(mediaBucketForKind(asset.kind));
+    const { data, error } = await bucket.exists(storagePath);
 
     if (error) {
       throw new AdminDatabaseError("asset upload lookup", error);
@@ -616,6 +626,79 @@ export async function assertSupabaseUploadsExist(
 
     if (data !== true) {
       throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD);
+    }
+
+    if (
+      !imageAssetIdsToValidate.has(asset.id) ||
+      (asset.kind !== "cover" && asset.kind !== "gallery")
+    ) continue;
+
+    const expectedUploadPrefix = `products/${asset.productId}/${asset.kind}/${asset.id}-`;
+    if (!storagePath.startsWith(expectedUploadPrefix)) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_PATH);
+    }
+
+    const metadataValidation = validateMediaFile(asset.kind, {
+      name: asset.filename,
+      size: asset.sizeBytes ?? 0,
+      type: asset.contentType,
+    });
+    if (!metadataValidation.ok) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+
+    const { data: fileInfo, error: infoError } = await bucket.info(storagePath);
+    if (infoError) {
+      throw new AdminDatabaseError("asset image metadata", infoError);
+    }
+    const storageContentType = fileInfo?.contentType ?? fileInfo?.metadata?.mimetype;
+    if (
+      !fileInfo ||
+      !Number.isSafeInteger(fileInfo.size) ||
+      fileInfo.size !== asset.sizeBytes ||
+      storageContentType !== asset.contentType
+    ) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+    const storageFileValidation = validateMediaFile(asset.kind, {
+      name: asset.filename,
+      size: fileInfo.size ?? 0,
+      type: storageContentType,
+    });
+    if (!storageFileValidation.ok) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+
+    const { data: file, error: downloadError } = await bucket.download(storagePath);
+    if (downloadError) {
+      throw new AdminDatabaseError("asset image validation", downloadError);
+    }
+    if (!file) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD);
+    }
+
+    if (!Number.isSafeInteger(file.size) || asset.sizeBytes !== file.size) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+    const downloadedFileValidation = validateMediaFile(asset.kind, {
+      name: asset.filename,
+      size: file.size,
+      type: asset.contentType,
+    });
+    if (!downloadedFileValidation.ok) {
+      throw new AdminApplicationError(ADMIN_ERROR_CODES.VALIDATION_ASSET_FILE);
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+
+    const imageValidation = await validateImageUploadBytes({
+      kind: asset.kind,
+      filename: asset.filename,
+      expectedContentType: asset.contentType,
+      bytes,
+    });
+    if (!imageValidation.ok) {
+      throw new AdminApplicationError(imageValidation.errorCode);
     }
   }
 }

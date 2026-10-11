@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -12,11 +13,14 @@ const mocks = vi.hoisted(() => ({
   createServiceRoleClient: vi.fn(),
   storageFrom: vi.fn(),
   storageExists: vi.fn(),
+  storageInfo: vi.fn(),
+  storageDownload: vi.fn(),
   storageRemove: vi.fn(),
   storeCategoryImage: vi.fn(),
   removeCategoryImageStorage: vi.fn(),
   deleteCategory: vi.fn(),
   categoryImageUpdates: [] as Array<{ table: string; fields: unknown }>,
+  categoryImageUpdateResult: null as unknown,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -56,6 +60,13 @@ import { RICH_TEXT_FORMAT_PREFIX, serializeRichTextDocument } from "./rich-text"
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const assetId = "11111111-1111-4111-8111-111111111199";
+let validSquareJpeg = new Uint8Array();
+
+beforeAll(async () => {
+  validSquareJpeg = new Uint8Array(await sharp({
+    create: { width: 800, height: 800, channels: 3, background: { r: 50, g: 60, b: 70 } },
+  }).jpeg().toBuffer());
+});
 
 function uploadedCoverForm(slug: string, title: string) {
   const form = new FormData();
@@ -70,7 +81,7 @@ function uploadedCoverForm(slug: string, title: string) {
   form.append("assetPath", `products/${productId}/cover/${assetId}-cover.jpg`);
   form.append("assetFilename", "cover.jpg");
   form.append("assetContentType", "image/jpeg");
-  form.append("assetSizeBytes", "1024");
+  form.append("assetSizeBytes", String(validSquareJpeg.byteLength));
   form.append("assetStorageProvider", "supabase");
   form.append("assetUploaded", "1");
   form.set("coverAssetId", assetId);
@@ -94,6 +105,7 @@ describe("Supabase content admin mutations", () => {
     mocks.upsertedRows = [];
     mocks.deletedTables = [];
     mocks.categoryImageUpdates = [];
+    mocks.categoryImageUpdateResult = { data: { id: "33333333-3333-4333-8333-333333333333" }, error: null };
     mocks.deleteCategory.mockReturnValue({ ok: true, id: "33333333-3333-4333-8333-333333333333" });
     mocks.from.mockImplementation((table: string) => ({
       upsert: vi.fn((rows, options) => {
@@ -108,7 +120,7 @@ describe("Supabase content admin mutations", () => {
         mocks.categoryImageUpdates.push({ table, fields });
         return {
           eq: vi.fn(() => ({
-            select: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: "33333333-3333-4333-8333-333333333333" }, error: null }) })),
+            select: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue(mocks.categoryImageUpdateResult) })),
           })),
         };
       }),
@@ -116,8 +128,21 @@ describe("Supabase content admin mutations", () => {
     }));
     mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
     mocks.storageExists.mockResolvedValue({ data: true, error: null });
+    mocks.storageInfo.mockResolvedValue({
+      data: { size: validSquareJpeg.byteLength, contentType: "image/jpeg" },
+      error: null,
+    });
     mocks.storageRemove.mockResolvedValue({ error: null });
-    mocks.storageFrom.mockReturnValue({ exists: mocks.storageExists, remove: mocks.storageRemove });
+    mocks.storageFrom.mockReturnValue({
+      exists: mocks.storageExists,
+      info: mocks.storageInfo,
+      download: mocks.storageDownload,
+      remove: mocks.storageRemove,
+    });
+    mocks.storageDownload.mockResolvedValue({
+      data: new Blob([validSquareJpeg], { type: "image/jpeg" }),
+      error: null,
+    });
     mocks.createServiceRoleClient.mockReturnValue({
       storage: { from: mocks.storageFrom },
     });
@@ -173,6 +198,43 @@ describe("Supabase content admin mutations", () => {
       },
     }]);
     expect(mocks.removeCategoryImageStorage).toHaveBeenCalledWith({ categoryId, image: oldImage, authorizationToken: null });
+  });
+
+  it("removes the newly uploaded category image when the category disappears before its metadata update", async () => {
+    const categoryId = "33333333-3333-4333-8333-333333333333";
+    const image = {
+      id: "55555555-5555-4555-8555-555555555555",
+      path: `/api/category-media/${categoryId}?v=55555555-5555-4555-8555-555555555555`,
+      storagePath: `categories/${categoryId}/image/55555555-5555-4555-8555-555555555555-new.webp`,
+      storageProvider: "supabase" as const,
+      filename: "new.webp",
+      contentType: "image/webp",
+      sizeBytes: 2000,
+    };
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [{ id: categoryId, slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.storeCategoryImage.mockResolvedValue(image);
+    mocks.categoryImageUpdateResult = { data: null, error: null };
+
+    await expect(saveCategoryImageForRequest({
+      categoryId,
+      imageId: image.id,
+      filename: image.filename,
+      contentType: image.contentType,
+      bytes: new Uint8Array([1, 2, 3]),
+    })).resolves.toEqual({ ok: false, errors: ["admin.not_found.resource"] });
+
+    expect(mocks.removeCategoryImageStorage).toHaveBeenCalledTimes(1);
+    expect(mocks.removeCategoryImageStorage).toHaveBeenCalledWith({
+      categoryId,
+      image,
+      authorizationToken: null,
+    });
   });
 
   it("clears category image metadata before removing its stored object", async () => {
@@ -577,6 +639,49 @@ describe("Supabase content admin mutations", () => {
     await expect(saveProductForRequest(retry)).resolves.toMatchObject({ ok: false });
 
     expect(mocks.storageRemove).not.toHaveBeenCalled();
+  });
+
+  it("rejects a newly uploaded cover with a forged invalid ratio before saving product metadata", async () => {
+    const invalidRatioJpeg = new Uint8Array(await sharp({
+      create: { width: 800, height: 1000, channels: 3, background: { r: 50, g: 60, b: 70 } },
+    }).jpeg().toBuffer());
+    const storagePath = `products/${productId}/cover/${assetId}-cover.jpg`;
+    const form = uploadedCoverForm("invalid-ratio-product", "Invalid ratio product");
+    form.set("assetSizeBytes", String(invalidRatioJpeg.byteLength));
+    mocks.storageDownload.mockResolvedValue({
+      data: new Blob([invalidRatioJpeg], { type: "image/jpeg" }),
+      error: null,
+    });
+    mocks.storageInfo.mockResolvedValue({
+      data: { size: invalidRatioJpeg.byteLength, contentType: "image/jpeg" },
+      error: null,
+    });
+
+    await expect(saveProductForRequest(form)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.validation.image_dimensions"],
+    });
+
+    expect(mocks.storageDownload).toHaveBeenCalledWith(storagePath);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.storageRemove).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized Supabase object from Storage metadata before downloading its bytes", async () => {
+    const form = uploadedCoverForm("oversized-cover-product", "Oversized cover product");
+    mocks.storageInfo.mockResolvedValue({
+      data: { size: 20 * 1024 * 1024 + 1, contentType: "image/jpeg" },
+      error: null,
+    });
+
+    await expect(saveProductForRequest(form)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.validation.asset_file"],
+    });
+
+    expect(mocks.storageInfo).toHaveBeenCalledWith(`products/${productId}/cover/${assetId}-cover.jpg`);
+    expect(mocks.storageDownload).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it("rejects an oversized premium code before calling the save RPC", async () => {
