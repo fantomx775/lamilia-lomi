@@ -2197,10 +2197,14 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const delimiterBeforeKey = "https://production.example.test/catalog?\ntoken=secret-token\n&continuation=continuation-marker";
   const fragmentContinuation = "https://production.example.test/catalog\n#access_token=fragment-secret\n&continuation=fragment-continuation-marker";
   const fragmentDelimiterBeforeKey = "https://production.example.test/catalog#\naccess_token=bare-fragment-secret\n&continuation=bare-fragment-continuation-marker";
+  const bracketWrappedValue = "https://production.example.test/catalog?token=<bracket-marker>";
+  const backtickWrappedValue = "https://production.example.test/catalog?token=`backtick-marker`";
+  const lineSeparatorQuery = "https://production.example.test/catalog\u2028?token=line-separator-marker\u2028&continuation=line-separator-continuation";
+  const paragraphSeparatorQuery = "https://production.example.test/catalog\u2029?token=paragraph-separator-marker\u2029&continuation=paragraph-separator-continuation";
   const plan = {
     status: "PASS",
     flows: [{
-      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note\nFragment ${fragmentContinuation}\nKeep this fragment note\nBare fragment ${fragmentDelimiterBeforeKey}\nKeep this bare-fragment note`,
+      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note\nFragment ${fragmentContinuation}\nKeep this fragment note\nBare fragment ${fragmentDelimiterBeforeKey}\nKeep this bare-fragment note\nBracket ${bracketWrappedValue}\nKeep this bracket note\nBacktick ${backtickWrappedValue}\nKeep this backtick note\nLine separator ${lineSeparatorQuery}\u2028Keep this line-separator note\nParagraph separator ${paragraphSeparatorQuery}\u2029Keep this paragraph-separator note`,
       affectedFiles: [filename],
       paths: [{
         path: "/catalog",
@@ -2215,7 +2219,7 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
 
   assert.equal(checkedPlan.status, "PASS");
-  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note\nFragment https://production.example.test/catalog\nKeep this fragment note\nBare fragment https://production.example.test/catalog\nKeep this bare-fragment note";
+  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note\nFragment https://production.example.test/catalog\nKeep this fragment note\nBare fragment https://production.example.test/catalog\nKeep this bare-fragment note\nBracket https://production.example.test/catalog\nKeep this bracket note\nBacktick https://production.example.test/catalog\nKeep this backtick note\nLine separator https://production.example.test/catalog\u2028Keep this line-separator note\nParagraph separator https://production.example.test/catalog\u2029Keep this paragraph-separator note";
   const safeExpectedText = "Catalog heading at https://production.example.test/catalog\nKeep this expected-text note";
   assert.equal(localVerification.record.productionSmokePlan.flows[0].name, safeFlowName);
   assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].expectedText, safeExpectedText);
@@ -2225,12 +2229,22 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   assert.equal(persistedOutput.includes("secret-token"), false);
   assert.equal(persistedOutput.includes("fragment-secret"), false);
   assert.equal(persistedOutput.includes("bare-fragment-secret"), false);
+  assert.equal(persistedOutput.includes("bracket-marker"), false);
+  assert.equal(persistedOutput.includes("backtick-marker"), false);
+  assert.equal(persistedOutput.includes("line-separator-marker"), false);
+  assert.equal(persistedOutput.includes("line-separator-continuation"), false);
+  assert.equal(persistedOutput.includes("paragraph-separator-marker"), false);
+  assert.equal(persistedOutput.includes("paragraph-separator-continuation"), false);
   assert.equal(persistedOutput.includes("continuation-marker"), false);
   assert.equal(persistedOutput.includes("fragment-continuation-marker"), false);
   assert.equal(persistedOutput.includes("bare-fragment-continuation-marker"), false);
   assert.ok(persistedOutput.includes("Keep this flow note"));
   assert.ok(persistedOutput.includes("Keep this fragment note"));
   assert.ok(persistedOutput.includes("Keep this bare-fragment note"));
+  assert.ok(persistedOutput.includes("Keep this bracket note"));
+  assert.ok(persistedOutput.includes("Keep this backtick note"));
+  assert.ok(persistedOutput.includes("Keep this line-separator note"));
+  assert.ok(persistedOutput.includes("Keep this paragraph-separator note"));
   assert.ok(persistedOutput.includes("Keep this expected-text note"));
   assert.ok(persistedOutput.includes("https://production.example.test/catalog"));
 });

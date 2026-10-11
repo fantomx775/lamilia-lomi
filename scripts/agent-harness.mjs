@@ -16,20 +16,20 @@ const PRIVATE_RAW_VERIFICATION_RECORD = new WeakMap();
 const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
 
 function redactFreeTextUrls(value) {
-  // Treat a query or fragment continued on the next line as part of the URL,
-  // while leaving ordinary multiline prose after it intact.
+  // Strip query and fragment tails, including wrapped values and line
+  // continuations, while leaving ordinary multiline prose intact.
   return value.replace(
-    /(?:https?:\/\/|\/)[^\s<>`]*(?:(?:(?:\r\n?|\n)[ \t]*[?&#]|(?<=[?&#])(?:\r\n?|\n)[ \t]*)[^\s<>`=?&#]+=[^\s<>`]*)*/gi,
+    /(?:https?:\/\/|\/)[^\s<>`?#]*(?:[?#][^\s]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\s=?&#]+=[^\s]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#]+=[^\s]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\s]*)*/gi,
     (urlOrPath) => {
       const queryOrFragment = urlOrPath.search(/[?#]/);
-      const continuedParameter = urlOrPath.search(/(?:\r\n?|\n)[ \t]*&/);
-      const parameterAfterDelimiter = urlOrPath.search(/[?&#](?:\r\n?|\n)[ \t]*[^\s<>`=?&#]+=/);
+      const continuedParameter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*&/);
+      const parameterAfterDelimiter = urlOrPath.search(/[?&#](?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#]+=/);
       const redactionStart = [queryOrFragment, continuedParameter, parameterAfterDelimiter]
         .filter((index) => index >= 0)
         .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
       if (!Number.isFinite(redactionStart)) return urlOrPath;
       const url = urlOrPath.slice(0, redactionStart);
-      return url.replace(/(?:\r\n?|\n)[ \t]*$/, "");
+      return url.replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
     },
   );
 }
