@@ -35,7 +35,8 @@ function redactFreeTextUrls(value) {
     const hasWrappedValue = /^(?:<[^>\n]*>|"[^"\n]*"|'[^'\n]*'|\x60[^\x60\n]*\x60)/.test(content);
     const hasAmpersandContinuation = content.startsWith("&") || /^\s*&/.test(content);
     const hasSingleOpaqueToken =
-      /^[A-Za-z0-9_~%-]+(?:\.[A-Za-z0-9_~%-]+)*$/.test(firstLine) && /[-_~%0-9]/.test(firstLine);
+      /^[A-Za-z0-9_~%-]+(?:\.[A-Za-z0-9_~%-]+)*$/.test(firstLine) &&
+      (/[-_~%0-9]/.test(firstLine) || firstLine.length >= 16);
     if (!(hasParameter || hasWrappedValue || hasAmpersandContinuation || hasSingleOpaqueToken)) return urlOrPath;
 
     return urlOrPath

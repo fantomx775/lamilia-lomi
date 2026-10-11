@@ -2252,6 +2252,12 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
       safe: "https://bad host",
       secret: "opaque-leading-space-fragment-secret",
     },
+    {
+      label: "Leading absolute alphabetic token",
+      value: "https://bad host? abcdefghijklmnopqrstuvwx",
+      safe: "https://bad host",
+      secret: "abcdefghijklmnopqrstuvwx",
+    },
   ];
   const lineSeparatorQuery = "https://production.example.test/catalog\u2028?token=line-separator-marker\u2028&continuation=line-separator-continuation";
   const paragraphSeparatorQuery = "https://production.example.test/catalog\u2029?token=paragraph-separator-marker\u2029&continuation=paragraph-separator-continuation";
