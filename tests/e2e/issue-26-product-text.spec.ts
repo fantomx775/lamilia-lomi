@@ -35,7 +35,6 @@ test("product text fields count, warn, survive failed saves, and persist on crea
   const maximumDescription = `Issue 26 short description ${"S".repeat(300 - "Issue 26 short description ".length)}`;
   const slug = `issue-26-${suffix.toLowerCase()}`;
   const consoleErrors: string[] = [];
-  const environmentWarnings: string[] = [];
   const unexpectedFailedRequests: string[] = [];
   const unexpectedServerErrors: string[] = [];
   let failureIntercepted = false;
@@ -45,10 +44,6 @@ test("product text fields count, warn, survive failed saves, and persist on crea
     if (message.type() !== "error") return;
     const messageText = message.text();
     if (failureIntercepted && messageText.includes("503")) return;
-    if (messageText.includes("A tree hydrated") && messageText.includes("caret-color")) {
-      environmentWarnings.push("The browser environment injected caret-color styles before hydration.");
-      return;
-    }
     consoleErrors.push(messageText);
   });
   page.on("requestfailed", (request) => {
@@ -185,7 +180,7 @@ test("product text fields count, warn, survive failed saves, and persist on crea
     expect(unexpectedFailedRequests).toEqual([]);
     expect(unexpectedServerErrors).toEqual([]);
     await testInfo.attach("issue-26-browser-diagnostics.txt", {
-      body: JSON.stringify({ consoleErrors, environmentWarnings, unexpectedFailedRequests, unexpectedServerErrors }, null, 2),
+      body: JSON.stringify({ consoleErrors, unexpectedFailedRequests, unexpectedServerErrors }, null, 2),
       contentType: "text/plain",
     });
   } finally {

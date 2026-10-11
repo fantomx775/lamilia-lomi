@@ -241,6 +241,11 @@ describe("ProductEditor V2", () => {
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
     expect(amazonSection).toHaveTextContent("Opublikowany produkt wymaga tytułu EN, krótkiego opisu, okładki i linku Amazon.");
     expect(view.getByLabelText("Status")).not.toHaveAttribute("aria-invalid", "true");
+
+    await user.type(view.getByLabelText("Krótki opis"), " updated");
+
+    expect(view.queryByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).not.toBeInTheDocument();
+    expect(amazonSection).not.toHaveTextContent("Opublikowany produkt wymaga tytułu EN, krótkiego opisu, okładki i linku Amazon.");
   });
 
   it("reveals and collapses SEO details without leaving the native disclosure open", async () => {
@@ -384,6 +389,32 @@ describe("ProductEditor V2", () => {
     expect(shortDescription).toHaveValue("This value must remain after the failed save.");
     expect(title).toHaveAttribute("aria-invalid", "true");
     expect(view.getAllByText("Tytuł produktu po angielsku jest wymagany.").length).toBeGreaterThan(0);
+  });
+
+  it("clears a title-required summary after the missing title is corrected", async () => {
+    const saveAction = vi.fn().mockResolvedValue({
+      ok: false,
+      errors: [ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED],
+    });
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Nowy produkt"
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={saveAction}
+      />,
+    );
+
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalled());
+    expect(view.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeInTheDocument();
+    expect(view.getByLabelText("Tytuł")).toHaveAttribute("aria-invalid", "true");
+
+    await user.type(view.getByLabelText("Tytuł"), "Nowy tytuł");
+
+    expect(view.queryByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).not.toBeInTheDocument();
+    expect(view.getByLabelText("Tytuł")).not.toHaveAttribute("aria-invalid", "true");
   });
 
   it("warns before internal navigation and browser reload while edits are unsaved", async () => {
