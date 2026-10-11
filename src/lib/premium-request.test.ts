@@ -272,9 +272,22 @@ describe("authorizePremiumDownloadForRequest", () => {
 
 describe("redeemPremiumCodeForRequest in local mode", () => {
   it("allows one account to claim a code when two accounts redeem it concurrently", async () => {
+    type LocalSnapshot = {
+      products: Array<{
+        id: string;
+        premiumCodes: Array<{
+          id: string;
+          productId: string;
+          code: string;
+          active: boolean;
+          redeemedAt?: string;
+          redeemedBy?: string;
+        }>;
+      }>;
+    };
     const productId = "local-product-1";
     const code = "LOCAL-CROSS-ACCOUNT-TEST";
-    const state = {
+    const state: { snapshot: LocalSnapshot } = {
       snapshot: {
         products: [{
           id: productId,
