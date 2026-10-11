@@ -222,6 +222,50 @@ describe("ProductEditor V2", () => {
     expect(codeRow?.querySelector("button")).toBeDisabled();
   });
 
+  it("locks editor changes and saves while a generated premium batch is being persisted", async () => {
+    let finishBatch!: (response: {
+      ok: boolean;
+      status: number;
+      json: () => Promise<unknown>;
+    }) => void;
+    const fetchMock = vi.fn().mockReturnValue(new Promise((resolve) => {
+      finishBatch = resolve;
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const view = render(
+      <ProductEditor
+        title="Edycja produktu"
+        product={product}
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+        saveAction={vi.fn().mockResolvedValue({ ok: true, id: product.id })}
+      />,
+    );
+
+    await user.click(view.getByRole("button", { name: "Wygeneruj partię" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/admin/products/${encodeURIComponent(product.id)}/premium-codes`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(view.getByLabelText("Tytuł")).toBeDisabled();
+    expect(view.getByRole("button", { name: "Zapisz" })).toBeDisabled();
+
+    finishBatch({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        ok: true,
+        codes: [{ id: "generated-premium-code", productId: product.id, code: "LOMI-NEW-2026", active: true }],
+      }),
+    });
+
+    expect(await view.findByText("Wygenerowano 1 kodów. Partia została zapisana.")).toBeInTheDocument();
+    expect(view.getByLabelText("Tytuł")).toBeEnabled();
+    expect(view.getByText("Wszystkie zmiany są zapisane")).toBeInTheDocument();
+  });
+
   it("adds each available Amazon market once and then disables the add button", async () => {
     const user = userEvent.setup();
     const view = render(

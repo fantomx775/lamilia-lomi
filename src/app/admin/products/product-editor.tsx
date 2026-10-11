@@ -919,7 +919,7 @@ export function ProductEditor({
 
   const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSaving || hasActiveMediaUpload || !saveAction) return;
+    if (isSaving || isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction) return;
 
     if (!validatePremiumCodesBeforeSubmit()) {
       setSaveStatus("error");
@@ -1018,7 +1018,7 @@ export function ProductEditor({
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
         <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
 
-        <fieldset disabled={isSaving} className="m-0 grid min-w-0 gap-6 border-0 p-0">
+        <fieldset disabled={isSaving || isGeneratingPremiumBatch} className="m-0 grid min-w-0 gap-6 border-0 p-0">
         <AdminEditorHeader
           backHref="/admin/products"
           backLabel="Produkty"
@@ -1189,7 +1189,7 @@ export function ProductEditor({
       </form>
 
       {product && archiveAction && deleteAction ? (
-        <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving} />
+        <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving || isGeneratingPremiumBatch} />
       ) : null}
 
       {saveBarRoot ? createPortal(
@@ -1198,7 +1198,7 @@ export function ProductEditor({
             <p role={saveStatus === "error" ? "alert" : "status"} aria-live="polite" className={`min-w-0 text-sm ${saveStatus === "error" ? "text-red-800" : "text-[var(--color-muted)]"}`}>
               {isSaving ? "Zapisywanie…" : saveStatus === "saved" ? "Zapisano. Zmiany są aktualne." : saveStatus === "error" ? "Zapis nie powiódł się. Sprawdź wskazane błędy." : isDirty ? "Niezapisane zmiany" : product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"}
             </p>
-            <ProductSubmitButton pending={isSaving} dirty={isDirty} disabled={hasActiveMediaUpload || !saveAction} />
+            <ProductSubmitButton pending={isSaving} dirty={isDirty} disabled={isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction} />
           </div>
         </div>,
         saveBarRoot,
