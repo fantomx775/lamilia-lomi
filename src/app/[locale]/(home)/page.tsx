@@ -66,7 +66,7 @@ export default async function HomePage({ params }: Props) {
                 <ImageWithFallback
                   src={product!.cover.path}
                   alt={product!.cover.title ?? product!.title}
-                  priority
+                  loading="eager"
                   className="object-contain"
                   sizes="(min-width: 1024px) 28vw, 48vw"
                 />

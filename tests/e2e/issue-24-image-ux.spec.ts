@@ -159,12 +159,12 @@ test("shows an actionable warning when category image cleanup is deferred", asyn
 });
 
 async function signInAsAdmin(page: Page) {
-  await page.goto("/pl/login?redirectTo=/admin/categories");
-  await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-  await page.getByLabel("Hasło").fill("demo-password");
+  await page.goto("/en/login?redirectTo=/admin/categories");
+  await page.getByLabel("Email").fill("admin@lamilialomi.test");
+  await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin/categories"),
-    page.getByRole("button", { name: "Kontynuuj" }).click(),
+    page.getByRole("button", { name: "Continue" }).click(),
   ]);
 }
 

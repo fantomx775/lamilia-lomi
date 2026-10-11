@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
 
 const mocks = vi.hoisted(() => ({
   hasAdminAccess: vi.fn(),
@@ -19,7 +20,13 @@ import { DELETE, POST } from "./route";
 const categoryId = "11111111-1111-4111-8111-111111111111";
 const imageId = "22222222-2222-4222-8222-222222222222";
 
-function png(width: number, height: number) {
+async function png(width: number, height: number) {
+  return new Uint8Array(await sharp({
+    create: { width, height, channels: 4, background: { r: 50, g: 60, b: 70, alpha: 1 } },
+  }).png().toBuffer());
+}
+
+function pngHeaderOnly(width: number, height: number) {
   const bytes = new Uint8Array(24);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
   bytes.set([0x49, 0x48, 0x44, 0x52], 12);
@@ -52,7 +59,7 @@ describe("admin category image route", () => {
   it("rejects a non-square category image before storing it", async () => {
     const form = new FormData();
     form.set("categoryId", categoryId);
-    form.set("file", new File([png(600, 900)], "books.png", { type: "image/png" }));
+    form.set("file", new File([await png(600, 900)], "books.png", { type: "image/png" }));
 
     const response = await POST(new Request("http://localhost/api/admin/category-image", { method: "POST", body: form }));
 
@@ -64,7 +71,7 @@ describe("admin category image route", () => {
   it("stores validated category images and returns the new media reference", async () => {
     const form = new FormData();
     form.set("categoryId", categoryId);
-    form.set("file", new File([png(800, 800)], "books.png", { type: "image/png" }));
+    form.set("file", new File([await png(800, 800)], "books.png", { type: "image/png" }));
 
     const response = await POST(new Request("http://localhost/api/admin/category-image", { method: "POST", body: form }));
 
@@ -76,6 +83,18 @@ describe("admin category image route", () => {
       contentType: "image/png",
       bytes: expect.any(Uint8Array),
     }));
+  });
+
+  it("rejects a PNG signature and IHDR without image data before storing it", async () => {
+    const form = new FormData();
+    form.set("categoryId", categoryId);
+    form.set("file", new File([pngHeaderOnly(800, 800)], "books.png", { type: "image/png" }));
+
+    const response = await POST(new Request("http://localhost/api/admin/category-image", { method: "POST", body: form }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ errorCode: "admin.validation.asset_file" });
+    expect(mocks.saveCategoryImageForRequest).not.toHaveBeenCalled();
   });
 
   it("removes the category image through the admin persistence service", async () => {

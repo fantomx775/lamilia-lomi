@@ -30,8 +30,8 @@ export async function POST(request: Request) {
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const dimensions = readImageDimensionsFromBytes(bytes);
-  const ratioValidation = dimensions
+  const dimensions = await readImageDimensionsFromBytes(bytes);
+  const ratioValidation = dimensions && dimensions.contentType === validation.contentType
     ? validateImageDimensions("category", dimensions)
     : { ok: false as const, error: "Nie udało się odczytać wymiarów obrazu. Wybierz prawidłowy plik PNG, JPG lub WEBP." };
   if (!ratioValidation.ok) {

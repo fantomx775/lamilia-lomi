@@ -299,7 +299,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
             <ImageWithFallback
               src={product.cover.path}
               alt={product.cover.title ?? product.title}
-              priority
+              loading="eager"
               className="object-contain"
               sizes="(min-width: 1024px) 38vw, 100vw"
             />
