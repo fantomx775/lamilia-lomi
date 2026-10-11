@@ -1,6 +1,6 @@
 # PR #45 English-only verification
 
-The focused browser checks and screenshot review below use local demo backend Playwright run `pr-45-focused-final-route-auth-unlock-editors-r9-smoke-redaction-20261011`. The route spec logs separate `PR45_BROWSER_SCREENSHOT` and `PR45_BROWSER_DIAGNOSTICS` records. The unlock spec logs per-test `PR45_BROWSER_DIAGNOSTICS` records with request details and elapsed time. The editor spec attaches `BROWSER_EVIDENCE` JSON with the run ID, exact tested SHA, browser project, test title, screenshot paths, and diagnostics.
+The focused browser checks and screenshot review below use local demo backend Playwright run `pr-45-focused-final-route-auth-unlock-editors-r13-docs-aligned-20261011` on the PR head (24/24 passed). The route spec emits separate `PR45_BROWSER_SCREENSHOT` and `PR45_BROWSER_DIAGNOSTICS` records. The unlock spec emits per-test `PR45_BROWSER_DIAGNOSTICS` records with request details and timing. The editor spec attaches `BROWSER_EVIDENCE` JSON with the run ID, exact tested SHA, browser project, test title, screenshot paths, and diagnostics; unlock and route records use different shapes and do not all include screenshot paths.
 
 The run covers English-only public navigation and content, removal of the language selector, 308 redirects from legacy `/pl`, `/de`, and `/es` routes with query preservation, QR unlock redirects, login and registration return targets, guest and authenticated unlock/download behavior, and single-language product, category, and Terms editor save/reload flows. It runs the focused route, unlock, and editor specs on desktop Chromium and Pixel 7 mobile Chromium.
 
@@ -15,4 +15,4 @@ The run covers English-only public navigation and content, removal of the langua
 - [Single-language Terms editor, desktop](terms-editor-chromium.png)
 - [Single-language Terms editor, mobile](terms-editor-mobile.png)
 
-The route checks record no browser console, page, or failed-network errors. The unknown-product unlock case deliberately returns 404; canceled requests during successful client navigation are recorded with their URL, error, test title, and elapsed time.
+The route checks record no console errors, page errors, or failed requests. In the unlock cases, the only console error and failed response is the deliberate `GET /en/unlock/not-a-product` 404 on desktop and mobile, which the test asserts. Other failed requests are `net::ERR_ABORTED` font, route-transition, or Server Action requests during the next asserted navigation; the per-test diagnostics record their URL, error, request metadata, and timing. The editor flow records an expected abort during login or font loading after the route transition, with the saved values verified again after reload.
