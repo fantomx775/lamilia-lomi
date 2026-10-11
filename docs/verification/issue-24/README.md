@@ -2,15 +2,15 @@
 
 ## Browser evidence
 
-The final local Playwright run on 2026-10-11 passed 8/8 tests with `--workers=1` across the three focused specs for category image UX, product gallery preview, and product image ordering. It covered Chromium desktop (1280×720) and Pixel 7 mobile emulation (412×839). The earlier wrapper attempt started with six workers and was interrupted; it is not counted as a pass. The stale login locale selector was corrected before the final run.
+The latest local Playwright run on 2026-10-11 passed 8/8 tests with `--workers=1` on candidate SHA `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351`. It covered the three focused specs for category image UX, product gallery preview, and product image ordering on Chromium desktop (1280×720) and Pixel 7 mobile emulation (412×839). This run includes the category cleanup-warning flow added in the final review follow-up. Screenshots from this exact candidate are under `candidate-fe5a3f30/`, grouped by flow and viewport.
 
-The reviewed screenshots in this directory come from the final run:
+The reviewed screenshots from the latest run are:
 
-- `chromium/` and `mobile/`: category upload, storefront rendering, admin thumbnails, and deferred-cleanup warning.
-- `product-gallery/chromium/` and `product-gallery/mobile/`: catalog cover, product detail cover, and full-size gallery preview.
-- `product-image-order/chromium/` and `product-image-order/mobile/`: upload, reorder, save, reload, and edit states. Debug-only arrow-target diagnostic images are excluded.
+- `candidate-fe5a3f30/category-image-ux/{chromium,mobile}/`: category upload, storefront rendering, admin thumbnails, and deferred-cleanup warning.
+- `candidate-fe5a3f30/product-gallery/{chromium,mobile}/`: full-size gallery preview.
+- `candidate-fe5a3f30/product-image-order/{chromium,mobile}/`: upload, reorder, save, reload, and edit states.
 
-Visual review confirmed category images and product covers retain their proportions, gallery preview shows the full image, and storefront and admin thumbnails load. The cleanup warning is readable on both viewports. The first and last order arrows are disabled at their respective ends and cannot receive a center hit; enabled-arrow checks and saved-order persistence after reload passed. Some captures show the local Next.js development badge. The known hydration warning involving `caret-color` on the category search input recurred; there were no page errors, unexpected failed requests, or broken image loads.
+Visual review of the latest desktop and mobile captures confirmed category images and product covers retain their proportions, gallery preview shows the full image, and storefront and admin thumbnails load. The cleanup warning is readable on both viewports. The first and last order arrows are disabled at their respective ends and cannot receive a center hit; enabled-arrow checks and saved-order persistence after reload passed. Some captures show the local Next.js development badge. The 8/8 run reported no failed tests or page errors.
 
 The follow-up now surfaces a failure-case cleanup warning in the taxonomy drawer when the category disappears and the new image cannot be removed. A focused component/API regression covers that error response and the displayed category/image IDs. Playwright was not rerun for this error state; the existing browser evidence still covers the unchanged upload, storefront, thumbnail, gallery-preview, and ordering flows.
 
@@ -26,9 +26,9 @@ The follow-up now surfaces a failure-case cleanup warning in the taxonomy drawer
 ## Checks
 
 - Before the latest retry/local-cleanup review follow-up, focused Vitest passed 6 files / 84 tests, covering R2 byte parity/retries, product media finalization, Supabase content mutations, EXIF dimensions, category-image API responses, and the taxonomy drawer warning.
-- Latest retry/local-cleanup follow-up: focused Vitest passed 2 files / 57 tests (`supabase-content-admin.test.ts`, `media-storage.test.ts`); changed-file ESLint, `tsc --noEmit --pretty false`, and `git diff --check` passed. The build and Playwright run were not repeated for this small server-side retry/result change.
+- Latest retry/local-cleanup follow-up: focused Vitest passed 2 files / 57 tests (`supabase-content-admin.test.ts`, `media-storage.test.ts`); changed-file ESLint, `tsc --noEmit --pretty false`, and `git diff --check` passed. The focused Playwright run on exact candidate SHA `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351` then passed 8/8 across desktop and mobile.
 - `npm run build` passed with `LAMILIA_BACKEND=local` and `NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000`.
-- Focused Playwright passed 8/8 in the earlier browser run described above; it was not rerun after this review follow-up, so the new failed-cleanup warning has component/API test evidence rather than a new browser screenshot.
+- Focused Playwright on the final reviewed candidate passed 8/8 and includes fresh desktop/mobile screenshots for the deferred-cleanup warning.
 - The exact migration `20261010184114_category_image_media.sql` was applied successfully to an isolated local Supabase database. Because an older foundation migration fails with SQLSTATE `42501` (`must be owner of table objects` while changing `storage.objects`), the target migration was checked against a minimal local `public.categories (id, slug)` fixture instead of claiming a full historical migration-chain pass. The CLI returned `ALTER TABLE`; a separate assertion block passed and confirmed all six nullable, typed media columns and all three CHECK constraints. Assertions accepted valid metadata and rejected an invalid provider, partial metadata, zero size, and SVG MIME; the fixture ended with zero rows.
 - The category-image API and image decoder tests use generated fixtures/mocked storage. No live R2 account or assets were used.
 
