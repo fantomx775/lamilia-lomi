@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   verify:
-    name: ${{ github.event.action == 'edited' && github.event.changes.base.ref.from == null && 'PR metadata' || 'Verify' }}
+    name: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && 'Draft PR' || github.event.action == 'edited' && github.event.changes.base.ref.from == null && 'PR metadata' || 'Verify' }}
     if: >-
       github.event_name != 'pull_request' ||
       (github.event.pull_request.draft == false &&
