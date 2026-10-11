@@ -19,7 +19,7 @@ function redactFreeTextUrls(value) {
   // Strip query and fragment tails, including wrapped values and line
   // continuations, while leaving ordinary multiline prose intact.
   return value.replace(
-    /(?:https?:\/\/|\/)[^\s<>`?#]*(?:[?#][^\s]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\s=?&#]+=[^\s]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#]+=[^\s]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\s]*)*/gi,
+    /(?:https?:\/\/|\/)[^\s<>`?#]*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
     (urlOrPath) => {
       const queryOrFragment = urlOrPath.search(/[?#]/);
       const continuedParameter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*&/);

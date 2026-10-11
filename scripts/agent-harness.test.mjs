@@ -2199,12 +2199,16 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const fragmentDelimiterBeforeKey = "https://production.example.test/catalog#\naccess_token=bare-fragment-secret\n&continuation=bare-fragment-continuation-marker";
   const bracketWrappedValue = "https://production.example.test/catalog?token=<bracket-marker>";
   const backtickWrappedValue = "https://production.example.test/catalog?token=`backtick-marker`";
+  const bracketWrappedSpacedValue = "https://production.example.test/catalog?token=<very secret>";
+  const backtickWrappedSpacedValue = "https://production.example.test/catalog?token=`very secret`";
+  const doubleQuoteWrappedSpacedValue = 'https://production.example.test/catalog?token="very secret"';
+  const spacedContinuation = "https://production.example.test/catalog\n?token=<continuation secret>\n&continuation=second secret";
   const lineSeparatorQuery = "https://production.example.test/catalog\u2028?token=line-separator-marker\u2028&continuation=line-separator-continuation";
   const paragraphSeparatorQuery = "https://production.example.test/catalog\u2029?token=paragraph-separator-marker\u2029&continuation=paragraph-separator-continuation";
   const plan = {
     status: "PASS",
     flows: [{
-      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note\nFragment ${fragmentContinuation}\nKeep this fragment note\nBare fragment ${fragmentDelimiterBeforeKey}\nKeep this bare-fragment note\nBracket ${bracketWrappedValue}\nKeep this bracket note\nBacktick ${backtickWrappedValue}\nKeep this backtick note\nLine separator ${lineSeparatorQuery}\u2028Keep this line-separator note\nParagraph separator ${paragraphSeparatorQuery}\u2029Keep this paragraph-separator note`,
+      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note\nFragment ${fragmentContinuation}\nKeep this fragment note\nBare fragment ${fragmentDelimiterBeforeKey}\nKeep this bare-fragment note\nBracket ${bracketWrappedValue}\nKeep this bracket note\nBacktick ${backtickWrappedValue}\nKeep this backtick note\nBracket with spaces ${bracketWrappedSpacedValue}\nKeep this bracket-space note\nBacktick with spaces ${backtickWrappedSpacedValue}\nKeep this backtick-space note\nDouble-quoted with spaces ${doubleQuoteWrappedSpacedValue}\nKeep this double-quote-space note\nSpaced continuation ${spacedContinuation}\nKeep this continuation-space note\nLine separator ${lineSeparatorQuery}\u2028Keep this line-separator note\nParagraph separator ${paragraphSeparatorQuery}\u2029Keep this paragraph-separator note`,
       affectedFiles: [filename],
       paths: [{
         path: "/catalog",
@@ -2219,7 +2223,7 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
 
   assert.equal(checkedPlan.status, "PASS");
-  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note\nFragment https://production.example.test/catalog\nKeep this fragment note\nBare fragment https://production.example.test/catalog\nKeep this bare-fragment note\nBracket https://production.example.test/catalog\nKeep this bracket note\nBacktick https://production.example.test/catalog\nKeep this backtick note\nLine separator https://production.example.test/catalog\u2028Keep this line-separator note\nParagraph separator https://production.example.test/catalog\u2029Keep this paragraph-separator note";
+  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note\nFragment https://production.example.test/catalog\nKeep this fragment note\nBare fragment https://production.example.test/catalog\nKeep this bare-fragment note\nBracket https://production.example.test/catalog\nKeep this bracket note\nBacktick https://production.example.test/catalog\nKeep this backtick note\nBracket with spaces https://production.example.test/catalog\nKeep this bracket-space note\nBacktick with spaces https://production.example.test/catalog\nKeep this backtick-space note\nDouble-quoted with spaces https://production.example.test/catalog\nKeep this double-quote-space note\nSpaced continuation https://production.example.test/catalog\nKeep this continuation-space note\nLine separator https://production.example.test/catalog\u2028Keep this line-separator note\nParagraph separator https://production.example.test/catalog\u2029Keep this paragraph-separator note";
   const safeExpectedText = "Catalog heading at https://production.example.test/catalog\nKeep this expected-text note";
   assert.equal(localVerification.record.productionSmokePlan.flows[0].name, safeFlowName);
   assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].expectedText, safeExpectedText);
@@ -2231,6 +2235,11 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   assert.equal(persistedOutput.includes("bare-fragment-secret"), false);
   assert.equal(persistedOutput.includes("bracket-marker"), false);
   assert.equal(persistedOutput.includes("backtick-marker"), false);
+  assert.equal(persistedOutput.includes("very secret"), false);
+  assert.equal(persistedOutput.includes("secret>"), false);
+  assert.equal(persistedOutput.includes("secret`"), false);
+  assert.equal(persistedOutput.includes("continuation secret"), false);
+  assert.equal(persistedOutput.includes("second secret"), false);
   assert.equal(persistedOutput.includes("line-separator-marker"), false);
   assert.equal(persistedOutput.includes("line-separator-continuation"), false);
   assert.equal(persistedOutput.includes("paragraph-separator-marker"), false);
@@ -2243,6 +2252,10 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   assert.ok(persistedOutput.includes("Keep this bare-fragment note"));
   assert.ok(persistedOutput.includes("Keep this bracket note"));
   assert.ok(persistedOutput.includes("Keep this backtick note"));
+  assert.ok(persistedOutput.includes("Keep this bracket-space note"));
+  assert.ok(persistedOutput.includes("Keep this backtick-space note"));
+  assert.ok(persistedOutput.includes("Keep this double-quote-space note"));
+  assert.ok(persistedOutput.includes("Keep this continuation-space note"));
   assert.ok(persistedOutput.includes("Keep this line-separator note"));
   assert.ok(persistedOutput.includes("Keep this paragraph-separator note"));
   assert.ok(persistedOutput.includes("Keep this expected-text note"));
