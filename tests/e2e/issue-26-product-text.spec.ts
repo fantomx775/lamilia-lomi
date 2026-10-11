@@ -158,6 +158,9 @@ test("product text fields count, warn, survive failed saves, and persist on crea
       (document.activeElement as HTMLElement | null)?.blur();
       window.scrollTo({ top: 0, behavior: "instant" });
     });
+    await page.getByLabel("Krótki opis").evaluate((element: HTMLTextAreaElement) => {
+      element.scrollTop = 0;
+    });
     await expect(page.locator("#product-title-counter")).toHaveText("125 / 140 znaków");
     await expect(page.locator("#product-short-description-counter")).toHaveText("285 / 300 znaków");
     await expect(page.getByText("Zbliżasz się do limitu. Pozostało 15 znaków.")).toHaveCount(2);
