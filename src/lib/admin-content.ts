@@ -19,6 +19,7 @@ import { mediaBucketForKind, validateMediaFile } from "./media-upload";
 import { ADMIN_ERROR_CODES, type AdminErrorCode, type AdminMutationResult } from "./admin-errors";
 import { normalizePremiumCode, validatePremiumCodeEntries } from "./premium-code";
 import { sanitizeRichTextValue } from "./rich-text";
+import { validateProductTextLengths } from "./product-text";
 import { slugify } from "./utils";
 
 export function buildProductFromFormData(
@@ -678,6 +679,8 @@ function validateProductDraft(product: Product, snapshot: ContentSnapshot) {
   if (!english?.title) {
     errors.push(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED);
   }
+
+  errors.push(...validateProductTextLengths(english?.title ?? "", english?.shortDescription ?? ""));
 
   if (product.status === "published") {
     if (!validateProductForPublish(product).ok) {
