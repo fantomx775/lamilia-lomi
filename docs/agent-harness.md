@@ -398,6 +398,11 @@ target/log URLs and recover through the ordinary implementation, test,
 independent-review, and merge path. Never use a manual Vercel production deploy
 as a substitute for Git integration.
 
+Next metadata route files have explicit smoke mappings: `src/app/robots.ts`
+maps to `/robots.txt`, and `src/app/sitemap.ts` maps to `/sitemap.xml`. Smoke
+plans must check those endpoints and expected response text; they are not page
+routes.
+
 The deployment gate requires a Vercel Git integration deployment and success
 status for the exact merge SHA, and checks that the environment URL belongs to
 the `lamilia-lomi` Production project. A matching GitHub `Production` label

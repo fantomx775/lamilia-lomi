@@ -1279,6 +1279,11 @@ function isSupportedProductionSmokeStatus(status, path) {
 
 function routePatternForFile(filename) {
   const normalized = filename.replace(/^src\//, "");
+  const metadataMatch = normalized.match(/^app\/(robots|sitemap)\.[^/]+$/i);
+  if (metadataMatch) {
+    const route = metadataMatch[1].toLowerCase() === "robots" ? "robots\\.txt" : "sitemap\\.xml";
+    return new RegExp("^/" + route + "/?$");
+  }
   const appMatch = normalized.match(/^app\/(?:(.*)\/)?(?:page|route)\.[^/]+$/i);
   const pagesMatch = normalized.match(/^pages\/(.+)\.[^/]+$/i);
   if (!appMatch && !pagesMatch) return null;

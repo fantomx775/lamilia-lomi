@@ -2055,6 +2055,35 @@ test("production smoke plans bind changed route files to valid paths and expecte
   }).status, "PASS");
 });
 
+test("production smoke plans map Next metadata route files to their public endpoints", () => {
+  const cases = [
+    { filename: "src/app/robots.ts", path: "/robots.txt", expectedText: "User-agent:" },
+    { filename: "src/app/sitemap.ts", path: "/sitemap.xml", expectedText: "<urlset" },
+  ];
+
+  for (const { filename, path, expectedText } of cases) {
+    const smokePlan = {
+      status: "PASS",
+      flows: [{
+        name: `Next metadata endpoint ${path}`,
+        affectedFiles: [filename],
+        paths: [{ path, expectedText }],
+      }],
+    };
+    assert.equal(validateProductionSmokePlan({
+      files: [filename],
+      localVerification: { record: { productionSmokePlan: smokePlan } },
+    }).status, "PASS", filename);
+
+    const wrongRoute = structuredClone(smokePlan);
+    wrongRoute.flows[0].paths[0].path = "/en";
+    assert.equal(validateProductionSmokePlan({
+      files: [filename],
+      localVerification: { record: { productionSmokePlan: wrongRoute } },
+    }).status, "BLOCKED", filename);
+  }
+});
+
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
   const evidenceComments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
