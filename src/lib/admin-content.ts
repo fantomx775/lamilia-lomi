@@ -642,16 +642,32 @@ function parsePremiumCodes(
   const codes = formData.getAll("premiumCode");
   const activeIds = new Set(existingIds(formData, "premiumCodeActive"));
   const existingById = new Map(existing?.premiumCodes.map((code) => [code.id, code]));
+  const submittedIds = new Set(
+    ids.filter((value): value is string => typeof value === "string" && Boolean(value.trim())),
+  );
+  const errors: AdminErrorCode[] = [];
   const rowCount = Math.max(ids.length, codes.length);
   const rows = Array.from({ length: rowCount }, (_, index) => {
     const existingId = valueAt(ids, index);
     const existingCode = existingId ? existingById.get(existingId) : undefined;
 
     if (existingId && removed.has(existingId)) {
+      if (existingCode?.redeemedAt) {
+        errors.push(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+        return { ...existingCode, active: activeIds.has(existingId) };
+      }
       return null;
     }
 
     const id = existingId || randomUUID();
+    if (existingCode?.redeemedAt) {
+      const submittedCode = normalizePremiumCode(valueAt(codes, index));
+      if (submittedCode !== normalizePremiumCode(existingCode.code)) {
+        errors.push(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+      }
+
+      return { ...existingCode, active: activeIds.has(id) };
+    }
 
     return {
       id,
@@ -661,11 +677,18 @@ function parsePremiumCodes(
     };
   }).filter((code): code is Product["premiumCodes"][number] => Boolean(code));
 
+  for (const redeemedCode of existing?.premiumCodes ?? []) {
+    if (redeemedCode.redeemedAt && !submittedIds.has(redeemedCode.id)) {
+      errors.push(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+      rows.push(redeemedCode);
+    }
+  }
+
   const validation = validatePremiumCodeEntries(rows);
 
   return {
     codes: rows.filter((row) => row.code),
-    errors: validation.map((issue) => {
+    errors: Array.from(new Set([...errors, ...validation.map((issue) => {
       if (issue.reason === "required") {
         return ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED;
       }
@@ -675,7 +698,7 @@ function parsePremiumCodes(
       }
 
       return ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE;
-    }),
+    })])),
   };
 }
 

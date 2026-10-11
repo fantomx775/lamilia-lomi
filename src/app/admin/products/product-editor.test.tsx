@@ -195,6 +195,33 @@ describe("ProductEditor V2", () => {
     expect(view.getByLabelText("Aktywny")).toBeChecked();
   });
 
+  it("shows premium code status and locks a redeemed code identity", () => {
+    const redeemedProduct: Product = {
+      ...product,
+      premiumCodes: product.premiumCodes.map((code, index) => index === 0
+        ? { ...code, redeemedAt: "2026-10-10T12:00:00.000Z", redeemedBy: "user-id" }
+        : code),
+    };
+    const view = render(
+      <ProductEditor
+        title="Edycja produktu"
+        product={redeemedProduct}
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+      />,
+    );
+
+    const codeInput = view.getByLabelText("Kod");
+    const codeRow = codeInput.closest("div.rounded-lg");
+
+    expect(view.getByText("Wykorzystany")).toBeInTheDocument();
+    expect(codeInput).toHaveAttribute("readOnly");
+    fireEvent.change(codeInput, { target: { value: "CHANGED-CODE" } });
+    expect(codeInput).toHaveValue(redeemedProduct.premiumCodes[0].code);
+    expect(codeRow?.querySelector('input[type="checkbox"]')).toBeEnabled();
+    expect(codeRow?.querySelector("button")).toBeDisabled();
+  });
+
   it("adds each available Amazon market once and then disables the add button", async () => {
     const user = userEvent.setup();
     const view = render(

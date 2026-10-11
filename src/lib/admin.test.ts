@@ -272,6 +272,66 @@ describe("admin behavior", () => {
     expect(result.errors).toContain(ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING);
   });
 
+  it("preserves redeemed code identity and redemption metadata during product edits", () => {
+    const snapshot = getSeedContentSnapshot();
+    const source = snapshot.products[0];
+    const redeemedCode = {
+      id: "redeemed-premium-code",
+      productId: source.id,
+      code: "LOMI-REDEEMED-2026",
+      active: true,
+      redeemedAt: "2026-10-10T12:00:00.000Z",
+      redeemedBy: "user-id",
+    };
+    const existing = { ...source, premiumCodes: [redeemedCode] };
+
+    const editForm = new FormData();
+    editForm.set("premiumCodeId", redeemedCode.id);
+    editForm.set("premiumCode", "LOMI-CHANGED-2026");
+    editForm.set("premiumCodeActive", redeemedCode.id);
+    const edited = buildProductFromFormData(editForm, { existing, snapshot });
+
+    expect(edited.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+    expect(edited.product.premiumCodes).toEqual([redeemedCode]);
+
+    const removeForm = new FormData();
+    removeForm.set("premiumCodeId", redeemedCode.id);
+    removeForm.set("premiumCode", redeemedCode.code);
+    removeForm.set("premiumCodeRemove", redeemedCode.id);
+    const removed = buildProductFromFormData(removeForm, { existing, snapshot });
+
+    expect(removed.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+    expect(removed.product.premiumCodes).toEqual([{ ...redeemedCode, active: false }]);
+
+    const omitted = buildProductFromFormData(new FormData(), { existing, snapshot });
+    expect(omitted.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+    expect(omitted.product.premiumCodes).toEqual([redeemedCode]);
+  });
+
+  it("allows disabling a redeemed code without changing its owner or timestamp", () => {
+    const snapshot = getSeedContentSnapshot();
+    const source = snapshot.products[0];
+    const redeemedCode = {
+      id: "redeemed-premium-code",
+      productId: source.id,
+      code: "LOMI-REDEEMED-2026",
+      active: true,
+      redeemedAt: "2026-10-10T12:00:00.000Z",
+      redeemedBy: "user-id",
+    };
+    const form = new FormData();
+    form.set("premiumCodeId", redeemedCode.id);
+    form.set("premiumCode", redeemedCode.code);
+
+    const result = buildProductFromFormData(form, {
+      existing: { ...source, premiumCodes: [redeemedCode] },
+      snapshot,
+    });
+
+    expect(result.errors).not.toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+    expect(result.product.premiumCodes).toEqual([{ ...redeemedCode, active: false }]);
+  });
+
   it("updates one product language while preserving other content, assets, markets, and codes", () => {
     const snapshot = getSeedContentSnapshot();
     const existing = snapshot.products[0];

@@ -425,11 +425,15 @@ function mapAmazonLink(row: DbRow): AmazonLink {
 }
 
 function mapPremiumCode(row: DbRow): PremiumCode {
+  const redeemedAt = stringValue(row.redeemed_at);
+  const redeemedBy = stringValue(row.redeemed_by);
   return {
     id: stringValue(row.id),
     productId: stringValue(row.product_id),
     code: stringValue(row.code),
     active: Boolean(row.active),
+    ...(redeemedAt ? { redeemedAt } : {}),
+    ...(redeemedBy ? { redeemedBy } : {}),
   };
 }
 

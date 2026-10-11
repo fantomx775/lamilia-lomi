@@ -51,4 +51,24 @@ describe("QR unlock origin", () => {
     );
     expect(response.headers.get("location")).not.toContain("evil.example");
   });
+
+  it("stores a scanned code in the intent and redirects to a URL without the code", async () => {
+    const response = await GET(
+      new Request(
+        "https://edge.example/api/unlock/en/moon-garden-coloring-book?code=LOMI-BOOK-2026",
+      ),
+      { params: Promise.resolve({ locale: "en", slug: "moon-garden-coloring-book" }) },
+    );
+
+    expect(mocks.setUnlockIntent).toHaveBeenCalledWith({
+      locale: "en",
+      productSlug: "moon-garden-coloring-book",
+      returnTo: "/en/products/moon-garden-coloring-book",
+      code: "LOMI-BOOK-2026",
+    });
+    expect(response.headers.get("location")).toBe(
+      "https://canonical.lamilialomi.example/en/products/moon-garden-coloring-book#premium",
+    );
+    expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
+  });
 });

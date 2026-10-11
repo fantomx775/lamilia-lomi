@@ -9,6 +9,9 @@ const productSlug = "moon-garden-coloring-book";
 const productId = "11111111-1111-4111-8111-111111111111";
 const premiumAssetId = "11111111-1111-4111-8111-111111111105";
 const appLogPath = process.env.ISSUE_30_APP_LOG_PATH;
+const appPort = Number(process.env.ISSUE_30_APP_PORT ?? 3030);
+const supabasePort = Number(process.env.ISSUE_30_SUPABASE_PORT ?? 56321);
+const mailpitPort = Number(process.env.ISSUE_30_MAILPIT_PORT ?? 56324);
 const evidenceFolder = path.resolve(
   process.cwd(),
   "docs",
@@ -36,17 +39,17 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
     );
 
     const mailpitUrl = requireLoopbackUrl(
-      process.env.ISSUE_30_MAILPIT_URL ?? "http://127.0.0.1:56324",
-      56324,
+      process.env.ISSUE_30_MAILPIT_URL ?? `http://127.0.0.1:${mailpitPort}`,
+      mailpitPort,
       "Mailpit",
     );
-    const appUrl = requireLoopbackUrl(process.env.PLAYWRIGHT_BASE_URL, 3030, "application");
+    const appUrl = requireLoopbackUrl(process.env.PLAYWRIGHT_BASE_URL, appPort, "application");
     const supabaseUrl = requireLoopbackUrl(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      56321,
+      supabasePort,
       "Supabase",
     );
-    const localMailpitUrl = requireLoopbackUrl(mailpitUrl.href, 56324, "Mailpit");
+    const localMailpitUrl = requireLoopbackUrl(mailpitUrl.href, mailpitPort, "Mailpit");
     if (process.env.LAMILIA_BACKEND !== "supabase") {
       throw new Error("The app must be explicitly configured for Supabase mode.");
     }
@@ -80,7 +83,13 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
     let fixtureObjectPath: string | undefined;
     let cleanupSucceeded = true;
     let applicationLogWasSafe: boolean | undefined;
-    let premiumCode = "";
+    const premiumCode = `ISSUE31-${randomBytes(16).toString("hex").toUpperCase()}`;
+    const userTwoPremiumCode = `ISSUE31-${randomBytes(16).toString("hex").toUpperCase()}`;
+    const userThreePremiumCode = `ISSUE31-${randomBytes(16).toString("hex").toUpperCase()}`;
+    const codeIds: string[] = [];
+    sensitiveValues.add(premiumCode);
+    sensitiveValues.add(userTwoPremiumCode);
+    sensitiveValues.add(userThreePremiumCode);
 
     const createContext = async () => {
       const context = await browser.newContext({
@@ -92,18 +101,15 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
     };
 
     try {
-      const codeResult = await admin
-        .from("premium_codes")
-        .select("code")
-        .eq("product_id", productId)
-        .eq("active", true)
-        .limit(1)
-        .maybeSingle();
-      if (codeResult.error || !codeResult.data?.code) {
-        throw new Error("The seeded local premium code fixture could not be read.");
+      const codeRows = [premiumCode, userTwoPremiumCode, userThreePremiumCode].map((code) => {
+        const id = randomUUID();
+        codeIds.push(id);
+        return { id, product_id: productId, code, active: true };
+      });
+      const codeInsert = await admin.from("premium_codes").insert(codeRows);
+      if (codeInsert.error) {
+        throw new Error("The isolated premium code fixtures could not be created.");
       }
-      premiumCode = codeResult.data.code;
-      sensitiveValues.add(premiumCode);
 
       const assetResult = await admin
         .from("product_assets")
@@ -217,7 +223,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       crossDevicePage.on("response", (response) => {
         try {
           const responseUrl = new URL(response.url());
-          if (["3030", "56321"].includes(responseUrl.port)) {
+          if ([String(appPort), String(supabasePort)].includes(responseUrl.port)) {
             authNavigationResponses.push(
               `${responseUrl.hostname}:${responseUrl.port}${responseUrl.pathname} ${response.status()}`,
             );
@@ -318,7 +324,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       const registrationTwoPage = await registrationTwoContext.newPage();
       await registrationTwoPage.goto(`/en/products/${productSlug}#premium`);
       const secondGuestUnlock = registrationTwoPage.getByTestId("product-unlock-section");
-      await secondGuestUnlock.getByLabel("Premium code").fill(premiumCode);
+      await secondGuestUnlock.getByLabel("Premium code").fill(userTwoPremiumCode);
       await secondGuestUnlock
         .getByRole("button", { name: "Create account", exact: true })
         .click();
@@ -362,6 +368,18 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       await loginPage.getByRole("button", { name: "Continue", exact: true }).click();
       await waitForLocation(loginPage, {
         pathname: `/en/products/${productSlug}`,
+        query: { unlock: "already_used" },
+        hash: "#premium",
+      });
+      completed.usedCodeRejectedForSecondAccount = !(await hasUnlock(admin, userTwo.email));
+      expect(completed.usedCodeRejectedForSecondAccount).toBe(true);
+      await expect(loginPage.getByTestId("unlock-code-state")).toBeVisible();
+      await loginUnlock.getByLabel("Premium code").fill(userTwoPremiumCode);
+      await loginUnlock
+        .getByRole("button", { name: "Unlock premium content", exact: true })
+        .click();
+      await waitForLocation(loginPage, {
+        pathname: `/en/products/${productSlug}`,
         query: { unlocked: "1" },
         hash: "#premium",
       });
@@ -393,7 +411,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       const registrationThreePage = await registrationThreeContext.newPage();
       await registrationThreePage.goto(`/en/products/${productSlug}#premium`);
       const thirdGuestUnlock = registrationThreePage.getByTestId("product-unlock-section");
-      await thirdGuestUnlock.getByLabel("Premium code").fill(premiumCode);
+      await thirdGuestUnlock.getByLabel("Premium code").fill(userThreePremiumCode);
       await thirdGuestUnlock
         .getByRole("button", { name: "Create account", exact: true })
         .click();
@@ -422,6 +440,27 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       expect(completed.tamperedResumeConfirmedAccount).toBe(true);
       completed.tamperedResumeDidNotUnlock = !(await hasUnlock(admin, userThree.email));
       expect(completed.tamperedResumeDidNotUnlock).toBe(true);
+
+      const secondAccountContext = await createContext();
+      const secondAccountPage = await secondAccountContext.newPage();
+      await secondAccountPage.goto("/en/login");
+      await secondAccountPage.getByLabel("Email").fill(userThree.email);
+      await secondAccountPage.getByLabel("Password").fill(userThree.password);
+      await secondAccountPage.getByRole("button", { name: "Continue", exact: true }).click();
+      await waitForLocation(secondAccountPage, { pathname: "/en/library" });
+      await secondAccountPage.goto(`/en/products/${productSlug}#premium`);
+      const secondAccountUnlock = secondAccountPage.getByTestId("product-unlock-section");
+      await secondAccountUnlock.getByLabel("Premium code").fill(premiumCode);
+      await secondAccountUnlock
+        .getByRole("button", { name: "Unlock premium content", exact: true })
+        .click();
+      await waitForLocation(secondAccountPage, {
+        pathname: `/en/products/${productSlug}`,
+        query: { unlock: "already_used" },
+        hash: "#premium",
+      });
+      completed.usedCodeRejectedForThirdAccount = !(await hasUnlock(admin, userThree.email));
+      expect(completed.usedCodeRejectedForThirdAccount).toBe(true);
 
       // A tampered OTP from a real email is rejected by local GoTrue and cannot log in.
       const invalidLink = mutateConfirmationToken(userOneLink.href);
@@ -505,7 +544,8 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         query: { error: "verification_failed" },
       });
       completed.externalCallbackReturnSanitized = await redirectPage.evaluate(
-        () => window.location.origin === "https://127.0.0.1:3030",
+        (expectedOrigin) => window.location.origin === expectedOrigin,
+        appUrl.origin,
       );
       expect(completed.externalCallbackReturnSanitized).toBe(true);
 
@@ -557,6 +597,11 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
             cleanupSucceeded = cleanupSucceeded && !deleteResult.error;
           }
         }
+      }
+
+      if (codeIds.length) {
+        const codeDelete = await admin.from("premium_codes").delete().in("id", codeIds);
+        cleanupSucceeded = cleanupSucceeded && !codeDelete.error;
       }
 
       await mkdir(evidenceFolder, { recursive: true });
@@ -619,6 +664,10 @@ function ageLocalSignupConfirmation(userId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(userId)) {
     throw new Error("The synthetic Auth user ID was invalid for the local expiry check.");
   }
+  const projectId = process.env.ISSUE_30_SUPABASE_PROJECT_ID;
+  if (!projectId || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(projectId)) {
+    throw new Error("The isolated local Supabase project ID is required for the expiry check.");
+  }
 
   const query = `
     with updated as (
@@ -635,29 +684,30 @@ function ageLocalSignupConfirmation(userId: string) {
   try {
     const isWindows = process.platform === "win32";
     result = execFileSync(
-      isWindows ? "powershell.exe" : "supabase",
-      isWindows
-        ? [
-            "-NoLogo",
-            "-NoProfile",
-            "-Command",
-            "supabase db query --local --output-format json $env:ISSUE_30_CONFIRMATION_AGE_SQL",
-          ]
-        : ["db", "query", "--local", "--output-format", "json", query],
+      isWindows ? "docker.exe" : "docker",
+      [
+        "exec",
+        `supabase_db_${projectId}`,
+        "psql",
+        "-U",
+        "supabase_admin",
+        "-d",
+        "postgres",
+        "-Atc",
+        query,
+      ],
       {
-        cwd: process.cwd(),
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 30_000,
         windowsHide: true,
-        env: { ...process.env, ISSUE_30_CONFIRMATION_AGE_SQL: query },
       },
     );
   } catch {
     throw new Error("Could not age the synthetic confirmation in the local Supabase database.");
   }
 
-  if (!/"updated_count"\s*:\s*"?1"?/.test(result)) {
+  if (result.trim() !== "1") {
     throw new Error("The local Supabase expiry fixture did not update exactly one pending account.");
   }
 }
@@ -768,7 +818,7 @@ async function readConfirmationLink(email: string, mailpitUrl: URL) {
       const url = new URL(href);
       if (
         url.hostname === "127.0.0.1" &&
-        url.port === "3030" &&
+        url.port === String(appPort) &&
         url.pathname === "/auth/callback" &&
         url.searchParams.get("type") === "email" &&
         url.searchParams.has("token_hash")

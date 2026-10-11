@@ -180,6 +180,25 @@ describe("authorizePremiumDownloadForRequest", () => {
     });
   });
 
+  it("maps an already-used premium code to a recoverable domain result", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: { status: "already_used" },
+      error: null,
+    });
+    mocks.getSupabaseAuthContext.mockResolvedValue({
+      supabase: { rpc },
+      user: { id: "user-1", email_confirmed_at: "2026-09-08T00:00:00.000Z" },
+    });
+
+    await expect(
+      redeemPremiumCodeForRequest({
+        productSlug: "moon-garden-coloring-book",
+        productId: "product-1",
+        code: "LOMI-BOOK-2026",
+      }),
+    ).resolves.toEqual({ ok: false, status: "already_used" });
+  });
+
   it.each([
     {
       label: "an unexpected bucket",

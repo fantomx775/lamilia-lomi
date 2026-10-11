@@ -29,6 +29,7 @@ export type PremiumRedemptionResult =
         | "email_unverified"
         | "invalid_code"
         | "inactive_code"
+        | "already_used"
         | "wrong_product"
         | "product_not_found";
     };
@@ -278,6 +279,7 @@ function mapPremiumRedemptionResult(
     status === "email_unverified" ||
     status === "invalid_code" ||
     status === "inactive_code" ||
+    status === "already_used" ||
     status === "wrong_product" ||
     status === "product_not_found"
   ) {

@@ -1425,6 +1425,7 @@ describe("registration auth action", () => {
 
   it.each([
     ["already_unlocked", "/en/products/moon-garden-coloring-book?unlocked=already#premium"],
+    ["already_used", "/en/products/moon-garden-coloring-book?unlock=already_used#premium"],
     ["email_unverified", "/en/products/moon-garden-coloring-book?step=verify#premium"],
     ["invalid_code", "/en/products/moon-garden-coloring-book?unlock=invalid_code#premium"],
   ] as const)("maps active-session unlock signup result %s safely", async (status, location) => {
@@ -1461,6 +1462,7 @@ describe("premium unlock action", () => {
   it.each([
     ["throws", null, "/en/products/moon-garden-coloring-book?unlock=unexpected#premium"],
     ["returns invalid_code", "invalid_code", "/en/products/moon-garden-coloring-book?unlock=invalid_code#premium"],
+    ["returns already_used", "already_used", "/en/products/moon-garden-coloring-book?unlock=already_used#premium"],
     ["returns email_unverified", "email_unverified", "/en/products/moon-garden-coloring-book?step=verify#premium"],
     ["returns auth_required", "auth_required", "/en/login?returnTo=%2Fen%2Fproducts%2Fmoon-garden-coloring-book"],
   ] as const)(
@@ -1663,6 +1665,7 @@ describe("premium unlock action", () => {
     ["success", { ok: true, status: "success" }, true, "/en/products/moon-garden-coloring-book?unlocked=1#premium"],
     ["already_unlocked", { ok: true, status: "already_unlocked" }, true, "/en/products/moon-garden-coloring-book?unlocked=already#premium"],
     ["invalid_code", { ok: false, status: "invalid_code" }, true, "/en/products/moon-garden-coloring-book?unlock=invalid_code#premium"],
+    ["already_used", { ok: false, status: "already_used" }, true, "/en/products/moon-garden-coloring-book?unlock=already_used#premium"],
     ["email_unverified", { ok: false, status: "email_unverified" }, true, "/en/products/moon-garden-coloring-book?step=verify#premium"],
     ["session_email_unverified", null, false, "/en/products/moon-garden-coloring-book?step=verify#premium"],
   ] as const)("keeps the premium section visible after %s", async (name, redemption, emailVerified, location) => {
