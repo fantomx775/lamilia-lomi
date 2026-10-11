@@ -150,11 +150,13 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     expect((await termsSaveResponse).status()).toBe(200);
     await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
     await termsTitle.fill(originalTermsTitle);
-    const unsavedNavigation = page.waitForEvent("dialog");
+    const unsavedNavigationMessage = page.waitForEvent("dialog").then(async (dialog) => {
+      const message = dialog.message();
+      await dialog.dismiss();
+      return message;
+    });
     await page.locator("#page-editor-form").getByRole("link", { name: "Strony" }).click();
-    const navigationDialog = await unsavedNavigation;
-    expect(navigationDialog.message()).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
-    await navigationDialog.dismiss();
+    expect(await unsavedNavigationMessage).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
     await page.reload();
     await expect(page.locator('#page-editor-form input[name="body"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/terms");
