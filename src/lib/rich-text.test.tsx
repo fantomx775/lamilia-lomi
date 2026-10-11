@@ -76,6 +76,24 @@ describe("rich text serialization and rendering", () => {
     expect(parsed).toMatchObject({ kind: "rich" });
   });
 
+  it("preserves underline, blockquotes, and horizontal rules in the v1 document", () => {
+    const value = serializeRichTextDocument({
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Underlined", marks: [{ type: "underline" }] }] },
+        { type: "blockquote", content: [{ type: "paragraph", content: [{ type: "text", text: "Quoted" }] }] },
+        { type: "horizontalRule" },
+      ],
+    });
+    const rendered = renderToStaticMarkup(<RichTextContent value={value} />);
+
+    expect(parseRichTextValue(value)).toMatchObject({ kind: "rich" });
+    expect(rendered).toContain("<u>Underlined</u>");
+    expect(rendered).toContain("<blockquote");
+    expect(rendered).toContain("Quoted");
+    expect(rendered).toContain("<hr");
+  });
+
   it("keeps legacy plain text readable and displays HTML-looking text as text", () => {
     const legacy = "First paragraph.\nStill the first paragraph.\n\nSecond paragraph with <script>alert(1)</script>.";
     const rendered = renderToStaticMarkup(<RichTextContent value={legacy} />);

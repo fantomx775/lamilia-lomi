@@ -5,6 +5,7 @@ export const RICH_TEXT_FORMAT_PREFIX = "lamilia-rich-text:v1:";
 export type RichTextMark =
   | { type: "bold" }
   | { type: "italic" }
+  | { type: "underline" }
   | { type: "link"; attrs: { href: string } };
 
 export type RichTextNode = {
@@ -28,6 +29,7 @@ const MARK_ORDER: Record<RichTextMark["type"], number> = {
   link: 0,
   bold: 1,
   italic: 2,
+  underline: 3,
 };
 
 const MAX_DOCUMENT_DEPTH = 32;
@@ -104,6 +106,7 @@ export function sanitizeRichTextDocument(value: unknown): RichTextDocument | nul
     }
 
     if (node.type === "hardBreak") return { type: "hardBreak" };
+    if (node.type === "horizontalRule") return { type: "horizontalRule" };
 
     if (node.type === "paragraph") {
       return { type: "paragraph", content: sanitizeInlineContent(node.content, depth + 1) };
@@ -139,6 +142,18 @@ export function sanitizeRichTextDocument(value: unknown): RichTextDocument | nul
       return content.length ? { type: "listItem", content } : null;
     }
 
+    if (node.type === "blockquote") {
+      const content = Array.isArray(node.content)
+        ? node.content.flatMap((child) => {
+            const safeChild = sanitizeNode(child, depth + 1);
+            return safeChild && ["paragraph", "heading", "bulletList", "orderedList", "blockquote"].includes(safeChild.type)
+              ? [safeChild]
+              : [];
+          })
+        : [];
+      return { type: "blockquote", content };
+    }
+
     // Unsupported nodes such as images, code blocks, and arbitrary HTML are dropped.
     return null;
   };
@@ -154,7 +169,7 @@ export function sanitizeRichTextDocument(value: unknown): RichTextDocument | nul
   const content = Array.isArray(value.content)
     ? value.content.flatMap((node) => {
         const safeNode = sanitizeNode(node, 1);
-        return safeNode && ["paragraph", "heading", "bulletList", "orderedList"].includes(safeNode.type)
+        return safeNode && ["paragraph", "heading", "bulletList", "orderedList", "blockquote", "horizontalRule"].includes(safeNode.type)
           ? [safeNode]
           : [];
       })
@@ -206,6 +221,8 @@ function sanitizeMarks(value: unknown): RichTextMark[] {
     if (!isRecord(mark)) continue;
     if (mark.type === "bold" || mark.type === "italic") {
       marks.set(mark.type, { type: mark.type });
+    } else if (mark.type === "underline") {
+      marks.set(mark.type, { type: mark.type });
     } else if (mark.type === "link" && isRecord(mark.attrs)) {
       const href = sanitizeRichTextHref(mark.attrs.href);
       if (href) marks.set("link", { type: "link", attrs: { href } });
@@ -249,6 +266,18 @@ function renderBlock(node: RichTextNode, key: string): ReactNode {
       : <ol className="list-decimal space-y-1 pl-6" key={key}>{items}</ol>;
   }
 
+  if (node.type === "blockquote") {
+    return (
+      <blockquote className="border-l-2 border-[var(--color-terracotta)] pl-4 text-[var(--color-ink)]" key={key}>
+        {node.content?.map((child, index) => renderBlock(child, key + "-quote-" + index))}
+      </blockquote>
+    );
+  }
+
+  if (node.type === "horizontalRule") {
+    return <hr className="my-6 border-[var(--color-border)]" key={key} />;
+  }
+
   if (node.type === "listItem") {
     return <li className="pl-1" key={key}>{node.content?.map((child, index) => renderBlock(child, `${key}-block-${index}`))}</li>;
   }
@@ -265,6 +294,7 @@ function renderInline(nodes: RichTextNode[] | undefined): ReactNode {
     for (const mark of node.marks ?? []) {
       if (mark.type === "bold") content = <strong>{content}</strong>;
       if (mark.type === "italic") content = <em>{content}</em>;
+      if (mark.type === "underline") content = <u>{content}</u>;
       if (mark.type === "link") {
         const href = sanitizeRichTextHref(mark.attrs.href);
         if (href) {

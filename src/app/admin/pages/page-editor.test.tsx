@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +43,59 @@ describe("PageEditor", () => {
     expect(formData.get("body")).toBe(records.find((page) => page.locale === "en")?.body);
     expect(formData.has("title_pl")).toBe(false);
     expect(formData.has("body_pl")).toBe(false);
+  });
+
+  it("keeps unsafe HTML drafts unchanged until the user accepts the supported conversion", async () => {
+    const user = userEvent.setup();
+    const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "privacy");
+    const originalBody = records.find((page) => page.locale === "en")?.body ?? "";
+    const view = render(<PageEditor slug="privacy" title="Privacy Policy" records={records} />);
+
+    await user.click(view.getByRole("button", { name: "HTML" }));
+    const source = view.getByRole("textbox", { name: "Źródło HTML" });
+    fireEvent.change(source, { target: { value: '<p onclick="alert(1)">Safe <a href="javascript:alert(2)">link</a><script>alert(3)</script></p>' } });
+    await user.click(view.getByRole("button", { name: "HTML" }));
+    expect(view.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue('<p onclick="alert(1)">Safe <a href="javascript:alert(2)">link</a><script>alert(3)</script></p>');
+    expect(view.container.querySelector<HTMLInputElement>('input[name="body"]')).toHaveValue(originalBody);
+    await user.click(view.getByRole("button", { name: "Rich Text" }));
+
+    expect(view.getByText(/Przed konwersją/)).toBeInTheDocument();
+    expect(view.container.querySelector<HTMLInputElement>('input[name="body"]')).toHaveValue(originalBody);
+    expect((view.getByRole("textbox", { name: "Źródło HTML" }) as HTMLTextAreaElement).value).toContain("javascript:");
+
+    await user.click(view.getByRole("button", { name: "Użyj obsługiwanej treści" }));
+    await waitFor(() => expect(view.container.querySelector<HTMLInputElement>('input[name="body"]')?.value.startsWith("lamilia-rich-text:v1:")).toBe(true));
+    expect(view.container.querySelector<HTMLInputElement>('input[name="body"]')?.value).not.toMatch(/javascript:|script|onclick/i);
+    expect(view.getByRole("textbox", { name: "Treść" })).toHaveTextContent("Safe link");
+  });
+
+  it("blocks saving while a source HTML draft has not been converted", async () => {
+    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "terms");
+    const view = render(<PageEditor slug="terms" title="Terms" records={records} saveAction={saveAction} />);
+
+    await user.click(view.getByRole("button", { name: "HTML" }));
+    fireEvent.change(view.getByRole("textbox", { name: "Źródło HTML" }), { target: { value: "<p>Unconverted source</p>" } });
+    await user.click(view.getAllByRole("button", { name: "Zapisz" })[0]);
+
+    expect(saveAction).not.toHaveBeenCalled();
+    expect(view.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue("<p>Unconverted source</p>");
+  });
+
+  it("warns before leaving a page with unsaved changes", async () => {
+    const user = userEvent.setup();
+    const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "terms");
+    const view = render(<PageEditor slug="terms" title="Terms" records={records} />);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const title = view.container.querySelector<HTMLInputElement>("#page-title");
+
+    await user.type(title!, " updated");
+    expect(view.getByRole("status")).toHaveTextContent("Masz niezapisane zmiany.");
+    await user.click(view.getByRole("link", { name: "Strony" }));
+    expect(confirm).toHaveBeenCalledWith("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
+    expect(view.container.querySelector("#page-title")).toBeInTheDocument();
+    confirm.mockRestore();
   });
 
 });
