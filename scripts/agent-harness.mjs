@@ -18,20 +18,25 @@ const PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN = new WeakMap();
 function redactFreeTextUrls(value) {
   // Strip query and fragment tails, including wrapped values and line
   // continuations, while leaving ordinary multiline prose intact.
-  return value.replace(
-    /(?:https?:\/\/|\/)[^\s<>`?#]*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
-    (urlOrPath) => {
-      const queryOrFragment = urlOrPath.search(/[?#]/);
-      const continuedParameter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*&/);
-      const parameterAfterDelimiter = urlOrPath.search(/[?&#](?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#]+=/);
-      const redactionStart = [queryOrFragment, continuedParameter, parameterAfterDelimiter]
-        .filter((index) => index >= 0)
-        .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
-      if (!Number.isFinite(redactionStart)) return urlOrPath;
-      const url = urlOrPath.slice(0, redactionStart);
-      return url.replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
-    },
-  );
+  return value
+    .replace(
+      /https?:\/\/[^\r\n\u2028\u2029]*?[?#][^=?&#\s\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*/gi,
+      (urlOrPath) => urlOrPath.slice(0, urlOrPath.search(/[?#]/)),
+    )
+    .replace(
+      /(?:https?:\/\/|\/)[^\s<>`?#]*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      (urlOrPath) => {
+        const queryOrFragment = urlOrPath.search(/[?#]/);
+        const continuedParameter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*&/);
+        const parameterAfterDelimiter = urlOrPath.search(/[?&#](?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#]+=/);
+        const redactionStart = [queryOrFragment, continuedParameter, parameterAfterDelimiter]
+          .filter((index) => index >= 0)
+          .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
+        if (!Number.isFinite(redactionStart)) return urlOrPath;
+        const url = urlOrPath.slice(0, redactionStart);
+        return url.replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
+      },
+    );
 }
 
 function redactStructuredPath(value) {
