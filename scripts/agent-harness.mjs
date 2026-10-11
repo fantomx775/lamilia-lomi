@@ -22,8 +22,12 @@ function redactFreeTextUrls(value) {
     /(?:https?:\/\/|\/)[^\s<>`]*(?:(?:\r\n?|\n)[ \t]*[?&][^\s<>`]*=[^\s<>`]*)*/gi,
     (urlOrPath) => {
       const queryOrFragment = urlOrPath.search(/[?#]/);
-      if (queryOrFragment < 0) return urlOrPath;
-      const url = urlOrPath.slice(0, queryOrFragment);
+      const continuedParameter = urlOrPath.search(/(?:\r\n?|\n)[ \t]*&/);
+      const redactionStart = [queryOrFragment, continuedParameter]
+        .filter((index) => index >= 0)
+        .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
+      if (!Number.isFinite(redactionStart)) return urlOrPath;
+      const url = urlOrPath.slice(0, redactionStart);
       return url.replace(/(?:\r\n?|\n)[ \t]*$/, "");
     },
   );

@@ -2193,6 +2193,7 @@ test("smoke plan validation and verify output redact query strings from persiste
 test("free-text smoke fields redact multiline URL queries and preserve ordinary multiline text", () => {
   const filename = "src/app/catalog/page.tsx";
   const multilineUrl = "https://production.example.test/catalog\n?token=secret-token\n&continuation=continuation-marker";
+  const ampersandContinuation = "https://production.example.test/catalog\n&token=secret-token\n&continuation=continuation-marker";
   const plan = {
     status: "PASS",
     flows: [{
@@ -2200,7 +2201,7 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
       affectedFiles: [filename],
       paths: [{
         path: "/catalog",
-        expectedText: `Catalog heading at ${multilineUrl}\nKeep this expected-text note`,
+        expectedText: `Catalog heading at ${ampersandContinuation}\nKeep this expected-text note`,
       }],
     }],
   };
