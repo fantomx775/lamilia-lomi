@@ -10,9 +10,10 @@ const mocks = vi.hoisted(() => ({
   getDemoSession: vi.fn(),
   removeUploadedMedia: vi.fn(),
   storeMediaFile: vi.fn(),
+  hasAdminAccess: vi.fn(() => true),
 }));
 
-vi.mock("@/lib/auth", () => ({ hasAdminAccess: vi.fn(() => true) }));
+vi.mock("@/lib/auth", () => ({ hasAdminAccess: mocks.hasAdminAccess }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
 vi.mock("@/lib/media-r2-config", () => ({ getMediaUploadProvider: mocks.getMediaUploadProvider }));
@@ -25,7 +26,7 @@ vi.mock("@/lib/media-storage", () => ({
 vi.mock("@/lib/session.server", () => ({ getDemoSession: mocks.getDemoSession }));
 vi.mock("@/lib/supabase/server", () => ({ getCurrentAccessToken: mocks.getCurrentAccessToken }));
 
-import { DELETE, POST } from "./route";
+import { DELETE, GET, POST } from "./route";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 
 const productId = "11111111-1111-4111-8111-111111111111";
@@ -44,7 +45,21 @@ beforeAll(async () => {
 describe("admin media upload setup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.hasAdminAccess.mockReturnValue(true);
     mocks.getMediaUploadProvider.mockReturnValue("supabase");
+  });
+
+  it("denies an unauthenticated GET smoke probe without entering upload handling", async () => {
+    mocks.hasAdminAccess.mockReturnValue(false);
+    mocks.getDemoSession.mockResolvedValue(null);
+
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload.errorCode).toBe(ADMIN_ERROR_CODES.AUTHORIZATION_DENIED);
+    expect(mocks.storeMediaFile).not.toHaveBeenCalled();
+    expect(mocks.createSignedMediaUpload).not.toHaveBeenCalled();
   });
 
   it("prepares a private R2 upload and a Supabase rollback mirror for cover images", async () => {

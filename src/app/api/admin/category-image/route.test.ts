@@ -15,7 +15,7 @@ vi.mock("@/lib/supabase-content-admin", () => ({
   removeCategoryImageForRequest: mocks.removeCategoryImageForRequest,
 }));
 
-import { DELETE, POST } from "./route";
+import { DELETE, GET, POST } from "./route";
 
 const categoryId = "11111111-1111-4111-8111-111111111111";
 const imageId = "22222222-2222-4222-8222-222222222222";
@@ -54,6 +54,19 @@ describe("admin category image route", () => {
       cleanupDeferred: false,
     });
     mocks.removeCategoryImageForRequest.mockResolvedValue({ ok: true, id: categoryId, cleanupDeferred: false });
+  });
+
+  it("denies an unauthenticated GET smoke probe before media handling", async () => {
+    mocks.hasAdminAccess.mockReturnValue(false);
+    mocks.getDemoSession.mockResolvedValue(null);
+
+    const response = await GET();
+    const payload = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(payload.errorCode).toBe("admin.authorization.denied");
+    expect(mocks.saveCategoryImageForRequest).not.toHaveBeenCalled();
+    expect(mocks.removeCategoryImageForRequest).not.toHaveBeenCalled();
   });
 
   it("rejects a non-square category image before storing it", async () => {

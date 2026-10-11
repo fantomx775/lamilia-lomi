@@ -385,10 +385,11 @@ and does not report delivery complete.
 
 Smoke requests use HTTPS and must return a non-empty successful response on
 the Production deployment origin. The default `/` path is a health check.
-Expected responses must be HTTP 2xx unless a path explicitly sets
-`expectedStatus` to 401 or 403 and also checks response text. This supports a
-security smoke that proves a guest is denied access to a protected endpoint;
-unexpected denials and all other non-2xx responses remain failures. If
+Expected responses must be HTTP 2xx unless an API path explicitly sets
+`expectedStatus` to 401 or 403 and also checks response text, or sets it to 404
+and checks for the expected error text. This supports guest authorization checks
+and known absent optional resources without treating an unexplained not-found as
+a pass; unexpected denials and all other non-2xx responses remain failures. If
 application-flow files change, the current-SHA `productionSmokePlan` must map
 each changed source file to its affected route and expected response content;
 the pre-merge gate blocks on a missing file, mismatched route, or absent text.

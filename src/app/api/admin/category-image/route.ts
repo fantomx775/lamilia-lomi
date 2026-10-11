@@ -9,6 +9,12 @@ import { validateMediaFile } from "@/lib/media-upload";
 import { removeCategoryImageForRequest, saveCategoryImageForRequest } from "@/lib/supabase-content-admin";
 import { getDemoSession } from "@/lib/session.server";
 
+export async function GET() {
+  const authError = await authorizeAdmin();
+  if (authError) return authError;
+  return new NextResponse(null, { status: 405 });
+}
+
 export async function POST(request: Request) {
   const authError = await authorizeAdmin();
   if (authError) return authError;
