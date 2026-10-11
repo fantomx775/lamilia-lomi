@@ -126,10 +126,11 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
         .filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id))
         .map((asset) => asset.id),
     );
+    const imageAssetIdsToValidate = new Set([...newAssetIds, ...uploadedIds]);
     const validatedImageSha256ByAssetId = await assertSupabaseUploadsExist(
-      product.assets.filter((asset) => product.status === "published" || !existing?.assets.some((previous) => previous.id === asset.id)),
+      product.assets.filter((asset) => product.status === "published" || imageAssetIdsToValidate.has(asset.id)),
       storageAuthorizationToken,
-      newAssetIds,
+      imageAssetIdsToValidate,
     );
     await finalizeR2MediaUploads(product.assets, uploadedIds, validatedImageSha256ByAssetId);
     const revokedPublicAssetIds = await revokeR2PublicAssetsBeforeMutation({
@@ -368,8 +369,13 @@ export async function saveCategoryImageForRequest(input: {
       if (backendMode === "local") {
         const result = updateCategoryImageInSnapshot(input.categoryId, image);
         if (!result.ok) {
-          await removeCategoryImageStorage({ categoryId: input.categoryId, image });
-          return result;
+          const cleanedUp = await removeCategoryImageStorage({ categoryId: input.categoryId, image });
+          return cleanedUp ? result : {
+            ...result,
+            cleanupDeferred: true,
+            id: input.categoryId,
+            cleanupImageId: image.id,
+          };
         }
       } else {
         const supabase = await createClient();

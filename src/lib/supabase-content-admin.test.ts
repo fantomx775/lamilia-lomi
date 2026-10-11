@@ -17,9 +17,11 @@ const mocks = vi.hoisted(() => ({
   storageInfo: vi.fn(),
   storageDownload: vi.fn(),
   storageRemove: vi.fn(),
+  finalizeR2MediaUploads: vi.fn(),
   storeCategoryImage: vi.fn(),
   removeCategoryImageStorage: vi.fn(),
   deleteCategory: vi.fn(),
+  updateCategoryImageInSnapshot: vi.fn(),
   categoryImageUpdates: [] as Array<{ table: string; fields: unknown }>,
   categoryImageUpdateResult: null as unknown,
 }));
@@ -38,12 +40,23 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 vi.mock("./admin-content", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./admin-content")>();
-  return { ...actual, deleteCategory: mocks.deleteCategory };
+  return {
+    ...actual,
+    deleteCategory: mocks.deleteCategory,
+    updateCategoryImageInSnapshot: (...args: Parameters<typeof actual.updateCategoryImageInSnapshot>) => {
+      const implementation = mocks.updateCategoryImageInSnapshot.getMockImplementation();
+      return implementation ? implementation(...args) : actual.updateCategoryImageInSnapshot(...args);
+    },
+  };
 });
 vi.mock("./category-image-storage", () => ({
   storeCategoryImage: mocks.storeCategoryImage,
   removeCategoryImageStorage: mocks.removeCategoryImageStorage,
 }));
+vi.mock("./media-storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./media-storage")>();
+  return { ...actual, finalizeR2MediaUploads: mocks.finalizeR2MediaUploads };
+});
 
 import {
   archiveProductForRequest,
@@ -92,6 +105,7 @@ function uploadedCoverForm(slug: string, title: string) {
 describe("Supabase content admin mutations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.updateCategoryImageInSnapshot.mockReset();
     mocks.getBackendMode.mockReturnValue("supabase");
     mocks.getCurrentAccessToken.mockResolvedValue(null);
     mocks.getAdminContentSnapshot.mockResolvedValue({
@@ -275,6 +289,46 @@ describe("Supabase content admin mutations", () => {
     });
 
     expect(mocks.removeCategoryImageStorage).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports deferred cleanup when a local category disappears and its new image cannot be removed", async () => {
+    const categoryId = "33333333-3333-4333-8333-333333333333";
+    const image = {
+      id: "55555555-5555-4555-8555-555555555555",
+      path: "/api/category-media/" + categoryId + "?v=55555555-5555-4555-8555-555555555555",
+      storagePath: "categories/" + categoryId + "/image/55555555-5555-4555-8555-555555555555-new.webp",
+      storageProvider: "supabase" as const,
+      filename: "new.webp",
+      contentType: "image/webp",
+      sizeBytes: 2000,
+    };
+    mocks.getBackendMode.mockReturnValue("local");
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [{ id: categoryId, slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.updateCategoryImageInSnapshot.mockReturnValue({ ok: false, errors: ["admin.not_found.resource"] });
+    mocks.storeCategoryImage.mockResolvedValue(image);
+    mocks.removeCategoryImageStorage.mockResolvedValue(false);
+
+    await expect(saveCategoryImageForRequest({
+      categoryId,
+      imageId: image.id,
+      filename: image.filename,
+      contentType: image.contentType,
+      bytes: new Uint8Array([1, 2, 3]),
+    })).resolves.toEqual({
+      ok: false,
+      errors: ["admin.not_found.resource"],
+      cleanupDeferred: true,
+      id: categoryId,
+      cleanupImageId: image.id,
+    });
+
+    expect(mocks.removeCategoryImageStorage).toHaveBeenCalledWith({ categoryId, image });
   });
 
   it("clears category image metadata before removing its stored object", async () => {
@@ -679,6 +733,58 @@ describe("Supabase content admin mutations", () => {
     await expect(saveProductForRequest(retry)).resolves.toMatchObject({ ok: false });
 
     expect(mocks.storageRemove).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the Supabase mirror when retrying an already saved R2 asset still marked uploaded", async () => {
+    const storagePath = `products/${productId}/cover/${assetId}-cover.jpg`;
+    const existingAsset = {
+      id: assetId,
+      productId,
+      kind: "cover" as const,
+      bucket: "public-media",
+      path: storagePath,
+      storagePath,
+      storageProvider: "r2_private" as const,
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      sizeBytes: validSquareJpeg.byteLength,
+      isPublic: true,
+      isActive: true,
+      sortOrder: 1,
+    };
+    const seededProduct = getSeedContentSnapshot().products[0];
+    const existingProduct = {
+      ...seededProduct,
+      id: productId,
+      slug: "retry-after-lost-save-response",
+      status: "draft" as const,
+      coverAssetId: assetId,
+      assets: [existingAsset],
+      amazonLinks: [],
+      premiumCodes: [],
+    };
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [existingProduct],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.rpc.mockResolvedValue({ data: { status: "success" }, error: null });
+
+    const retry = uploadedCoverForm("retry-after-lost-save-response", "Retry after lost response");
+    retry.set("assetStorageProvider", "r2_private");
+    retry.set("assetPath", storagePath);
+
+    await expect(saveProductForRequest(retry)).resolves.toMatchObject({ ok: true, id: productId });
+
+    expect(mocks.storageDownload).toHaveBeenCalledWith(storagePath);
+    expect(mocks.finalizeR2MediaUploads).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: assetId, storageProvider: "r2_private" })]),
+      new Set([assetId]),
+      new Map([[assetId, createHash("sha256").update(validSquareJpeg).digest("hex")]]),
+    );
+    expect(mocks.rpc).toHaveBeenCalledWith("save_product_with_storage_provider", expect.anything());
   });
 
   it("rejects a newly uploaded cover with a forged invalid ratio before saving product metadata", async () => {
