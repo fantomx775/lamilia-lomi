@@ -199,6 +199,11 @@ async function saveScreenshot(page: Page, filename: string, target: import("@pla
   await target.scrollIntoViewIfNeeded();
   await page.evaluate(() => document.fonts.ready);
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  const viewport = page.viewportSize();
+  if (viewport) await page.mouse.move(viewport.width - 1, viewport.height - 1);
   await page.screenshot({ path: path.join(evidenceDirectory, filename), animations: "disabled" });
 }
 
