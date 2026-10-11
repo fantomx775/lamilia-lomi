@@ -70,12 +70,12 @@ test("product text fields count, warn, survive failed saves, and persist on crea
     if (!expectedSaveFailure) unexpectedServerErrors.push(`${response.status()} ${response.url()}`);
   });
 
-  await page.goto("/pl/login?redirectTo=/admin");
-  await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-  await page.getByLabel("Hasło").fill("demo-password");
+  await page.goto("/en/login?redirectTo=/admin");
+  await page.getByLabel("Email").fill("admin@lamilialomi.test");
+  await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
-    page.getByRole("button", { name: "Kontynuuj" }).click(),
+    page.getByRole("button", { name: "Continue" }).click(),
   ]);
 
   try {
