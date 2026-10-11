@@ -12,7 +12,7 @@ The reviewed screenshots from the latest run are:
 
 Visual review of the latest desktop and mobile captures confirmed category images and product covers retain their proportions, gallery preview shows the full image, and storefront and admin thumbnails load. The cleanup warning is readable on both viewports. The first and last order arrows are disabled at their respective ends and cannot receive a center hit; enabled-arrow checks and saved-order persistence after reload passed. Some captures show the local Next.js development badge. The 8/8 run reported no failed tests or page errors.
 
-The follow-up now surfaces a failure-case cleanup warning in the taxonomy drawer when the category disappears and the new image cannot be removed. A focused component/API regression covers that error response and the displayed category/image IDs. Playwright was not rerun for this error state; the existing browser evidence still covers the unchanged upload, storefront, thumbnail, gallery-preview, and ordering flows.
+The final review follow-up surfaces a failure-case cleanup warning in the taxonomy drawer when the category disappears and the new image cannot be removed. The latest desktop and mobile Playwright run above covers this failure state, while the focused component/API regression checks the response and displayed category/image IDs.
 
 ## Server-side image validation
 
