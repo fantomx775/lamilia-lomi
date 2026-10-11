@@ -11,7 +11,9 @@ export async function readImageDimensionsFromBytes(bytes: Uint8Array): Promise<D
   try {
     const image = sharp(bytes, { failOn: "warning", limitInputPixels: MAX_IMAGE_PIXELS });
     const metadata = await image.metadata();
-    if (!metadata.width || !metadata.height) return null;
+    const width = metadata.autoOrient?.width ?? metadata.width;
+    const height = metadata.autoOrient?.height ?? metadata.height;
+    if (!width || !height) return null;
 
     const contentType = getSupportedContentType(metadata.format);
     if (!contentType) return null;
@@ -19,7 +21,7 @@ export async function readImageDimensionsFromBytes(bytes: Uint8Array): Promise<D
     // Metadata parsing alone accepts truncated files; pixel statistics force a full decode.
     await image.stats();
 
-    return { width: metadata.width, height: metadata.height, contentType };
+    return { width, height, contentType };
   } catch {
     return null;
   }

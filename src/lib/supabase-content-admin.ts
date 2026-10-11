@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { getBackendMode } from "@/lib/config";
 import { createClient, getCurrentAccessToken } from "@/lib/supabase/server";
@@ -126,12 +126,12 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
         .filter((asset) => !existing?.assets.some((previous) => previous.id === asset.id))
         .map((asset) => asset.id),
     );
-    await assertSupabaseUploadsExist(
+    const validatedImageSha256ByAssetId = await assertSupabaseUploadsExist(
       product.assets.filter((asset) => product.status === "published" || !existing?.assets.some((previous) => previous.id === asset.id)),
       storageAuthorizationToken,
       newAssetIds,
     );
-    await finalizeR2MediaUploads(product.assets, uploadedIds);
+    await finalizeR2MediaUploads(product.assets, uploadedIds, validatedImageSha256ByAssetId);
     const revokedPublicAssetIds = await revokeR2PublicAssetsBeforeMutation({
       previousAssets,
       nextAssets: product.assets,
@@ -381,8 +381,16 @@ export async function saveCategoryImageForRequest(input: {
           .maybeSingle();
         if (error) throw new AdminDatabaseError("category image update", error);
         if (!data) {
-          await cleanupCategoryImageSafely({ categoryId: input.categoryId, image, authorizationToken });
-          throw new AdminApplicationError(ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE);
+          const cleanedUp = await cleanupCategoryImageSafely({ categoryId: input.categoryId, image, authorizationToken });
+          return cleanedUp
+            ? { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] }
+            : {
+              ok: false,
+              errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE],
+              cleanupDeferred: true,
+              id: input.categoryId,
+              cleanupImageId: image.id,
+            };
         }
       }
     } catch (error) {
@@ -601,8 +609,9 @@ export async function assertSupabaseUploadsExist(
   assets: Product["assets"],
   storageAuthorizationToken?: string | null,
   imageAssetIdsToValidate: ReadonlySet<string> = new Set(),
-) {
-  if (!assets.length) return;
+): Promise<Map<string, string>> {
+  const validatedImageSha256ByAssetId = new Map<string, string>();
+  if (!assets.length) return validatedImageSha256ByAssetId;
 
   const storage = createServiceRoleClient({
     storageAuthorizationToken: storageAuthorizationToken ?? undefined,
@@ -700,7 +709,9 @@ export async function assertSupabaseUploadsExist(
     if (!imageValidation.ok) {
       throw new AdminApplicationError(imageValidation.errorCode);
     }
+    validatedImageSha256ByAssetId.set(asset.id, createHash("sha256").update(bytes).digest("hex"));
   }
+  return validatedImageSha256ByAssetId;
 }
 
 function isDefinitivePostgresFailure(error: DatabaseErrorLike) {

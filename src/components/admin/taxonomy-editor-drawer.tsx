@@ -90,6 +90,7 @@ function TaxonomyEditorForm({
   );
   const [imagePending, setImagePending] = useState(false);
   const [imageError, setImageError] = useState("");
+  const [imageCleanupWarning, setImageCleanupWarning] = useState("");
   const [imageMessage, setImageMessage] = useState("");
 
   const updateValue = (field: keyof TaxonomyContent, value: string) => {
@@ -146,6 +147,7 @@ function TaxonomyEditorForm({
   const uploadCategoryImage = async (file?: File) => {
     if (!file || !itemId) return;
     setImageError("");
+    setImageCleanupWarning("");
     setImageMessage("");
 
     const fileValidation = validateMediaFile("cover", file);
@@ -172,9 +174,20 @@ function TaxonomyEditorForm({
       formData.set("categoryId", itemId);
       formData.set("file", file);
       const response = await fetch("/api/admin/category-image", { method: "POST", body: formData });
-      const result = await response.json().catch(() => null) as { image?: CategoryImage; cleanupDeferred?: boolean; error?: string } | null;
+      const result = await response.json().catch(() => null) as {
+        image?: CategoryImage;
+        cleanupDeferred?: boolean;
+        categoryId?: string;
+        cleanupImageId?: string;
+        error?: string;
+      } | null;
       if (!response.ok || !result?.image) {
         setImageError(result?.error ?? "Nie udało się zapisać obrazu kategorii.");
+        if (result?.cleanupDeferred) {
+          const cleanupCategoryId = result.categoryId ?? itemId;
+          const cleanupImageId = result.cleanupImageId ?? "nieznane";
+          setImageCleanupWarning("Nie udało się automatycznie usunąć przesłanego pliku. Kategoria: " + cleanupCategoryId + "; obraz: " + cleanupImageId + ".");
+        }
         return;
       }
       setCategoryImage(result.image);
@@ -191,6 +204,7 @@ function TaxonomyEditorForm({
     if (!itemId || !categoryImage || !window.confirm("Czy na pewno usunąć obraz kategorii?")) return;
     setImagePending(true);
     setImageError("");
+    setImageCleanupWarning("");
     setImageMessage("");
     try {
       const response = await fetch("/api/admin/category-image", {
@@ -290,6 +304,7 @@ function TaxonomyEditorForm({
                   <p className="text-xs leading-5 text-[var(--color-muted)]">PNG, JPG lub WEBP · maks. 20 MB. Kwadrat 1:1, co najmniej 480 × 480 px. Obraz zachowuje oryginalne proporcje.</p>
                   {imagePending ? <p role="status" className="text-sm text-[var(--color-muted)]">Zapisywanie obrazu…</p> : null}
                   {imageError ? <p role="alert" className="text-sm text-red-800">{imageError}</p> : null}
+                  {imageCleanupWarning ? <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">{imageCleanupWarning}</p> : null}
                   {imageMessage ? <p role="status" className="text-sm text-emerald-800">{imageMessage}</p> : null}
                 </div>
               ) : (

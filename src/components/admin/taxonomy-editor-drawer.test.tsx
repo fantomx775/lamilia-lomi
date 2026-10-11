@@ -122,6 +122,40 @@ describe("TaxonomyEditorDrawer", () => {
     expect(onSaved).toHaveBeenCalled();
   });
 
+  it("shows cleanup details when the category image upload returns a deferred-cleanup 404", async () => {
+    const categoryId = "11111111-1111-4111-8111-111111111111";
+    const cleanupImageId = "22222222-2222-4222-8222-222222222222";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({
+        error: "Nie znaleziono elementu.",
+        cleanupDeferred: true,
+        categoryId,
+        cleanupImageId,
+      }),
+    }));
+    const user = userEvent.setup();
+    render(
+      <TaxonomyEditorDrawer
+        kind="category"
+        item={{ id: categoryId, slug: "books", sortOrder: 1, translations: [{ locale: "en", name: "Books" }] }}
+        open
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+        saveAction={saveCategoryInlineAction}
+        deleteAction={deleteCategoryInlineAction}
+      />,
+    );
+
+    await user.upload(screen.getByLabelText("Dodaj obraz"), new File(["image"], "books.webp", { type: "image/webp" }));
+
+    const cleanupWarning = await screen.findByText(new RegExp(cleanupImageId));
+    expect(cleanupWarning).toHaveAttribute("role", "alert");
+    expect(cleanupWarning).toHaveTextContent(categoryId);
+    expect(cleanupWarning).toHaveTextContent("automatycznie usunąć");
+  });
+
   it("uploads, replaces, and removes a category image without submitting taxonomy text", async () => {
     const categoryId = "11111111-1111-4111-8111-111111111111";
     const firstImage = {

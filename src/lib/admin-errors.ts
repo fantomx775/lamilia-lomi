@@ -46,6 +46,9 @@ export type AdminMutationResult =
         kind: ProductAsset["kind"];
         storagePath: string;
       }>;
+      cleanupDeferred?: boolean;
+      id?: string;
+      cleanupImageId?: string;
     };
 
 export type DatabaseErrorLike = {

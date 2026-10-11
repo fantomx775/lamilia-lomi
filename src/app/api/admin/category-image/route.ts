@@ -46,7 +46,13 @@ export async function POST(request: Request) {
       contentType: validation.contentType,
       bytes,
     });
-    if (!result.ok) return adminErrorResponse(result.errors[0] ?? ADMIN_ERROR_CODES.INTERNAL, result.errors[0] === ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE ? 404 : 400);
+    if (!result.ok) {
+      const code = result.errors[0] ?? ADMIN_ERROR_CODES.INTERNAL;
+      const details = result.cleanupDeferred
+        ? { cleanupDeferred: true, categoryId: result.id ?? categoryId, cleanupImageId: result.cleanupImageId }
+        : undefined;
+      return adminErrorResponse(code, code === ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE ? 404 : 400, details);
+    }
     return NextResponse.json({ image: result.categoryImage, cleanupDeferred: result.cleanupDeferred ?? false });
   } catch (error) {
     console.error("[category-image] Upload nie powiódł się.", error);
@@ -90,6 +96,6 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function adminErrorResponse(code: AdminErrorCode, status: number) {
-  return NextResponse.json({ error: getAdminErrorMessage(code, "pl"), errorCode: code }, { status });
+function adminErrorResponse(code: AdminErrorCode, status: number, details?: Record<string, unknown>) {
+  return NextResponse.json({ error: getAdminErrorMessage(code, "pl"), errorCode: code, ...details }, { status });
 }

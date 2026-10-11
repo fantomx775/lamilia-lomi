@@ -97,6 +97,29 @@ describe("admin category image route", () => {
     expect(mocks.saveCategoryImageForRequest).not.toHaveBeenCalled();
   });
 
+  it("returns deferred cleanup details when the category disappears during upload", async () => {
+    mocks.saveCategoryImageForRequest.mockResolvedValue({
+      ok: false,
+      errors: ["admin.not_found.resource"],
+      cleanupDeferred: true,
+      id: categoryId,
+      cleanupImageId: imageId,
+    });
+    const form = new FormData();
+    form.set("categoryId", categoryId);
+    form.set("file", new File([await png(800, 800)], "books.png", { type: "image/png" }));
+
+    const response = await POST(new Request("http://localhost/api/admin/category-image", { method: "POST", body: form }));
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      errorCode: "admin.not_found.resource",
+      cleanupDeferred: true,
+      categoryId,
+      cleanupImageId: imageId,
+    });
+  });
+
   it("removes the category image through the admin persistence service", async () => {
     const response = await DELETE(new Request("http://localhost/api/admin/category-image", {
       method: "DELETE",

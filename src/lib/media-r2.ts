@@ -12,6 +12,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import type { AssetKind } from "./types";
+import { MEDIA_UPLOAD_SPECS } from "./media-upload";
 import {
   getR2StorageConfig,
   isSafeCategoryImageStoragePath,
@@ -20,6 +21,7 @@ import {
 } from "./media-r2-config";
 
 const signedUrlTtlSeconds = 15 * 60;
+const maxR2ImageBytes = Math.min(MEDIA_UPLOAD_SPECS.cover.maxBytes, MEDIA_UPLOAD_SPECS.gallery.maxBytes);
 
 export type SignedR2Upload = {
   url: string;
@@ -138,6 +140,7 @@ export async function finalizeR2StagingUpload(input: {
   storagePath: string;
   contentType: string;
   sizeBytes: number;
+  expectedSha256?: string;
 }) {
   if (
     input.stagingPath !== `staging/${input.storagePath}` ||
@@ -145,6 +148,15 @@ export async function finalizeR2StagingUpload(input: {
     !isSafeMediaStoragePath(input.storagePath)
   ) {
     throw new Error("Invalid R2 media path.");
+  }
+
+  if (input.expectedSha256 !== undefined) {
+    if (!/^[0-9a-f]{64}$/i.test(input.expectedSha256)) {
+      throw new Error("Invalid validated image checksum.");
+    }
+    if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0 || input.sizeBytes > maxR2ImageBytes) {
+      throw new Error("R2 image exceeds the allowed byte limit.");
+    }
   }
 
   const config = getR2StorageConfig();
@@ -161,11 +173,17 @@ export async function finalizeR2StagingUpload(input: {
     if (finalized.ContentType !== input.contentType) {
       throw new Error("Finalized R2 media Content-Type does not match the saved media record.");
     }
+    if (input.expectedSha256) {
+      await assertR2ObjectSha256(client, config.privateBucket, input.storagePath, input.sizeBytes, input.expectedSha256);
+    }
     return;
   }
 
   if (source.ContentLength !== input.sizeBytes || source.ContentType !== input.contentType) {
     throw new Error("R2 staging upload metadata does not match the submitted media file.");
+  }
+  if (input.expectedSha256) {
+    await assertR2ObjectSha256(client, config.privateBucket, input.stagingPath, input.sizeBytes, input.expectedSha256);
   }
   await client.send(new CopyObjectCommand({
     Bucket: config.privateBucket,
@@ -180,7 +198,56 @@ export async function finalizeR2StagingUpload(input: {
     throw new Error("Finalized R2 media Content-Type does not match the saved media record.");
   }
   assertSameObjectBytes(source, destination);
+  if (input.expectedSha256) {
+    await assertR2ObjectSha256(client, config.privateBucket, input.storagePath, input.sizeBytes, input.expectedSha256);
+  }
   await client.send(new DeleteObjectCommand({ Bucket: config.privateBucket, Key: input.stagingPath }));
+}
+
+async function assertR2ObjectSha256(
+  client: S3Client,
+  bucket: string,
+  key: string,
+  sizeBytes: number,
+  expectedSha256: string,
+) {
+  const result = await client.send(new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Range: "bytes=0-" + (sizeBytes - 1),
+  }));
+  const body = result.Body as unknown as (AsyncIterable<Uint8Array> & { destroy?: () => void }) | undefined;
+  if (result.ContentLength !== undefined && result.ContentLength !== sizeBytes) {
+    body?.destroy?.();
+    throw new Error("R2 object byte range does not match the validated image size.");
+  }
+  if (!body || typeof body[Symbol.asyncIterator] !== "function") {
+    throw new Error("R2 object could not be read for checksum verification.");
+  }
+
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  for await (const chunk of body) {
+    if (!(chunk instanceof Uint8Array)) {
+      body.destroy?.();
+      throw new Error("R2 object returned an invalid byte stream.");
+    }
+    if (totalBytes + chunk.byteLength > sizeBytes) {
+      body.destroy?.();
+      throw new Error("R2 object byte read exceeded the validated image size.");
+    }
+    const buffer = Buffer.from(chunk);
+    chunks.push(buffer);
+    totalBytes += buffer.byteLength;
+  }
+
+  if (totalBytes !== sizeBytes) {
+    throw new Error("R2 object bytes do not match the validated image size.");
+  }
+  const actualSha256 = createHash("sha256").update(Buffer.concat(chunks, totalBytes)).digest("hex");
+  if (actualSha256 !== expectedSha256.toLowerCase()) {
+    throw new Error("R2 object bytes do not match the validated Supabase image.");
+  }
 }
 
 export async function assertR2PrivateObject(storagePath: string, sizeBytes?: number) {

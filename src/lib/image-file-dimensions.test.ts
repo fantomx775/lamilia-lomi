@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 
+import { validateImageDimensions } from "./image-ratios";
 import { readImageDimensionsFromBytes } from "./image-file-dimensions";
 
 describe("image file dimensions", () => {
@@ -15,6 +16,17 @@ describe("image file dimensions", () => {
       .resolves.toEqual({ width: 800, height: 800, contentType: "image/jpeg" });
     await expect(readImageDimensionsFromBytes(new Uint8Array(await createImage("webp"))))
       .resolves.toEqual({ width: 800, height: 800, contentType: "image/webp" });
+  });
+
+  it("uses EXIF-oriented display dimensions for cover ratio validation", async () => {
+    const bytes = await sharp({
+      create: { width: 1100, height: 850, channels: 3, background: { r: 50, g: 60, b: 70 } },
+    }).jpeg().withMetadata({ orientation: 6 }).toBuffer();
+
+    const dimensions = await readImageDimensionsFromBytes(new Uint8Array(bytes));
+
+    expect(dimensions).toEqual({ width: 850, height: 1100, contentType: "image/jpeg" });
+    expect(validateImageDimensions("cover", dimensions!)).toEqual({ ok: true });
   });
 
   it("rejects a PNG signature and IHDR without image data", async () => {

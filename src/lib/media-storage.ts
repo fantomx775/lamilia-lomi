@@ -227,6 +227,7 @@ export async function cleanupPersistedMedia(input: {
 export async function finalizeR2MediaUploads(
   assets: ProductAsset[],
   newlyUploadedAssetIds: Set<string>,
+  validatedImageSha256ByAssetId: ReadonlyMap<string, string> = new Map(),
 ) {
   for (const asset of assets) {
     if ((asset.storageProvider ?? "supabase") !== "r2_private") continue;
@@ -236,12 +237,17 @@ export async function finalizeR2MediaUploads(
     }
 
     if (newlyUploadedAssetIds.has(asset.id)) {
+      const expectedSha256 = validatedImageSha256ByAssetId.get(asset.id);
+      if (!expectedSha256) {
+        throw new Error("A validated Supabase image checksum is required before R2 finalization.");
+      }
       const stagingPath = r2StagingPath(storagePath);
       await finalizeR2StagingUpload({
         stagingPath,
         storagePath,
         contentType: asset.contentType,
         sizeBytes: asset.sizeBytes ?? 0,
+        expectedSha256,
       });
     } else {
       await assertR2PrivateObject(storagePath, asset.sizeBytes);
