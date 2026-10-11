@@ -47,7 +47,7 @@ describe("selectUnlockPrefillCode", () => {
         productSlug: "moon-garden-coloring-book",
         code: "OTHER-LOCALE-CODE",
       },
-    ]) {
+    ] as const) {
       expect(
         selectUnlockPrefillCode({
           currentIntent,

@@ -1,26 +1,28 @@
 import type { UnlockIntent } from "./unlock-intent";
+import type { Locale } from "@/i18n/routing";
 
 type BackendMode = "local" | "supabase";
 
 export function selectUnlockPrefillCode(input: {
   currentIntent: Pick<UnlockIntent, "locale" | "productSlug" | "code"> | null;
-  locale: string;
+  locale: Locale;
   productSlug: string;
   backendMode: BackendMode;
   hasSupabaseUser: boolean;
   accountBoundResumeCode?: string;
 }) {
+  const currentIntent = input.currentIntent;
   const hasCurrentIntent =
-    input.currentIntent?.locale === input.locale &&
-    input.currentIntent.productSlug === input.productSlug;
+    currentIntent?.locale === input.locale &&
+    currentIntent?.productSlug === input.productSlug;
 
-  if (hasCurrentIntent && input.currentIntent.code) {
-    return input.currentIntent.code;
+  if (hasCurrentIntent && currentIntent?.code) {
+    return currentIntent.code;
   }
 
   if (input.backendMode === "supabase" && input.hasSupabaseUser) {
     return input.accountBoundResumeCode;
   }
 
-  return hasCurrentIntent ? input.currentIntent.code : undefined;
+  return hasCurrentIntent ? currentIntent?.code : undefined;
 }
