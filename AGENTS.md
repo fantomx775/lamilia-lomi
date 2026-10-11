@@ -52,6 +52,15 @@ Run the full E2E/browser suite only when:
 - making a broad cross-cutting change,
 - or when focused tests indicate a possible regression outside the changed area.
 
+## GitHub Actions CI
+
+- Local focused tests remain the primary fast feedback loop for agents.
+- Pull request CI independently verifies TypeScript, ESLint, unit tests, and the production build.
+- Check CI status before marking a PR ready for merge.
+- Keep Playwright in local/browser verification for relevant UI changes.
+- Passing CI complements but does not replace an independent code review.
+- Investigate failures at the reported step without automatically repeating unrelated historical audits.
+
 ## Vercel
 
 - Automatic Git deployments are enabled only for the production branch `main`
