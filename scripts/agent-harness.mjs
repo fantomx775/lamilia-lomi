@@ -20,21 +20,18 @@ function redactFreeTextUrls(value) {
   // including malformed values with spaces before delimiters and continuations.
   const redactTail = (urlOrPath, matchOffset, source) => {
     const openingWrapper = source[matchOffset - 1];
-    const closingWrapper = openingWrapper === "<"
-      ? ">"
-      : openingWrapper === "\x60" || openingWrapper === '"'
-        ? openingWrapper
-        : "";
-    const hasBalancedWrapper = closingWrapper && urlOrPath.endsWith(closingWrapper);
-    const valueToRedact = hasBalancedWrapper ? urlOrPath.slice(0, -1) : urlOrPath;
-    const sameLineDelimiter = valueToRedact.search(/[?#]/);
-    const continuedDelimiter = valueToRedact.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#]/);
+    const closingWrapper = { "<": ">", "\x60": "\x60", '"': '"' }[openingWrapper] ?? "";
+    const sameLineDelimiter = urlOrPath.search(/[?#]/);
+    const continuedDelimiter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#]/);
     const redactionStart = [sameLineDelimiter, continuedDelimiter]
       .filter((index) => index >= 0)
       .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
     if (!Number.isFinite(redactionStart)) return urlOrPath;
 
-    const tail = valueToRedact.slice(redactionStart)
+    const wrapperEnd = closingWrapper ? urlOrPath.indexOf(closingWrapper, redactionStart) : -1;
+    const hasBalancedWrapper = wrapperEnd >= 0;
+    const tailEnd = hasBalancedWrapper ? wrapperEnd : urlOrPath.length;
+    const tail = urlOrPath.slice(redactionStart, tailEnd)
       .replace(/\r\n?/g, "\n")
       .replace(/[\u2028\u2029]/g, "\n");
     const content = tail.replace(/^(?:[?#&]|\s)+/, "");
@@ -47,10 +44,12 @@ function redactFreeTextUrls(value) {
       (/[-_~%0-9]/.test(firstLine) || firstLine.length >= 16);
     if (!(hasParameter || hasWrappedValue || hasAmpersandContinuation || hasSingleOpaqueToken)) return urlOrPath;
 
-    const safeValue = valueToRedact
+    const safeValue = urlOrPath
       .slice(0, redactionStart)
       .replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
-    return hasBalancedWrapper ? safeValue + closingWrapper : safeValue;
+    return hasBalancedWrapper
+      ? safeValue + closingWrapper + urlOrPath.slice(wrapperEnd + 1)
+      : safeValue;
   };
 
   return value

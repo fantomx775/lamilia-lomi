@@ -2262,21 +2262,39 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const wrappedOpaqueFragmentCases = [
     {
       label: "Backtick-wrapped absolute",
-      value: "`https://bad host/path#opaque-backtick-fragment-secret`",
-      safe: "`https://bad host/path`",
+      value: "See `https://bad host/path#opaque-backtick-fragment-secret` now",
+      safe: "See `https://bad host/path` now",
       secret: "opaque-backtick-fragment-secret",
     },
     {
       label: "Angle-wrapped absolute",
-      value: "<https://bad host/path#opaque-angle-fragment-secret>",
-      safe: "<https://bad host/path>",
+      value: "See <https://bad host/path#opaque-angle-fragment-secret> now",
+      safe: "See <https://bad host/path> now",
       secret: "opaque-angle-fragment-secret",
     },
     {
       label: "Double-quote-wrapped absolute",
-      value: '"https://bad host/path#opaque-double-quote-fragment-secret"',
-      safe: '"https://bad host/path"',
+      value: 'See "https://bad host/path#opaque-double-quote-fragment-secret" now',
+      safe: 'See "https://bad host/path" now',
       secret: "opaque-double-quote-fragment-secret",
+    },
+    {
+      label: "Backtick-wrapped punctuation",
+      value: "`https://bad host/path#opaque-backtick-punctuation-secret`, now.",
+      safe: "`https://bad host/path`, now.",
+      secret: "opaque-backtick-punctuation-secret",
+    },
+    {
+      label: "Angle-wrapped punctuation",
+      value: "<https://bad host/path#opaque-angle-punctuation-secret>, now.",
+      safe: "<https://bad host/path>, now.",
+      secret: "opaque-angle-punctuation-secret",
+    },
+    {
+      label: "Double-quote-wrapped punctuation",
+      value: '"https://bad host/path#opaque-double-quote-punctuation-secret". Now,',
+      safe: '"https://bad host/path". Now,',
+      secret: "opaque-double-quote-punctuation-secret",
     },
   ];
   const lineSeparatorQuery = "https://production.example.test/catalog\u2028?token=line-separator-marker\u2028&continuation=line-separator-continuation";
