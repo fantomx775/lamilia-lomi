@@ -2222,6 +2222,37 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
     "/catalog. Should we keep working? Yes.",
     "5/10 should be acceptable? Keep the sentence.",
   ];
+  const lineWrappedProseExamples = [
+    "https://example.test/catalog. Should we ship?\nYes, keep this prose.",
+    "/catalog page is ready?\nKeep this ordinary continuation.",
+  ];
+  const oneWordProseExample = "https://example.test/catalog. Should we ship? Keep";
+  const leadingSpaceTailCases = [
+    {
+      label: "Leading absolute",
+      value: "https://bad host? token=leading-space-absolute-secret",
+      safe: "https://bad host",
+      secret: "leading-space-absolute-secret",
+    },
+    {
+      label: "Leading slash path",
+      value: "/bad host? opaque-leading-space-slash-secret",
+      safe: "/bad host",
+      secret: "opaque-leading-space-slash-secret",
+    },
+    {
+      label: "Leading relative path",
+      value: "catalog? opaque-leading-space-relative-secret",
+      safe: "catalog",
+      secret: "opaque-leading-space-relative-secret",
+    },
+    {
+      label: "Leading absolute fragment",
+      value: "https://bad host# opaque-leading-space-fragment-secret",
+      safe: "https://bad host",
+      secret: "opaque-leading-space-fragment-secret",
+    },
+  ];
   const lineSeparatorQuery = "https://production.example.test/catalog\u2028?token=line-separator-marker\u2028&continuation=line-separator-continuation";
   const paragraphSeparatorQuery = "https://production.example.test/catalog\u2029?token=paragraph-separator-marker\u2029&continuation=paragraph-separator-continuation";
   const plan = {
@@ -2235,10 +2266,12 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
       }],
     }],
   };
-  plan.flows[0].name += "\n" + sameLineProseExamples.join("\n");
+  plan.flows[0].name += "\n" + sameLineProseExamples.join("\n") + "\n" + lineWrappedProseExamples.join("\n") + "\n" + oneWordProseExample;
   const verificationRecord = cleanVerificationRecord({ productionSmokePlan: plan });
   verificationRecord.checks[0].result = `${malformedHostFragment}\nKeep this malformed-fragment note\n${relativeOpaqueQuery}\nKeep this relative-query note\n${relativeOpaqueFragment}\nKeep this relative-fragment note\nRelative path reference ${relativeReferenceQuery}\n${sameLineProseExamples.join("\n")}`;
   verificationRecord.checks[0].result += "\nRelative path fragment reference " + relativeReferenceFragment;
+  verificationRecord.checks[0].result += "\n" + leadingSpaceTailCases.map(({ label, value }) => label + " " + value).join("\n");
+  verificationRecord.checks[0].result += "\n" + lineWrappedProseExamples.join("\n") + "\n" + oneWordProseExample;
   const localVerification = validateLocalVerification({
     headSha: CURRENT_SHA,
     comments: [structuredComment(VERIFICATION_MARKER, verificationRecord)],
@@ -2251,10 +2284,24 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
     "Keep this bracket note\nBracket with spaces",
     "Keep this bracket note\nBacktick https://production.example.test/catalog\nKeep this backtick note\nBracket with spaces",
   );
-  const expectedFlowName = safeFlowNameWithBacktickNote + "\n" + sameLineProseExamples.join("\n");
+  const expectedFlowName = safeFlowNameWithBacktickNote + "\n" + sameLineProseExamples.join("\n") + "\n" + lineWrappedProseExamples.join("\n") + "\n" + oneWordProseExample;
   const safeExpectedText = "Catalog heading at https://production.example.test/catalog\nKeep this expected-text note";
+  const expectedCheckResult = [
+    "https://bad host",
+    "Keep this malformed-fragment note",
+    "route /bad host",
+    "Keep this relative-query note",
+    "route /bad host",
+    "Keep this relative-fragment note",
+    "Relative path reference catalog",
+    ...sameLineProseExamples,
+    "Relative path fragment reference catalog",
+    ...leadingSpaceTailCases.map(({ label, safe }) => label + " " + safe),
+    ...lineWrappedProseExamples,
+    oneWordProseExample,
+  ].join("\n");
   assert.equal(localVerification.record.productionSmokePlan.flows[0].name, expectedFlowName);
-  assert.equal(localVerification.record.checks[0].result, "https://bad host\nKeep this malformed-fragment note\nroute /bad host\nKeep this relative-query note\nroute /bad host\nKeep this relative-fragment note\nRelative path reference catalog\n" + sameLineProseExamples.join("\n") + "\nRelative path fragment reference catalog");
+  assert.equal(localVerification.record.checks[0].result, expectedCheckResult);
   assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].expectedText, safeExpectedText);
   assert.equal(checkedPlan.flows[0].name, expectedFlowName);
   assert.equal(checkedPlan.expectations[0].expectedText, safeExpectedText);
@@ -2273,6 +2320,7 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   assert.equal(persistedOutput.includes("relative-opaque-fragment-secret"), false);
   assert.equal(persistedOutput.includes("opaque-relative-secret"), false);
   assert.equal(persistedOutput.includes("opaque-relative-fragment-secret"), false);
+  for (const { secret } of leadingSpaceTailCases) assert.equal(persistedOutput.includes(secret), false);
   assert.equal(persistedOutput.includes("bare-fragment-secret"), false);
   assert.equal(persistedOutput.includes("bracket-marker"), false);
   assert.equal(persistedOutput.includes("backtick-marker"), false);
@@ -2314,6 +2362,12 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   assert.ok(persistedOutput.includes("Keep this expected-text note"));
   assert.ok(persistedOutput.includes("https://production.example.test/catalog"));
   for (const prose of sameLineProseExamples) assert.ok(persistedOutput.includes(prose));
+  for (const prose of lineWrappedProseExamples) {
+    assert.ok(localVerification.record.checks[0].result.includes(prose));
+    assert.ok(localVerification.record.productionSmokePlan.flows[0].name.includes(prose));
+  }
+  assert.ok(localVerification.record.checks[0].result.includes(oneWordProseExample));
+  assert.ok(localVerification.record.productionSmokePlan.flows[0].name.includes(oneWordProseExample));
 });
 
 test("invalid relative smoke paths redact queries before validation blocks them", () => {

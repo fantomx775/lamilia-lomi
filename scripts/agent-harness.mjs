@@ -24,6 +24,20 @@ function redactFreeTextUrls(value) {
     const redactionStart = [sameLineDelimiter, continuedDelimiter]
       .filter((index) => index >= 0)
       .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
+    if (!Number.isFinite(redactionStart)) return urlOrPath;
+
+    const tail = urlOrPath.slice(redactionStart)
+      .replace(/\r\n?/g, "\n")
+      .replace(/[\u2028\u2029]/g, "\n");
+    const content = tail.replace(/^(?:[?#&]|\s)+/, "");
+    const firstLine = content.split("\n", 1)[0].trim();
+    const hasParameter = /^[A-Za-z0-9._~%-]+\s*=/.test(firstLine);
+    const hasWrappedValue = /^(?:<[^>\n]*>|"[^"\n]*"|'[^'\n]*'|\x60[^\x60\n]*\x60)/.test(content);
+    const hasAmpersandContinuation = content.startsWith("&") || /^\s*&/.test(content);
+    const hasSingleOpaqueToken =
+      /^[A-Za-z0-9_~%-]+(?:\.[A-Za-z0-9_~%-]+)*$/.test(firstLine) && /[-_~%0-9]/.test(firstLine);
+    if (!(hasParameter || hasWrappedValue || hasAmpersandContinuation || hasSingleOpaqueToken)) return urlOrPath;
+
     return urlOrPath
       .slice(0, redactionStart)
       .replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
@@ -35,25 +49,15 @@ function redactFreeTextUrls(value) {
       redactTail,
     )
     .replace(
-      /(?:https?:\/\/|(?<![/:])\/)[^\r\n\u2028\u2029]*?(?:[?#](?=[^\s\r\n\u2028\u2029])[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*)(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      /(?:https?:\/\/|(?<![/:])\/)[^\r\n\u2028\u2029]*?(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*)(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
       redactTail,
     )
     .replace(
-      /(?:https?:\/\/|\/)[^\s<>\x60?#]*(?:[?#](?=[^\s\r\n\u2028\u2029])[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
-      (urlOrPath) => {
-        const queryOrFragment = urlOrPath.search(/[?#]/);
-        const continuedParameter = urlOrPath.search(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*&/);
-        const parameterAfterDelimiter = urlOrPath.search(/[?&#](?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#]+=/);
-        const redactionStart = [queryOrFragment, continuedParameter, parameterAfterDelimiter]
-          .filter((index) => index >= 0)
-          .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
-        if (!Number.isFinite(redactionStart)) return urlOrPath;
-        const url = urlOrPath.slice(0, redactionStart);
-        return url.replace(/(?:\r\n?|\n|\u2028|\u2029)[ \t]*$/, "");
-      },
+      /(?:https?:\/\/|\/)[^\s<>\x60?#]*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*|(?<=[?&#])(?:\r\n?|\n|\u2028|\u2029)[ \t]*[^\s=?&#\r\n\u2028\u2029]+=[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      redactTail,
     )
     .replace(
-      /(?<![\w./-])[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*(?:[?#](?=[^\s\r\n\u2028\u2029])[^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*)(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
+      /(?<![\w./-])[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~-]+)*(?:[?#][^\r\n\u2028\u2029]*|(?:\r\n?|\n|\u2028|\u2029)[ \t]*[?&#][^\r\n\u2028\u2029]*)(?:(?:\r\n?|\n|\u2028|\u2029)[ \t]*&[^\r\n\u2028\u2029]*)*/gi,
       redactTail,
     );
 }
