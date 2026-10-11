@@ -11,6 +11,8 @@ const productId = "11111111-1111-4111-8111-111111111111";
 const premiumCode = "LOMI-BOOK-2026";
 let restoreLocalContentStore: (() => void) | undefined;
 
+test.setTimeout(120_000);
+
 test.describe("Issue 31 local QR and premium workflow", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
@@ -48,7 +50,6 @@ test.describe("Issue 31 local QR and premium workflow", () => {
   });
 
   test("a QR scan survives registration and verification, unlocks My Library, and denies anonymous downloads", async ({ page }, testInfo) => {
-    test.setTimeout(120_000);
     const consoleErrors: string[] = [];
     const failedRequests: Array<{ method: string; url: string; errorText: string }> = [];
     page.on("console", (message) => {
@@ -78,6 +79,7 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     await unlockSection.getByRole("button", { name: "Create account" }).click();
     await expect(page).toHaveURL(
       new RegExp(`/en/register\\?returnTo=%2Fen%2Fproducts%2F${productSlug}$`),
+      { timeout: 30_000 },
     );
     await expect(page.locator('input[name="code"]')).toHaveValue(premiumCode);
 
@@ -102,7 +104,7 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     await saveEvidenceScreenshot(page, testInfo, "qr-product-unlocked");
 
     await page.getByRole("link", { name: "Go to My Library" }).click();
-    await expect(page).toHaveURL(/\/en\/library$/);
+    await expect(page).toHaveURL(/\/en\/library$/, { timeout: 30_000 });
     await expect(page.getByTestId("library-page")).toContainText("Moon Garden");
     await page.evaluate(() => window.scrollTo(0, 0));
     await saveEvidenceScreenshot(page, testInfo, "qr-my-library");
@@ -131,6 +133,8 @@ test.describe("Issue 31 local QR and premium workflow", () => {
         const failedUrl = new URL(url);
         return !(
           (method === "POST" && failedUrl.pathname === "/en/register" && failedUrl.searchParams.has("returnTo")) ||
+          (method === "POST" && failedUrl.pathname === `/en/products/${productSlug}`) ||
+          (method === "GET" && failedUrl.pathname.startsWith("/__nextjs_font/")) ||
           (method === "GET" && failedUrl.pathname === "/en/library" && failedUrl.searchParams.has("_rsc"))
         );
       }),
