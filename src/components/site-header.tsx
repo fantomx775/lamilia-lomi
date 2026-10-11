@@ -1,4 +1,4 @@
-import { BookOpen, Library, LogIn } from "lucide-react";
+import { BookOpen, Info, Library, LogIn } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 
@@ -13,6 +13,7 @@ export function SiteHeader({ locale }: {
   const labels = {
     products: "Catalog",
     library: "My Library",
+    about: "About",
     account: "Account",
     login: "Log in",
     navigation: "Primary navigation",
@@ -42,6 +43,10 @@ export function SiteHeader({ locale }: {
             <BookOpen className="size-4" aria-hidden />
             {labels.products}
           </Link>
+          <Link className={headerLinkClassName()} href={`/${locale}/about`}>
+            <Info className="size-4" aria-hidden />
+            {labels.about}
+          </Link>
           <Link className={headerLinkClassName()} href={`/${locale}/library`}>
             <Library className="size-4" aria-hidden />
             {labels.library}
@@ -52,14 +57,18 @@ export function SiteHeader({ locale }: {
             <HeaderAccountLink locale={locale} labels={labels} />
           </Suspense>
         </div>
-        <nav aria-label={labels.navigation} className="flex w-full items-center gap-2 border-t border-[var(--color-border)] py-2 md:hidden">
-          <Link className={headerLinkClassName("flex-1")} href={`/${locale}/products`}>
+        <nav aria-label={labels.navigation} className="grid w-full grid-cols-3 gap-1 border-t border-[var(--color-border)] py-2 md:hidden">
+          <Link className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/products`}>
             <BookOpen className="size-4" aria-hidden />
             {labels.products}
           </Link>
-          <Link className={headerLinkClassName("flex-1")} href={`/${locale}/library`}>
+          <Link className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/about`}>
+            <Info className="size-4" aria-hidden />
+            {labels.about}
+          </Link>
+          <Link className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/library`}>
             <Library className="size-4" aria-hidden />
-            {labels.library}
+            Library
           </Link>
         </nav>
       </div>

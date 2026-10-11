@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(14);
+SELECT plan(16);
 
 SELECT ok(
   (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.catalog_settings'::regclass),
@@ -101,7 +101,9 @@ SELECT set_config(
 );
 WITH updated AS (
   UPDATE public.catalog_settings
-  SET desktop_columns = 3
+  SET desktop_columns = 3,
+      about_intro = 'unauthorized intro',
+      favorite_coloring_book_ids = ARRAY['forbidden', '', '']::text[]
   WHERE id = 'global'
   RETURNING id
 )
@@ -120,14 +122,22 @@ SELECT is(
 SELECT is(
   current_setting('test.catalog_settings_nonadmin_update_rows'),
   '0',
-  'non-admin users cannot update catalog settings'
+  'non-admin users cannot update About or catalog settings'
+);
+SELECT is(
+  (SELECT about_intro FROM public.catalog_settings WHERE id = 'global'),
+  '',
+  'non-admin updates do not change About content'
 );
 
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 WITH updated AS (
   UPDATE public.catalog_settings
-  SET desktop_columns = 5
+  SET desktop_columns = 5,
+      about_intro = 'Admin introduction',
+      favorite_coloring_book_ids = ARRAY['coloring-1', 'coloring-2', 'coloring-3']::text[],
+      favorite_picture_book_ids = ARRAY['picture-1', 'picture-2', 'picture-3']::text[]
   WHERE id = 'global'
   RETURNING id
 )
@@ -147,6 +157,17 @@ SELECT is(
   (SELECT desktop_columns::integer FROM public.catalog_settings WHERE id = 'global'),
   5,
   'the admin update is persisted'
+);
+SELECT ok(
+  EXISTS (
+    SELECT 1
+    FROM public.catalog_settings
+    WHERE id = 'global'
+      AND about_intro = 'Admin introduction'
+      AND favorite_coloring_book_ids = ARRAY['coloring-1', 'coloring-2', 'coloring-3']::text[]
+      AND favorite_picture_book_ids = ARRAY['picture-1', 'picture-2', 'picture-3']::text[]
+  ),
+  'the admin About settings update is persisted'
 );
 SELECT ok(
   EXISTS (

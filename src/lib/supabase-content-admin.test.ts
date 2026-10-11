@@ -67,6 +67,7 @@ import {
   saveCategoryForRequest,
   saveCategoryImageForRequest,
   savePagesForRequest,
+  saveAboutPageSettingsForRequest,
   saveTagForRequest,
 } from "./supabase-content-admin";
 import { getSeedContentSnapshot } from "./content-store";
@@ -81,6 +82,77 @@ beforeAll(async () => {
     create: { width: 800, height: 800, channels: 3, background: { r: 50, g: 60, b: 70 } },
   }).jpeg().toBuffer());
 });
+
+function aboutSettingsForm(
+  coloringIds = ["coloring-1", "coloring-2", "coloring-3"],
+  pictureIds = ["picture-1", "picture-2", "picture-3"],
+) {
+  const form = new FormData();
+  form.set("aboutIntro", "About these books");
+  coloringIds.forEach((id) => form.append("favoriteColoringBookIds", id));
+  pictureIds.forEach((id) => form.append("favoritePictureBookIds", id));
+  return form;
+}
+
+function configureAboutSettingsDatabase(options: {
+  existing?: {
+    about_intro: string;
+    favorite_coloring_book_ids: string[];
+    favorite_picture_book_ids: string[];
+  };
+  products?: Array<{ id: string; product_type: string; status?: string }>;
+  updateError?: { code: string; message: string } | null;
+} = {}) {
+  const existing = options.existing ?? {
+    about_intro: "",
+    favorite_coloring_book_ids: ["", "", ""],
+    favorite_picture_book_ids: ["", "", ""],
+  };
+  const products = options.products ?? [
+    { id: "coloring-1", product_type: "coloring-book" },
+    { id: "coloring-2", product_type: "coloring-book" },
+    { id: "coloring-3", product_type: "coloring-book" },
+    { id: "picture-1", product_type: "picture-book" },
+    { id: "picture-2", product_type: "picture-book" },
+    { id: "picture-3", product_type: "picture-book" },
+  ];
+  const updates: unknown[] = [];
+
+  mocks.from.mockImplementation((table: string) => {
+    if (table === "products") {
+      return {
+        select: vi.fn(() => ({
+          in: vi.fn(() => Promise.resolve({ data: products, error: null })),
+        })),
+      };
+    }
+
+    let updatePayload = false;
+    const query: {
+      select: ReturnType<typeof vi.fn>;
+      eq: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+      maybeSingle: ReturnType<typeof vi.fn>;
+    } = {
+      select: vi.fn(() => query),
+      eq: vi.fn(() => query),
+      update: vi.fn((value: unknown) => {
+        updatePayload = true;
+        updates.push(value);
+        return query;
+      }),
+      maybeSingle: vi.fn(async () => updatePayload
+        ? {
+            data: options.updateError ? null : { id: "global" },
+            error: options.updateError ?? null,
+          }
+        : { data: existing, error: null }),
+    };
+    return query;
+  });
+
+  return updates;
+}
 
 function uploadedCoverForm(slug: string, title: string) {
   const form = new FormData();
@@ -928,6 +1000,108 @@ describe("Supabase content admin mutations", () => {
       errors: ["admin.validation.premium_code_too_long"],
     });
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("persists six distinct ordered About product IDs in one settings update", async () => {
+    const updates = configureAboutSettingsDatabase({
+      products: [
+        { id: "coloring-1", product_type: "coloring-book", status: "draft" },
+        { id: "coloring-2", product_type: "coloring-book" },
+        { id: "coloring-3", product_type: "coloring-book" },
+        { id: "picture-1", product_type: "picture-book" },
+        { id: "picture-2", product_type: "picture-book" },
+        { id: "picture-3", product_type: "picture-book" },
+      ],
+    });
+
+    await expect(saveAboutPageSettingsForRequest(aboutSettingsForm())).resolves.toEqual({
+      ok: true,
+      id: "global",
+    });
+
+    expect(updates).toEqual([{
+      about_intro: "About these books",
+      favorite_coloring_book_ids: ["coloring-1", "coloring-2", "coloring-3"],
+      favorite_picture_book_ids: ["picture-1", "picture-2", "picture-3"],
+    }]);
+  });
+
+  it("rejects duplicate IDs within a section or across the two sections before writing", async () => {
+    const updates = configureAboutSettingsDatabase();
+    const withinSection = aboutSettingsForm(["same-id", "same-id", "coloring-3"]);
+    const acrossSections = aboutSettingsForm(
+      ["same-id", "coloring-2", "coloring-3"],
+      ["same-id", "picture-2", "picture-3"],
+    );
+
+    await expect(saveAboutPageSettingsForRequest(withinSection)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.validation.invalid_input"],
+    });
+    await expect(saveAboutPageSettingsForRequest(acrossSections)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.validation.invalid_input"],
+    });
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+  });
+
+  it("rejects a known product with the wrong section type", async () => {
+    const updates = configureAboutSettingsDatabase({
+      products: [
+        { id: "coloring-1", product_type: "picture-book" },
+        { id: "coloring-2", product_type: "coloring-book" },
+        { id: "coloring-3", product_type: "coloring-book" },
+        { id: "picture-1", product_type: "picture-book" },
+        { id: "picture-2", product_type: "picture-book" },
+        { id: "picture-3", product_type: "picture-book" },
+      ],
+    });
+
+    await expect(saveAboutPageSettingsForRequest(aboutSettingsForm())).resolves.toEqual({
+      ok: false,
+      errors: ["admin.validation.invalid_input"],
+    });
+    expect(updates).toEqual([]);
+  });
+
+  it("allows a retained stale ID and a known unpublished product when other settings change", async () => {
+    const existing = {
+      about_intro: "Old intro",
+      favorite_coloring_book_ids: ["stale-coloring", "coloring-2", "coloring-3"],
+      favorite_picture_book_ids: ["picture-1", "picture-2", "picture-3"],
+    };
+    const updates = configureAboutSettingsDatabase({
+      existing,
+      products: [
+        { id: "coloring-2", product_type: "coloring-book", status: "draft" },
+        { id: "coloring-3", product_type: "coloring-book" },
+        { id: "picture-1", product_type: "picture-book" },
+        { id: "picture-2", product_type: "picture-book" },
+        { id: "picture-3", product_type: "picture-book" },
+      ],
+    });
+    const form = aboutSettingsForm(
+      ["stale-coloring", "coloring-2", "coloring-3"],
+      ["picture-1", "picture-2", "picture-3"],
+    );
+
+    await expect(saveAboutPageSettingsForRequest(form)).resolves.toEqual({
+      ok: true,
+      id: "global",
+    });
+    expect(updates).toHaveLength(1);
+  });
+
+  it("returns authorization denied when Supabase RLS rejects a non-admin settings write", async () => {
+    configureAboutSettingsDatabase({
+      updateError: { code: "42501", message: "permission denied for table catalog_settings" },
+    });
+
+    await expect(saveAboutPageSettingsForRequest(aboutSettingsForm())).resolves.toEqual({
+      ok: false,
+      errors: ["admin.authorization.denied"],
+    });
   });
 
   it("checks uploaded objects by exact path and skips static seed assets", async () => {
