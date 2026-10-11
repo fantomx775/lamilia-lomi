@@ -33,9 +33,8 @@ test("category image upload, replace, storefront display, and removal work on de
   page.setDefaultTimeout(15_000);
   page.setDefaultNavigationTimeout(60_000);
   const project = testInfo.project.name;
-  const suffix = `${Date.now()}-${project}`;
-  const categoryName = `Issue 24 category ${suffix}`;
-  const categorySlug = `issue-24-category-${suffix.toLowerCase()}`;
+  const categoryName = `E2E Issue 24 PR46 ${project}`;
+  const categorySlug = `e2e-issue-24-pr46-${project}`;
   const errors: string[] = [];
   let categoryCreated = false;
 
@@ -44,6 +43,8 @@ test("category image upload, replace, storefront display, and removal work on de
 
   try {
     await signInAsAdmin(page);
+    await cleanupLegacyCategoryTestData(page);
+    await cleanupCategory(page, categoryName);
     await page.goto("/admin/categories");
     await page.getByRole("button", { name: "Dodaj kategorię" }).click();
 
@@ -181,6 +182,20 @@ async function cleanupCategory(page: Page, categoryName: string) {
   }
   await dialog.getByRole("button", { name: "Usuń kategorię" }).click();
   await expect(page.getByRole("button", { name: `Edytuj kategorię ${categoryName}` })).toHaveCount(0);
+}
+
+async function cleanupLegacyCategoryTestData(page: Page) {
+  await page.goto("/admin/categories");
+  const trigger = page.getByRole("button", {
+    name: /^Edytuj kategorię Issue 24 category \d+-(?:chromium|mobile)$/,
+  });
+
+  while (await trigger.count()) {
+    const categoryName = (await trigger.first().getAttribute("aria-label"))
+      ?.replace(/^Edytuj kategorię /, "");
+    if (!categoryName) throw new Error("Could not identify a legacy Issue 24 E2E category.");
+    await cleanupCategory(page, categoryName);
+  }
 }
 
 async function capture(page: Page, name: string, testInfo: { project: { name: string } }) {
