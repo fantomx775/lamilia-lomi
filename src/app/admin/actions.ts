@@ -7,9 +7,11 @@ import { hasAdminAccess } from "@/lib/auth";
 import {
   archiveProductForRequest,
   deleteCategoryForRequest,
+  deleteCollectionForRequest,
   deleteProductForRequest,
   deleteTagForRequest,
   saveCategoryForRequest,
+  saveCollectionForRequest,
   saveCatalogSettingsForRequest,
   savePageForRequest,
   savePagesForRequest,
@@ -134,6 +136,20 @@ export async function saveCategoryInlineAction(formData: FormData) {
 export async function deleteCategoryInlineAction(formData: FormData) {
   await assertAdmin();
   const result = await executeAdminMutation("category deletion", () => deleteCategoryForRequest(String(formData.get("id") ?? "")));
+  revalidateContentPaths();
+  return result;
+}
+
+export async function saveCollectionInlineAction(formData: FormData) {
+  await assertAdmin();
+  const result = await executeAdminMutation("collection", () => saveCollectionForRequest(formData));
+  revalidateContentPaths();
+  return result;
+}
+
+export async function deleteCollectionInlineAction(formData: FormData) {
+  await assertAdmin();
+  const result = await executeAdminMutation("collection deletion", () => deleteCollectionForRequest(String(formData.get("id") ?? "")));
   revalidateContentPaths();
   return result;
 }

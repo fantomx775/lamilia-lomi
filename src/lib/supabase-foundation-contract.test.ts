@@ -60,6 +60,10 @@ describe("Supabase production foundation contracts", () => {
     const r2RevocationMigration = read(
       "supabase/migrations/20261009113000_r2_media_publication_revoking.sql",
     );
+    const collectionMigration = read(
+      "supabase/migrations/20261011204732_issue_49_collections_admin.sql",
+    );
+    const collectionRlsTest = read("supabase/tests/collections-rls.test.sql");
     const r2BackfillScript = read("scripts/media-r2-backfill.mjs");
     const tagDescriptionsMigration = read(
       "supabase/migrations/20260905100000_add_tag_translation_descriptions.sql",
@@ -185,6 +189,18 @@ describe("Supabase production foundation contracts", () => {
     expect(r2PublicationMigration).toContain("grant execute on function public.set_product_asset_storage_provider(uuid, text) to authenticated, service_role");
     expect(productAdmin).not.toContain('from("product_assets").delete');
     expect(productAdmin).not.toContain('from("premium_codes").delete');
+    expect(collectionMigration).toContain("create table public.collections");
+    expect(collectionMigration).toContain("on delete set null");
+    expect(collectionMigration).toContain("create index products_collection_id_idx");
+    expect(collectionMigration).toContain("alter table public.collections enable row level security");
+    expect(collectionMigration).toContain("create policy collections_admin_all");
+    expect(collectionMigration).toContain("'collection-media'");
+    expect(collectionMigration).toContain("product_state ? 'collectionId'");
+    expect(collectionRlsTest).toContain("older product-save payloads preserve the collection assignment");
+    expect(collectionRlsTest).toContain("deleting a collection detaches but preserves its product");
+    expect(productAdmin).toContain("collectionId: product.collectionId ?? null");
+    expect(read("src/lib/content-repository.ts")).toContain("options.includeCollections");
+    expect(read("src/lib/collection-image-path.ts")).toContain("collections/");
     expect(authActions).toContain("buildSupabaseAuthCallbackUrl(locale, safeRedirectTo, intent)");
     expect(authActions).toContain("setAuthResumeIntent");
     expect(authActions).toContain("redeemAuthResumeIntent");

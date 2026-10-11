@@ -8,6 +8,7 @@ import type {
   AmazonLink,
   Category,
   CategoryImage,
+  Collection,
   ContentSnapshot,
   Product,
   ProductAsset,
@@ -22,6 +23,7 @@ import { normalizePremiumCode, validatePremiumCodeEntries } from "./premium-code
 import { sanitizeRichTextValue } from "./rich-text";
 import { validateProductTextLengths } from "./product-text";
 import { slugify } from "./utils";
+import { isSafeCollectionImagePath } from "./collection-image-path";
 
 export function buildProductFromFormData(
   formData: FormData,
@@ -63,6 +65,7 @@ export function buildProductFromFormData(
     audience: audienceField(formData, "audience", existing?.audience ?? "kids"),
     productType:
       textField(formData, "productType") || existing?.productType || "coloring-book",
+    collectionId: parseProductCollectionId(formData, existing),
     coverAssetId,
     videoAssetId: videoAssetId || undefined,
     reviewDelayDays: positiveIntField(
@@ -200,6 +203,72 @@ export function deleteProduct(productId: string): AdminMutationResult {
   });
 
   return { ok: true, id: productId };
+}
+
+export function buildCollectionFromFormData(
+  formData: FormData,
+  snapshot: ContentSnapshot,
+  existing?: Collection,
+): Collection {
+  const id = textField(formData, "id") || existing?.id || randomUUID();
+  const name = textField(formData, "name");
+  const imagePathField = optionalTextField(formData, "imagePath");
+  const imagePath = imagePathField.present
+    ? imagePathField.value || undefined
+    : existing?.imagePath;
+  const keepsExistingImage = Boolean(imagePath && imagePath === existing?.imagePath);
+  const rawProvider = textField(formData, "imageStorageProvider");
+  const imageStorageProvider = keepsExistingImage
+    ? existing?.imageStorageProvider
+    : rawProvider === "supabase" || rawProvider === "r2" || rawProvider === "local"
+      ? rawProvider
+      : undefined;
+  const sizeValue = numberFromValue(textField(formData, "imageSizeBytes"), 0);
+
+  return {
+    id,
+    name,
+    slug: uniqueSlug(textField(formData, "slug") || slugify(name), snapshot.collections, id),
+    imagePath,
+    imageStorageProvider,
+    imageFilename: keepsExistingImage ? existing?.imageFilename : optionalTextField(formData, "imageFilename").value ?? undefined,
+    imageContentType: keepsExistingImage ? existing?.imageContentType : optionalTextField(formData, "imageContentType").value ?? undefined,
+    imageSizeBytes: keepsExistingImage ? existing?.imageSizeBytes : sizeValue || undefined,
+    sortOrder: intField(formData, "sortOrder", existing?.sortOrder ?? 100),
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function saveCollectionFromFormData(formData: FormData): AdminMutationResult {
+  const snapshot = getContentSnapshot();
+  const existing = snapshot.collections.find((collection) => collection.id === textField(formData, "id"));
+  const collection = buildCollectionFromFormData(formData, snapshot, existing);
+  const errors = validateCollectionDraft(collection, snapshot.collections, collection.id);
+
+  if (errors.length) return { ok: false, errors };
+
+  saveContentSnapshot({
+    ...snapshot,
+    collections: upsertById(snapshot.collections, collection).sort((a, b) => a.sortOrder - b.sortOrder),
+  });
+  return { ok: true, id: collection.id };
+}
+
+export function deleteCollection(collectionId: string): AdminMutationResult {
+  const snapshot = getContentSnapshot();
+  if (!snapshot.collections.some((collection) => collection.id === collectionId)) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+  }
+
+  saveContentSnapshot({
+    ...snapshot,
+    collections: snapshot.collections.filter((collection) => collection.id !== collectionId),
+    products: snapshot.products.map((product) => product.collectionId === collectionId
+      ? { ...product, collectionId: undefined }
+      : product),
+  });
+  return { ok: true, id: collectionId };
 }
 
 export function archiveProduct(productId: string): AdminMutationResult {
@@ -700,6 +769,10 @@ function validateProductDraft(product: Product, snapshot: ContentSnapshot) {
     errors.push(ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED);
   }
 
+  if (product.collectionId && !snapshot.collections.some((collection) => collection.id === product.collectionId)) {
+    errors.push(ADMIN_ERROR_CODES.NOT_FOUND_COLLECTION);
+  }
+
   if (!english?.title) {
     errors.push(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED);
   }
@@ -772,6 +845,41 @@ function validateProductDraft(product: Product, snapshot: ContentSnapshot) {
   }
 
   return Array.from(new Set(errors));
+}
+
+export function validateCollectionDraft(collection: Collection, collections: Collection[], currentId: string) {
+  const errors: AdminErrorCode[] = [];
+  if (!collection.name) errors.push(ADMIN_ERROR_CODES.VALIDATION_COLLECTION_NAME_REQUIRED);
+  if (!collection.slug) errors.push(ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED);
+  const normalizedName = collection.name.trim().toLowerCase();
+  if (collections.some((item) => item.id !== currentId && item.name.trim().toLowerCase() === normalizedName)) {
+    errors.push(ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME);
+  }
+  if (collections.some((item) => item.slug === collection.slug && item.id !== currentId)) {
+    errors.push(ADMIN_ERROR_CODES.CONFLICT_SLUG);
+  }
+  if (collection.imagePath) {
+    if (
+      !isSafeCollectionImagePath(collection.imagePath, collection.id) ||
+      !collection.imageStorageProvider ||
+      !collection.imageFilename ||
+      !["image/png", "image/jpeg", "image/webp"].includes(collection.imageContentType ?? "") ||
+      !collection.imageSizeBytes
+    ) {
+      errors.push(ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE);
+    }
+  } else if (
+    collection.imageStorageProvider || collection.imageFilename ||
+    collection.imageContentType || collection.imageSizeBytes
+  ) {
+    errors.push(ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE);
+  }
+  return errors;
+}
+
+function parseProductCollectionId(formData: FormData, existing?: Product) {
+  const value = optionalTextField(formData, "collectionId");
+  return value.present ? value.value || undefined : existing?.collectionId;
 }
 
 function validateTaxonomy<T extends { id: string; slug: string; translations: TaxonomyTranslation[] }>(

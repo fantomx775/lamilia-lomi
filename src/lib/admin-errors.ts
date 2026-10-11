@@ -4,6 +4,7 @@ export const ADMIN_ERROR_CODES = {
   INTERNAL: "admin.internal",
   AUTHORIZATION_DENIED: "admin.authorization.denied",
   NOT_FOUND_PRODUCT: "admin.not_found.product",
+  NOT_FOUND_COLLECTION: "admin.not_found.collection",
   NOT_FOUND_RESOURCE: "admin.not_found.resource",
   NOT_FOUND_ASSET_UPLOAD: "admin.not_found.asset_upload",
   VALIDATION_INVALID_INPUT: "admin.validation.invalid_input",
@@ -14,6 +15,8 @@ export const ADMIN_ERROR_CODES = {
   VALIDATION_SLUG_REQUIRED: "admin.validation.slug_required",
   VALIDATION_CATEGORY_NAME_REQUIRED: "admin.validation.category_name_required",
   VALIDATION_TAG_NAME_REQUIRED: "admin.validation.tag_name_required",
+  VALIDATION_COLLECTION_NAME_REQUIRED: "admin.validation.collection_name_required",
+  VALIDATION_COLLECTION_IMAGE: "admin.validation.collection_image",
   VALIDATION_PAGE_SLUG: "admin.validation.page_slug",
   VALIDATION_MEDIA_UPLOAD_ACTIVE: "admin.validation.media_upload_active",
   VALIDATION_MEDIA_UPLOAD_STATE: "admin.validation.media_upload_state",
@@ -30,6 +33,7 @@ export const ADMIN_ERROR_CODES = {
   CONFLICT_PREMIUM_CODE_DUPLICATE: "admin.conflict.premium_code_duplicate",
   CONFLICT_PREMIUM_CODE_EXISTING: "admin.conflict.premium_code_existing",
   CONFLICT_AMAZON_MARKET_DUPLICATE: "admin.conflict.amazon_market_duplicate",
+  CONFLICT_COLLECTION_NAME: "admin.conflict.collection_name",
   CONFLICT_SLUG: "admin.conflict.slug",
   CONFLICT_DATA: "admin.conflict.data",
 } as const;
@@ -88,6 +92,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.INTERNAL]: "We couldn't save the changes. Try again.",
     [ADMIN_ERROR_CODES.AUTHORIZATION_DENIED]: "Your administrator session is no longer valid. Sign in again.",
     [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT]: "The product was not found.",
+    [ADMIN_ERROR_CODES.NOT_FOUND_COLLECTION]: "The selected collection no longer exists. Refresh and try again.",
     [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE]: "The requested item was not found.",
     [ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD]: "The uploaded file was not found. Upload it again.",
     [ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT]: "Check the entered values and try again.",
@@ -98,6 +103,8 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED]: "A slug is required.",
     [ADMIN_ERROR_CODES.VALIDATION_CATEGORY_NAME_REQUIRED]: "An English category name is required.",
     [ADMIN_ERROR_CODES.VALIDATION_TAG_NAME_REQUIRED]: "An English tag name is required.",
+    [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_NAME_REQUIRED]: "A collection name is required.",
+    [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE]: "The collection image is invalid. Upload it again.",
     [ADMIN_ERROR_CODES.VALIDATION_PAGE_SLUG]: "Only the privacy and terms pages can be edited.",
     [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_ACTIVE]: "Finish uploading files before saving the product.",
     [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_STATE]: "The file upload state could not be confirmed.",
@@ -114,6 +121,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE]: "Each premium code can be used only once in this product.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING]: "This premium code is already assigned to another product.",
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Each Amazon market can be listed only once.",
+    [ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME]: "A collection with this name already exists.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "This slug is already in use.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "These changes conflict with existing data. Refresh and try again.",
   },
@@ -121,6 +129,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.INTERNAL]: "Nie udało się zapisać zmian. Spróbuj ponownie.",
     [ADMIN_ERROR_CODES.AUTHORIZATION_DENIED]: "Sesja administratora wygasła. Zaloguj się ponownie.",
     [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT]: "Nie znaleziono produktu.",
+    [ADMIN_ERROR_CODES.NOT_FOUND_COLLECTION]: "Wybrana kolekcja już nie istnieje. Odśwież stronę i spróbuj ponownie.",
     [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE]: "Nie znaleziono wskazanego elementu.",
     [ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD]: "Nie znaleziono przesłanego pliku. Prześlij go ponownie.",
     [ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT]: "Sprawdź wpisane wartości i spróbuj ponownie.",
@@ -131,6 +140,8 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED]: "Slug jest wymagany.",
     [ADMIN_ERROR_CODES.VALIDATION_CATEGORY_NAME_REQUIRED]: "Nazwa kategorii po angielsku jest wymagana.",
     [ADMIN_ERROR_CODES.VALIDATION_TAG_NAME_REQUIRED]: "Nazwa tagu po angielsku jest wymagana.",
+    [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_NAME_REQUIRED]: "Nazwa kolekcji jest wymagana.",
+    [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE]: "Obraz kolekcji jest nieprawidłowy. Prześlij go ponownie.",
     [ADMIN_ERROR_CODES.VALIDATION_PAGE_SLUG]: "Można edytować tylko strony privacy i terms.",
     [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_ACTIVE]: "Zakończ przesyłanie plików przed zapisaniem produktu.",
     [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_STATE]: "Nie udało się potwierdzić stanu przesyłania plików.",
@@ -147,6 +158,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE]: "Każdy kod premium może wystąpić w tym produkcie tylko raz.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING]: "Ten kod premium jest już przypisany do innego produktu.",
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Każdy rynek Amazon może wystąpić tylko raz.",
+    [ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME]: "Kolekcja o takiej nazwie już istnieje.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Ten slug jest już używany.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Zmiany kolidują z istniejącymi danymi. Odśwież stronę i spróbuj ponownie.",
   },
@@ -154,6 +166,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.INTERNAL]: "Die Änderungen konnten nicht gespeichert werden. Bitte versuche es erneut.",
     [ADMIN_ERROR_CODES.AUTHORIZATION_DENIED]: "Deine Administratorsitzung ist abgelaufen. Bitte melde dich erneut an.",
     [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT]: "Das Produkt wurde nicht gefunden.",
+    [ADMIN_ERROR_CODES.NOT_FOUND_COLLECTION]: "Die ausgewählte Sammlung ist nicht mehr vorhanden. Bitte aktualisiere die Seite.",
     [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE]: "Das angeforderte Element wurde nicht gefunden.",
     [ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD]: "Die hochgeladene Datei wurde nicht gefunden. Lade sie erneut hoch.",
     [ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT]: "Prüfe die eingegebenen Werte und versuche es erneut.",
@@ -164,6 +177,8 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED]: "Ein Slug ist erforderlich.",
     [ADMIN_ERROR_CODES.VALIDATION_CATEGORY_NAME_REQUIRED]: "Ein englischer Kategoriename ist erforderlich.",
     [ADMIN_ERROR_CODES.VALIDATION_TAG_NAME_REQUIRED]: "Ein englischer Tagname ist erforderlich.",
+    [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_NAME_REQUIRED]: "Ein Sammlungsname ist erforderlich.",
+    [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE]: "Das Sammlungsbild ist ungültig. Bitte lade es erneut hoch.",
     [ADMIN_ERROR_CODES.VALIDATION_PAGE_SLUG]: "Nur die Seiten privacy und terms können bearbeitet werden.",
     [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_ACTIVE]: "Schließe die Dateiübertragung ab, bevor du das Produkt speicherst.",
     [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_STATE]: "Der Status der Dateiübertragung konnte nicht bestätigt werden.",
@@ -180,6 +195,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE]: "Jeder Premium-Code darf in diesem Produkt nur einmal verwendet werden.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING]: "Dieser Premium-Code ist bereits einem anderen Produkt zugewiesen.",
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Jeder Amazon-Markt darf nur einmal aufgeführt werden.",
+    [ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME]: "Eine Sammlung mit diesem Namen existiert bereits.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Dieser Slug wird bereits verwendet.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Die Änderungen stehen im Konflikt mit vorhandenen Daten. Aktualisiere die Seite und versuche es erneut.",
   },
@@ -187,6 +203,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.INTERNAL]: "No se pudieron guardar los cambios. Inténtalo de nuevo.",
     [ADMIN_ERROR_CODES.AUTHORIZATION_DENIED]: "La sesión de administrador ha caducado. Inicia sesión de nuevo.",
     [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT]: "No se encontró el producto.",
+    [ADMIN_ERROR_CODES.NOT_FOUND_COLLECTION]: "La colección seleccionada ya no existe. Actualiza la página e inténtalo de nuevo.",
     [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE]: "No se encontró el elemento solicitado.",
     [ADMIN_ERROR_CODES.NOT_FOUND_ASSET_UPLOAD]: "No se encontró el archivo subido. Vuelve a subirlo.",
     [ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT]: "Comprueba los valores introducidos e inténtalo de nuevo.",
@@ -197,6 +214,8 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED]: "Se necesita un slug.",
     [ADMIN_ERROR_CODES.VALIDATION_CATEGORY_NAME_REQUIRED]: "Se necesita un nombre de categoría en inglés.",
     [ADMIN_ERROR_CODES.VALIDATION_TAG_NAME_REQUIRED]: "Se necesita un nombre de etiqueta en inglés.",
+    [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_NAME_REQUIRED]: "Se necesita un nombre para la colección.",
+    [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE]: "La imagen de la colección no es válida. Vuelve a subirla.",
     [ADMIN_ERROR_CODES.VALIDATION_PAGE_SLUG]: "Solo se pueden editar las páginas privacy y terms.",
     [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_ACTIVE]: "Termina de subir los archivos antes de guardar el producto.",
     [ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_STATE]: "No se pudo confirmar el estado de la subida.",
@@ -213,6 +232,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE]: "Cada código premium solo puede usarse una vez en este producto.",
     [ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING]: "Este código premium ya está asignado a otro producto.",
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Cada mercado de Amazon solo puede aparecer una vez.",
+    [ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME]: "Ya existe una colección con este nombre.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Este slug ya está en uso.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Los cambios entran en conflicto con datos existentes. Actualiza e inténtalo de nuevo.",
   },
@@ -260,6 +280,10 @@ export function classifyAdminDatabaseError(
   }
 
   if (code === "23505") {
+    if (diagnosticText.includes("collections_name_normalized_key")) {
+      return ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME;
+    }
+
     if (diagnosticText.includes("premium_codes") || diagnosticText.includes("premium code")) {
       return ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE;
     }

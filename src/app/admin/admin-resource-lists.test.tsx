@@ -113,6 +113,36 @@ describe("admin resource list adapters", () => {
     expect(user.getByRole("link", { name: "Eksport marketing CSV" })).toHaveAttribute("href", "/admin/users/export?marketingOnly=1");
   });
 
+  it("shows collection, category and tag columns with an accessible 2 plus N expansion", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <ProductsResourceList rows={[{
+        id: "product-collections",
+        title: "Forest book",
+        slug: "forest-book",
+        status: "draft",
+        audience: "kids",
+        productType: "coloring-book",
+        collectionName: "Forest stories",
+        categoryNames: ["Books", "Nature", "A very long category name"],
+        tagNames: ["Calm", "Printable", "Seasonal"],
+      }]} />,
+    );
+
+    expect(view.getByRole("columnheader", { name: "Kolekcja" })).toBeInTheDocument();
+    expect(view.getByRole("columnheader", { name: "Kategorie" })).toBeInTheDocument();
+    expect(view.getByRole("columnheader", { name: "Tagi" })).toBeInTheDocument();
+    expect(view.getAllByRole("button", { name: "Pokaż 1 kolejnych kategorii" })).toHaveLength(2);
+
+    const expand = view.getAllByRole("button", { name: "Pokaż 1 kolejnych kategorii" })[0];
+    expand.focus();
+    await user.keyboard("{Enter}");
+
+    expect(expand).toHaveAttribute("aria-expanded", "true");
+    expect(view.getByText("A very long category name")).toBeInTheDocument();
+    expect(view.getAllByText("Forest stories")).toHaveLength(2);
+  });
+
   it("opens category and user details as accessible drawers", async () => {
     const user = userEvent.setup();
     const category = render(

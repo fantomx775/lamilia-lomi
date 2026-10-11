@@ -8,23 +8,28 @@ import { createClient, getCurrentAccessToken } from "@/lib/supabase/server";
 import {
   archiveProduct,
   buildProductFromFormData,
+  buildCollectionFromFormData,
   buildCategoryFromFormData,
   buildTagFromFormData,
   buildStaticPagesFromFormData,
   deleteCategory,
+  deleteCollection,
   deleteProduct,
   deleteTag,
   saveCategoryFromFormData,
   updateCategoryImageInSnapshot,
+  saveCollectionFromFormData,
   saveProductFromFormData,
   validateProductAssetSubmission,
   validateProductMediaSubmission,
+  validateCollectionDraft,
   saveStaticPageFromFormData,
   saveStaticPagesFromFormData,
   saveTagFromFormData,
 } from "./admin-content";
 import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
+import { assertCollectionImageExists, removeCollectionImage } from "./collection-image-storage";
 import {
   cleanupNewMediaFromFormData,
   cleanupPersistedMedia,
@@ -44,7 +49,7 @@ import {
   type AdminMutationResult,
   type DatabaseErrorLike,
 } from "./admin-errors";
-import type { CategoryImage, CatalogDesktopColumns, Product } from "./types";
+import type { CategoryImage, CatalogDesktopColumns, Collection, Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
   let storageAuthorizationToken: string | null | undefined;
@@ -211,6 +216,7 @@ export function buildProductMutationPayload(product: Product) {
     status: product.status,
     audience: product.audience,
     productType: product.productType,
+    collectionId: product.collectionId ?? null,
     coverAssetId: product.coverAssetId || null,
     videoAssetId: product.videoAssetId || null,
     reviewDelayDays: product.reviewDelayDays,
@@ -478,6 +484,90 @@ export async function deleteCategoryForRequest(categoryId: string): Promise<Admi
   });
 }
 
+export async function saveCollectionForRequest(formData: FormData): Promise<AdminMutationResult> {
+  return runAdminMutation("collection", async () => {
+    const backendMode = getBackendMode();
+    const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
+    const snapshot = await getAdminContentSnapshot();
+    const existing = snapshot.collections.find((collection) => collection.id === stringField(formData, "id"));
+    const collection = buildCollectionFromFormData(formData, snapshot, existing);
+    const errors = validateCollectionDraft(collection, snapshot.collections, collection.id);
+    if (errors.length) return { ok: false, errors };
+
+    if (
+      (backendMode === "local" && collection.imagePath && collection.imageStorageProvider !== "local") ||
+      (backendMode === "supabase" && collection.imagePath && collection.imageStorageProvider === "local")
+    ) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE] };
+    }
+
+    if (collection.imagePath && collection.imageStorageProvider && collection.imagePath !== existing?.imagePath) {
+      await assertCollectionImageExists({
+        collectionId: collection.id,
+        storagePath: collection.imagePath,
+        provider: collection.imageStorageProvider,
+        contentType: collection.imageContentType ?? "",
+        sizeBytes: collection.imageSizeBytes ?? 0,
+        authorizationToken,
+      });
+    }
+
+    if (backendMode === "local") {
+      const result = saveCollectionFromFormData(formData);
+      if (!result.ok) return result;
+      if (existing?.imagePath && existing.imagePath !== collection.imagePath && existing.imageStorageProvider) {
+        await cleanupCollectionImageIfUnreferenced(existing, collection.id);
+      }
+      return result;
+    }
+
+    assertUuidSet(collection.id);
+    const supabase = await createClient();
+    await run(supabase.from("collections").upsert({
+      id: collection.id,
+      name: collection.name,
+      slug: collection.slug,
+      image_path: collection.imagePath ?? null,
+      image_storage_provider: collection.imageStorageProvider ?? null,
+      image_filename: collection.imageFilename ?? null,
+      image_content_type: collection.imageContentType ?? null,
+      image_size_bytes: collection.imageSizeBytes ?? null,
+      sort_order: collection.sortOrder,
+      updated_at: collection.updatedAt,
+    }), "collection");
+
+    if (existing?.imagePath && existing.imagePath !== collection.imagePath && existing.imageStorageProvider) {
+      await cleanupCollectionImageIfUnreferenced(existing, collection.id, authorizationToken);
+    }
+    return { ok: true, id: collection.id };
+  });
+}
+
+export async function deleteCollectionForRequest(collectionId: string): Promise<AdminMutationResult> {
+  return runAdminMutation("collection deletion", async () => {
+    const snapshot = await getAdminContentSnapshot();
+    const existing = snapshot.collections.find((collection) => collection.id === collectionId);
+    if (!existing) return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+
+    const backendMode = getBackendMode();
+    const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
+    if (backendMode === "local") {
+      const result = deleteCollection(collectionId);
+      if (result.ok && existing.imagePath && existing.imageStorageProvider) {
+        await cleanupCollectionImageIfUnreferenced(existing, collectionId);
+      }
+      return result;
+    }
+
+    const supabase = await createClient();
+    await run(supabase.from("collections").delete().eq("id", collectionId), "collection deletion");
+    if (existing.imagePath && existing.imageStorageProvider) {
+      await cleanupCollectionImageIfUnreferenced(existing, collectionId, authorizationToken);
+    }
+    return { ok: true, id: collectionId };
+  });
+}
+
 export async function saveTagForRequest(formData: FormData): Promise<AdminMutationResult> {
   return runAdminMutation("tag", async () => {
     if (getBackendMode() === "local") {
@@ -608,6 +698,42 @@ async function run(query: PromiseLike<{ error: DatabaseErrorLike | null }>, labe
 
   if (error) {
     throw new AdminDatabaseError(label, error);
+  }
+}
+
+async function cleanupCollectionImageIfUnreferenced(
+  collection: Collection,
+  excludedCollectionId: string,
+  authorizationToken?: string | null,
+) {
+  if (!collection.imagePath || !collection.imageStorageProvider) return;
+
+  try {
+    if (collection.imageStorageProvider === "local") {
+      const referenced = getContentSnapshot().collections.some((item) =>
+        item.id !== excludedCollectionId && item.imagePath === collection.imagePath,
+      );
+      if (referenced) return;
+    } else {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("collections")
+        .select("id")
+        .eq("image_path", collection.imagePath)
+        .neq("id", excludedCollectionId)
+        .limit(1);
+      if (error) throw new AdminDatabaseError("collection image reference check", error);
+      if (data?.length) return;
+    }
+
+    await removeCollectionImage({
+      collectionId: collection.id,
+      storagePath: collection.imagePath,
+      provider: collection.imageStorageProvider,
+      authorizationToken,
+    });
+  } catch (error) {
+    console.error("Collection image cleanup was deferred.", error);
   }
 }
 

@@ -32,6 +32,7 @@ export function getContentSnapshot(): ContentSnapshot {
 
     return structuredClone({
       products: Array.isArray(stored.products) ? stored.products : seed.products,
+      collections: Array.isArray(stored.collections) ? stored.collections : seed.collections,
       categories: Array.isArray(stored.categories) ? stored.categories : seed.categories,
       tags: Array.isArray(stored.tags) ? stored.tags : seed.tags,
       staticPages: Array.isArray(stored.staticPages)

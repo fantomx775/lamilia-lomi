@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildStaticPagesFromFormData,
+  buildCollectionFromFormData,
   buildProductFromFormData,
   buildCategoryFromFormData,
   buildTagFromFormData,
   validateProductAssetSubmission,
   validateAssetClassification,
+  validateCollectionDraft,
 } from "./admin-content";
 import { exportUsersToCsv, validateProductForPublish } from "./admin";
 import { ADMIN_ERROR_CODES } from "./admin-errors";
@@ -16,6 +18,81 @@ import { PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH, PRODUCT_TITLE_MAX_LENGTH } from "
 import { products } from "./seed-data";
 
 describe("admin behavior", () => {
+  it("assigns one validated collection while keeping product categories and tags", () => {
+    const snapshot = getSeedContentSnapshot();
+    const collectionId = "aaaaaaaa-9999-4999-8999-aaaaaaaaaaaa";
+    snapshot.collections = [{
+      id: collectionId,
+      name: "Forest stories",
+      slug: "forest-stories",
+      sortOrder: 100,
+      createdAt: "2026-10-11T00:00:00.000Z",
+      updatedAt: "2026-10-11T00:00:00.000Z",
+    }];
+    const existing = snapshot.products[0];
+    const form = new FormData();
+    form.set("status", "draft");
+    form.set("collectionId", collectionId);
+    form.set("title", existing.translations.find((translation) => translation.locale === "en")?.title ?? "Product");
+    for (const id of existing.categoryIds) form.append("categoryIds", id);
+    for (const id of existing.tagIds) form.append("tagIds", id);
+
+    const result = buildProductFromFormData(form, { existing, snapshot });
+
+    expect(result.errors).toEqual([]);
+    expect(result.product.collectionId).toBe(collectionId);
+    expect(result.product.categoryIds).toEqual(existing.categoryIds);
+    expect(result.product.tagIds).toEqual(existing.tagIds);
+
+    form.set("collectionId", "");
+    expect(buildProductFromFormData(form, { existing, snapshot }).product.collectionId).toBeUndefined();
+    form.set("collectionId", "unavailable-collection");
+    expect(buildProductFromFormData(form, { existing, snapshot }).errors).toContain(ADMIN_ERROR_CODES.NOT_FOUND_COLLECTION);
+  });
+
+  it("generates a unique collection slug and validates private image metadata", () => {
+    const snapshot = getSeedContentSnapshot();
+    snapshot.collections = [{
+      id: "aaaaaaaa-9999-4999-8999-aaaaaaaaaaaa",
+      name: "Forest stories",
+      slug: "forest-stories",
+      sortOrder: 100,
+      createdAt: "2026-10-11T00:00:00.000Z",
+      updatedAt: "2026-10-11T00:00:00.000Z",
+    }];
+    const form = new FormData();
+    form.set("id", "bbbbbbbb-9999-4999-8999-bbbbbbbbbbbb");
+    form.set("name", "Forest stories II");
+    form.set("slug", "Forest stories");
+    form.set("imagePath", "");
+
+    const collection = buildCollectionFromFormData(form, snapshot);
+    expect(collection.slug).toBe("forest-stories-2");
+    expect(validateCollectionDraft(collection, snapshot.collections, collection.id)).toEqual([]);
+  });
+
+  it("requires collection names to be unique ignoring case and outer whitespace", () => {
+    const snapshot = getSeedContentSnapshot();
+    snapshot.collections = [{
+      id: "aaaaaaaa-9999-4999-8999-aaaaaaaaaaaa",
+      name: "Forest stories",
+      slug: "forest-stories",
+      sortOrder: 100,
+      createdAt: "2026-10-11T00:00:00.000Z",
+      updatedAt: "2026-10-11T00:00:00.000Z",
+    }];
+    const form = new FormData();
+    form.set("id", "bbbbbbbb-9999-4999-8999-bbbbbbbbbbbb");
+    form.set("name", "  FOREST STORIES  ");
+    form.set("slug", "forest-stories-copy");
+
+    const collection = buildCollectionFromFormData(form, snapshot);
+
+    expect(validateCollectionDraft(collection, snapshot.collections, collection.id)).toContain(
+      ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME,
+    );
+  });
+
   it("requires English title and Amazon link before publishing", () => {
     expect(validateProductForPublish(products[0])).toMatchObject({ ok: true });
     expect(

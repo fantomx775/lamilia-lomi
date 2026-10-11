@@ -11,6 +11,7 @@ import type {
   AmazonLink,
   Category,
   CatalogSettings,
+  Collection,
   ContentSnapshot,
   Product,
   ProductAsset,
@@ -118,7 +119,7 @@ export const getPublicProductDetailSnapshotForRequest = cache(
 );
 
 export const getAdminContentSnapshot = cache(async () =>
-  getContentSnapshotForRequest({ includePremiumCodes: true }),
+  getContentSnapshotForRequest({ includePremiumCodes: true, includeCollections: true }),
 );
 
 export const getCatalogSettingsForRequest = cache(async (): Promise<CatalogSettings> => {
@@ -146,11 +147,19 @@ export const getCatalogSettingsForRequest = cache(async (): Promise<CatalogSetti
 
 export async function getContentSnapshotForRequest(options: {
   includePremiumCodes?: boolean;
+  includeCollections?: boolean;
 } = {}): Promise<ContentSnapshot> {
   if (getBackendMode() === "local") {
     const { getContentSnapshot } = await import("./content-store");
+    const snapshot = getContentSnapshot();
 
-    return getContentSnapshot();
+    return options.includeCollections
+      ? snapshot
+      : {
+          ...snapshot,
+          collections: [],
+          products: snapshot.products.map((product) => ({ ...product, collectionId: undefined })),
+        };
   }
 
   const supabase = await createClient();
@@ -168,6 +177,7 @@ export async function getContentSnapshotForRequest(options: {
     staticPageRows,
     catalogSettingsRows,
     premiumCodeRows,
+    collectionRows,
   ] = await Promise.all([
     selectRows(supabase, "products"),
     selectRows(supabase, "product_translations"),
@@ -183,6 +193,9 @@ export async function getContentSnapshotForRequest(options: {
     selectRows(supabase, "catalog_settings"),
     options.includePremiumCodes
       ? selectRows(supabase, "premium_codes")
+      : Promise.resolve([]),
+    options.includeCollections
+      ? selectRows(supabase, "collections")
       : Promise.resolve([]),
   ]);
 
@@ -212,8 +225,10 @@ export async function getContentSnapshotForRequest(options: {
         assets.get(stringValue(row.id)) ?? [],
         amazonLinks.get(stringValue(row.id)) ?? [],
         premiumCodes.get(stringValue(row.id)) ?? [],
+        options.includeCollections === true,
       ),
     ),
+    collections: collectionRows.map(mapCollection),
     categories,
     tags,
     staticPages: staticPageRows
@@ -248,6 +263,7 @@ function mapProduct(
   assetRows: DbRow[],
   amazonRows: DbRow[],
   premiumCodeRows: DbRow[],
+  includeCollectionAssignment = false,
 ): Product {
   return {
     id: stringValue(row.id),
@@ -255,6 +271,7 @@ function mapProduct(
     status: row.status as Product["status"],
     audience: row.audience as Product["audience"],
     productType: stringValue(row.product_type),
+    collectionId: includeCollectionAssignment ? optionalString(row.collection_id) : undefined,
     coverAssetId: stringValue(row.cover_asset_id),
     videoAssetId: optionalString(row.video_asset_id),
     reviewDelayDays: numberValue(row.review_delay_days, 14),
@@ -300,6 +317,7 @@ function mapPublicProductDetailRow(row: DbRow): ContentSnapshot {
         [],
       ),
     ],
+    collections: [],
     categories,
     tags,
     staticPages: [],
@@ -365,6 +383,25 @@ function mapTag(row: DbRow, translationRows: DbRow[]): Tag {
     id: stringValue(row.id),
     slug: stringValue(row.slug),
     translations: translationRows.map(mapTaxonomyTranslation),
+  };
+}
+
+function mapCollection(row: DbRow): Collection {
+  const imagePath = optionalString(row.image_path);
+  const rawProvider = row.image_storage_provider;
+
+  return {
+    id: stringValue(row.id),
+    name: stringValue(row.name),
+    slug: stringValue(row.slug),
+    imagePath,
+    imageStorageProvider: rawProvider === "r2" || rawProvider === "supabase" ? rawProvider : undefined,
+    imageFilename: optionalString(row.image_filename),
+    imageContentType: optionalString(row.image_content_type),
+    imageSizeBytes: numberOrUndefined(row.image_size_bytes),
+    sortOrder: numberValue(row.sort_order, 100),
+    createdAt: stringValue(row.created_at),
+    updatedAt: stringValue(row.updated_at),
   };
 }
 

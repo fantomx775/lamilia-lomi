@@ -66,6 +66,7 @@ import {
   saveProductForRequest,
   saveCategoryForRequest,
   saveCategoryImageForRequest,
+  saveCollectionForRequest,
   savePagesForRequest,
   saveTagForRequest,
 } from "./supabase-content-admin";
@@ -110,6 +111,7 @@ describe("Supabase content admin mutations", () => {
     mocks.getCurrentAccessToken.mockResolvedValue(null);
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [],
+      collections: [],
       categories: [],
       tags: [],
       staticPages: [],
@@ -434,6 +436,7 @@ describe("Supabase content admin mutations", () => {
     const tagId = "22222222-2222-4222-8222-222222222222";
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [],
+      collections: [],
       categories: [],
       tags: [{ id: tagId, slug: "old-name", translations: [
         { locale: "en", name: "Old name", description: "Old description" },
@@ -462,6 +465,7 @@ describe("Supabase content admin mutations", () => {
     const categoryId = "33333333-3333-4333-8333-333333333333";
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [],
+      collections: [],
       categories: [{ id: categoryId, slug: "books", sortOrder: 1, translations: [
         { locale: "en", name: "Books", description: "English books" },
         { locale: "pl", name: "Książki", description: "Polskie książki" },
@@ -489,6 +493,7 @@ describe("Supabase content admin mutations", () => {
   it("rejects over-limit product text before sending a Supabase write", async () => {
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [],
+      collections: [],
       categories: [],
       tags: [],
       staticPages: [],
@@ -507,6 +512,77 @@ describe("Supabase content admin mutations", () => {
     });
 
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("includes a validated collection assignment in the atomic product-save payload", async () => {
+    const collectionId = "aaaaaaaa-4999-4999-8999-aaaaaaaaaaaa";
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      collections: [{
+        id: collectionId,
+        name: "Forest stories",
+        slug: "forest-stories",
+        sortOrder: 100,
+        createdAt: "2026-10-11T00:00:00.000Z",
+        updatedAt: "2026-10-11T00:00:00.000Z",
+      }],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.rpc.mockResolvedValue({ data: { status: "success" }, error: null });
+    const form = new FormData();
+    form.set("id", productId);
+    form.set("slug", "forest-book");
+    form.set("status", "draft");
+    form.set("audience", "kids");
+    form.set("productType", "coloring-book");
+    form.set("title", "Forest book");
+    form.set("collectionId", collectionId);
+
+    await expect(saveProductForRequest(form)).resolves.toMatchObject({ ok: true, id: productId });
+
+    expect(mocks.rpc).toHaveBeenCalledWith("save_product", expect.objectContaining({
+      product_state: expect.objectContaining({ collectionId }),
+    }));
+  });
+
+  it("rejects an unavailable collection before calling the product-save RPC", async () => {
+    const form = new FormData();
+    form.set("id", productId);
+    form.set("slug", "forest-book");
+    form.set("status", "draft");
+    form.set("audience", "kids");
+    form.set("productType", "coloring-book");
+    form.set("title", "Forest book");
+    form.set("collectionId", "aaaaaaaa-4999-4999-8999-aaaaaaaaaaaa");
+
+    await expect(saveProductForRequest(form)).resolves.toMatchObject({
+      ok: false,
+      errors: ["admin.not_found.collection"],
+    });
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("creates a collection row with an automatically normalized unique slug", async () => {
+    const collectionId = "aaaaaaaa-4999-4999-8999-aaaaaaaaaaaa";
+    const form = new FormData();
+    form.set("id", collectionId);
+    form.set("name", "Forest Stories");
+    form.set("slug", "");
+    form.set("imagePath", "");
+    form.set("imageStorageProvider", "");
+    form.set("imageFilename", "");
+    form.set("imageContentType", "");
+    form.set("imageSizeBytes", "");
+
+    await expect(saveCollectionForRequest(form)).resolves.toMatchObject({ ok: true, id: collectionId });
+
+    expect(mocks.upsertedRows).toContainEqual(expect.objectContaining({
+      table: "collections",
+      rows: expect.objectContaining({ id: collectionId, name: "Forest Stories", slug: "forest-stories" }),
+    }));
   });
 
   it("saves a product with existing non-English content intact", async () => {
@@ -532,6 +608,7 @@ describe("Supabase content admin mutations", () => {
     };
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [existingProduct],
+      collections: [],
       categories: [],
       tags: [],
       staticPages: [],
@@ -588,6 +665,7 @@ describe("Supabase content admin mutations", () => {
     ];
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [],
+      collections: [],
       categories: [],
       tags: [],
       staticPages: seededPages,
@@ -628,6 +706,7 @@ describe("Supabase content admin mutations", () => {
   it("archives through the update-only RPC without saving a stale product snapshot", async () => {
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [{ id: productId, assets: [] }],
+      collections: [],
       categories: [],
       tags: [],
       staticPages: [],
@@ -647,6 +726,7 @@ describe("Supabase content admin mutations", () => {
   it("does not recreate a product deleted after the admin snapshot was read", async () => {
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [{ id: productId, assets: [] }],
+      collections: [],
       categories: [],
       tags: [],
       staticPages: [],

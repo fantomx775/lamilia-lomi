@@ -47,6 +47,22 @@ export type Category = {
   image?: CategoryImage;
 };
 
+export type CollectionImageStorageProvider = "local" | "supabase" | "r2";
+
+export type Collection = {
+  id: string;
+  name: string;
+  slug: string;
+  imagePath?: string;
+  imageStorageProvider?: CollectionImageStorageProvider;
+  imageFilename?: string;
+  imageContentType?: string;
+  imageSizeBytes?: number;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Tag = {
   id: string;
   slug: string;
@@ -101,6 +117,7 @@ export type StaticPageRecord = {
 
 export type ContentSnapshot = {
   products: Product[];
+  collections: Collection[];
   categories: Category[];
   tags: Tag[];
   staticPages: StaticPageRecord[];
@@ -123,6 +140,7 @@ export type Product = {
   videoAssetId?: string;
   reviewDelayDays: number;
   sortOrder: number;
+  collectionId?: string;
   createdAt: string;
   updatedAt: string;
   translations: ProductTranslation[];

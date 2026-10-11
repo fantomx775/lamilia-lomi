@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 
@@ -18,6 +19,9 @@ export type AdminProductListRow = {
   audience: Audience;
   productType: string;
   coverPath?: string;
+  collectionName?: string | null;
+  categoryNames?: string[];
+  tagNames?: string[];
 };
 
 const statusLabels: Record<ProductStatus, string> = {
@@ -68,6 +72,28 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
     header: "Typ produktu",
     cell: (row) => formatProductType(row.productType),
   },
+  {
+    id: "collection",
+    header: "Kolekcja",
+    cell: (row) => row.collectionName
+      ? <Badge className="max-w-36 truncate" title={row.collectionName}>{row.collectionName}</Badge>
+      : <span aria-label="Bez kolekcji">—</span>,
+    cellClassName: "max-w-40",
+  },
+  {
+    id: "categories",
+    header: "Kategorie",
+    cell: (row) => <CompactBadgeList rowId={row.id} kind="kategorii" labels={row.categoryNames ?? []} />,
+    headerClassName: "min-w-40",
+    cellClassName: "min-w-40 max-w-48",
+  },
+  {
+    id: "tags",
+    header: "Tagi",
+    cell: (row) => <CompactBadgeList rowId={row.id} kind="tagów" labels={row.tagNames ?? []} />,
+    headerClassName: "min-w-40",
+    cellClassName: "min-w-40 max-w-48",
+  },
 ];
 
 export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) {
@@ -83,7 +109,7 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
       getRowId={(row) => row.id}
       getRowHref={(row) => `/admin/products/${row.id}`}
       getSearchText={(row) =>
-        [row.title, row.slug, row.status, row.audience, row.productType].join(" ")
+        [row.title, row.slug, row.status, row.audience, row.productType, row.collectionName, ...(row.categoryNames ?? []), ...(row.tagNames ?? [])].join(" ")
       }
       toolbarActions={
         <Link className={buttonClassName({ size: "sm" })} href="/admin/products/new">
@@ -92,29 +118,76 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
         </Link>
       }
       renderMobileCard={(row) => (
-        <Link
-          href={`/admin/products/${row.id}`}
-          className="admin-motion group block min-w-0 cursor-pointer rounded-md p-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] hover:bg-[var(--color-bg-alt)]"
-          aria-label={`Edytuj produkt ${row.title}`}
-        >
-          <div className="flex min-w-0 items-start justify-between gap-3">
-            <span className="relative size-14 shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]">
-              <ImageWithFallback src={row.coverPath} alt={row.title} className="object-contain p-0.5" sizes="56px" />
-            </span>
-            <div className="min-w-0">
-              <p className="truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
-              <p className="mt-1 truncate text-xs text-[var(--color-muted)]">{row.slug}</p>
+        <div className="grid min-w-0 gap-3">
+          <Link
+            href={`/admin/products/${row.id}`}
+            className="admin-motion group block min-w-0 cursor-pointer rounded-md p-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] hover:bg-[var(--color-bg-alt)]"
+            aria-label={`Edytuj produkt ${row.title}`}
+          >
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <span className="relative size-14 shrink-0 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-bg)]">
+                <ImageWithFallback src={row.coverPath} alt={row.title} className="object-contain p-0.5" sizes="56px" />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
+                <p className="mt-1 truncate text-xs text-[var(--color-muted)]">{row.slug}</p>
+              </div>
+              <Badge className={statusClasses[row.status]}>{statusLabels[row.status]}</Badge>
             </div>
-            <Badge className={statusClasses[row.status]}>{statusLabels[row.status]}</Badge>
-          </div>
-          <p className="mt-4 text-sm text-[var(--color-muted)]">
-            {row.audience === "kids" ? "Dzieci" : "Dorośli"} · {formatProductType(row.productType)}
-          </p>
-        </Link>
+            <p className="mt-3 text-sm text-[var(--color-muted)]">
+              {row.audience === "kids" ? "Dzieci" : "Dorośli"} · {formatProductType(row.productType)}
+            </p>
+          </Link>
+          <dl className="grid gap-2 border-t border-[var(--color-border)] pt-3 text-sm">
+            <MobileLabel label="Kolekcja">{row.collectionName ? <Badge className="max-w-56 truncate" title={row.collectionName}>{row.collectionName}</Badge> : <span aria-label="Bez kolekcji">—</span>}</MobileLabel>
+            <MobileLabel label="Kategorie"><CompactBadgeList rowId={`${row.id}-mobile`} kind="kategorii" labels={row.categoryNames ?? []} /></MobileLabel>
+            <MobileLabel label="Tagi"><CompactBadgeList rowId={`${row.id}-mobile`} kind="tagów" labels={row.tagNames ?? []} /></MobileLabel>
+          </dl>
+        </div>
       )}
       emptyState={<p className="p-8 text-center text-sm text-[var(--color-muted)]">Brak produktów.</p>}
     />
   );
+}
+
+function CompactBadgeList({ rowId, kind, labels }: { rowId: string; kind: string; labels: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!labels.length) return <span aria-label={`Brak ${kind}`}>—</span>;
+
+  const visible = labels.slice(0, 2);
+  const hidden = labels.slice(2);
+  const detailsId = `product-${rowId}-${kind.replaceAll(" ", "-")}`;
+
+  return (
+    <div className="grid min-w-0 gap-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {visible.map((label, index) => (
+          <Badge key={`${label}-${index}`} className="max-w-32 truncate px-2" title={label}>{label}</Badge>
+        ))}
+        {hidden.length ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={detailsId}
+            aria-label={`${expanded ? "Ukryj" : "Pokaż"} ${hidden.length} kolejnych ${kind}`}
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex min-h-7 items-center rounded-md border border-[var(--color-border)] bg-white px-2 text-xs font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+          >
+            +{hidden.length}
+          </button>
+        ) : null}
+      </div>
+      {hidden.length && expanded ? (
+        <ul id={detailsId} className="grid min-w-0 gap-1 text-xs text-[var(--color-muted)]" aria-label={`Pozostałe ${kind}`}>
+          {hidden.map((label, index) => <li key={`${label}-${index}`} className="break-words">{label}</li>)}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function MobileLabel({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] items-start gap-2"><dt className="text-xs text-[var(--color-muted)]">{label}</dt><dd className="min-w-0">{children}</dd></div>;
 }
 
 function formatProductType(value: string) {
