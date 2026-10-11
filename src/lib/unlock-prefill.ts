@@ -2,9 +2,12 @@ import type { UnlockIntent } from "./unlock-intent";
 import type { Locale } from "@/i18n/routing";
 
 type BackendMode = "local" | "supabase";
+type CurrentUnlockIntent = Pick<UnlockIntent, "productSlug" | "code"> & {
+  locale: string;
+};
 
 export function selectUnlockPrefillCode(input: {
-  currentIntent: Pick<UnlockIntent, "locale" | "productSlug" | "code"> | null;
+  currentIntent: CurrentUnlockIntent | null;
   locale: Locale;
   productSlug: string;
   backendMode: BackendMode;
