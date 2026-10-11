@@ -403,6 +403,12 @@ maps to `/robots.txt`, and `src/app/sitemap.ts` maps to `/sitemap.xml`. Smoke
 plans must check those endpoints and expected response text; they are not page
 routes.
 
+Smoke expectations may use `expectedText` for text responses or an exact
+`expectedContentType` such as `image/png` for a non-empty binary response. An
+optional `expectedFinalOrigin` must be one exact HTTPS origin; without it, the
+final response must stay on the deployment origin. Recorded final URLs omit
+query strings so signed redirect parameters are not written into evidence.
+
 The deployment gate requires a Vercel Git integration deployment and success
 status for the exact merge SHA, and checks that the environment URL belongs to
 the `lamilia-lomi` Production project. A matching GitHub `Production` label

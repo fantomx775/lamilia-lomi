@@ -2084,6 +2084,54 @@ test("production smoke plans map Next metadata route files to their public endpo
   }
 });
 
+test("production smoke plans preserve exact HTTPS origins and MIME expectations", () => {
+  const filename = "src/app/api/media/[assetId]/route.ts";
+  const plan = {
+    status: "PASS",
+    flows: [{
+      name: "public English cover",
+      affectedFiles: [filename],
+      paths: [{
+        path: "/api/media/moon-garden-cover",
+        expectedContentType: "image/png",
+        expectedFinalOrigin: "https://media.lamilialomi.com",
+      }],
+    }],
+  };
+  const verified = validateProductionSmokePlan({
+    files: [filename],
+    localVerification: { record: { productionSmokePlan: plan } },
+  });
+  assert.equal(verified.status, "PASS");
+  assert.deepEqual(verified.expectations, [{
+    path: "/api/media/moon-garden-cover",
+    expectedContentType: "image/png",
+    expectedFinalOrigin: "https://media.lamilialomi.com",
+    flow: "public English cover",
+  }]);
+
+  for (const origin of [
+    "http://media.lamilialomi.com",
+    "https://media.lamilialomi.com/covers",
+    "https://user:password@media.lamilialomi.com",
+    "https://media.lamilialomi.com?signature=secret",
+  ]) {
+    const invalidOriginPlan = structuredClone(plan);
+    invalidOriginPlan.flows[0].paths[0].expectedFinalOrigin = origin;
+    assert.equal(validateProductionSmokePlan({
+      files: [filename],
+      localVerification: { record: { productionSmokePlan: invalidOriginPlan } },
+    }).status, "BLOCKED", origin);
+  }
+
+  const wildcardMimePlan = structuredClone(plan);
+  wildcardMimePlan.flows[0].paths[0].expectedContentType = "image/*";
+  assert.equal(validateProductionSmokePlan({
+    files: [filename],
+    localVerification: { record: { productionSmokePlan: wildcardMimePlan } },
+  }).status, "BLOCKED");
+});
+
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
   const evidenceComments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),
@@ -2873,6 +2921,107 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
   assert.equal(expectedFlow.status, "PASS");
   assert.equal(expectedFlow.checks[0].expectedTextMatched, true);
 
+  const externalCover = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{
+      path: "/api/media/moon-garden-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com",
+    }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://media.lamilialomi.com/covers/moon-garden.png?X-Amz-Signature=secret-token",
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x00]).buffer,
+    }),
+  });
+  assert.equal(externalCover.status, "PASS");
+  assert.equal(externalCover.checks[0].responseBytes, 5);
+  assert.equal(externalCover.checks[0].expectedContentTypeMatched, true);
+  assert.equal(externalCover.checks[0].expectedFinalOrigin, "https://media.lamilialomi.com");
+  assert.equal(externalCover.checks[0].finalUrl, "https://media.lamilialomi.com/covers/moon-garden.png");
+  assert.equal(externalCover.checks[0].finalUrl.includes("secret-token"), false);
+
+  const mismatchedFinalOrigin = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{
+      path: "/api/media/moon-garden-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com",
+    }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://other-cdn.example.test/moon-garden.png",
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => Uint8Array.from([0x89, 0x50, 0x4e, 0x47]).buffer,
+    }),
+  });
+  assert.equal(mismatchedFinalOrigin.status, "FAIL");
+  assert.match(mismatchedFinalOrigin.details, /final origin did not match/);
+
+  const emptyBinaryCover = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/empty-cover"],
+    expectations: [{
+      path: "/api/media/empty-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com",
+    }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://media.lamilialomi.com/covers/empty.png",
+      headers: { get: () => "image/png" },
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }),
+  });
+  assert.equal(emptyBinaryCover.status, "FAIL");
+  assert.match(emptyBinaryCover.details, /empty response body/);
+
+  const externalOriginDeniedByDefault = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{ path: "/api/media/moon-garden-cover", expectedContentType: "image/png" }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://media.lamilialomi.com/covers/moon-garden.png?signature=secret",
+      headers: { get: () => "image/png" },
+      text: async () => "non-empty PNG bytes",
+    }),
+  });
+  assert.equal(externalOriginDeniedByDefault.status, "FAIL");
+  assert.match(externalOriginDeniedByDefault.details, /final origin did not match/);
+  assert.equal(externalOriginDeniedByDefault.checks[0].finalUrl, "https://media.lamilialomi.com/covers/moon-garden.png");
+
+  const invalidFinalOrigin = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{
+      path: "/api/media/moon-garden-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com/covers",
+    }],
+  });
+  assert.equal(invalidFinalOrigin.status, "BLOCKED");
+
+  const wrongContentType = await runProductionSmoke("https://production.example.test", {
+    paths: ["/api/media/moon-garden-cover"],
+    expectations: [{
+      path: "/api/media/moon-garden-cover",
+      expectedContentType: "image/png",
+      expectedFinalOrigin: "https://media.lamilialomi.com",
+    }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      url: "https://media.lamilialomi.com/covers/moon-garden.png",
+      headers: { get: () => "image/jpeg" },
+      text: async () => "non-empty image bytes",
+    }),
+  });
+  assert.equal(wrongContentType.status, "FAIL");
+  assert.match(wrongContentType.details, /expected content type/);
+
   const wrongExpectedFlow = await runProductionSmoke("https://production.example.test", {
     paths: ["/products"],
     expectations: [{ path: "/products", expectedText: "Private admin console" }],
@@ -3572,6 +3721,8 @@ test("application-flow delivery requires and runs an explicit affected Productio
       expectations: [{
         path: "/api/downloads/known-asset",
         expectedText: "guest",
+        expectedContentType: "application/json",
+        expectedFinalOrigin: "https://production.example.test",
         expectedStatus: 401,
       }],
     },
@@ -3598,6 +3749,8 @@ test("application-flow delivery requires and runs an explicit affected Productio
   assert.deepEqual(smokeExpectations, [{
     path: "/api/downloads/known-asset",
     expectedText: "guest",
+    expectedContentType: "application/json",
+    expectedFinalOrigin: "https://production.example.test",
     expectedStatus: 401,
   }]);
 

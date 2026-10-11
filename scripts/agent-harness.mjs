@@ -1270,6 +1270,21 @@ function isValidProductionSmokePath(path) {
   }
 }
 
+function isValidProductionSmokeOrigin(origin) {
+  if (typeof origin !== "string") return false;
+  try {
+    const url = new URL(origin);
+    return url.protocol === "https:" && url.origin === origin && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
+function isValidProductionSmokeContentType(contentType) {
+  return typeof contentType === "string" &&
+    /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(contentType);
+}
+
 function isSupportedProductionSmokeStatus(status, path) {
   if (!Number.isInteger(status)) return false;
   if (status >= 200 && status < 300) return true;
@@ -1364,10 +1379,15 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       failures.push("Smoke flow " + flow.name + " must identify a matching route module in affectedFiles or routeFiles.");
     }
     for (const expectation of flow.paths) {
+      const hasExpectedText = typeof expectation?.expectedText === "string" && expectation.expectedText.trim();
+      const expectedTextIsValid = expectation?.expectedText === undefined || hasExpectedText;
+      const expectedContentTypeIsValid = expectation?.expectedContentType === undefined ||
+        isValidProductionSmokeContentType(expectation.expectedContentType);
       if (!expectation || !isValidProductionSmokePath(expectation.path) ||
-        typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+        !expectedTextIsValid || !expectedContentTypeIsValid || (!hasExpectedText && expectation.expectedContentType === undefined) ||
+        (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
         (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path))) {
-        failures.push("Smoke flow " + flow.name + " has an invalid absolute path, expected response text, or supported HTTP status.");
+        failures.push("Smoke flow " + flow.name + " has an invalid absolute path, expected response content, HTTPS final origin, or supported HTTP status.");
         continue;
       }
       const pathName = new URL(expectation.path, "https://agent-harness.invalid").pathname;
@@ -1379,7 +1399,9 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       paths.push(expectation.path);
       expectations.push({
         path: expectation.path,
-        expectedText: expectation.expectedText.trim(),
+        ...(hasExpectedText ? { expectedText: expectation.expectedText.trim() } : {}),
+        ...(expectation.expectedContentType !== undefined ? { expectedContentType: expectation.expectedContentType } : {}),
+        ...(expectation.expectedFinalOrigin !== undefined ? { expectedFinalOrigin: expectation.expectedFinalOrigin } : {}),
         ...(expectation.expectedStatus !== undefined ? { expectedStatus: expectation.expectedStatus } : {}),
         flow: flow.name,
       });
@@ -1400,6 +1422,20 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
     return statuses.size > 1;
   });
   if (conflictingStatuses) failures.push("Smoke plan has conflicting expected HTTP statuses for one path.");
+  const conflictingFinalOrigins = uniquePaths.some((path) => {
+    const origins = new Set(expectations
+      .filter((expectation) => expectation.path === path)
+      .map((expectation) => expectation.expectedFinalOrigin ?? null));
+    return origins.size > 1;
+  });
+  if (conflictingFinalOrigins) failures.push("Smoke plan has conflicting expected final origins for one path.");
+  const conflictingContentTypes = uniquePaths.some((path) => {
+    const contentTypes = new Set(expectations
+      .filter((expectation) => expectation.path === path && expectation.expectedContentType !== undefined)
+      .map((expectation) => expectation.expectedContentType.toLowerCase()));
+    return contentTypes.size > 1;
+  });
+  if (conflictingContentTypes) failures.push("Smoke plan has conflicting expected content types for one path.");
   return {
     status: failures.length ? "BLOCKED" : "PASS",
     required: true,
@@ -2687,10 +2723,31 @@ export async function runProductionSmoke(environmentUrl, {
   }
   if (!Array.isArray(expectations) || expectations.some((expectation) =>
     !expectation || !paths.includes(expectation.path) ||
-    typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+    (expectation.expectedText !== undefined && (typeof expectation.expectedText !== "string" || !expectation.expectedText.trim())) ||
+    (expectation.expectedContentType !== undefined && !isValidProductionSmokeContentType(expectation.expectedContentType)) ||
+    (expectation.expectedText === undefined && expectation.expectedContentType === undefined) ||
+    (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
     (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)),
   )) {
-    return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path and non-empty expected content." };
+    return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path, expected text or exact MIME content type, and a valid HTTPS final origin." };
+  }
+  const conflictingFinalOrigins = paths.some((path) => {
+    const origins = new Set(expectations
+      .filter((expectation) => expectation.path === path)
+      .map((expectation) => expectation.expectedFinalOrigin ?? baseUrl.origin));
+    return origins.size > 1;
+  });
+  if (conflictingFinalOrigins) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke expectations cannot require conflicting final origins for one path." };
+  }
+  const conflictingContentTypes = paths.some((path) => {
+    const contentTypes = new Set(expectations
+      .filter((expectation) => expectation.path === path && expectation.expectedContentType !== undefined)
+      .map((expectation) => expectation.expectedContentType.toLowerCase()));
+    return contentTypes.size > 1;
+  });
+  if (conflictingContentTypes) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke expectations cannot require conflicting content types for one path." };
   }
   const conflictingStatuses = paths.some((path) => {
     const statuses = new Set(expectations
@@ -2714,38 +2771,63 @@ export async function runProductionSmoke(environmentUrl, {
         redirect: "follow",
         signal: AbortSignal.timeout(timeoutMs),
       });
-      const body = await response.text();
       const finalUrl = new URL(response.url || url.href);
+      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
+      const expectedFinalOrigin = expectedForPath[0]?.expectedFinalOrigin ?? baseUrl.origin;
+      const expectedContentType = expectedForPath.find((expectation) => expectation.expectedContentType !== undefined)?.expectedContentType;
+      const responseContentType = response.headers?.get?.("content-type") || null;
+      const mediaType = responseContentType?.split(";", 1)[0].trim().toLowerCase() || null;
+      const expectedTextValues = expectedForPath
+        .filter((expectation) => expectation.expectedText !== undefined)
+        .map((expectation) => expectation.expectedText);
+      const responseBody = typeof response.arrayBuffer === "function"
+        ? Buffer.from(await response.arrayBuffer())
+        : Buffer.from(await response.text(), "utf8");
+      const body = expectedTextValues.length || expectedContentType === undefined
+        ? responseBody.toString("utf8")
+        : "";
+      const responseBodyEmpty = responseBody.length === 0 ||
+        ((expectedTextValues.length > 0 || expectedContentType === undefined) && !body.trim());
+      const expectedTextMatched = expectedTextValues.every((expectedText) => body.includes(expectedText));
+      const expectedContentTypeMatched = expectedContentType === undefined ||
+        mediaType === expectedContentType.toLowerCase();
       const check = {
         path,
         statusCode: response.status,
-        contentType: response.headers?.get?.("content-type") || null,
-        responseBytes: Buffer.byteLength(body),
-        finalUrl: finalUrl.href,
+        contentType: responseContentType,
+        responseBytes: responseBody.length,
+        finalUrl: finalUrl.origin + finalUrl.pathname,
       };
-      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
-      const expectedTextMatched = expectedForPath.every((expectation) => body.includes(expectation.expectedText));
       const expectedStatus = expectedForPath.find((expectation) => expectation.expectedStatus !== undefined)?.expectedStatus;
       const expectedStatusMatched = expectedStatus === undefined || response.status === expectedStatus;
       const responseStatusPassed = expectedStatus === undefined ? response.ok : expectedStatusMatched;
-      if (expectedForPath.length) {
-        check.expectedText = expectedForPath.map((expectation) => expectation.expectedText);
+      if (expectedTextValues.length) {
+        check.expectedText = expectedTextValues;
         check.expectedTextMatched = expectedTextMatched;
+      }
+      if (expectedContentType !== undefined) {
+        check.expectedContentType = expectedContentType;
+        check.expectedContentTypeMatched = expectedContentTypeMatched;
+      }
+      if (expectedForPath.some((expectation) => expectation.expectedFinalOrigin !== undefined)) {
+        check.expectedFinalOrigin = expectedFinalOrigin;
       }
       if (expectedStatus !== undefined) {
         check.expectedStatus = expectedStatus;
         check.expectedStatusMatched = expectedStatusMatched;
       }
       checks.push(check);
-      if (!responseStatusPassed || finalUrl.origin !== baseUrl.origin || !body.trim() || !expectedTextMatched) {
+      if (!responseStatusPassed || finalUrl.origin !== expectedFinalOrigin || responseBodyEmpty ||
+        !expectedTextMatched || !expectedContentTypeMatched) {
         return {
           status: "FAIL",
           checks,
           details: "Production smoke failed for " + path + " (HTTP " + response.status +
             (expectedStatus !== undefined && !expectedStatusMatched ? ", expected HTTP " + expectedStatus : "") +
-            (finalUrl.origin !== baseUrl.origin ? ", redirected outside the deployment origin" : "") +
-            (!body.trim() ? ", empty response body" : "") +
-            (!expectedTextMatched ? ", expected content was not present" : "") + ").",
+            (finalUrl.origin !== expectedFinalOrigin ? ", final origin did not match the expected origin" : "") +
+            (responseBodyEmpty ? ", empty response body" : "") +
+            (!expectedTextMatched ? ", expected content was not present" : "") +
+            (!expectedContentTypeMatched ? ", expected content type was not present" : "") + ").",
         };
       }
     } catch (error) {
@@ -3649,10 +3731,31 @@ export async function deliverPullRequest(client, pullRequestNumber, {
     }
     if (expectations.some((expectation) =>
       !expectation || !paths.includes(expectation.path) ||
-      typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+      (expectation.expectedText !== undefined && (typeof expectation.expectedText !== "string" || !expectation.expectedText.trim())) ||
+      (expectation.expectedContentType !== undefined && !isValidProductionSmokeContentType(expectation.expectedContentType)) ||
+      (expectation.expectedText === undefined && expectation.expectedContentType === undefined) ||
+      (expectation.expectedFinalOrigin !== undefined && !isValidProductionSmokeOrigin(expectation.expectedFinalOrigin)) ||
       (expectation.expectedStatus !== undefined && !isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)),
     )) {
-      return { status: "BLOCKED", details: "Production smoke expectations must name an included path, expected content, and a supported HTTP status." };
+      return { status: "BLOCKED", details: "Production smoke expectations must name an included path, expected text or exact MIME content type, HTTPS final origin, and a supported HTTP status." };
+    }
+    const conflictingFinalOrigins = paths.some((path) => {
+      const origins = new Set(expectations
+        .filter((expectation) => expectation.path === path)
+        .map((expectation) => expectation.expectedFinalOrigin ?? null));
+      return origins.size > 1;
+    });
+    if (conflictingFinalOrigins) {
+      return { status: "BLOCKED", details: "Production smoke expectations cannot require conflicting final origins for one path." };
+    }
+    const conflictingContentTypes = paths.some((path) => {
+      const contentTypes = new Set(expectations
+        .filter((expectation) => expectation.path === path && expectation.expectedContentType !== undefined)
+        .map((expectation) => expectation.expectedContentType.toLowerCase()));
+      return contentTypes.size > 1;
+    });
+    if (conflictingContentTypes) {
+      return { status: "BLOCKED", details: "Production smoke expectations cannot require conflicting content types for one path." };
     }
     return { status: "PASS", paths, expectations, details: plan.details };
   };
