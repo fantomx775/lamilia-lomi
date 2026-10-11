@@ -677,11 +677,15 @@ function parsePremiumCodes(
     };
   }).filter((code): code is Product["premiumCodes"][number] => Boolean(code));
 
-  for (const redeemedCode of existing?.premiumCodes ?? []) {
-    if (redeemedCode.redeemedAt && !submittedIds.has(redeemedCode.id)) {
-      errors.push(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
-      rows.push(redeemedCode);
+  for (const existingCode of existing?.premiumCodes ?? []) {
+    if (submittedIds.has(existingCode.id) || removed.has(existingCode.id)) {
+      continue;
     }
+
+    if (existingCode.redeemedAt) {
+      errors.push(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+    }
+    rows.push(existingCode);
   }
 
   const validation = validatePremiumCodeEntries(rows);

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
+  rpc: vi.fn(),
   getAdminContentSnapshot: vi.fn(),
   getBackendMode: vi.fn(),
   getContentSnapshot: vi.fn(),
@@ -41,18 +42,19 @@ function postRequest(body: unknown, origin = "https://lamilialomi.test") {
   });
 }
 
-function mockSupabaseInsert(insert: ReturnType<typeof vi.fn>, hasProduct = true) {
+function mockSupabaseBatchRpc(rpc: ReturnType<typeof vi.fn>, hasProduct = true) {
   const maybeSingle = vi.fn().mockResolvedValue({ data: hasProduct ? { id: productId } : null, error: null });
   const eq = vi.fn(() => ({ maybeSingle }));
   const select = vi.fn(() => ({ eq }));
-  const from = vi.fn((table: string) => table === "products" ? { select } : { insert });
-  mocks.createClient.mockResolvedValue({ from });
-  return { from, insert, maybeSingle };
+  const from = vi.fn(() => ({ select }));
+  mocks.createClient.mockResolvedValue({ from, rpc });
+  return { from, rpc, maybeSingle };
 }
 
 describe("admin premium code batch and export routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
     mocks.getDemoSession.mockResolvedValue({ role: "admin" });
     mocks.hasAdminAccess.mockImplementation((session) => session?.role === "admin");
     mocks.getBackendMode.mockReturnValue("supabase");
@@ -69,8 +71,8 @@ describe("admin premium code batch and export routes", () => {
   });
 
   it("inserts a complete bounded batch through the authenticated client", async () => {
-    const insert = vi.fn().mockResolvedValue({ error: null });
-    const { from } = mockSupabaseInsert(insert);
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    const { from } = mockSupabaseBatchRpc(rpc);
 
     const response = await POST(postRequest({ count: 3 }), routeParams);
     const payload = await response.json();
@@ -78,25 +80,35 @@ describe("admin premium code batch and export routes", () => {
     expect(response.status).toBe(201);
     expect(payload.ok).toBe(true);
     expect(payload.codes).toHaveLength(3);
-    expect(insert).toHaveBeenCalledTimes(1);
-    expect(insert.mock.calls[0][0]).toHaveLength(3);
-    expect(insert.mock.calls[0][0].every((code: { product_id: string; active: boolean }) => code.product_id === productId && code.active)).toBe(true);
-    expect(from.mock.calls.map(([table]) => table)).toEqual(["products", "premium_codes"]);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("create_premium_code_batch", {
+      requested_product_id: productId,
+      code_entries: expect.arrayContaining([
+        expect.objectContaining({ id: expect.any(String), code: expect.any(String) }),
+      ]),
+    });
+    const batchCalls = rpc.mock.calls as unknown as unknown[][];
+    const createdBatch = batchCalls[0] as [string, { code_entries: unknown[] }];
+    expect(createdBatch[1].code_entries).toHaveLength(3);
+    expect(from).toHaveBeenCalledWith("products");
   });
 
   it("retries a unique-key collision with a fresh batch and hides database errors", async () => {
-    const insert = vi.fn()
-      .mockResolvedValueOnce({ error: { code: "23505", message: "sensitive database detail" } })
-      .mockResolvedValueOnce({ error: null });
-    mockSupabaseInsert(insert);
+    const rpc = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: { code: "23505", message: "sensitive database detail" } })
+      .mockResolvedValueOnce({ data: true, error: null });
+    mockSupabaseBatchRpc(rpc);
 
     const response = await POST(postRequest({ count: 2 }), routeParams);
     const payload = await response.json();
-    const firstBatch = insert.mock.calls[0][0].map((code: { code: string }) => code.code);
-    const secondBatch = insert.mock.calls[1][0].map((code: { code: string }) => code.code);
+    const batchCalls = rpc.mock.calls as unknown as unknown[][];
+    const firstCall = batchCalls[0] as [string, { code_entries: Array<{ code: string }> }];
+    const secondCall = batchCalls[1] as [string, { code_entries: Array<{ code: string }> }];
+    const firstBatch = firstCall[1].code_entries.map((code) => code.code);
+    const secondBatch = secondCall[1].code_entries.map((code) => code.code);
 
     expect(response.status).toBe(201);
-    expect(insert).toHaveBeenCalledTimes(2);
+    expect(rpc).toHaveBeenCalledTimes(2);
     expect(secondBatch).not.toEqual(firstBatch);
     expect(JSON.stringify(payload)).not.toContain("sensitive database detail");
   });

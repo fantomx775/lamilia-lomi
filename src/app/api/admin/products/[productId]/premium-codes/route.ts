@@ -102,16 +102,13 @@ async function createSupabaseBatch(productId: string, count: number) {
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const codes = createPremiumCodeBatch({ productId, count });
-    const { error } = await supabase.from("premium_codes").insert(
-      codes.map((code) => ({
-        id: code.id,
-        product_id: code.productId,
-        code: code.code,
-        active: code.active,
-      })),
-    );
+    const { data, error } = await supabase.rpc("create_premium_code_batch", {
+      requested_product_id: productId,
+      code_entries: codes.map((code) => ({ id: code.id, code: code.code })),
+    });
 
-    if (!error) return codes;
+    if (!error && data === true) return codes;
+    if (!error) return null;
     if (error.code !== "23505") throw new Error("Premium code batch insert failed.");
   }
 

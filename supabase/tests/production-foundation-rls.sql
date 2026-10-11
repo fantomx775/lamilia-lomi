@@ -21,7 +21,8 @@ delete from public.premium_codes
 where id in (
   '99999999-9999-4999-8999-999999999994',
   '99999999-9999-4999-8999-999999999995',
-  '99999999-9999-4999-8999-999999999997'
+  '99999999-9999-4999-8999-999999999997',
+  '99999999-9999-4999-8999-999999999998'
 );
 delete from public.user_product_unlocks
 where user_id in (
@@ -370,7 +371,11 @@ as $$
         )
         where add_code
       ) premium_rows
-    ), '[]'::jsonb)
+    ), '[]'::jsonb),
+    'premiumCodeRemovals', case
+      when removed_code_id is null then '[]'::jsonb
+      else jsonb_build_array(removed_code_id)
+    end
   )
   from public.products p
   where p.id = requested_product_id;
@@ -431,9 +436,75 @@ when others then
 end;
 $$;
 
+create function pg_temp.premium_code_batch_should_fail(
+  requested_product_id uuid,
+  requested_code_id uuid,
+  requested_code text
+)
+returns boolean
+language plpgsql
+as $$
+begin
+  return not public.create_premium_code_batch(
+    requested_product_id,
+    jsonb_build_array(jsonb_build_object('id', requested_code_id, 'code', requested_code))
+  );
+exception when others then
+  return true;
+end;
+$$;
+
 update public.profiles
 set role = 'admin'
 where id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+
+\echo 'RLS matrix: premium-code batch authorization and stale editor saves'
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
+select case when pg_temp.premium_code_batch_should_fail(
+  '22222222-2222-4222-8222-222222222222',
+  '99999999-9999-4999-8999-999999999998',
+  'LOMI-STALE-EDITOR-2026'
+) then 'PASS non-admin cannot generate premium batches' else 'FAIL non-admin generated a premium batch' end;
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+select case when set_config(
+  'issue31.stale_product_state',
+  pg_temp.product_state('22222222-2222-4222-8222-222222222222'::uuid)::text,
+  true
+) is not null then 'PASS captured stale product editor state' else 'FAIL stale product editor fixture' end;
+select case when public.create_premium_code_batch(
+  '22222222-2222-4222-8222-222222222222',
+  jsonb_build_array(jsonb_build_object(
+    'id', '99999999-9999-4999-8999-999999999998',
+    'code', 'LOMI-STALE-EDITOR-2026'
+  ))
+) then 'PASS admin batch inserted atomically' else 'FAIL admin batch was not inserted' end;
+select case when (public.save_product_with_storage_provider(current_setting('issue31.stale_product_state')::jsonb) ->> 'status') = 'success'
+  then 'PASS stale editor save succeeds without replacing current codes'
+  else 'FAIL stale editor save failed' end;
+select case when count(*) = 2
+  and count(*) filter (where id = '99999999-9999-4999-8999-999999999992'::uuid) = 1
+  and count(*) filter (where id = '99999999-9999-4999-8999-999999999998'::uuid) = 1
+  then 'PASS stale editor save preserves newly generated batch codes'
+  else 'FAIL stale editor save lost or changed premium codes' end
+from public.premium_codes
+where product_id = '22222222-2222-4222-8222-222222222222';
+select case when (public.save_product(pg_temp.product_state(
+  requested_product_id => '22222222-2222-4222-8222-222222222222',
+  removed_code_id => '99999999-9999-4999-8999-999999999998'
+)) ->> 'status') = 'success'
+  then 'PASS explicit code removal still works after stale-state merge'
+  else 'FAIL explicit code removal was ignored' end;
+select case when count(*) = 0 then 'PASS explicitly removed generated code is deleted'
+  else 'FAIL explicitly removed generated code remains present' end
+from public.premium_codes
+where id = '99999999-9999-4999-8999-999999999998';
+rollback;
 
 \echo 'RLS matrix: premium-code length at request, RPC, and database boundaries'
 begin;
