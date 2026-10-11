@@ -72,7 +72,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
     const productField = page.locator('#product-editor-form input[name="longDescription"]');
     const originalProductValue = await productField.inputValue();
-    const productHtml = '<h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><img src="https://rich-text-resource.invalid/tracker.png" alt="Product diagram"><iframe src="https://rich-text-resource.invalid/frame"></iframe><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><script>window.__issue51Executed = true</script><p onclick="window.__issue51Executed = true">Safe paragraph.</p>';
+    const productHtml = '<style>p { color: red }</style><h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><img src="https://rich-text-resource.invalid/tracker.png" alt="Product diagram"><iframe src="https://rich-text-resource.invalid/frame"></iframe><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><script>window.__issue51Executed = true</script><p onclick="window.__issue51Executed = true">Safe paragraph.</p>';
     await page.getByRole("button", { name: "HTML" }).click();
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(productHtml);
     await page.getByRole("button", { name: "Rich Text" }).click();
@@ -151,7 +151,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
     await termsTitle.fill(originalTermsTitle);
     const unsavedNavigation = page.waitForEvent("dialog");
-    await page.getByRole("link", { name: "Strony" }).click();
+    await page.locator("#page-editor-form").getByRole("link", { name: "Strony" }).click();
     const navigationDialog = await unsavedNavigation;
     expect(navigationDialog.message()).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
     await navigationDialog.dismiss();

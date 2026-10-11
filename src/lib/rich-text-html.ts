@@ -74,12 +74,16 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
     return { document: { type: "doc", content: [] }, warnings: [...warningMap.values()], canConvert: false };
   }
 
-  const parserSafeSource = removeFetchableAttributes(source, (tag, attribute) => {
-    addWarning(
-      "unsupported-attribute",
-      "The " + attribute + " attribute on <" + tag + "> will be removed.",
-    );
-  });
+  const parserSafeSource = removeFetchableAttributes(
+    source,
+    (tag, attribute) => {
+      addWarning(
+        "unsupported-attribute",
+        "The " + attribute + " attribute on <" + tag + "> will be removed.",
+      );
+    },
+    () => addWarning("unsupported-element", "Style block content will be removed during conversion."),
+  );
   const parsed = new DOMParser().parseFromString(parserSafeSource, "text/html");
   if (parsed.querySelector("parsererror")) {
     addWarning("invalid-markup", "The HTML source could not be parsed. Review it before converting.");
@@ -264,6 +268,7 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
 function removeFetchableAttributes(
   source: string,
   onRemovedAttribute: (tag: string, attribute: string) => void,
+  onRemovedStyleContent: () => void,
 ): string {
   const lowerSource = source.toLowerCase();
   let result = "";
@@ -308,6 +313,7 @@ function removeFetchableAttributes(
     const closeStart = findRawTextClose(lowerSource, tagName, cursor);
     const contentEnd = closeStart < 0 ? source.length : closeStart;
     if (tagName === "style") {
+      onRemovedStyleContent();
       result += " ";
     } else {
       result += source.slice(cursor, contentEnd);

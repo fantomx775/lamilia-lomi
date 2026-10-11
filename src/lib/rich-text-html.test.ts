@@ -70,6 +70,14 @@ describe("rich text HTML import and export", () => {
     expect(imported.warnings.map((warning) => warning.code)).toContain("unsupported-element");
   });
 
+  it("warns when style block content is removed even when it appears in the document head", () => {
+    const imported = importRichTextHtml("<style>p { color: red }</style><p>Text</p>");
+
+    expect(imported.canConvert).toBe(true);
+    expect(richTextDocumentToHtml(imported.document)).toBe("<p>Text</p>");
+    expect(imported.warnings.map((warning) => warning.code)).toContain("unsupported-element");
+  });
+
   it("escapes legacy text when exporting it to HTML", () => {
     const html = richTextDocumentToHtml("Legacy <script>alert(1)</script> & text");
 
