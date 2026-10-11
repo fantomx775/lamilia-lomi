@@ -7,21 +7,62 @@ const premiumAssetId = "asset-moon-premium-pdf";
 const secondProductSlug = "bedtime-forest-picture-book";
 const browserRunId = process.env.LAMILIA_BROWSER_RUN_ID ?? `pr-45-unlock-${Date.now()}`;
 const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-const diagnosticsByPage = new WeakMap<Page, { consoleErrors: string[]; failedNetworkRequests: string[] }>();
+const diagnosticsByPage = new WeakMap<Page, {
+  startedAt: number;
+  consoleErrors: string[];
+  failedNetworkRequests: Array<{
+    method: string;
+    url: string;
+    error: string | null;
+    resourceType: string;
+    isNavigationRequest: boolean;
+    hasNextActionHeader: boolean;
+    elapsedMs: number;
+  }>;
+  failedResponses: Array<{ method: string; url: string; status: number }>;
+}>();
 
 // This suite exercises local demo accounts and fixed email addresses. Keep it
 // away from externally configured Playwright targets.
 test.describe("Local demo unlock funnel", () => {
   test.beforeEach(async ({ page }) => {
-    const diagnostics = { consoleErrors: [] as string[], failedNetworkRequests: [] as string[] };
+    const diagnostics = {
+      startedAt: Date.now(),
+      consoleErrors: [] as string[],
+      failedNetworkRequests: [] as Array<{
+        method: string;
+        url: string;
+        error: string | null;
+        resourceType: string;
+        isNavigationRequest: boolean;
+        hasNextActionHeader: boolean;
+        elapsedMs: number;
+      }>,
+      failedResponses: [] as Array<{ method: string; url: string; status: number }>,
+    };
     diagnosticsByPage.set(page, diagnostics);
     page.on("console", (message) => {
-      if (message.type() === "error") diagnostics.consoleErrors.push(message.text());
+      if (message.type() === "error") diagnostics.consoleErrors.push(redactBrowserText(message.text()));
     });
     page.on("requestfailed", (request) => {
-      diagnostics.failedNetworkRequests.push(
-        `${request.method()} ${new URL(request.url()).pathname}`,
-      );
+      diagnostics.failedNetworkRequests.push({
+        method: request.method(),
+        url: safeBrowserUrl(request.url()),
+        error: request.failure()?.errorText ?? null,
+        resourceType: request.resourceType(),
+        isNavigationRequest: request.isNavigationRequest(),
+        hasNextActionHeader: Boolean(request.headers()["next-action"]),
+        elapsedMs: Date.now() - diagnostics.startedAt,
+      });
+    });
+    page.on("response", (response) => {
+      if (response.status() >= 400) {
+        diagnostics.failedResponses.push({
+          method: response.request().method(),
+          url: safeBrowserUrl(response.url()),
+          status: response.status(),
+        });
+      }
     });
   });
 
@@ -36,6 +77,7 @@ test.describe("Local demo unlock funnel", () => {
         test: testInfo.title,
         consoleErrors: diagnostics.consoleErrors,
         failedNetworkRequests: diagnostics.failedNetworkRequests,
+        failedResponses: diagnostics.failedResponses,
       })}`,
     );
   });
@@ -55,6 +97,18 @@ test.beforeEach(async ({ page }) => {
     );
   });
 });
+
+function safeBrowserUrl(value: string) {
+  const url = new URL(value);
+  for (const key of ["code", "token", "password", "key", "email"]) {
+    if (url.searchParams.has(key)) url.searchParams.set(key, "[REDACTED]");
+  }
+  return `${url.origin}${url.pathname}${url.search}`;
+}
+
+function redactBrowserText(value: string) {
+  return value.replace(/([?&](?:code|token|password|key|email)=)[^&\s]*/gi, "$1[REDACTED]");
+}
 
 test("legacy QR links keep product context and land on English", async ({ page }) => {
   const response = await page.goto(`/pl/unlock/${productSlug}?code=LOMI-BOOK-2026`);

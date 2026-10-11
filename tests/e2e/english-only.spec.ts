@@ -114,7 +114,7 @@ test("public pages use English only and retired locale links reach English", asy
     `PR45_BROWSER_SCREENSHOT ${JSON.stringify({
       testedSha,
       runId: browserRunId,
-      path: path.join("docs", "verification", "issue-42", screenshotName),
+      path: `docs/verification/issue-42/${screenshotName}`,
       project: testInfo.project.name,
     })}`,
   );
