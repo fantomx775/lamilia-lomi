@@ -2885,11 +2885,11 @@ async function runProductionSmokeInternal(environmentUrl, {
             (!expectedContentTypeMatched ? ", expected content type was not present" : "") + ").",
         };
       }
-    } catch (error) {
+    } catch {
       return {
         status: "FAIL",
         checks,
-        details: "Production smoke request failed: " + error.message,
+        details: "Production smoke request failed because of a network error or timeout.",
       };
     }
   }

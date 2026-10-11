@@ -2164,6 +2164,7 @@ test("smoke plan validation and verify output redact query strings from persiste
 
   const quotedPath = '/api/downloads/known-asset?token="secret-token"';
   const quotedPlan = structuredClone(smokePlan);
+  quotedPlan.flows[0].name = 'guest response at https://production.example.test/api/downloads/known-asset?token="secret-token"';
   quotedPlan.flows[0].paths[0].path = quotedPath;
   const quotedLocalVerification = validateLocalVerification({
     headSha: CURRENT_SHA,
@@ -2172,6 +2173,7 @@ test("smoke plan validation and verify output redact query strings from persiste
   const quotedCheckedPlan = validateProductionSmokePlan({ files: [filename], localVerification: quotedLocalVerification });
   assert.equal(quotedCheckedPlan.status, "PASS");
   assert.deepEqual(quotedCheckedPlan.paths, ["/api/downloads/known-asset"]);
+  assert.equal(quotedCheckedPlan.flows[0].name, "guest response at https://production.example.test/api/downloads/known-asset");
   assert.equal(JSON.stringify(quotedLocalVerification).includes("secret-token"), false);
   assert.equal(JSON.stringify(quotedCheckedPlan).includes("secret-token"), false);
 
@@ -3189,12 +3191,14 @@ test("Production smoke keeps query parameters for execution and redacts them fro
     expectations,
     fetchImpl: async (url) => {
       requestedUrls.push(url.href);
-      throw new Error('fetch failed for "' + url.origin + url.pathname + '?token="secret-token""');
+      throw new Error('fetch failed for "' + url.origin + url.pathname + '?token="secret-token"\ncontinuation-marker""');
     },
   });
   assert.equal(fetchFailure.status, "FAIL");
   assert.equal(new URL(requestedUrls[2]).searchParams.get("token"), '"secret-token"');
+  assert.equal(fetchFailure.details, "Production smoke request failed because of a network error or timeout.");
   assert.equal(JSON.stringify(fetchFailure).includes("secret-token"), false);
+  assert.equal(JSON.stringify(fetchFailure).includes("continuation-marker"), false);
 
   const newlinePath = "/api/downloads/known-asset\n?token=secret-token";
   const invalidControlPath = await runProductionSmoke("https://production.example.test", {
