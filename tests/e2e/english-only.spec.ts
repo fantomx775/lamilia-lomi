@@ -69,6 +69,21 @@ test("public pages use English only and retired locale links reach English", asy
 
   await page.goto("/en");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.getByTestId("localized-page-loading")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "LamiliaLomi", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Real product paths from the first screen", level: 2 })).toBeVisible();
+  const firstProductCard = page
+    .locator('main a[href^="/en/products/"]')
+    .filter({ has: page.locator("h3") })
+    .first();
+  await expect(firstProductCard).toBeVisible();
+  await expect(firstProductCard.locator("h3")).toHaveText(/\S/);
+  const firstProductImage = firstProductCard.locator("img").first();
+  await firstProductImage.scrollIntoViewIfNeeded();
+  await expect.poll(
+    () => firstProductImage.evaluate((image) => (image as HTMLImageElement).naturalWidth),
+    { timeout: 15_000 },
+  ).toBeGreaterThan(0);
 
   // Full-page screenshots do not always trigger native lazy loading for images
   // below the viewport. Load each image before capturing the evidence so the
