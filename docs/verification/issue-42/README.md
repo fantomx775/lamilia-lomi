@@ -1,6 +1,6 @@
 # PR #45 English-only verification
 
-The focused browser checks and screenshot review below use local demo backend Playwright run `pr-45-focused-final-route-auth-unlock-editors-r7-smoke-redaction-20261011`. The route spec logs separate `PR45_BROWSER_SCREENSHOT` and `PR45_BROWSER_DIAGNOSTICS` records. The unlock spec logs per-test `PR45_BROWSER_DIAGNOSTICS` records with request details and elapsed time. The editor spec attaches `BROWSER_EVIDENCE` JSON with the run ID, exact tested SHA, browser project, test title, screenshot paths, and diagnostics.
+The focused browser checks and screenshot review below use local demo backend Playwright run `pr-45-focused-final-route-auth-unlock-editors-r8-smoke-redaction-20261011`. The route spec logs separate `PR45_BROWSER_SCREENSHOT` and `PR45_BROWSER_DIAGNOSTICS` records. The unlock spec logs per-test `PR45_BROWSER_DIAGNOSTICS` records with request details and elapsed time. The editor spec attaches `BROWSER_EVIDENCE` JSON with the run ID, exact tested SHA, browser project, test title, screenshot paths, and diagnostics.
 
 The run covers English-only public navigation and content, removal of the language selector, 308 redirects from legacy `/pl`, `/de`, and `/es` routes with query preservation, QR unlock redirects, login and registration return targets, guest and authenticated unlock/download behavior, and single-language product, category, and Terms editor save/reload flows. It runs the focused route, unlock, and editor specs on desktop Chromium and Pixel 7 mobile Chromium.
 
