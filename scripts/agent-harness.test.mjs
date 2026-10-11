@@ -2284,6 +2284,29 @@ test("invalid relative smoke paths redact queries before validation blocks them"
   assert.equal(JSON.stringify({ localVerification, checkedPlan }).includes("secret-token"), false);
 });
 
+test("malformed absolute smoke paths redact queries before validation blocks them", () => {
+  const filename = "src/app/catalog/page.tsx";
+  const invalidPath = "https://bad host?token=secret-token";
+  const plan = {
+    status: "PASS",
+    flows: [{
+      name: "catalog path response",
+      affectedFiles: [filename],
+      paths: [{ path: invalidPath, expectedText: "Catalog" }],
+    }],
+  };
+  const localVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: plan }))],
+  });
+  const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
+  const persistedOutput = JSON.stringify({ localVerification, checkedPlan });
+
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].path, "https://bad host");
+  assert.equal(checkedPlan.status, "BLOCKED");
+  assert.equal(persistedOutput.includes("secret-token"), false);
+});
+
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
   const evidenceComments = [
     structuredComment(VERIFICATION_MARKER, cleanVerificationRecord()),

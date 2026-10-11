@@ -35,7 +35,8 @@ function redactFreeTextUrls(value) {
 }
 
 function redactStructuredPath(value) {
-  if (!value.startsWith("/") && !/^https?:\/\//i.test(value)) {
+  const isAbsoluteWebUrl = /^https?:\/\//i.test(value);
+  if (!value.startsWith("/") && !isAbsoluteWebUrl) {
     const queryOrFragment = value.search(/[?#]/);
     return queryOrFragment < 0 ? redactFreeTextUrls(value) : value.slice(0, queryOrFragment);
   }
@@ -44,6 +45,10 @@ function redactStructuredPath(value) {
     if (url.origin === "https://agent-harness.invalid") return url.pathname;
     if (url.protocol === "https:" || url.protocol === "http:") return url.origin + url.pathname;
   } catch {
+    if (isAbsoluteWebUrl) {
+      const queryOrFragment = value.search(/[?#]/);
+      if (queryOrFragment >= 0) return value.slice(0, queryOrFragment);
+    }
     // Keep malformed path text private through the free-text URL fallback below.
   }
   return redactFreeTextUrls(value);
