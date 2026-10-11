@@ -2,7 +2,7 @@
 
 ## Browser evidence
 
-The complete local Playwright capture run `issue24-local-chromium-mobile-20261010-full-8of8` passed 8/8 tests with one worker. It ran the category image lifecycle and deferred-cleanup warning, storefront gallery preview, and admin image-order flows in both Chromium desktop (1280×720) and Pixel 7 mobile emulation (412×839).
+The complete local Playwright capture run `issue24-local-chromium-mobile-20261010-final-8of8` passed 8/8 tests with one worker. It ran the category image lifecycle and deferred-cleanup warning, storefront gallery preview, and admin image-order flows in both Chromium desktop (1280×720) and Pixel 7 mobile emulation (412×839).
 
 The screenshots in this directory come from that run:
 
@@ -12,7 +12,7 @@ The screenshots in this directory come from that run:
 
 Visual review confirmed square category images and portrait product covers keep their proportions, the gallery preview contains the full image, storefront and admin thumbnails load, and the product list remains usable on mobile. The warning is readable on both viewports and includes the category ID needed for follow-up. Some captures show the local Next.js development badge.
 
-The order test reported that arrows at the first and last positions are disabled and therefore cannot receive a center hit; enabled-arrow checks passed, and saved order was confirmed after reload. The browser also logged expected navigation cancellations during admin login and product creation; persistence assertions passed. No page errors or broken image loads were found. The local development server emitted the known hydration warning involving `caret-color` on the category search input, which the existing Issue #30 browser diagnostics classify as known noise.
+The order test reported that arrows at the first and last positions are disabled and therefore cannot receive a center hit; enabled-arrow checks passed, and saved order was confirmed after reload. The browser logged expected local upload fallback responses and client-side cancellations around product save, reload, and cleanup; the persisted gallery order and product removal checks passed. No page errors, unexpected failed requests, or broken image loads were found. The local development server emitted the known hydration warning involving `caret-color` on the category search input, which the existing Issue #30 browser diagnostics classify as known noise.
 
 ## Checks
 

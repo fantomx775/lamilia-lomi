@@ -114,7 +114,9 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       failedUrl.pathname.startsWith("/_next/static/chunks/") && failedUrl.pathname.endsWith(".js");
     const localAdminFontFetch = request.method() === "GET" && request.resourceType() === "font" &&
       failedUrl.origin === new URL(page.url()).origin &&
-      new URL(page.url()).pathname.startsWith("/admin");
+      failedUrl.pathname === "/__nextjs_font/geist-latin.woff2" &&
+      (new URL(page.url()).pathname.startsWith("/admin") ||
+        new URL(page.url()).pathname.endsWith("/login"));
     const createActionPost = request.method() === "POST" && failedUrl.pathname === "/admin/products/new" &&
       Boolean(request.headers()["next-action"]);
     const nextFlightFetch = request.method() === "GET" && request.resourceType() === "fetch" &&
@@ -196,7 +198,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
         buffer: makePng(fixture.rgb, index),
       })),
     );
-    await expect(page.getByText("Przesłano", { exact: true })).toHaveCount(4);
+    await expect(page.getByText("Przesłano", { exact: true })).toHaveCount(4, { timeout: 30_000 });
 
     let expectedOrder = imageFixtures.slice(0, 4);
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));

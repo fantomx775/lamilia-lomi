@@ -148,7 +148,9 @@ test("shows an actionable warning when category image cleanup is deferred", asyn
   await signInAsAdmin(page);
   await page.goto(`/admin/categories?cleanupDeferred=1&categoryId=${categoryId}`);
 
-  const warning = page.getByRole("alert");
+  const warning = page.getByRole("alert").filter({
+    hasText: "Kategorię usunięto, ale jej plik obrazu nie został usunięty",
+  });
   await expect(warning).toContainText("Kategorię usunięto, ale jej plik obrazu nie został usunięty");
   await expect(warning).toContainText(categoryId);
   await expect(page.getByRole("button", { name: "Zamknij komunikat" })).toBeVisible();
