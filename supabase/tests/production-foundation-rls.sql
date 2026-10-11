@@ -847,4 +847,4 @@ where id in (
   'cccccccc-3333-4333-8333-cccccccccccc'
 );
 
-\echo 'RLS matrix and single-use premium-code suite complete'
+\echo 'RLS matrix complete: single-use premium-code and authorization checks passed'
