@@ -28,6 +28,11 @@ where c.id = r.premium_code_id
 create index premium_codes_product_redemption_idx
   on public.premium_codes (product_id, active, redeemed_at);
 
+-- Keep the referencing side of the account FK indexed for user deletion and
+-- redemption ownership lookups.
+create index premium_codes_redeemed_by_idx
+  on public.premium_codes (redeemed_by);
+
 -- Once an unlock references a code, its code and product identity are history.
 -- Redemption metadata is immutable after the first claim; deleting an auth
 -- user may clear redeemed_by through ON DELETE SET NULL, while redeemed_at

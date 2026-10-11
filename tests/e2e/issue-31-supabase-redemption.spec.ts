@@ -19,7 +19,7 @@ test.describe("Issue 31 isolated local Supabase premium redemption", () => {
 
     const supabaseUrl = requireLoopbackUrl(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      56421,
+      configuredSupabaseApiPort(),
       "isolated Supabase",
     );
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -216,6 +216,24 @@ function requireLoopbackUrl(value: string | undefined, port: number, label: stri
   }
 
   return url;
+}
+
+function configuredSupabaseApiPort() {
+  const value = process.env.ISSUE_31_SUPABASE_API_PORT;
+  if (value === undefined) {
+    return 56421;
+  }
+
+  if (!/^\d{1,5}$/.test(value)) {
+    throw new Error("ISSUE_31_SUPABASE_API_PORT must be a valid loopback port.");
+  }
+
+  const port = Number(value);
+  if (port < 1 || port > 65535) {
+    throw new Error("ISSUE_31_SUPABASE_API_PORT must be a valid loopback port.");
+  }
+
+  return port;
 }
 
 function statusOf(value: unknown) {

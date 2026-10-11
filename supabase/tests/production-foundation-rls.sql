@@ -1,5 +1,33 @@
 \set ON_ERROR_STOP on
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'premium_codes'
+      and indexname = 'premium_codes_product_redemption_idx'
+      and indexdef like '% (product_id, active, redeemed_at)'
+  ) then
+    raise exception 'Missing leading product_id index for premium code redemption';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'premium_codes'
+      and indexname = 'premium_codes_redeemed_by_idx'
+      and indexdef like '% (redeemed_by)'
+  ) then
+    raise exception 'Missing leading redeemed_by index for the auth.users foreign key';
+  end if;
+
+  raise notice 'PASS premium code foreign-key indexes use leading columns';
+end;
+$$;
+
 -- Run with psql against a disposable Supabase local database after migrations
 -- and seed have been applied. This is intentionally not a production script.
 -- These fixtures contain metadata-only rows, so permit their SQL cleanup here.
