@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -18,6 +19,13 @@ test("single-language admin content saves and reloads on the English public URL"
   const hadContentStore = fs.existsSync(contentStorePath);
   const originalContentStore = hadContentStore ? fs.readFileSync(contentStorePath) : undefined;
   const screenshotDirectory = path.resolve(process.cwd(), "docs", "verification", "issue-42");
+  const browserRunId = process.env.LAMILIA_BROWSER_RUN_ID ?? "issue-28-single-language-editor";
+  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const screenshotPaths = [
+    `docs/verification/issue-42/product-editor-${testInfo.project.name}.png`,
+    `docs/verification/issue-42/category-editor-${testInfo.project.name}.png`,
+    `docs/verification/issue-42/terms-editor-${testInfo.project.name}.png`,
+  ];
   const browserDiagnostics = {
     consoleErrors: [] as string[],
     pageErrors: [] as string[],
@@ -105,14 +113,14 @@ test("single-language admin content saves and reloads on the English public URL"
     await expect(page.getByRole("tab")).toHaveCount(0);
     await expect(page.locator('#page-editor-form input[name="title_pl"]')).toHaveCount(0);
     await page.getByLabel("Tytuł").fill("Issue 28 terms content");
-    await page.getByLabel("Treść").fill("Updated English terms saved through the single-language editor.");
+    await page.getByRole("textbox", { name: "Treść" }).fill("Updated English terms saved through the single-language editor.");
     await saveScreenshot(page, screenshotDirectory, "terms-editor", testInfo.project.name);
     await page.getByRole("button", { name: "Zapisz" }).first().click();
     await expect(page).toHaveURL(/\/admin\/pages\/terms\?saved=1$/);
     await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
     await page.reload();
     await expect(page.getByLabel("Tytuł")).toHaveValue("Issue 28 terms content");
-    await expect(page.getByLabel("Treść")).toHaveValue("Updated English terms saved through the single-language editor.");
+    await expect(page.getByRole("textbox", { name: "Treść" })).toContainText("Updated English terms saved through the single-language editor.");
 
     await page.goto("/en/terms");
     await expect(page.getByRole("heading", { name: "Issue 28 terms content" })).toBeVisible();
@@ -125,7 +133,19 @@ test("single-language admin content saves and reloads on the English public URL"
       body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
       contentType: "application/json",
     });
-    console.log(`BROWSER_DIAGNOSTICS issue-28 ${JSON.stringify(browserDiagnostics)}`);
+    const browserEvidence = {
+      runId: browserRunId,
+      testedSha,
+      project: testInfo.project.name,
+      test: testInfo.title,
+      screenshotPaths,
+      browserDiagnostics,
+    };
+    await testInfo.attach("browser-evidence.json", {
+      body: Buffer.from(JSON.stringify(browserEvidence, null, 2)),
+      contentType: "application/json",
+    });
+    console.log(`BROWSER_EVIDENCE ${JSON.stringify(browserEvidence)}`);
     expect(browserDiagnostics.consoleErrors).toEqual([]);
     expect(browserDiagnostics.pageErrors).toEqual([]);
     expect(browserDiagnostics.failedRequests.filter((request) => request.disposition === "unresolved")).toEqual([]);
