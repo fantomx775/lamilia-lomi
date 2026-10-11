@@ -26,7 +26,7 @@ test.describe("Issue 31 local QR and premium workflow", () => {
   test("a QR scan survives registration and verification, unlocks My Library, and denies anonymous downloads", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     const consoleErrors: string[] = [];
-    const failedRequests: Array<{ url: string; errorText: string }> = [];
+    const failedRequests: Array<{ method: string; url: string; errorText: string }> = [];
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
@@ -34,7 +34,8 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     page.on("requestfailed", (request) => {
       failedRequests.push(
         {
-          url: `${request.method()} ${request.url()}`,
+          method: request.method(),
+          url: request.url(),
           errorText: request.failure()?.errorText ?? "unknown",
         },
       );
@@ -79,7 +80,7 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     await page.getByRole("link", { name: "Go to My Library" }).click();
     await expect(page).toHaveURL(/\/en\/library$/);
     await expect(page.getByTestId("library-page")).toContainText("Moon Garden");
-    await page.getByTestId("library-page").getByText("Moon Garden Coloring Book").scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollTo(0, 0));
     await saveEvidenceScreenshot(page, testInfo, "qr-my-library");
 
     await page.goto(
@@ -101,7 +102,14 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     });
     expect(consoleErrors, "browser console errors").toEqual([]);
     expect(
-      failedRequests.filter(({ errorText }) => !/net::ERR_ABORTED/.test(errorText)),
+      failedRequests.filter(({ method, url, errorText }) => {
+        if (errorText !== "net::ERR_ABORTED") return true;
+        const failedUrl = new URL(url);
+        return !(
+          (method === "POST" && failedUrl.pathname === "/en/register" && failedUrl.searchParams.has("returnTo")) ||
+          (method === "GET" && failedUrl.pathname === "/en/library" && failedUrl.searchParams.has("_rsc"))
+        );
+      }),
       "unexpected browser request failures",
     ).toEqual([]);
   });
