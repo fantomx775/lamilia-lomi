@@ -157,7 +157,13 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     });
     await page.locator("#page-editor-form").getByRole("link", { name: "Strony" }).click();
     expect(await unsavedNavigationMessage).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
+    const reloadDialogMessage = page.waitForEvent("dialog").then(async (dialog) => {
+      const message = dialog.message();
+      await dialog.accept();
+      return message;
+    });
     await page.reload();
+    expect(await reloadDialogMessage).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
     await expect(page.locator('#page-editor-form input[name="body"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/terms");
     await expect(page.getByRole("heading", { level: 2, name: "Issue 51 Terms" })).toBeVisible();
