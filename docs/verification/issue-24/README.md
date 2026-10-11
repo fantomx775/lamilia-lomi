@@ -2,7 +2,7 @@
 
 ## Browser evidence
 
-The latest local Playwright run on 2026-10-11 passed 8/8 tests with `--workers=1` on candidate SHA `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351`. It covered the three focused specs for category image UX, product gallery preview, and product image ordering on Chromium desktop (1280×720) and Pixel 7 mobile emulation (412×839). This run includes the category cleanup-warning flow added in the final review follow-up. Screenshots from this exact candidate are under `candidate-fe5a3f30/`, grouped by flow and viewport.
+The latest local Playwright run on 2026-10-11 passed 8/8 tests with `--workers=1` on candidate SHA `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351`. It covered the three focused specs for category image UX, product gallery preview, and product image ordering on Chromium desktop (1280×720) and Pixel 7 mobile emulation (412×839). This run includes the category image cleanup warning shown after category removal. Screenshots captured from candidate `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351` are under `candidate-fe5a3f30/`, grouped by flow and viewport. The focused application code has not changed in later documentation-only commits.
 
 The reviewed screenshots from the latest run are:
 
@@ -12,7 +12,7 @@ The reviewed screenshots from the latest run are:
 
 Visual review of the latest desktop and mobile captures confirmed category images and product covers retain their proportions, gallery preview shows the full image, and storefront and admin thumbnails load. The cleanup warning is readable on both viewports. The first and last order arrows are disabled at their respective ends and cannot receive a center hit; enabled-arrow checks and saved-order persistence after reload passed. Some captures show the local Next.js development badge. The 8/8 run reported no failed tests or page errors.
 
-The final review follow-up surfaces a failure-case cleanup warning in the taxonomy drawer when the category disappears and the new image cannot be removed. The latest desktop and mobile Playwright run above covers this failure state, while the focused component/API regression checks the response and displayed category/image IDs.
+The taxonomy drawer race—where the category disappears after upload and cleanup of the new image fails—is covered by the focused component/API regression with mocked responses, including the returned and displayed category/image IDs. The Playwright cleanup-warning test covers the separate category-removal flow; it does not reproduce the taxonomy drawer race.
 
 ## Server-side image validation
 
@@ -28,7 +28,7 @@ The final review follow-up surfaces a failure-case cleanup warning in the taxono
 - Before the latest retry/local-cleanup review follow-up, focused Vitest passed 6 files / 84 tests, covering R2 byte parity/retries, product media finalization, Supabase content mutations, EXIF dimensions, category-image API responses, and the taxonomy drawer warning.
 - Latest retry/local-cleanup follow-up: focused Vitest passed 2 files / 57 tests (`supabase-content-admin.test.ts`, `media-storage.test.ts`); changed-file ESLint, `tsc --noEmit --pretty false`, and `git diff --check` passed. The focused Playwright run on exact candidate SHA `fe5a3f30eed1dea9316b08dc4f75fe5ff0ab0351` then passed 8/8 across desktop and mobile.
 - `npm run build` passed with `LAMILIA_BACKEND=local` and `NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000`.
-- Focused Playwright on the final reviewed candidate passed 8/8 and includes fresh desktop/mobile screenshots for the deferred-cleanup warning.
+- A separate Playwright rerun on candidate `f162ce9c9bfbb52ee58909a3a7a23ad399b173e9` passed 8/8 after the final application-code changes. Its fresh desktop/mobile captures were saved outside the repository under `C:\Users\user\.codex\verification-runs\issue24-f162ce9\`; the committed screenshots above are the reviewed captures from `fe5a3f30`. The application code is unchanged between these runs.
 - The exact migration `20261010184114_category_image_media.sql` was applied successfully to an isolated local Supabase database. Because an older foundation migration fails with SQLSTATE `42501` (`must be owner of table objects` while changing `storage.objects`), the target migration was checked against a minimal local `public.categories (id, slug)` fixture instead of claiming a full historical migration-chain pass. The CLI returned `ALTER TABLE`; a separate assertion block passed and confirmed all six nullable, typed media columns and all three CHECK constraints. Assertions accepted valid metadata and rejected an invalid provider, partial metadata, zero size, and SVG MIME; the fixture ended with zero rows.
 - The category-image API and image decoder tests use generated fixtures/mocked storage. No live R2 account or assets were used.
 
