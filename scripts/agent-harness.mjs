@@ -19,11 +19,12 @@ function redactFreeTextUrls(value) {
   // Treat a query continued on the next line as part of the URL, while leaving
   // ordinary multiline prose after it intact.
   return value.replace(
-    /(?:https?:\/\/|\/)[^\s<>`]*(?:(?:\r\n?|\n)[ \t]*[?&][^\s<>`]*=[^\s<>`]*)*/gi,
+    /(?:https?:\/\/|\/)[^\s<>`]*(?:(?:(?:\r\n?|\n)[ \t]*[?&]|(?<=[?&])(?:\r\n?|\n)[ \t]*)[^\s<>`=?&#]+=[^\s<>`]*)*/gi,
     (urlOrPath) => {
       const queryOrFragment = urlOrPath.search(/[?#]/);
       const continuedParameter = urlOrPath.search(/(?:\r\n?|\n)[ \t]*&/);
-      const redactionStart = [queryOrFragment, continuedParameter]
+      const parameterAfterDelimiter = urlOrPath.search(/[?&](?:\r\n?|\n)[ \t]*[^\s<>`=?&#]+=/);
+      const redactionStart = [queryOrFragment, continuedParameter, parameterAfterDelimiter]
         .filter((index) => index >= 0)
         .reduce((earliest, index) => Math.min(earliest, index), Number.POSITIVE_INFINITY);
       if (!Number.isFinite(redactionStart)) return urlOrPath;
@@ -34,7 +35,10 @@ function redactFreeTextUrls(value) {
 }
 
 function redactStructuredPath(value) {
-  if (!value.startsWith("/") && !/^https?:\/\//i.test(value)) return redactFreeTextUrls(value);
+  if (!value.startsWith("/") && !/^https?:\/\//i.test(value)) {
+    const queryOrFragment = value.search(/[?#]/);
+    return queryOrFragment < 0 ? redactFreeTextUrls(value) : value.slice(0, queryOrFragment);
+  }
   try {
     const url = new URL(value, "https://agent-harness.invalid");
     if (url.origin === "https://agent-harness.invalid") return url.pathname;

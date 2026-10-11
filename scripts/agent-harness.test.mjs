@@ -2194,10 +2194,11 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const filename = "src/app/catalog/page.tsx";
   const multilineUrl = "https://production.example.test/catalog\n?token=secret-token\n&continuation=continuation-marker";
   const ampersandContinuation = "https://production.example.test/catalog\n&token=secret-token\n&continuation=continuation-marker";
+  const delimiterBeforeKey = "https://production.example.test/catalog?\ntoken=secret-token\n&continuation=continuation-marker";
   const plan = {
     status: "PASS",
     flows: [{
-      name: `catalog flow at ${multilineUrl}\nKeep this flow note`,
+      name: `catalog flow at ${multilineUrl}\nKeep this flow note\nFollow-up ${delimiterBeforeKey}\nKeep this follow-up note`,
       affectedFiles: [filename],
       paths: [{
         path: "/catalog",
@@ -2212,7 +2213,7 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
 
   assert.equal(checkedPlan.status, "PASS");
-  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note";
+  const safeFlowName = "catalog flow at https://production.example.test/catalog\nKeep this flow note\nFollow-up https://production.example.test/catalog\nKeep this follow-up note";
   const safeExpectedText = "Catalog heading at https://production.example.test/catalog\nKeep this expected-text note";
   assert.equal(localVerification.record.productionSmokePlan.flows[0].name, safeFlowName);
   assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].expectedText, safeExpectedText);
@@ -2224,6 +2225,28 @@ test("free-text smoke fields redact multiline URL queries and preserve ordinary 
   assert.ok(persistedOutput.includes("Keep this flow note"));
   assert.ok(persistedOutput.includes("Keep this expected-text note"));
   assert.ok(persistedOutput.includes("https://production.example.test/catalog"));
+});
+
+test("invalid relative smoke paths redact queries before validation blocks them", () => {
+  const filename = "src/app/catalog/page.tsx";
+  const invalidPath = "catalog?token=secret-token";
+  const plan = {
+    status: "PASS",
+    flows: [{
+      name: "catalog path response",
+      affectedFiles: [filename],
+      paths: [{ path: invalidPath, expectedText: "Catalog" }],
+    }],
+  };
+  const localVerification = validateLocalVerification({
+    headSha: CURRENT_SHA,
+    comments: [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ productionSmokePlan: plan }))],
+  });
+  const checkedPlan = validateProductionSmokePlan({ files: [filename], localVerification });
+
+  assert.equal(localVerification.record.productionSmokePlan.flows[0].paths[0].path, "catalog");
+  assert.equal(checkedPlan.status, "BLOCKED");
+  assert.equal(JSON.stringify({ localVerification, checkedPlan }).includes("secret-token"), false);
 });
 
 test("marks the PR blocked when its state, base, or HEAD changes during assessment", () => {
