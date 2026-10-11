@@ -73,11 +73,13 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     );
     await expect(page.getByTestId("unlock-success-state")).toBeVisible();
     await expect(page).not.toHaveURL(/LOMI-BOOK-2026|premiumCode|[?&]code=/i);
+    await page.getByTestId("unlock-success-state").scrollIntoViewIfNeeded();
     await saveEvidenceScreenshot(page, testInfo, "qr-product-unlocked");
 
     await page.getByRole("link", { name: "Go to My Library" }).click();
     await expect(page).toHaveURL(/\/en\/library$/);
     await expect(page.getByTestId("library-page")).toContainText("Moon Garden");
+    await page.getByTestId("library-page").getByText("Moon Garden Coloring Book").scrollIntoViewIfNeeded();
     await saveEvidenceScreenshot(page, testInfo, "qr-my-library");
 
     await page.goto(
@@ -115,7 +117,7 @@ async function saveEvidenceScreenshot(
   const suffix = testInfo.project.name === "mobile" ? "mobile" : "desktop";
   const filename = `${name}-${suffix}.png`;
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
-  const screenshot = await page.screenshot({ fullPage: true, animations: "disabled" });
+  const screenshot = await page.screenshot({ fullPage: false, animations: "disabled" });
   await writeFile(path.join(folder, filename), screenshot);
   return filename;
 }
