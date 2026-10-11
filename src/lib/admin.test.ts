@@ -11,6 +11,7 @@ import {
 import { exportUsersToCsv, validateProductForPublish } from "./admin";
 import { ADMIN_ERROR_CODES } from "./admin-errors";
 import { getSeedContentSnapshot } from "./content-store";
+import { RICH_TEXT_FORMAT_PREFIX, parseRichTextValue, serializeRichTextDocument } from "./rich-text";
 import { products } from "./seed-data";
 
 describe("admin behavior", () => {
@@ -374,6 +375,43 @@ describe("admin behavior", () => {
     const protectedResult = buildStaticPagesFromFormData(form, snapshot, "privacy");
     expect(protectedResult.slug).toBe("privacy");
     expect(protectedResult.pages.every((page) => page.slug === "privacy")).toBe(true);
+  });
+
+  it("sanitizes serialized rich content for product and legal-page persistence", () => {
+    const snapshot = getSeedContentSnapshot();
+    const hostileRichText = `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify({
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "Safe product copy", marks: [{ type: "link", attrs: { href: "javascript:alert(1)" } }] }],
+        },
+        { type: "rawHTML", attrs: { html: "<script>alert(1)</script>" } },
+      ],
+    })}`;
+    const expected = serializeRichTextDocument({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Safe product copy" }] }],
+    });
+
+    const productForm = new FormData();
+    productForm.set("longDescription", hostileRichText);
+    const product = buildProductFromFormData(productForm, { snapshot }).product;
+    const productDescription = product.translations.find((translation) => translation.locale === "en")?.longDescription;
+
+    const pageForm = new FormData();
+    pageForm.set("slug", "terms");
+    pageForm.set("body", hostileRichText);
+    const pageBody = buildStaticPagesFromFormData(pageForm, snapshot, "terms").pages[0].body;
+
+    expect(productDescription).toBe(expected);
+    expect(pageBody).toBe(expected);
+    expect(parseRichTextValue(productDescription ?? "")).toEqual({
+      kind: "rich",
+      document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Safe product copy" }] }] },
+    });
+    expect(productDescription).not.toContain("javascript:");
+    expect(productDescription).not.toContain("script");
   });
 
   it("updates English taxonomy content without dropping stored translations", () => {

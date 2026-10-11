@@ -125,6 +125,22 @@ describe("ProductEditor V2", () => {
     expect(view.getByText("SEO i wygląd w Google")).toBeInTheDocument();
   });
 
+  it("uses the shared rich text editor only for the long description", () => {
+    const view = render(
+      <ProductEditor
+        title="Edycja produktu"
+        product={product}
+        categories={snapshot.categories}
+        tags={snapshot.tags}
+      />,
+    );
+    const english = product.translations.find((translation) => translation.locale === "en");
+
+    expect(view.getByRole("textbox", { name: "Długi opis" })).toHaveTextContent(english?.longDescription ?? "");
+    expect(view.getByLabelText("Krótki opis")).toHaveValue(english?.shortDescription);
+    expect(view.getByRole("button", { name: "Podgląd" })).toBeInTheDocument();
+  });
+
   it("shows five purpose-built media sections without the legacy asset builder", () => {
     const view = render(
       <ProductEditor

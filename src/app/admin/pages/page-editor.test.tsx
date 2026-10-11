@@ -18,7 +18,7 @@ describe("PageEditor", () => {
 
     expect(view.getByRole("heading", { name: "Treść strony" })).toBeInTheDocument();
     expect(view.queryByRole("tab")).not.toBeInTheDocument();
-    expect(view.getByLabelText("Treść")).toHaveValue(records.find((page) => page.locale === "en")?.body);
+    expect(view.getByRole("textbox", { name: "Treść" })).toHaveTextContent(records.find((page) => page.locale === "en")?.body ?? "");
     expect(view.getByText("Klucz strony: privacy")).toBeInTheDocument();
     expect(view.container.querySelector('select[name="slug"]')).not.toBeInTheDocument();
     expect(view.container.querySelector('input[name="slug"]')).toHaveValue("privacy");
@@ -40,7 +40,9 @@ describe("PageEditor", () => {
     const formData = saveAction.mock.calls[0][0] as FormData;
     expect(formData.get("slug")).toBe("privacy");
     expect(formData.get("title")).toBe("Updated privacy policy");
+    expect(formData.get("body")).toBe(records.find((page) => page.locale === "en")?.body);
     expect(formData.has("title_pl")).toBe(false);
     expect(formData.has("body_pl")).toBe(false);
   });
+
 });

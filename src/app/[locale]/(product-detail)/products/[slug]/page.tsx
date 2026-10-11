@@ -13,6 +13,7 @@ import { UnlockForm } from "@/components/unlock-form";
 import { Badge } from "@/components/ui/badge";
 import { buttonClassName } from "@/components/ui/button";
 import type { Locale } from "@/i18n/routing";
+import { RichTextContent } from "@/components/rich-text-content";
 import { isMediaProxyPath } from "@/lib/media-upload";
 import {
   getAccountBoundResumeCode,
@@ -319,9 +320,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
           <h1 className="mt-5 font-serif text-4xl font-semibold leading-tight sm:text-5xl">
             {product.title}
           </h1>
-          <p className="mt-5 text-lg leading-8 text-[var(--color-muted)]">
-            {product.longDescription}
-          </p>
+          <RichTextContent value={product.longDescription} className="mt-5 max-w-2xl space-y-4 text-lg leading-8 text-[var(--color-muted)]" />
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             {product.primaryAmazonLink ? (
               <AmazonLink

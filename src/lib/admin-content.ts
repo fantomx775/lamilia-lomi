@@ -18,6 +18,7 @@ import type {
 import { mediaBucketForKind, validateMediaFile } from "./media-upload";
 import { ADMIN_ERROR_CODES, type AdminErrorCode, type AdminMutationResult } from "./admin-errors";
 import { normalizePremiumCode, validatePremiumCodeEntries } from "./premium-code";
+import { sanitizeRichTextValue } from "./rich-text";
 import { slugify } from "./utils";
 
 export function buildProductFromFormData(
@@ -321,7 +322,7 @@ export function saveStaticPageFromFormData(formData: FormData): AdminMutationRes
     slug,
     locale,
     title: title.present ? title.value ?? "" : existing?.title ?? slug,
-    body: body.present ? body.value ?? "" : existing?.body ?? "",
+    body: sanitizeRichTextValue(body.present ? body.value ?? "" : existing?.body ?? ""),
     updatedAt: new Date().toISOString(),
   };
 
@@ -372,7 +373,7 @@ export function buildStaticPagesFromFormData(
     slug: expectedSlug,
     locale,
     title: title.present ? title.value ?? "" : existing?.title ?? expectedSlug,
-    body: body.present ? body.value ?? "" : existing?.body ?? "",
+    body: sanitizeRichTextValue(body.present ? body.value ?? "" : existing?.body ?? ""),
     updatedAt: new Date().toISOString(),
   }];
 
@@ -485,7 +486,7 @@ function parseProductTranslations(
     locale: "en",
     title: fieldValue("title", previous?.title),
     shortDescription: fieldValue("shortDescription", previous?.shortDescription),
-    longDescription: fieldValue("longDescription", previous?.longDescription),
+    longDescription: sanitizeRichTextValue(fieldValue("longDescription", previous?.longDescription)),
     seoTitle: optionalFieldValue(formData, "seoTitle", previous?.seoTitle),
     seoDescription: optionalFieldValue(formData, "seoDescription", previous?.seoDescription),
   };
