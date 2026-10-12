@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 export const RICH_TEXT_FORMAT_PREFIX = "lamilia-rich-text:v1:";
+const RICH_TEXT_V2_EXTENSION_KEY = "richTextV2";
 
 export type RichTextMark =
   | { type: "bold" }
@@ -42,7 +43,11 @@ export function parseRichTextValue(value: string): ParsedRichText {
 
   try {
     const parsed: unknown = JSON.parse(value.slice(RICH_TEXT_FORMAT_PREFIX.length));
-    const document = sanitizeRichTextDocument(parsed);
+    const richTextV2Extension = isRecord(parsed) ? parsed[RICH_TEXT_V2_EXTENSION_KEY] : null;
+    const richTextV2Content = isRecord(richTextV2Extension) ? richTextV2Extension.content : null;
+    const document = Array.isArray(richTextV2Content)
+      ? sanitizeRichTextDocument({ type: "doc", content: richTextV2Content })
+      : sanitizeRichTextDocument(parsed);
     return document ? { kind: "rich", document } : { kind: "plain", text: value };
   } catch {
     return { kind: "plain", text: value };
@@ -51,7 +56,15 @@ export function parseRichTextValue(value: string): ParsedRichText {
 
 export function serializeRichTextDocument(document: unknown): string {
   const safeDocument = sanitizeRichTextDocument(document) ?? emptyRichTextDocument();
-  return `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify(safeDocument)}`;
+  const legacyReadableDocument = documentForLegacyReaders(safeDocument);
+  const serializedDocument = hasRichTextV2Features(safeDocument)
+    ? {
+        ...legacyReadableDocument,
+        // Older v1 readers ignore this field and can still display the compatible content above.
+        [RICH_TEXT_V2_EXTENSION_KEY]: { content: safeDocument.content },
+      }
+    : legacyReadableDocument;
+  return `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify(serializedDocument)}`;
 }
 
 export function sanitizeRichTextValue(value: string): string {
@@ -176,6 +189,47 @@ export function sanitizeRichTextDocument(value: unknown): RichTextDocument | nul
     : [];
 
   return { type: "doc", content };
+}
+
+function documentForLegacyReaders(document: RichTextDocument): RichTextDocument {
+  return {
+    type: "doc",
+    content: document.content.flatMap(toLegacyReadableBlock),
+  };
+}
+
+function toLegacyReadableBlock(node: RichTextNode): RichTextNode[] {
+  if (node.type === "blockquote") {
+    return (node.content ?? []).flatMap(toLegacyReadableBlock);
+  }
+
+  if (node.type === "horizontalRule") {
+    // The old schema can retain an empty paragraph where the visual separator appeared.
+    return [{ type: "paragraph", content: [] }];
+  }
+
+  if (node.type === "bulletList" || node.type === "orderedList") {
+    const content = (node.content ?? []).flatMap((item) => {
+      if (item.type !== "listItem") return [];
+      const itemContent = (item.content ?? []).flatMap(toLegacyReadableBlock).filter((child) =>
+        ["paragraph", "heading", "bulletList", "orderedList"].includes(child.type),
+      );
+      return itemContent.length ? [{ type: "listItem", content: itemContent }] : [];
+    });
+    return [{ type: node.type, content }];
+  }
+
+  return [node];
+}
+
+function hasRichTextV2Features(document: RichTextDocument): boolean {
+  const hasFeature = (node: RichTextNode): boolean =>
+    node.type === "blockquote" ||
+    node.type === "horizontalRule" ||
+    node.marks?.some((mark) => mark.type === "underline") === true ||
+    node.content?.some(hasFeature) === true;
+
+  return document.content.some(hasFeature);
 }
 
 export function sanitizeRichTextHref(value: unknown): string | null {

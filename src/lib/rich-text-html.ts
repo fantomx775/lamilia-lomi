@@ -61,16 +61,16 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
   };
 
   if (source.length > MAX_HTML_SOURCE_LENGTH) {
-    addWarning("invalid-markup", "HTML source is over 100,000 characters and cannot be converted.");
+    addWarning("invalid-markup", "Źródło HTML przekracza limit 100 000 znaków i nie można go przekonwertować.");
     return { document: { type: "doc", content: [] }, warnings: [...warningMap.values()], canConvert: false };
   }
 
   if (hasMalformedTagStructure(source)) {
-    addWarning("invalid-markup", "Some HTML tags are missing or out of order. Review the source before converting it.");
+    addWarning("invalid-markup", "Niektóre znaczniki HTML są brakujące lub w niewłaściwej kolejności. Sprawdź źródło przed konwersją.");
   }
 
   if (typeof DOMParser === "undefined") {
-    addWarning("invalid-markup", "HTML parsing is unavailable in this environment. The source has been kept unchanged.");
+    addWarning("invalid-markup", "Konwersja HTML jest niedostępna w tym środowisku. Źródło pozostaje bez zmian.");
     return { document: { type: "doc", content: [] }, warnings: [...warningMap.values()], canConvert: false };
   }
 
@@ -79,18 +79,28 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
     (tag, attribute) => {
       addWarning(
         "unsupported-attribute",
-        "The " + attribute + " attribute on <" + tag + "> will be removed.",
+        "Atrybut „" + attribute + "” w elemencie <" + tag + "> zostanie usunięty.",
       );
     },
-    () => addWarning("unsupported-element", "Style block content will be removed during conversion."),
+    () => addWarning("unsupported-element", "Treść bloku <style> zostanie usunięta podczas konwersji."),
+    () => addWarning("invalid-markup", "Nie można odczytać końca komentarza HTML. Dalsza część źródła nie zostanie przekonwertowana."),
   );
   const parsed = new DOMParser().parseFromString(parserSafeSource, "text/html");
   if (parsed.querySelector("parsererror")) {
-    addWarning("invalid-markup", "The HTML source could not be parsed. Review it before converting.");
+    addWarning("invalid-markup", "Nie udało się odczytać źródła HTML. Sprawdź je przed konwersją.");
+  }
+
+  const hasUnsupportedHeadContent = Array.from(parsed.head.childNodes).some((node) => {
+    if (node.nodeType === Node.COMMENT_NODE) return true;
+    if (node.nodeType === Node.TEXT_NODE) return Boolean((node.nodeValue ?? "").trim());
+    return node instanceof Element && node.tagName.toLowerCase() !== "style";
+  });
+  if (hasUnsupportedHeadContent) {
+    addWarning("unsupported-element", "Zawartość sekcji <head> nie jest obsługiwana i zostanie usunięta podczas konwersji.");
   }
 
   if (!isWithinHtmlLimits(parsed.body)) {
-    addWarning("invalid-markup", "The HTML source is too deeply nested or contains too many elements to convert safely.");
+    addWarning("invalid-markup", "Źródło HTML jest zbyt głęboko zagnieżdżone lub zawiera zbyt wiele elementów do bezpiecznej konwersji.");
     return { document: { type: "doc", content: [] }, warnings: [...warningMap.values()], canConvert: false };
   }
 
@@ -103,7 +113,7 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
       if (!allowed.has(attribute.name.toLowerCase())) {
         addWarning(
           "unsupported-attribute",
-          "The " + attribute.name.toLowerCase() + " attribute on <" + element.tagName.toLowerCase() + "> will be removed.",
+          "Atrybut „" + attribute.name.toLowerCase() + "” w elemencie <" + element.tagName.toLowerCase() + "> zostanie usunięty.",
         );
       }
     }
@@ -114,7 +124,7 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
     const allowedAttributes = tag === "a" ? new Set(["href"]) : new Set<string>();
     inspectAttributes(element, allowedAttributes);
     if (!INLINE_TAGS.has(tag) && !BLOCK_TAGS.has(tag) && !(isListItem && tag === "li")) {
-      addWarning("unsupported-element", "The <" + tag + "> element is not supported and will be simplified.");
+      addWarning("unsupported-element", "Element <" + tag + "> nie jest obsługiwany i zostanie uproszczony.");
     }
   };
 
@@ -128,7 +138,7 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
       }
 
       if (node.nodeType === Node.COMMENT_NODE) {
-        addWarning("unsupported-element", "HTML comments are not supported and will be removed.");
+        addWarning("unsupported-element", "Komentarze HTML nie są obsługiwane i zostaną usunięte.");
         continue;
       }
 
@@ -152,8 +162,8 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
         const rawHref = element.getAttribute("href");
         const safeHref = rawHref === null ? null : sanitizeRichTextHref(rawHref);
         if (safeHref) marks = addMark(inheritedMarks, { type: "link", attrs: { href: safeHref } });
-        else if (rawHref !== null) addWarning("unsafe-link", "An unsafe or invalid link address will be removed.");
-        else addWarning("unsafe-link", "A link without an href will be converted to plain text.");
+        else if (rawHref !== null) addWarning("unsafe-link", "Niebezpieczny lub nieprawidłowy adres linku zostanie usunięty.");
+        else addWarning("unsafe-link", "Link bez atrybutu href zostanie zamieniony na zwykły tekst.");
       }
 
       if (["img"].includes(tag)) {
@@ -195,7 +205,7 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
       }
 
       if (node.nodeType === Node.COMMENT_NODE) {
-        addWarning("unsupported-element", "HTML comments are not supported and will be removed.");
+        addWarning("unsupported-element", "Komentarze HTML nie są obsługiwane i zostaną usunięte.");
         continue;
       }
 
@@ -226,7 +236,7 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
           } else if (child.nodeType === Node.TEXT_NODE && !(child.nodeValue ?? "").trim()) {
             continue;
           } else {
-            addWarning("unsupported-element", "Content outside a <li> element in a list will be moved into a list item.");
+            addWarning("unsupported-element", "Treść poza elementem <li> zostanie przeniesiona do nowego elementu listy.");
             const itemContent = child instanceof Element
               ? blocksFromNodes([child])
               : [{ type: "paragraph", content: inlineFromNodes([child]) }];
@@ -260,7 +270,7 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
   const imported = blocksFromNodes(parsed.body.childNodes);
   const document = sanitizeRichTextDocument({ type: "doc", content: imported }) ?? { type: "doc", content: [] };
   if (JSON.stringify(imported) !== JSON.stringify(document.content)) {
-    addWarning("unsupported-element", "Some nested content cannot be represented and will be removed during conversion.");
+    addWarning("unsupported-element", "Niektórych zagnieżdżonych elementów nie można zachować i zostaną usunięte podczas konwersji.");
   }
   return { document, warnings: [...warningMap.values()], canConvert: true };
 }
@@ -269,6 +279,7 @@ function removeFetchableAttributes(
   source: string,
   onRemovedAttribute: (tag: string, attribute: string) => void,
   onRemovedStyleContent: () => void,
+  onMalformedComment: () => void,
 ): string {
   const lowerSource = source.toLowerCase();
   let result = "";
@@ -283,10 +294,14 @@ function removeFetchableAttributes(
 
     result += source.slice(cursor, tagStart);
     if (source.startsWith("<!--", tagStart)) {
-      const commentEnd = source.indexOf("-->", tagStart + 4);
-      const end = commentEnd < 0 ? source.length : commentEnd + 3;
-      result += source.slice(tagStart, end);
-      cursor = end;
+      const commentEnd = findHtmlCommentEnd(source, tagStart);
+      if (commentEnd < 0) {
+        onMalformedComment();
+        result += " ";
+        break;
+      }
+      result += source.slice(tagStart, commentEnd + 1);
+      cursor = commentEnd + 1;
       continue;
     }
 
@@ -409,6 +424,14 @@ function findHtmlTagEnd(source: string, start: number): number {
   return -1;
 }
 
+function findHtmlCommentEnd(source: string, start: number): number {
+  if (source[start + 4] === ">") return start + 4;
+  if (source[start + 4] === "-" && source[start + 5] === ">") return start + 5;
+
+  const commentEnd = source.indexOf("-->", start + 4);
+  return commentEnd < 0 ? -1 : commentEnd + 2;
+}
+
 function findRawTextClose(lowerSource: string, tagName: string, start: number): number {
   const closePrefix = "</" + tagName;
   let cursor = start;
@@ -489,9 +512,9 @@ function hasMalformedTagStructure(source: string): boolean {
     const start = source.indexOf("<", cursor);
     if (start < 0) break;
     if (source.slice(start, start + 4) === "<!--") {
-      const commentEnd = source.indexOf("-->", start + 4);
+      const commentEnd = findHtmlCommentEnd(source, start);
       if (commentEnd < 0) return true;
-      cursor = commentEnd + 3;
+      cursor = commentEnd + 1;
       continue;
     }
 

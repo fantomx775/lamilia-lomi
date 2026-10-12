@@ -72,19 +72,28 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
     const productField = page.locator('#product-editor-form input[name="longDescription"]');
     const originalProductValue = await productField.inputValue();
-    const productHtml = '<style>p { color: red }</style><h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><img src="https://rich-text-resource.invalid/tracker.png" alt="Product diagram"><iframe src="https://rich-text-resource.invalid/frame"></iframe><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><script>window.__issue51Executed = true</script><p onclick="window.__issue51Executed = true">Safe paragraph.</p>';
+    const productHtml = `<!doctype html><html><head><title>Product source title</title><script>window.__issue51Executed = true</script><style>p { color: red }</style></head><body><h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><img src="https://rich-text-resource.invalid/tracker.png" alt="Product diagram"><!--><img src="https://rich-text-resource.invalid/malformed-comment.png" alt="Recovered after comment"><iframe src="https://rich-text-resource.invalid/frame"></iframe><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><p onclick="window.__issue51Executed = true">Safe paragraph.</p></body></html>`;
     await page.getByRole("button", { name: "HTML" }).click();
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(productHtml);
     await page.getByRole("button", { name: "Rich Text" }).click();
     await expect(page.getByText("Przed konwersją sprawdź obsługiwane formatowanie:")).toBeVisible();
-    await expect(page.getByText("Style block content will be removed during conversion.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Zawartość sekcji <head> nie jest obsługiwana i zostanie usunięta podczas konwersji.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Treść bloku <style> zostanie usunięta podczas konwersji.", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue(productHtml);
     await expect(productField).toHaveValue(originalProductValue);
     expect(await page.evaluate(() => (window as Window & { __issue51Executed?: boolean }).__issue51Executed)).toBe(false);
-    await saveScreenshot(page, screenshotDirectory, `product-editor-html-warning-${testInfo.project.name}.png`, page.getByRole("textbox", { name: "Źródło HTML" }));
+    expect(attemptedHtmlResourceRequests).toEqual([]);
+    await saveScreenshot(
+      page,
+      screenshotDirectory,
+      `product-editor-html-warning-${testInfo.project.name}.png`,
+      page.getByRole("status").filter({ hasText: "Przed konwersją sprawdź obsługiwane formatowanie:" }),
+      true,
+    );
     await page.getByRole("button", { name: "Użyj obsługiwanej treści" }).click();
     expect(attemptedHtmlResourceRequests).toEqual([]);
     await expect(productEditor.locator("h2")).toHaveText("Issue 51 product summary");
+    await expect(productEditor).toContainText("Recovered after comment");
     await expect(productEditor.locator("u")).toHaveText("Underlined product copy");
     await expect(productEditor.locator("blockquote")).toContainText("Product quotation.");
     await expect(productEditor.locator("hr")).toHaveCount(1);
@@ -280,7 +289,7 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
 }
 
-async function saveScreenshot(page: Page, directory: string, filename: string, target: Locator) {
+async function saveScreenshot(page: Page, directory: string, filename: string, target: Locator, captureTargetOnly = false) {
   await target.scrollIntoViewIfNeeded();
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   await page.evaluate(() => {
@@ -288,7 +297,13 @@ async function saveScreenshot(page: Page, directory: string, filename: string, t
   });
   const screenshotStyles = await page.addStyleTag({ content: "nextjs-portal, [data-testid='product-save-bar'] { display: none !important; }" });
   try {
-    await page.screenshot({ path: path.join(directory, filename), animations: "disabled" });
+    if (captureTargetOnly) {
+      const bounds = await target.boundingBox();
+      if (!bounds) throw new Error(`The screenshot target for ${filename} is not visible.`);
+      await page.screenshot({ path: path.join(directory, filename), animations: "disabled", clip: bounds });
+    } else {
+      await page.screenshot({ path: path.join(directory, filename), animations: "disabled" });
+    }
   } finally {
     await screenshotStyles.evaluate((element) => element.parentNode?.removeChild(element));
   }

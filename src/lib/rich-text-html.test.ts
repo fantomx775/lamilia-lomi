@@ -78,6 +78,33 @@ describe("rich text HTML import and export", () => {
     expect(imported.warnings.map((warning) => warning.code)).toContain("unsupported-element");
   });
 
+  it("warns before dropping unsupported content from a full document head", () => {
+    const imported = importRichTextHtml(
+      "<!doctype html><html><head><title>Keep this title</title><script>discardThisScript()</script></head><body><p>Keep this body</p></body></html>",
+    );
+
+    expect(imported.canConvert).toBe(true);
+    expect(richTextDocumentToHtml(imported.document)).toBe("<p>Keep this body</p>");
+    expect(imported.warnings).toContainEqual({
+      code: "unsupported-element",
+      message: "Zawartość sekcji <head> nie jest obsługiwana i zostanie usunięta podczas konwersji.",
+    });
+  });
+
+  it("strips resource attributes after an abruptly closed HTML comment", () => {
+    const imported = importRichTextHtml(
+      '<!--><img src="https://rich-text-resource.invalid/malformed-comment.png" alt="Recovered image"><p>Keep this paragraph</p>',
+    );
+
+    expect(imported.canConvert).toBe(true);
+    expect(imported.warnings).toContainEqual({
+      code: "unsupported-attribute",
+      message: "Atrybut „src” w elemencie <img> zostanie usunięty.",
+    });
+    expect(richTextDocumentToHtml(imported.document)).toBe("<p>Recovered image</p><p>Keep this paragraph</p>");
+    expect(richTextDocumentToHtml(imported.document)).not.toContain("rich-text-resource.invalid");
+  });
+
   it("escapes legacy text when exporting it to HTML", () => {
     const html = richTextDocumentToHtml("Legacy <script>alert(1)</script> & text");
 

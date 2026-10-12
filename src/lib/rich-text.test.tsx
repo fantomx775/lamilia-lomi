@@ -76,7 +76,7 @@ describe("rich text serialization and rendering", () => {
     expect(parsed).toMatchObject({ kind: "rich" });
   });
 
-  it("preserves underline, blockquotes, and horizontal rules in the v1 document", () => {
+  it("keeps new formatting readable to older v1 readers and restores it for current readers", () => {
     const value = serializeRichTextDocument({
       type: "doc",
       content: [
@@ -85,13 +85,33 @@ describe("rich text serialization and rendering", () => {
         { type: "horizontalRule" },
       ],
     });
+    const stored = JSON.parse(value.slice(RICH_TEXT_FORMAT_PREFIX.length)) as {
+      content: Array<{ type: string; content?: Array<{ type: string; text?: string; content?: Array<{ type: string; text?: string }> }> }>;
+      richTextV2: { content: unknown[] };
+    };
+    const legacyValue = `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify({ type: "doc", content: stored.content })}`;
     const rendered = renderToStaticMarkup(<RichTextContent value={value} />);
+    const legacyRendered = renderToStaticMarkup(<RichTextContent value={legacyValue} />);
 
-    expect(parseRichTextValue(value)).toMatchObject({ kind: "rich" });
+    expect(stored.content.map((node) => node.type)).toEqual(["paragraph", "paragraph", "paragraph"]);
+    expect(stored.content.flatMap((node) => node.content ?? []).map((node) => node.text).filter(Boolean)).toContain("Quoted");
+    expect(stored.richTextV2.content).toEqual([
+      { type: "paragraph", content: [{ type: "text", text: "Underlined", marks: [{ type: "underline" }] }] },
+      { type: "blockquote", content: [{ type: "paragraph", content: [{ type: "text", text: "Quoted" }] }] },
+      { type: "horizontalRule" },
+    ]);
+    expect(parseRichTextValue(value)).toMatchObject({
+      kind: "rich",
+      document: { content: [{ type: "paragraph" }, { type: "blockquote" }, { type: "horizontalRule" }] },
+    });
     expect(rendered).toContain("<u>Underlined</u>");
     expect(rendered).toContain("<blockquote");
     expect(rendered).toContain("Quoted");
     expect(rendered).toContain("<hr");
+    expect(legacyRendered).toContain("Underlined");
+    expect(legacyRendered).toContain("Quoted");
+    expect(legacyRendered).not.toContain("<blockquote");
+    expect(legacyRendered).not.toContain("<hr");
   });
 
   it("keeps legacy plain text readable and displays HTML-looking text as text", () => {
