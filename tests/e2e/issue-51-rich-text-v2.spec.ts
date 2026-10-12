@@ -77,6 +77,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(productHtml);
     await page.getByRole("button", { name: "Rich Text" }).click();
     await expect(page.getByText("Przed konwersją sprawdź obsługiwane formatowanie:")).toBeVisible();
+    await expect(page.getByText("Style block content will be removed during conversion.", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue(productHtml);
     await expect(productField).toHaveValue(originalProductValue);
     expect(await page.evaluate(() => (window as Window & { __issue51Executed?: boolean }).__issue51Executed)).toBe(false);
