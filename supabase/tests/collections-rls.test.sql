@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(18);
+SELECT plan(23);
 
 SELECT ok(
   (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.collections'::regclass),
@@ -12,6 +12,21 @@ SELECT ok(
 SELECT ok(
   has_table_privilege('authenticated', 'public.collections', 'SELECT'),
   'authenticated users receive the table privilege checked by RLS'
+);
+SELECT ok(
+  NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'collection_id'
+  ),
+  'public products do not expose collection assignments as a selectable column'
+);
+SELECT ok(
+  (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.product_collections'::regclass),
+  'product collection assignments have row level security enabled'
+);
+SELECT ok(
+  NOT has_table_privilege('anon', 'public.product_collections', 'SELECT'),
+  'anonymous visitors cannot read product collection assignments'
 );
 SELECT ok(
   NOT has_table_privilege('anon', 'public.collections', 'INSERT'),
@@ -68,6 +83,19 @@ EXCEPTION WHEN insufficient_privilege THEN
 END;
 $$;
 
+CREATE FUNCTION pg_temp.issue49_second_assignment_is_denied()
+RETURNS boolean
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  INSERT INTO public.product_collections (product_id, collection_id)
+  VALUES ('cccccccc-4999-4999-8999-cccccccccccc', 'dddddddd-4999-4999-8999-dddddddddddd');
+  RETURN false;
+EXCEPTION WHEN unique_violation THEN
+  RETURN true;
+END;
+$$;
+
 SET LOCAL ROLE anon;
 SELECT is(
   (SELECT count(*)::integer FROM storage.objects WHERE bucket_id = 'collection-media'),
@@ -80,6 +108,7 @@ SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claim.sub = 'bbbbbbbb-4999-4999-8999-bbbbbbbbbbbb';
 SELECT is((SELECT count(*)::integer FROM public.collections), 0, 'non-admin users cannot read collections');
 SELECT is((SELECT count(*)::integer FROM storage.objects WHERE bucket_id = 'collection-media'), 0, 'non-admin users cannot read collection image objects');
+SELECT is((SELECT count(*)::integer FROM public.product_collections), 0, 'non-admin users cannot read product collection assignments');
 SELECT ok(pg_temp.issue49_nonadmin_insert_is_denied(), 'non-admin users cannot create collections');
 RESET ROLE;
 
@@ -106,10 +135,11 @@ SELECT is(
   'the admin product-save RPC accepts a collection assignment'
 );
 SELECT is(
-  (SELECT collection_id FROM public.products WHERE id = 'cccccccc-4999-4999-8999-cccccccccccc'),
+  (SELECT collection_id FROM public.product_collections WHERE product_id = 'cccccccc-4999-4999-8999-cccccccccccc'),
   'dddddddd-4999-4999-8999-dddddddddddd'::uuid,
-  'the product-save RPC persists collection_id'
+  'the product-save RPC persists its admin-only collection assignment'
 );
+SELECT ok(pg_temp.issue49_second_assignment_is_denied(), 'a product can have at most one collection assignment');
 RESET ROLE;
 INSERT INTO public.premium_codes (id, product_id, code, active)
 VALUES (
@@ -153,7 +183,7 @@ SELECT public.save_product(jsonb_build_object(
   'premiumCodes', '[]'::jsonb
 ));
 SELECT is(
-  (SELECT collection_id FROM public.products WHERE id = 'cccccccc-4999-4999-8999-cccccccccccc'),
+  (SELECT collection_id FROM public.product_collections WHERE product_id = 'cccccccc-4999-4999-8999-cccccccccccc'),
   'dddddddd-4999-4999-8999-dddddddddddd'::uuid,
   'older product-save payloads preserve the collection assignment'
 );
@@ -172,8 +202,8 @@ SELECT public.save_product(jsonb_build_object(
   'premiumCodes', '[]'::jsonb
 ));
 SELECT is(
-  (SELECT collection_id FROM public.products WHERE id = 'cccccccc-4999-4999-8999-cccccccccccc'),
-  null::uuid,
+  (SELECT count(*)::integer FROM public.product_collections WHERE product_id = 'cccccccc-4999-4999-8999-cccccccccccc'),
+  0,
   'the product-save RPC clears collection assignment when requested'
 );
 SELECT public.save_product(jsonb_build_object(
@@ -191,10 +221,10 @@ SELECT public.save_product(jsonb_build_object(
   'premiumCodes', '[]'::jsonb
 ));
 DELETE FROM public.collections WHERE id = 'dddddddd-4999-4999-8999-dddddddddddd';
-SELECT is(
-  (SELECT collection_id FROM public.products WHERE id = 'cccccccc-4999-4999-8999-cccccccccccc'),
-  null::uuid,
-  'deleting a collection detaches but preserves its product'
+SELECT ok(
+  NOT EXISTS (SELECT 1 FROM public.product_collections WHERE product_id = 'cccccccc-4999-4999-8999-cccccccccccc')
+  AND EXISTS (SELECT 1 FROM public.products WHERE id = 'cccccccc-4999-4999-8999-cccccccccccc'),
+  'deleting a collection removes its assignment while preserving the product'
 );
 RESET ROLE;
 

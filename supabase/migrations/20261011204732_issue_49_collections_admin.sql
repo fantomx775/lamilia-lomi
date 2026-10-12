@@ -27,15 +27,30 @@ create table public.collections (
 create unique index collections_name_normalized_key
   on public.collections (lower(btrim(name)));
 
-alter table public.products
-  add column collection_id uuid references public.collections(id) on delete set null;
+-- Keep collection membership separate so public product reads cannot expose it.
+-- The unique product_id constraint enforces zero-or-one collection per product;
+-- deleting either side removes only the relationship row, never a product.
+create table public.product_collections (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null unique references public.products(id) on delete cascade,
+  collection_id uuid not null references public.collections(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
 
-create index products_collection_id_idx on public.products (collection_id);
+create index product_collections_collection_id_idx on public.product_collections (collection_id);
 alter table public.collections enable row level security;
 revoke all on public.collections from anon, authenticated;
 grant select, insert, update, delete on public.collections to authenticated;
 create policy collections_admin_all
   on public.collections for all to authenticated
+  using ((select private.is_admin()))
+  with check ((select private.is_admin()));
+
+alter table public.product_collections enable row level security;
+revoke all on public.product_collections from anon, authenticated;
+grant select, insert, update, delete on public.product_collections to authenticated;
+create policy product_collections_admin_all
+  on public.product_collections for all to authenticated
   using ((select private.is_admin()))
   with check ((select private.is_admin()));
 
@@ -55,10 +70,13 @@ set name = excluded.name,
 
 -- The collection-media bucket is private. Application routes authorize admins
 -- before using the service role to upload or issue short-lived image URLs.
+-- Supabase Storage owns this managed table; assume its owner only for policy DDL.
+set local role supabase_storage_admin;
 create policy admins_manage_collection_images
   on storage.objects for all to authenticated
   using (bucket_id = 'collection-media' and (select private.is_admin()))
   with check (bucket_id = 'collection-media' and (select private.is_admin()));
+reset role;
 -- Wrap the existing Issue 31 serializer so collection assignment does not replace its batch-merge behavior.
 alter function private.save_product(jsonb)
   rename to save_product_with_premium_code_batch_merge;
@@ -95,9 +113,15 @@ begin
   saved_product := private.save_product_with_premium_code_batch_merge(product_state - 'collectionId');
 
   if has_collection_assignment then
-    update public.products
-    set collection_id = requested_collection_id
-    where id = requested_product_id;
+    if requested_collection_id is null then
+      delete from public.product_collections
+      where product_id = requested_product_id;
+    else
+      insert into public.product_collections (product_id, collection_id)
+      values (requested_product_id, requested_collection_id)
+      on conflict (product_id) do update
+      set collection_id = excluded.collection_id;
+    end if;
   end if;
 
   return saved_product;

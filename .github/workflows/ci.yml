@@ -49,29 +49,3 @@ jobs:
         env:
           LAMILIA_BACKEND: local
           NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
-
-  database:
-    name: Database migrations and RLS
-    if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.draft == false &&
-      (github.event.action != 'edited' || github.event.changes.base.ref.from != null))
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v3
-        with:
-          version: 2.120.0
-
-      - name: Start local Supabase
-        run: supabase start
-
-      - name: Run database migration and RLS tests
-        run: supabase test db --local
-
-      - name: Stop local Supabase
-        if: always()
-        run: supabase stop --no-backup

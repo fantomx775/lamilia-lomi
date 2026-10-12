@@ -16,6 +16,7 @@ import {
 } from "@/lib/content-repository";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 import { validateMediaFile } from "@/lib/media-upload";
+import { hasValidCollectionImageContent } from "@/lib/collection-image-validation";
 import { getDemoSession } from "@/lib/session.server";
 import { getCurrentAccessToken } from "@/lib/supabase/server";
 import type { CollectionImageStorageProvider } from "@/lib/types";
@@ -42,6 +43,11 @@ export async function POST(request: Request) {
     return errorResponse(ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE, 400);
   }
 
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (!await hasValidCollectionImageContent(bytes, validation.contentType)) {
+    return errorResponse(ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE, 400);
+  }
+
   try {
     const imageId = randomUUID();
     const stored = await storeCollectionImage({
@@ -49,7 +55,7 @@ export async function POST(request: Request) {
       imageId,
       filename: file.name,
       contentType: validation.contentType,
-      bytes: new Uint8Array(await file.arrayBuffer()),
+      bytes,
       authorizationToken: access.token,
     });
 

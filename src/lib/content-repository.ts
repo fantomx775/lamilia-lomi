@@ -259,6 +259,7 @@ export async function getContentSnapshotForRequest(options: {
     catalogSettingsRows,
     premiumCodeRows,
     collectionRows,
+    productCollectionRows,
   ] = await Promise.all([
     options.includeCollections
       ? selectRowsAfterId(supabase, "products")
@@ -280,6 +281,9 @@ export async function getContentSnapshotForRequest(options: {
     options.includeCollections
       ? selectRows(supabase, "collections")
       : Promise.resolve([]),
+    options.includeCollections
+      ? selectRowsAfterId(supabase, "product_collections")
+      : Promise.resolve([]),
   ]);
 
   const categoryTranslations = groupByString(categoryTranslationRows, "category_id");
@@ -290,6 +294,9 @@ export async function getContentSnapshotForRequest(options: {
   const premiumCodes = groupByString(premiumCodeRows, "product_id");
   const productCategories = groupByString(productCategoryRows, "product_id");
   const productTags = groupByString(productTagRows, "product_id");
+  const productCollections = new Map(
+    productCollectionRows.map((row) => [stringValue(row.product_id), stringValue(row.collection_id)]),
+  );
 
   const categories = categoryRows.map((row) =>
     mapCategory(row, categoryTranslations.get(stringValue(row.id)) ?? []),
@@ -308,7 +315,7 @@ export async function getContentSnapshotForRequest(options: {
         assets.get(stringValue(row.id)) ?? [],
         amazonLinks.get(stringValue(row.id)) ?? [],
         premiumCodes.get(stringValue(row.id)) ?? [],
-        options.includeCollections === true,
+        productCollections.get(stringValue(row.id)),
       ),
     ),
     collections: collectionRows.map(mapCollection),
@@ -388,7 +395,7 @@ function mapProduct(
   assetRows: DbRow[],
   amazonRows: DbRow[],
   premiumCodeRows: DbRow[],
-  includeCollectionAssignment = false,
+  collectionId?: string,
 ): Product {
   return {
     id: stringValue(row.id),
@@ -396,7 +403,7 @@ function mapProduct(
     status: row.status as Product["status"],
     audience: row.audience as Product["audience"],
     productType: stringValue(row.product_type),
-    collectionId: includeCollectionAssignment ? optionalString(row.collection_id) : undefined,
+    collectionId,
     coverAssetId: stringValue(row.cover_asset_id),
     videoAssetId: optionalString(row.video_asset_id),
     reviewDelayDays: numberValue(row.review_delay_days, 14),
