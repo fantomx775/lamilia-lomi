@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(18);
+SELECT plan(19);
 
 SELECT ok(
   (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.catalog_settings'::regclass),
@@ -185,6 +185,13 @@ SELECT throws_ok(
     WHERE id = 'global'$$,
   '23514',
   'admins cannot bypass duplicate selection validation across sections using direct SQL'
+);
+SELECT throws_ok(
+  $$UPDATE public.catalog_settings
+    SET favorite_coloring_book_ids = ARRAY['AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA', 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', '']::text[]
+    WHERE id = 'global'$$,
+  '23514',
+  'admins cannot bypass duplicate selection validation with UUID casing variants'
 );
 RESET ROLE;
 SELECT ok(

@@ -98,6 +98,23 @@ describe("AboutPageEditor", () => {
     expect(view.queryByRole("option", { name: /Starry Night Coloring Book/ })).not.toBeInTheDocument();
   });
 
+  it("closes a product list when keyboard focus leaves its combobox", async () => {
+    const user = userEvent.setup();
+    const view = render(<AboutPageEditor config={emptyConfig} products={products} />);
+    const firstSlot = view.getByRole("combobox", { name: "Favorite Coloring Books, pozycja 1" });
+    const secondSlot = view.getByRole("combobox", { name: "Favorite Coloring Books, pozycja 2" });
+
+    await user.click(firstSlot);
+    expect(firstSlot).toHaveAttribute("aria-expanded", "true");
+    expect(view.getByRole("listbox", { name: /pozycja 1/ })).toBeInTheDocument();
+
+    await user.tab();
+
+    expect(secondSlot).toHaveFocus();
+    expect(firstSlot).toHaveAttribute("aria-expanded", "false");
+    expect(view.queryByRole("listbox", { name: /pozycja 1/ })).not.toBeInTheDocument();
+  });
+
   it("warns about missing and unpublished saved products while allowing their replacement", async () => {
     const user = userEvent.setup();
     const view = render(

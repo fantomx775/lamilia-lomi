@@ -50,9 +50,15 @@ export function hasDuplicateAboutProductIds(settings: AboutPageSettings) {
   const selectedIds = [
     ...settings.favoriteColoringBookIds,
     ...settings.favoritePictureBookIds,
-  ].filter(Boolean);
+  ].filter(Boolean).map(normalizeProductIdForDuplicateCheck);
 
   return new Set(selectedIds).size !== selectedIds.length;
+}
+
+function normalizeProductIdForDuplicateCheck(id: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    ? id.toLowerCase()
+    : id;
 }
 
 function normalizeProductIds(value: unknown): AboutPageSettings["favoriteColoringBookIds"] {

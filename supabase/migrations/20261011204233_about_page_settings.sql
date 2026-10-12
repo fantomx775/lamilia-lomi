@@ -8,14 +8,29 @@ immutable
 parallel safe
 set search_path = pg_catalog
 as $$
-  select not exists (
+  with selected_product_ids as (
     select selected.product_id
     from pg_catalog.unnest(
       pg_catalog.array_cat(coloring_book_ids, picture_book_ids)
     ) as selected(product_id)
-    group by selected.product_id
-    having selected.product_id is null
-      or (selected.product_id <> '' and pg_catalog.count(*) > 1)
+  ), normalized_product_ids as (
+    select case
+      when selected.product_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        then (selected.product_id::uuid)::text
+      else selected.product_id
+    end as product_id
+    from selected_product_ids as selected
+  )
+  select not exists (
+    select 1
+    from normalized_product_ids
+    where product_id is null
+  ) and not exists (
+    select product_id
+    from normalized_product_ids
+    where product_id <> ''
+    group by product_id
+    having pg_catalog.count(*) > 1
   );
 $$;
 

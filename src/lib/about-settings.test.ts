@@ -58,4 +58,11 @@ describe("About page settings", () => {
       favoritePictureBookIds: ["picture-1", "picture-2", "picture-3"],
     })).toBe(false);
   });
+
+  it("treats UUID casing variants as the same selected product", () => {
+    expect(hasDuplicateAboutProductIds({
+      ...DEFAULT_ABOUT_PAGE_SETTINGS,
+      favoriteColoringBookIds: ["AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA", "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", ""],
+    })).toBe(true);
+  });
 });

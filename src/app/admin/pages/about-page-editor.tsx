@@ -305,7 +305,15 @@ function ProductCombobox({
   };
 
   return (
-    <div ref={rootRef} className="relative min-w-0">
+    <div
+      ref={rootRef}
+      className="relative min-w-0"
+      onBlur={(event) => {
+        if (event.relatedTarget && event.currentTarget.contains(event.relatedTarget as Node)) return;
+        setOpen(false);
+        setActiveIndex(-1);
+      }}
+    >
       <Input
         id={id}
         type="text"
