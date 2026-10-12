@@ -70,8 +70,8 @@ set name = excluded.name,
 
 -- The collection-media bucket is private. Application routes authorize admins
 -- before using the service role to upload or issue short-lived image URLs.
--- Supabase Storage owns this managed table; assume its owner only for policy DDL.
-set local role supabase_storage_admin;
+-- Use a session role switch for compatibility with the CLI's pipelined runner.
+set role supabase_storage_admin;
 create policy admins_manage_collection_images
   on storage.objects for all to authenticated
   using (bucket_id = 'collection-media' and (select private.is_admin()))
