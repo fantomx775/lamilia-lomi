@@ -1,12 +1,14 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdminMutationResult } from "@/lib/admin-errors";
 
+const { routerPush } = vi.hoisted(() => ({ routerPush: vi.fn() }));
+
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: vi.fn() }),
+  useRouter: () => ({ refresh: vi.fn(), push: routerPush }),
 }));
 
 import { CategoriesResourceList } from "./categories/categories-list";
@@ -115,6 +117,34 @@ describe("admin resource list adapters", () => {
     );
     expect(user.getAllByRole("button", { name: /Pokaż szczegóły użytkownika user@example.com/ }).length).toBeGreaterThan(0);
     expect(user.getByRole("link", { name: "Eksport marketing CSV" })).toHaveAttribute("href", "/admin/users/export?marketingOnly=1");
+  });
+
+  it("opens a product from mobile metadata without hijacking overflow controls", async () => {
+    const user = userEvent.setup();
+    routerPush.mockClear();
+    const product = render(
+      <ProductsResourceList rows={[{
+        id: "product-mobile",
+        title: "Forest book",
+        slug: "forest-book",
+        status: "draft",
+        audience: "kids",
+        productType: "coloring-book",
+        collectionName: "Forest stories",
+        categoryNames: ["Books", "Nature", "Mindfulness"],
+      }]} />,
+    );
+    const mobileDetails = product.container.querySelector("dl");
+    expect(mobileDetails).not.toBeNull();
+
+    await user.click(within(mobileDetails!).getByText("Forest stories"));
+    expect(routerPush).toHaveBeenCalledWith("/admin/products/product-mobile");
+
+    routerPush.mockClear();
+    const categoryToggle = within(mobileDetails!).getByRole("button", { name: "Pokaż 1 kolejną kategorię" });
+    await user.click(categoryToggle);
+    expect(categoryToggle).toHaveAttribute("aria-expanded", "true");
+    expect(routerPush).not.toHaveBeenCalled();
   });
 
   it("shows collection, category and tag columns with an accessible 2 plus N expansion", async () => {

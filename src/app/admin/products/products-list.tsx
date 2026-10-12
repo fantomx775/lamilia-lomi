@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { Plus } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { AdminResourceList } from "@/components/admin/admin-resource-list";
 import { ImageWithFallback } from "@/components/image-with-fallback";
@@ -97,6 +98,8 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
 ];
 
 export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) {
+  const router = useRouter();
+
   return (
     <AdminResourceList
       title="Produkty"
@@ -118,7 +121,16 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
         </Link>
       }
       renderMobileCard={(row) => (
-        <div className="grid min-w-0 gap-3">
+        <div
+          className="group grid min-w-0 cursor-pointer gap-3 rounded-md hover:bg-[var(--color-bg-alt)]"
+          onClick={(event) => {
+            if (event.target instanceof Element && event.target.closest("a, button, [role='button'], [role='link']")) {
+              return;
+            }
+
+            router.push(`/admin/products/${row.id}`);
+          }}
+        >
           <Link
             href={`/admin/products/${row.id}`}
             className="admin-motion group block min-w-0 cursor-pointer rounded-md p-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] hover:bg-[var(--color-bg-alt)]"

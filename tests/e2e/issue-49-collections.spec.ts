@@ -232,6 +232,19 @@ test("manages collections, assigns products, and preserves products when a colle
     );
 
     await page.goto("/admin/products");
+    if (project === "mobile") {
+      const collectionDetails = page.locator("dd").filter({ hasText: collection }).first();
+      await expect(collectionDetails).toBeVisible();
+      await collectionDetails.scrollIntoViewIfNeeded();
+      const collectionDetailsBox = await collectionDetails.boundingBox();
+      expect(collectionDetailsBox).not.toBeNull();
+      const tapX = collectionDetailsBox!.x + collectionDetailsBox!.width / 2;
+      const tapY = collectionDetailsBox!.y + collectionDetailsBox!.height / 2;
+      await page.mouse.click(tapX, tapY);
+      await page.waitForURL((url) => url.pathname === productPath, { timeout: 15_000 });
+      await expect(page.getByLabel("Tytuł")).toHaveValue(product);
+      await page.goto("/admin/products");
+    }
     const visibleProductLink = page.locator('a[href^="/admin/products/"]:visible').filter({ hasText: product }).first();
     await expect(visibleProductLink).toBeVisible();
     const threeTagRow = page.getByRole("row").filter({ has: page.locator(`a[href="${productPath}"]`) });
