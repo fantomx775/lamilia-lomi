@@ -3,6 +3,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { AdminMutationResult } from "@/lib/admin-errors";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
@@ -81,6 +82,8 @@ describe("admin resource list adapters", () => {
     expect(product.container.querySelector('tbody a[href="/admin/products/product-1"]')).toBeInTheDocument();
     expect(product.container.querySelector('a[href="/admin/products/new"]')).toBeInTheDocument();
     expect(product.container.querySelector('tbody tr[role="button"]')).not.toBeInTheDocument();
+    expect(product.getAllByLabelText("Brak kategorii").length).toBeGreaterThan(0);
+    expect(product.getAllByLabelText("Brak tagów").length).toBeGreaterThan(0);
 
     const category = render(
       <CategoriesResourceList
@@ -117,35 +120,111 @@ describe("admin resource list adapters", () => {
   it("shows collection, category and tag columns with an accessible 2 plus N expansion", async () => {
     const user = userEvent.setup();
     const view = render(
-      <ProductsResourceList rows={[{
-        id: "product-collections",
-        title: "Forest book",
-        slug: "forest-book",
-        status: "draft",
-        audience: "kids",
-        productType: "coloring-book",
-        collectionName: "Forest stories",
-        categoryNames: ["Books", "Nature", "A very long category name"],
-        tagNames: ["Calm", "Printable", "Seasonal"],
-      }]} />,
+      <ProductsResourceList rows={[
+        {
+          id: "product-collections",
+          title: "Forest book",
+          slug: "forest-book",
+          status: "draft",
+          audience: "kids",
+          productType: "coloring-book",
+          collectionName: "Forest stories",
+          categoryNames: ["Books", "Nature", "A very long category name"],
+          tagNames: ["Calm", "Printable", "Seasonal"],
+        },
+        {
+          id: "product-count-3",
+          title: "Three hidden labels",
+          slug: "three-hidden-labels",
+          status: "draft",
+          audience: "kids",
+          productType: "coloring-book",
+          categoryNames: ["One", "Two", "Three", "Four", "Five"],
+          tagNames: ["One", "Two", "Three", "Four", "Five"],
+        },
+        {
+          id: "product-count-5",
+          title: "Five hidden labels",
+          slug: "five-hidden-labels",
+          status: "draft",
+          audience: "kids",
+          productType: "coloring-book",
+          categoryNames: ["One", "Two", "Three", "Four", "Five", "Six", "Seven"],
+          tagNames: ["One", "Two", "Three", "Four", "Five", "Six", "Seven"],
+        },
+        {
+          id: "product-count-22",
+          title: "Twenty two hidden labels",
+          slug: "twenty-two-hidden-labels",
+          status: "draft",
+          audience: "kids",
+          productType: "coloring-book",
+          categoryNames: Array.from({ length: 24 }, (_, index) => `Category ${index + 1}`),
+          tagNames: Array.from({ length: 24 }, (_, index) => `Tag ${index + 1}`),
+        },
+      ]} />,
     );
 
     expect(view.getByRole("columnheader", { name: "Kolekcja" })).toBeInTheDocument();
     expect(view.getByRole("columnheader", { name: "Kategorie" })).toBeInTheDocument();
     expect(view.getByRole("columnheader", { name: "Tagi" })).toBeInTheDocument();
-    expect(view.getAllByRole("button", { name: "Pokaż 1 kolejnych kategorii" })).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "Pokaż 1 kolejną kategorię" })).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "Pokaż 1 kolejny tag" })).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "Pokaż 3 kolejne kategorie" })).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "Pokaż 3 kolejne tagi" })).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "Pokaż 5 kolejnych kategorii" })).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "Pokaż 5 kolejnych tagów" })).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "Pokaż 22 kolejne kategorie" })).toHaveLength(2);
+    expect(view.getAllByRole("button", { name: "Pokaż 22 kolejne tagi" })).toHaveLength(2);
 
-    const expand = view.getAllByRole("button", { name: "Pokaż 1 kolejnych kategorii" })[0];
+    const expand = view.getAllByRole("button", { name: "Pokaż 1 kolejną kategorię" })[0];
     const detailsId = expand.getAttribute("aria-controls");
     expect(detailsId).toBeTruthy();
-    expect(document.getElementById(detailsId!)).toHaveAttribute("hidden");
+    expect(expand).toHaveAttribute("aria-haspopup", "true");
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById(detailsId!)).toHaveAttribute("popover", "auto");
+    const popoverIds = Array.from(document.querySelectorAll("[popover]")).map((popover) => popover.id);
+    expect(new Set(popoverIds).size).toBe(popoverIds.length);
     expand.focus();
     await user.keyboard("{Enter}");
 
     expect(expand).toHaveAttribute("aria-expanded", "true");
-    expect(document.getElementById(detailsId!)).not.toHaveAttribute("hidden");
+    expect(document.getElementById(detailsId!)).toHaveAttribute("popover", "auto");
     expect(view.getAllByText("A very long category name")).toHaveLength(2);
     expect(view.getAllByText("Forest stories")).toHaveLength(2);
+  });
+
+  it("keeps the collection drawer open while a save is pending", async () => {
+    const user = userEvent.setup();
+    const collectionId = "11111111-1111-4111-8111-111111111111";
+    let resolveSave!: (result: Extract<AdminMutationResult, { ok: true }>) => void;
+    const saveAction = vi.fn(() => new Promise<Extract<AdminMutationResult, { ok: true }>>((resolve) => {
+      resolveSave = resolve;
+    }));
+    render(
+      <CollectionsResourceList
+        rows={[{
+          id: collectionId,
+          name: "Forest stories",
+          slug: "forest-stories",
+          sortOrder: 100,
+          createdAt: "2026-10-12T00:00:00.000Z",
+          updatedAt: "2026-10-12T00:00:00.000Z",
+          productCount: 0,
+        }]}
+        saveAction={saveAction}
+        deleteAction={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "Edytuj kolekcję Forest stories" })[0]);
+    await user.click(screen.getByRole("button", { name: "Zapisz" }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("dialog", { name: "Edytuj kolekcję" })).toBeInTheDocument();
+    resolveSave({ ok: true, id: collectionId });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edytuj kolekcję" })).not.toBeInTheDocument());
   });
 
   it("uses Polish product-count plural forms", () => {

@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
@@ -13,8 +15,11 @@ const productSlug = (project: string) => `issue-49-${project}-product`;
 const evidenceDirectory = path.resolve(process.cwd(), "docs", "verification", "issue-49");
 
 let releaseContentStoreLock: (() => void) | undefined;
+let originalContentStore: Buffer | undefined;
+let contentStoreExisted = false;
+const contentStorePath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
 
-test.setTimeout(180_000);
+test.setTimeout(300_000);
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
@@ -22,6 +27,8 @@ test.beforeEach(async ({ page }, testInfo) => {
     "Issue 49 browser verification requires the loopback local demo backend.",
   );
   releaseContentStoreLock = await acquireLocalContentStoreLock();
+  contentStoreExisted = fs.existsSync(contentStorePath);
+  originalContentStore = contentStoreExisted ? fs.readFileSync(contentStorePath) : undefined;
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "ll_cookie_consent",
@@ -31,16 +38,33 @@ test.beforeEach(async ({ page }, testInfo) => {
 });
 
 test.afterEach(() => {
-  releaseContentStoreLock?.();
-  releaseContentStoreLock = undefined;
+  try {
+    if (contentStoreExisted && originalContentStore) {
+      fs.writeFileSync(contentStorePath, originalContentStore);
+    } else if (!contentStoreExisted && fs.existsSync(contentStorePath)) {
+      fs.rmSync(contentStorePath);
+    }
+  } finally {
+    originalContentStore = undefined;
+    contentStoreExisted = false;
+    releaseContentStoreLock?.();
+    releaseContentStoreLock = undefined;
+  }
 });
 
 test("manages collections, assigns products, and preserves products when a collection is deleted", async ({ page }, testInfo) => {
   const project = testInfo.project.name;
-  const collection = collectionName(project);
-  const slug = collectionSlug(project);
+  const initialCollection = collectionName(project);
+  const initialSlug = collectionSlug(project);
+  const editedCollection = `${initialCollection} edited`;
+  const editedSlug = `${initialSlug}-edited`;
+  let collection = initialCollection;
+  let slug = initialSlug;
+  const collectionNamesForCleanup = new Set([initialCollection, editedCollection]);
   const product = productTitle(project);
   const productAddress = productSlug(project);
+  const overflowProduct = `${product} 50 tags`;
+  const overflowProductAddress = `${productAddress}-50-tags`;
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const failedRequests: Array<{
@@ -77,6 +101,8 @@ test("manages collections, assigns products, and preserves products when a colle
   let productCreated = false;
   let collectionDeleted = false;
   let productDeleted = false;
+  let overflowProductCreated = false;
+  let overflowProductDeleted = false;
   let createdCollectionId = "";
   const replacementJpeg = await sharp({
     create: { width: 1, height: 1, channels: 3, background: { r: 40, g: 70, b: 90 } },
@@ -88,13 +114,27 @@ test("manages collections, assigns products, and preserves products when a colle
       ? { width: 1600, height: 1000 }
       : { width: 412, height: 1200 });
     await cleanupProduct(page, product).catch(() => undefined);
-    await cleanupCollection(page, collection).catch(() => undefined);
+    await cleanupProduct(page, overflowProduct).catch(() => undefined);
+    for (const staleCollectionName of collectionNamesForCleanup) {
+      await cleanupCollection(page, staleCollectionName).catch(() => undefined);
+    }
 
     await page.goto("/admin/collections");
     await page.getByRole("button", { name: "Dodaj kolekcję" }).click();
     createdCollectionId = await page.locator('input[name="id"]').inputValue();
     await page.getByLabel("Nazwa").fill(collection);
     await page.getByLabel("Slug").fill(slug);
+    await saveScreenshot(page, `collection-editor-empty-${project}.png`, page.getByLabel("Nazwa"));
+    await page.getByRole("button", { name: "Zapisz", exact: true }).click();
+    await expect(page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first()).toBeVisible({ timeout: 45_000 });
+    collectionCreated = true;
+
+    await page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first().click();
+    await page.getByLabel("Nazwa").fill(editedCollection);
+    await page.getByLabel("Slug").fill(editedSlug);
+    collection = editedCollection;
+    slug = editedSlug;
+    collectionNamesForCleanup.add(collection);
     const collectionImageUpload = page.waitForResponse(
       (response) => response.request().method() === "POST" &&
         new URL(response.url()).pathname === "/api/admin/collection-image",
@@ -112,9 +152,19 @@ test("manages collections, assigns products, and preserves products when a colle
     const imagePreview = page.getByAltText(`Podgląd obrazu kolekcji ${collection}`);
     await expect(imagePreview).toBeVisible({ timeout: 30_000 });
     await expect(imagePreview).toHaveJSProperty("naturalWidth", 1, { timeout: 30_000 });
+    await saveScreenshot(page, `collection-editor-image-${project}.png`, imagePreview);
     await page.getByRole("button", { name: "Zapisz", exact: true }).click();
     await expect(page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first()).toBeVisible({ timeout: 45_000 });
-    collectionCreated = true;
+    await expect(page.getByRole("dialog", { name: "Edytuj kolekcję" })).toHaveCount(0);
+
+    await page.reload();
+    await page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first().click();
+    await expect(page.getByLabel("Nazwa")).toHaveValue(collection);
+    await expect(page.getByLabel("Slug")).toHaveValue(slug);
+    const persistedImage = page.getByAltText(`Podgląd obrazu kolekcji ${collection}`);
+    await expect(persistedImage).toBeVisible();
+    await expect(persistedImage).toHaveJSProperty("naturalWidth", 1);
+    await page.getByRole("button", { name: "Anuluj" }).click();
 
     await page.goto("/admin/products/new");
     await page.getByLabel("Tytuł").fill(product);
@@ -128,6 +178,7 @@ test("manages collections, assigns products, and preserves products when a colle
     for (const tag of ["Printable bonus", "Amazon KDP", "Calm evening"]) {
       await page.getByLabel(tag).check();
     }
+    await saveScreenshot(page, `product-editor-collection-${project}.png`, page.getByLabel("Kolekcja"));
     const productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
     await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
@@ -135,6 +186,38 @@ test("manages collections, assigns products, and preserves products when a colle
     const productPath = `/admin/products/${productId}`;
     await page.goto(productPath);
     await expect(page.getByLabel("Kolekcja")).toHaveValue(createdCollectionId);
+    await page.getByLabel("Kolekcja").selectOption("");
+    await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
+    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel("Kolekcja")).toHaveValue("");
+    await page.getByLabel("Kolekcja").selectOption({ label: collection });
+    await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
+    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+    await page.reload();
+    await expect(page.getByLabel("Kolekcja")).toHaveValue(createdCollectionId);
+
+    const overflowTags = project === "chromium" ? appendOverflowTags(project) : [];
+    let overflowProductPath = "";
+    if (project === "chromium") {
+      await page.goto("/admin/products/new");
+      await page.getByLabel("Tytuł").fill(overflowProduct);
+      await page.getByLabel("Krótki opis").fill("Temporary product used to verify 50-tag overflow rendering.");
+      await page.getByLabel("Adres produktu").fill(overflowProductAddress);
+      await page.getByLabel("Pozycja w katalogu").fill("2");
+      for (const tag of overflowTags) {
+        const checkbox = page.locator(`#product-editor-form input[name="tagIds"][value="${tag.id}"]:visible`);
+        await expect(checkbox).toHaveCount(1);
+        await checkbox.check();
+      }
+      const overflowProductId = await page.locator('#product-editor-form input[name="id"]').inputValue();
+      await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
+      await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+      overflowProductCreated = true;
+      overflowProductPath = `/admin/products/${overflowProductId}`;
+      await page.goto(overflowProductPath);
+      await expect(page.getByLabel(overflowTags[49].name, { exact: true })).toBeChecked();
+    }
 
     await page.goto("/admin/collections");
     if (project === "chromium") {
@@ -151,8 +234,11 @@ test("manages collections, assigns products, and preserves products when a colle
     await page.goto("/admin/products");
     const visibleProductLink = page.locator('a[href^="/admin/products/"]:visible').filter({ hasText: product }).first();
     await expect(visibleProductLink).toBeVisible();
-    await expect(page.locator('button[aria-label="Pokaż 1 kolejnych kategorii"]:visible').first()).toBeVisible();
-    await expect(page.locator('button[aria-label="Pokaż 1 kolejnych tagów"]:visible').first()).toBeVisible();
+    const threeTagRow = page.getByRole("row").filter({ has: page.locator(`a[href="${productPath}"]`) });
+    const categoryToggle = page.locator(`button[aria-controls^="product-${productId}"][aria-controls*="-category-"]:visible`).first();
+    const tagToggle = page.locator(`button[aria-controls^="product-${productId}"][aria-controls*="-tag-"]:visible`).first();
+    await expect(categoryToggle).toBeVisible();
+    await expect(tagToggle).toBeVisible();
     if (project === "chromium") {
       await expect(page.getByRole("columnheader", { name: "Kolekcja" })).toBeVisible();
       await expect(page.getByRole("columnheader", { name: "Kategorie" })).toBeVisible();
@@ -160,13 +246,83 @@ test("manages collections, assigns products, and preserves products when a colle
     } else {
       await expect(page.locator("dt").filter({ hasText: "Kolekcja" }).first()).toBeVisible();
     }
-    await page.locator('button[aria-label="Pokaż 1 kolejnych kategorii"]:visible').first().click();
-    await page.locator('button[aria-label="Pokaż 1 kolejnych tagów"]:visible').first().click();
-    await expect(page.locator("li:visible").filter({ hasText: "Mindfulness" }).first()).toBeVisible();
-    await expect(page.locator("li:visible").filter({ hasText: "Calm evening" }).first()).toBeVisible();
+    await categoryToggle.click();
+    await expect(categoryToggle).toHaveAttribute("aria-expanded", "true");
+    const categoryPopoverId = await categoryToggle.getAttribute("aria-controls");
+    const categoryPopover = page.locator(`[id="${categoryPopoverId}"]`);
+    await expect(categoryPopover).toBeVisible();
+    await expect(categoryPopover.getByText("Mindfulness", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(categoryToggle).toHaveAttribute("aria-expanded", "false");
+
+    await tagToggle.click();
+    await expect(tagToggle).toHaveAttribute("aria-expanded", "true");
+    const tagPopoverId = await tagToggle.getAttribute("aria-controls");
+    const tagPopover = page.locator(`[id="${tagPopoverId}"]`);
+    await expect(tagPopover).toBeVisible();
+    await expect(tagPopover.getByText("Calm evening", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(tagToggle).toHaveAttribute("aria-expanded", "false");
     await saveScreenshot(page, `products-${project}.png`, visibleProductLink);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(project === "chromium" ? 1600 : 412);
+
+    if (project === "chromium") {
+      const zeroTagRow = page.getByRole("row").filter({ hasText: "Secret Draft Product" });
+      const oneTagRow = page.getByRole("row").filter({ hasText: "Bedtime Forest Picture Book" });
+      const twoTagRow = page.getByRole("row").filter({ hasText: "Moon Garden Coloring Book" });
+      await expect(zeroTagRow.locator("td").last()).toHaveText("—");
+      await expect(oneTagRow.locator("td").last()).toContainText("Amazon KDP");
+      await expect(oneTagRow.locator("td").last().getByRole("button")).toHaveCount(0);
+      await expect(twoTagRow.locator("td").last().getByText("Printable bonus")).toBeVisible();
+      await expect(twoTagRow.locator("td").last().getByText("Amazon KDP")).toBeVisible();
+      await expect(twoTagRow.locator("td").last().getByRole("button")).toHaveCount(0);
+      await expect(threeTagRow.locator("td").last().getByRole("button", { name: "Pokaż 1 kolejny tag" })).toBeVisible();
+
+      const overflowProductLink = page.locator('a[href^="/admin/products/"]:visible').filter({ hasText: overflowProduct }).first();
+      await expect(overflowProductLink).toBeVisible();
+      const overflowTagButton = page.locator('button[aria-label="Pokaż 48 kolejnych tagów"]:visible').first();
+      await expect(overflowTagButton).toBeVisible();
+      const overflowPopoverId = await overflowTagButton.getAttribute("aria-controls");
+      await overflowTagButton.click();
+      const overflowPopover = page.locator(`[id="${overflowPopoverId}"]`);
+      await expect(overflowPopover).toBeVisible();
+      const lastOverflowTag = overflowPopover.getByText(overflowTags[49].name, { exact: true });
+      await lastOverflowTag.scrollIntoViewIfNeeded();
+      await expect(lastOverflowTag).toBeVisible();
+      await expect.poll(() => overflowPopover.evaluate((popover) => popover.scrollTop)).toBeGreaterThan(0);
+      await saveScreenshot(page, `products-overflow-${project}.png`, overflowProductLink);
+    }
 
     await page.goto("/admin/collections");
+    await page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first().click();
+    await expect(page.getByAltText(`Podgląd obrazu kolekcji ${collection}`)).toBeVisible();
+    await page.getByRole("button", { name: "Usuń obraz kolekcji" }).click();
+    await expect(page.getByText("Nie dodano obrazu.", { exact: true })).toBeVisible();
+    await saveScreenshot(page, `collection-editor-no-image-${project}.png`, page.getByText("Nie dodano obrazu.", { exact: true }));
+    await page.getByRole("button", { name: "Zapisz", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Edytuj kolekcję" })).toHaveCount(0);
+
+    await page.reload();
+    await page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first().click();
+    await expect(page.getByText("Nie dodano obrazu.", { exact: true })).toBeVisible();
+    await expect(page.getByAltText(`Podgląd obrazu kolekcji ${collection}`)).toHaveCount(0);
+
+    const restoredImageUpload = page.waitForResponse((response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === "/api/admin/collection-image",
+    );
+    await page.locator('input[type="file"][aria-label="Wybierz obraz kolekcji"]').setInputFiles({
+      name: "restored.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+        "base64",
+      ),
+    });
+    expect((await restoredImageUpload).ok()).toBe(true);
+    await expect(page.getByAltText(`Podgląd obrazu kolekcji ${collection}`)).toBeVisible();
+    await page.getByRole("button", { name: "Zapisz", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Edytuj kolekcję" })).toHaveCount(0);
+
     await page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first().click();
     await expect(page.getByRole("dialog", { name: "Edytuj kolekcję" })).toBeVisible();
     const replacementUploadResponse = page.waitForResponse((response) =>
@@ -198,9 +354,19 @@ test("manages collections, assigns products, and preserves products when a colle
 
     await deleteProduct(page, product);
     productDeleted = true;
+    if (overflowProductPath) {
+      await page.goto(overflowProductPath);
+      await deleteProduct(page, overflowProduct);
+      overflowProductDeleted = true;
+    }
   } finally {
-    if (collectionCreated && !collectionDeleted) await cleanupCollection(page, collection).catch(() => undefined);
+    if (collectionCreated && !collectionDeleted) {
+      for (const collectionNameForCleanup of collectionNamesForCleanup) {
+        await cleanupCollection(page, collectionNameForCleanup).catch(() => undefined);
+      }
+    }
     if (productCreated && !productDeleted) await cleanupProduct(page, product).catch(() => undefined);
+    if (overflowProductCreated && !overflowProductDeleted) await cleanupProduct(page, overflowProduct).catch(() => undefined);
     await testInfo.attach("issue-49-browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify({ consoleErrors, pageErrors, failedRequests }, null, 2)),
       contentType: "application/json",
@@ -233,6 +399,30 @@ async function saveScreenshot(page: Page, filename: string, target: import("@pla
   const viewport = page.viewportSize();
   if (viewport) await page.mouse.move(viewport.width - 1, viewport.height - 1);
   await page.screenshot({ path: path.join(evidenceDirectory, filename), animations: "disabled" });
+}
+
+function appendOverflowTags(project: string) {
+  if (!fs.existsSync(contentStorePath)) {
+    throw new Error("The local content store was not created before the 50-tag browser fixture was added.");
+  }
+
+  const snapshot = JSON.parse(fs.readFileSync(contentStorePath, "utf8")) as {
+    tags?: Array<{
+      id: string;
+      slug: string;
+      translations: Array<{ locale: "en"; name: string }>;
+    }>;
+    [key: string]: unknown;
+  };
+  const tagNames = Array.from({ length: 50 }, (_, index) => `Issue 49 ${project} overflow tag ${index + 1}`);
+  const tags = tagNames.map((name, index) => ({
+    id: randomUUID(),
+    slug: `issue-49-${project}-overflow-tag-${index + 1}`,
+    translations: [{ locale: "en" as const, name }],
+  }));
+  snapshot.tags = [...(snapshot.tags ?? []), ...tags];
+  fs.writeFileSync(contentStorePath, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+  return tags.map((tag) => ({ id: tag.id, name: tag.translations[0].name }));
 }
 
 async function cleanupCollection(page: Page, name: string) {

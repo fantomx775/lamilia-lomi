@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 
@@ -83,14 +83,14 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
   {
     id: "categories",
     header: "Kategorie",
-    cell: (row) => <CompactBadgeList rowId={row.id} kind="kategorii" labels={row.categoryNames ?? []} />,
+    cell: (row) => <CompactBadgeList rowId={row.id} kind="category" labels={row.categoryNames ?? []} />,
     headerClassName: "min-w-40",
     cellClassName: "min-w-40 max-w-48",
   },
   {
     id: "tags",
     header: "Tagi",
-    cell: (row) => <CompactBadgeList rowId={row.id} kind="tagów" labels={row.tagNames ?? []} />,
+    cell: (row) => <CompactBadgeList rowId={row.id} kind="tag" labels={row.tagNames ?? []} />,
     headerClassName: "min-w-40",
     cellClassName: "min-w-40 max-w-48",
   },
@@ -140,8 +140,8 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
           </Link>
           <dl className="grid gap-2 border-t border-[var(--color-border)] pt-3 text-sm">
             <MobileLabel label="Kolekcja">{row.collectionName ? <Badge className="max-w-56 truncate" title={row.collectionName}>{row.collectionName}</Badge> : <span aria-label="Bez kolekcji">—</span>}</MobileLabel>
-            <MobileLabel label="Kategorie"><CompactBadgeList rowId={`${row.id}-mobile`} kind="kategorii" labels={row.categoryNames ?? []} /></MobileLabel>
-            <MobileLabel label="Tagi"><CompactBadgeList rowId={`${row.id}-mobile`} kind="tagów" labels={row.tagNames ?? []} /></MobileLabel>
+            <MobileLabel label="Kategorie"><CompactBadgeList rowId={`${row.id}-mobile`} kind="category" labels={row.categoryNames ?? []} /></MobileLabel>
+            <MobileLabel label="Tagi"><CompactBadgeList rowId={`${row.id}-mobile`} kind="tag" labels={row.tagNames ?? []} /></MobileLabel>
           </dl>
         </div>
       )}
@@ -150,13 +150,16 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
   );
 }
 
-function CompactBadgeList({ rowId, kind, labels }: { rowId: string; kind: string; labels: string[] }) {
+function CompactBadgeList({ rowId, kind, labels }: { rowId: string; kind: "category" | "tag"; labels: string[] }) {
   const [expanded, setExpanded] = useState(false);
-  if (!labels.length) return <span aria-label={`Brak ${kind}`}>—</span>;
+  const instanceId = useId();
+  const emptyLabel = kind === "category" ? "kategorii" : "tagów";
+  const collectionLabel = kind === "category" ? "kategorie" : "tagi";
+  if (!labels.length) return <span aria-label={`Brak ${emptyLabel}`}>—</span>;
 
   const visible = labels.slice(0, 2);
   const hidden = labels.slice(2);
-  const detailsId = `product-${rowId}-${kind.replaceAll(" ", "-")}`;
+  const detailsId = `product-${rowId}-${kind.replaceAll(" ", "-")}-${instanceId}`;
 
   return (
     <div className="grid min-w-0 gap-1">
@@ -166,10 +169,14 @@ function CompactBadgeList({ rowId, kind, labels }: { rowId: string; kind: string
         ))}
         {hidden.length ? (
           <button
+            id={`${detailsId}-trigger`}
             type="button"
             aria-expanded={expanded}
             aria-controls={detailsId}
-            aria-label={`${expanded ? "Ukryj" : "Pokaż"} ${hidden.length} kolejnych ${kind}`}
+            aria-haspopup="true"
+            aria-label={`${expanded ? "Ukryj" : "Pokaż"} ${formatHiddenBadgeCount(hidden.length, kind)}`}
+            popoverTarget={detailsId}
+            popoverTargetAction="toggle"
             onClick={() => setExpanded((value) => !value)}
             className="inline-flex min-h-7 items-center rounded-md border border-[var(--color-border)] bg-white px-2 text-xs font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
           >
@@ -178,12 +185,35 @@ function CompactBadgeList({ rowId, kind, labels }: { rowId: string; kind: string
         ) : null}
       </div>
       {hidden.length ? (
-        <ul id={detailsId} hidden={!expanded} className="grid min-w-0 gap-1 text-xs text-[var(--color-muted)]" aria-label={`Pozostałe ${kind}`}>
-          {hidden.map((label, index) => <li key={`${label}-${index}`} className="break-words">{label}</li>)}
-        </ul>
+        <div
+          id={detailsId}
+          popover="auto"
+          role="group"
+          aria-label={`Pozostałe ${collectionLabel}`}
+          onToggle={(event) => setExpanded(event.currentTarget.matches(":popover-open"))}
+          onClick={(event) => event.stopPropagation()}
+          className="m-0 inset-auto w-[min(28rem,calc(100vw-2rem))] max-h-[min(28rem,calc(100dvh-2rem))] overflow-y-auto rounded-xl border border-[var(--color-border)] bg-white p-3 text-xs text-[var(--color-ink)] shadow-xl [position-area:bottom] [position-try-fallbacks:flip-block]"
+        >
+          <p className="mb-2 font-medium">Pozostałe {collectionLabel}</p>
+          <ul className="grid gap-1 text-[var(--color-muted)]">
+            {hidden.map((label, index) => <li key={`${label}-${index}`} className="break-words">{label}</li>)}
+          </ul>
+        </div>
       ) : null}
     </div>
   );
+}
+
+function formatHiddenBadgeCount(count: number, kind: "category" | "tag") {
+  const lastTwoDigits = count % 100;
+  const lastDigit = count % 10;
+  if (count === 1) return kind === "category" ? "1 kolejną kategorię" : "1 kolejny tag";
+  if (lastTwoDigits < 12 || lastTwoDigits > 14) {
+    if (lastDigit >= 2 && lastDigit <= 4) {
+      return kind === "category" ? `${count} kolejne kategorie` : `${count} kolejne tagi`;
+    }
+  }
+  return kind === "category" ? `${count} kolejnych kategorii` : `${count} kolejnych tagów`;
 }
 
 function MobileLabel({ label, children }: { label: string; children: React.ReactNode }) {

@@ -52,6 +52,7 @@ export function CollectionsResourceList({
   const [cleanupWarning, setCleanupWarning] = useState<CleanupWarning | null>(null);
   const pendingImagesRef = useRef<ImageDraft[]>([]);
   const uploadInFlightRef = useRef(false);
+  const mutationInFlightRef = useRef(false);
   const editingItem = rows.find((row) => row.id === editingId);
 
   const openCreate = (trigger: HTMLElement) => {
@@ -104,7 +105,7 @@ export function CollectionsResourceList({
   };
 
   const close = () => {
-    if (uploadInFlightRef.current) return;
+    if (uploadInFlightRef.current || mutationInFlightRef.current) return;
     const pending = [...pendingImagesRef.current];
     const collectionId = draftId;
     pendingImagesRef.current = [];
@@ -236,6 +237,7 @@ export function CollectionsResourceList({
           onImageUploaded={(image) => pendingImagesRef.current.push(image)}
           onImageDiscarded={discardPendingImage}
           onImageUploadStateChange={(inFlight) => { uploadInFlightRef.current = inFlight; }}
+          onMutationStateChange={(inFlight) => { mutationInFlightRef.current = inFlight; }}
         />
       </AdminDrawer>
     </>
@@ -253,6 +255,7 @@ function CollectionEditorForm({
   onImageUploaded,
   onImageDiscarded,
   onImageUploadStateChange,
+  onMutationStateChange,
 }: {
   id: string;
   item?: AdminCollectionListRow;
@@ -264,6 +267,7 @@ function CollectionEditorForm({
   onImageUploaded: (image: ImageDraft) => void;
   onImageDiscarded: (image: ImageDraft, collectionId: string) => Promise<void>;
   onImageUploadStateChange: (inFlight: boolean) => void;
+  onMutationStateChange: (inFlight: boolean) => void;
 }) {
   const [name, setName] = useState(item?.name ?? "");
   const [slug, setSlug] = useState(item?.slug ?? "");
@@ -320,13 +324,18 @@ function CollectionEditorForm({
     event.preventDefault();
     setErrors([]);
     const formData = new FormData(event.currentTarget);
+    onMutationStateChange(true);
     startTransition(async () => {
-      const result = await saveAction(formData);
-      if (!result.ok) {
-        setErrors(result.errors);
-        return;
+      try {
+        const result = await saveAction(formData);
+        if (!result.ok) {
+          setErrors(result.errors);
+          return;
+        }
+        onSaved(result, String(formData.get("imagePath") ?? ""));
+      } finally {
+        onMutationStateChange(false);
       }
-      onSaved(result, String(formData.get("imagePath") ?? ""));
     });
   };
 
@@ -335,13 +344,18 @@ function CollectionEditorForm({
     const formData = new FormData();
     formData.set("id", item.id);
     formData.set("expectedUpdatedAt", item.updatedAt);
+    onMutationStateChange(true);
     startTransition(async () => {
-      const result = await deleteAction(formData);
-      if (!result.ok) {
-        setErrors(result.errors);
-        return;
+      try {
+        const result = await deleteAction(formData);
+        if (!result.ok) {
+          setErrors(result.errors);
+          return;
+        }
+        await onDeleted(result, item.id);
+      } finally {
+        onMutationStateChange(false);
       }
-      await onDeleted(result, item.id);
     });
   };
 
