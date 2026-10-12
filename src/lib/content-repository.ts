@@ -6,9 +6,11 @@ import { getBackendMode } from "@/lib/config";
 import { createClient } from "@/lib/supabase/server";
 
 import { normalizeCatalogSettings } from "./catalog-settings";
+import { normalizeAboutPageSettings } from "./about-settings";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
 import type {
   AmazonLink,
+  AboutPageSettings,
   Category,
   CatalogSettings,
   Collection,
@@ -199,6 +201,31 @@ export const getCatalogSettingsForRequest = cache(async (): Promise<CatalogSetti
   );
 });
 
+export const getAboutPageSettingsForRequest = cache(async (): Promise<AboutPageSettings> => {
+  if (getBackendMode() === "local") {
+    const { getContentSnapshot } = await import("./content-store");
+
+    return getContentSnapshot().aboutPageSettings;
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("catalog_settings")
+    .select("about_intro, favorite_coloring_book_ids, favorite_picture_book_ids")
+    .eq("id", "global")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("Supabase About page settings read failed: " + error.message);
+  }
+
+  return normalizeAboutPageSettings(data ? {
+    intro: data.about_intro,
+    favoriteColoringBookIds: data.favorite_coloring_book_ids,
+    favoritePictureBookIds: data.favorite_picture_book_ids,
+  } : undefined);
+});
+
 export async function getContentSnapshotForRequest(options: {
   includePremiumCodes?: boolean;
   includeCollections?: boolean;
@@ -295,6 +322,13 @@ export async function getContentSnapshotForRequest(options: {
         ? { desktopColumns: catalogSettingsRows[0].desktop_columns }
         : undefined,
     ),
+    aboutPageSettings: normalizeAboutPageSettings(catalogSettingsRows[0]
+      ? {
+          intro: catalogSettingsRows[0].about_intro,
+          favoriteColoringBookIds: catalogSettingsRows[0].favorite_coloring_book_ids,
+          favoritePictureBookIds: catalogSettingsRows[0].favorite_picture_book_ids,
+        }
+      : undefined),
   };
 }
 
@@ -413,6 +447,7 @@ function mapPublicProductDetailRow(row: DbRow): ContentSnapshot {
     tags,
     staticPages: [],
     catalogSettings: normalizeCatalogSettings(undefined),
+    aboutPageSettings: normalizeAboutPageSettings(undefined),
   };
 }
 

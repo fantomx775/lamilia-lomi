@@ -19,6 +19,9 @@ export function SiteFooter({ locale }: { locale: Locale }) {
           <Link href={`/${locale}/products`} className="hover:text-[var(--color-ink)]">
             Catalog
           </Link>
+          <Link href={`/${locale}/about`} className="hover:text-[var(--color-ink)]">
+            About
+          </Link>
           <Link href={`/${locale}/contact`} className="hover:text-[var(--color-ink)]">
             Contact
           </Link>

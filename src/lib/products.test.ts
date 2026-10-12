@@ -48,6 +48,11 @@ function catalogSnapshotWithLongDescription(longDescription: string): ContentSna
     tags: [],
     staticPages: [],
     catalogSettings: { desktopColumns: 4 },
+    aboutPageSettings: {
+      intro: "",
+      favoriteColoringBookIds: ["", "", ""],
+      favoritePictureBookIds: ["", "", ""],
+    },
   };
 }
 
@@ -109,6 +114,11 @@ function createCoverSelectionSnapshot(
     tags: [],
     staticPages: [],
     catalogSettings: { desktopColumns: 4 },
+    aboutPageSettings: {
+      intro: "",
+      favoriteColoringBookIds: ["", "", ""],
+      favoritePictureBookIds: ["", "", ""],
+    },
   };
 }
 
@@ -312,6 +322,11 @@ describe("product catalog behavior", () => {
       tags: [],
       staticPages: [],
       catalogSettings: { desktopColumns: 4 },
+      aboutPageSettings: {
+        intro: "",
+        favoriteColoringBookIds: ["", "", ""],
+        favoritePictureBookIds: ["", "", ""],
+      },
     };
 
     const product = getLocalizedProductViewFromSnapshot(

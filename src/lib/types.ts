@@ -124,6 +124,13 @@ export type ContentSnapshot = {
   tags: Tag[];
   staticPages: StaticPageRecord[];
   catalogSettings: CatalogSettings;
+  aboutPageSettings: AboutPageSettings;
+};
+
+export type AboutPageSettings = {
+  intro: string;
+  favoriteColoringBookIds: [string, string, string];
+  favoritePictureBookIds: [string, string, string];
 };
 
 export type CatalogDesktopColumns = 3 | 4 | 5;

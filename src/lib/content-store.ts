@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { normalizeCatalogSettings } from "./catalog-settings";
+import { normalizeAboutPageSettings } from "./about-settings";
 import type { ContentSnapshot } from "./types";
 import { getSeedContentSnapshot } from "./local-content";
 
@@ -39,6 +40,7 @@ export function getContentSnapshot(): ContentSnapshot {
         ? stored.staticPages
         : seed.staticPages,
       catalogSettings: normalizeCatalogSettings(stored.catalogSettings),
+      aboutPageSettings: normalizeAboutPageSettings(stored.aboutPageSettings),
     });
   } catch {
     return getSeedContentSnapshot();
