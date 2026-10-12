@@ -68,7 +68,7 @@ export function SiteHeader({ locale }: {
           </Link>
           <Link className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/library`}>
             <Library className="size-4" aria-hidden />
-            Library
+            {labels.library}
           </Link>
         </nav>
       </div>

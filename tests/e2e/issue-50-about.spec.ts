@@ -8,6 +8,7 @@ import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const contentPath = path.join(process.cwd(), "data", "lamilialomi-content.local.json");
+const fixtureCoverDirectory = path.join(process.cwd(), "tests", "e2e", "fixtures", "issue-50");
 const productSelections = [
   { label: "Favorite Coloring Books, pozycja 1", query: "Moon Garden", title: "Moon Garden Coloring Book", id: "11111111-1111-4111-8111-111111111111" },
   { label: "Favorite Coloring Books, pozycja 2", query: "Mindful Mandalas", title: "Mindful Mandalas for Adults", id: "22222222-2222-4222-8222-222222222222" },
@@ -59,24 +60,28 @@ test("About settings save six unique books and render responsively from current 
         slug: "issue-50-garden-whispers",
         title: "Garden Whispers Coloring Book",
         description: "A peaceful garden coloring collection.",
+        coverFileName: "issue50-garden.svg",
       }),
       createAboutFixtureProduct(pictureTemplate, {
         id: "66666666-6666-4666-8666-666666666666",
         slug: "issue-50-little-star",
         title: "The Little Star Picture Book",
         description: "A tender story about a curious star.",
+        coverFileName: "issue50-little-star.svg",
       }),
       createAboutFixtureProduct(pictureTemplate, {
         id: "77777777-7777-4777-8777-777777777777",
         slug: "issue-50-forest-friends",
         title: "Forest Friends Picture Book",
         description: "A gentle woodland adventure for little readers.",
+        coverFileName: "issue50-forest-friends.svg",
       }),
       createAboutFixtureProduct(coloringTemplate, {
         id: "88888888-8888-4888-8888-888888888888",
         slug: "issue-50-quiet-patterns",
         title: "Quiet Patterns Coloring Book",
         description: "A calm collection of playful patterns to color.",
+        coverFileName: "issue50-quiet.svg",
       }),
     );
     content.aboutPageSettings = {
@@ -178,6 +183,11 @@ test("About settings save six unique books and render responsively from current 
     await expect(page.locator("footer").getByRole("link", { name: "About", exact: true })).toHaveAttribute("href", "/en/about");
 
     const coverImages = page.locator("main img");
+    await expect(coverImages).toHaveCount(6);
+    const coverSources = await coverImages.evaluateAll((images) => images.map((image) => (image as HTMLImageElement).currentSrc));
+    const fixtureCoverSources = coverSources.filter((source) => source.startsWith("data:image/svg+xml;base64,"));
+    expect(fixtureCoverSources).toHaveLength(4);
+    expect(new Set(fixtureCoverSources).size).toBe(4);
     for (let index = 0; index < await coverImages.count(); index += 1) {
       const cover = coverImages.nth(index);
       await cover.scrollIntoViewIfNeeded();
@@ -193,6 +203,7 @@ test("About settings save six unique books and render responsively from current 
     await expectNoHorizontalOverflow(page);
     await expect(page.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeVisible();
     await expect(page.getByRole("link", { name: "About", exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "My Library", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 3 })).toHaveCount(6);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: testInfo.outputPath("about-mobile.png"), fullPage: true });
@@ -262,6 +273,7 @@ function createAboutFixtureProduct(
     slug: string;
     title: string;
     description: string;
+    coverFileName: string;
   },
 ): Product {
   const translation = template.translations.find((entry) => entry.locale === "en") ?? template.translations[0];
@@ -291,8 +303,11 @@ function createAboutFixtureProduct(
       ...cover,
       id: coverAssetId,
       productId: fixture.id,
+      path: `data:image/svg+xml;base64,${fs.readFileSync(path.join(fixtureCoverDirectory, fixture.coverFileName), "base64")}`,
       storagePath: undefined,
       storageProvider: undefined,
+      filename: fixture.coverFileName,
+      contentType: "image/svg+xml",
       title: `${fixture.title} cover`,
       isPublic: true,
       isActive: true,
