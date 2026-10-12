@@ -104,6 +104,9 @@ test("manages collections, assigns products, and preserves products when a colle
   let overflowProductCreated = false;
   let overflowProductDeleted = false;
   let createdCollectionId = "";
+  const collectionPng = await sharp({
+    create: { width: 1, height: 1, channels: 3, background: { r: 40, g: 70, b: 90 } },
+  }).png().toBuffer();
   const replacementJpeg = await sharp({
     create: { width: 1, height: 1, channels: 3, background: { r: 40, g: 70, b: 90 } },
   }).jpeg().toBuffer();
@@ -143,10 +146,7 @@ test("manages collections, assigns products, and preserves products when a colle
     await page.locator('input[type="file"][aria-label="Wybierz obraz kolekcji"]').setInputFiles({
       name: "collection.png",
       mimeType: "image/png",
-      buffer: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
-        "base64",
-      ),
+      buffer: collectionPng,
     });
     expect((await collectionImageUpload).ok()).toBe(true);
     const imagePreview = page.getByAltText(`Podgląd obrazu kolekcji ${collection}`);
@@ -326,10 +326,7 @@ test("manages collections, assigns products, and preserves products when a colle
     await page.locator('input[type="file"][aria-label="Wybierz obraz kolekcji"]').setInputFiles({
       name: "restored.png",
       mimeType: "image/png",
-      buffer: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
-        "base64",
-      ),
+      buffer: collectionPng,
     });
     expect((await restoredImageUpload).ok()).toBe(true);
     await expect(page.getByAltText(`Podgląd obrazu kolekcji ${collection}`)).toBeVisible();
