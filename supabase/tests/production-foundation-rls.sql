@@ -1,7 +1,37 @@
 \set ON_ERROR_STOP on
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'premium_codes'
+      and indexname = 'premium_codes_product_redemption_idx'
+      and indexdef like '% (product_id, active, redeemed_at)'
+  ) then
+    raise exception 'Missing leading product_id index for premium code redemption';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_indexes
+    where schemaname = 'public'
+      and tablename = 'premium_codes'
+      and indexname = 'premium_codes_redeemed_by_idx'
+      and indexdef like '% (redeemed_by)'
+  ) then
+    raise exception 'Missing leading redeemed_by index for the auth.users foreign key';
+  end if;
+
+  raise notice 'PASS premium code foreign-key indexes use leading columns';
+end;
+$$;
+
 -- Run with psql against a disposable Supabase local database after migrations
 -- and seed have been applied. This is intentionally not a production script.
+-- These fixtures contain metadata-only rows, so permit their SQL cleanup here.
+set storage.allow_delete_query = 'true';
 
 delete from storage.objects
 where bucket_id = 'premium-files'
@@ -16,7 +46,12 @@ where id in (
   '44444444-4444-4444-8444-444444444405'
 );
 delete from public.premium_codes
-where id in ('99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999995');
+where id in (
+  '99999999-9999-4999-8999-999999999994',
+  '99999999-9999-4999-8999-999999999995',
+  '99999999-9999-4999-8999-999999999997',
+  '99999999-9999-4999-8999-999999999998'
+);
 delete from public.user_product_unlocks
 where user_id in (
   'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
@@ -48,7 +83,8 @@ values
 insert into public.premium_codes (id, product_id, code, active)
 values
   ('99999999-9999-4999-8999-999999999994', '11111111-1111-4111-8111-111111111111', 'LOMI-INACTIVE-2026', false),
-  ('99999999-9999-4999-8999-999999999995', '44444444-4444-4444-8444-444444444444', 'LOMI-DRAFT-2026', true);
+  ('99999999-9999-4999-8999-999999999995', '44444444-4444-4444-8444-444444444444', 'LOMI-DRAFT-2026', true),
+  ('99999999-9999-4999-8999-999999999997', '11111111-1111-4111-8111-111111111111', 'LOMI-ALTERNATE-2026', true);
 
 insert into public.user_product_unlocks (user_id, product_id, premium_code_id)
 values (
@@ -135,10 +171,22 @@ rollback;
 begin;
 set local role authenticated;
 set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+select case when (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-INACTIVE-2026') ->> 'status') = 'inactive_code' then 'PASS inactive code rejected before entitlement' else 'FAIL inactive code=' || (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-INACTIVE-2026'))::text end;
 select case when (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', ' lomi-book-2026 ') ->> 'status') = 'success' then 'PASS first redemption unlocks product' else 'FAIL first redemption=' || (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', ' lomi-book-2026 '))::text end;
 select case when (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-BOOK-2026') ->> 'status') = 'already_unlocked' then 'PASS duplicate redemption is idempotent' else 'FAIL duplicate redemption=' || (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-BOOK-2026'))::text end;
+select case when (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-ALTERNATE-2026') ->> 'status') = 'already_unlocked' then 'PASS another valid code does not replace an existing entitlement' else 'FAIL alternate-code redemption=' || (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-ALTERNATE-2026'))::text end;
+set local role postgres;
+select case when count(*) = 1 and bool_and(redeemed_by = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'::uuid and redeemed_at is not null) then 'PASS redemption records the account and timestamp' else 'FAIL redemption ownership metadata' end
+from public.premium_codes where id = '99999999-9999-4999-8999-999999999991';
+select case when count(*) = 1 and bool_and(redeemed_by is null and redeemed_at is null) then 'PASS alternate valid code remains unused' else 'FAIL alternate code was consumed' end
+from public.premium_codes where id = '99999999-9999-4999-8999-999999999997';
+set local role authenticated;
+set local request.jwt.claim.sub = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
+select case when (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-BOOK-2026') ->> 'status') = 'already_used' then 'PASS another account cannot reuse the code' else 'FAIL cross-account redemption=' || (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-BOOK-2026'))::text end;
+select case when count(*) = 0 then 'PASS rejected account receives no entitlement' else 'FAIL rejected account unlock count=' || count(*) end
+from public.user_product_unlocks where user_id = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb' and product_id = '11111111-1111-4111-8111-111111111111';
+set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 select case when (public.redeem_premium_code('22222222-2222-4222-8222-222222222222', 'LOMI-BOOK-2026') ->> 'status') = 'wrong_product' then 'PASS code is product-bound' else 'FAIL wrong product=' || (public.redeem_premium_code('22222222-2222-4222-8222-222222222222', 'LOMI-BOOK-2026'))::text end;
-select case when (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-INACTIVE-2026') ->> 'status') = 'inactive_code' then 'PASS inactive code rejected' else 'FAIL inactive code=' || (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'LOMI-INACTIVE-2026'))::text end;
 select case when (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'not-real') ->> 'status') = 'invalid_code' then 'PASS unknown code rejected' else 'FAIL unknown code=' || (public.redeem_premium_code('11111111-1111-4111-8111-111111111111', 'not-real'))::text end;
 select case when count(*) = 1 then 'PASS exactly one unlock row exists' else 'FAIL unlock row count=' || count(*) end
 from public.user_product_unlocks
@@ -351,7 +399,11 @@ as $$
         )
         where add_code
       ) premium_rows
-    ), '[]'::jsonb)
+    ), '[]'::jsonb),
+    'premiumCodeRemovals', case
+      when removed_code_id is null then '[]'::jsonb
+      else jsonb_build_array(removed_code_id)
+    end
   )
   from public.products p
   where p.id = requested_product_id;
@@ -366,6 +418,31 @@ begin
   return false;
 exception when others then
   return true;
+end;
+$$;
+
+create function pg_temp.premium_code_identity_change_should_fail(
+  requested_code_id uuid,
+  requested_product_id uuid default null
+)
+returns boolean
+language plpgsql
+as $$
+begin
+  if requested_product_id is null then
+    update public.premium_codes
+    set code = code || '-EDIT'
+    where id = requested_code_id;
+  else
+    update public.premium_codes
+    set product_id = requested_product_id
+    where id = requested_code_id;
+  end if;
+  return false;
+exception when check_violation then
+  return position('A premium code referenced by an unlock cannot change its code or product.' in sqlerrm) > 0;
+when others then
+  return false;
 end;
 $$;
 
@@ -387,9 +464,75 @@ when others then
 end;
 $$;
 
+create function pg_temp.premium_code_batch_should_fail(
+  requested_product_id uuid,
+  requested_code_id uuid,
+  requested_code text
+)
+returns boolean
+language plpgsql
+as $$
+begin
+  return not public.create_premium_code_batch(
+    requested_product_id,
+    jsonb_build_array(jsonb_build_object('id', requested_code_id, 'code', requested_code))
+  );
+exception when others then
+  return true;
+end;
+$$;
+
 update public.profiles
 set role = 'admin'
 where id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+
+\echo 'RLS matrix: premium-code batch authorization and stale editor saves'
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
+select case when pg_temp.premium_code_batch_should_fail(
+  '22222222-2222-4222-8222-222222222222',
+  '99999999-9999-4999-8999-999999999998',
+  'LOMI-STALE-EDITOR-2026'
+) then 'PASS non-admin cannot generate premium batches' else 'FAIL non-admin generated a premium batch' end;
+rollback;
+
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+select case when set_config(
+  'issue31.stale_product_state',
+  pg_temp.product_state('22222222-2222-4222-8222-222222222222'::uuid)::text,
+  true
+) is not null then 'PASS captured stale product editor state' else 'FAIL stale product editor fixture' end;
+select case when public.create_premium_code_batch(
+  '22222222-2222-4222-8222-222222222222',
+  jsonb_build_array(jsonb_build_object(
+    'id', '99999999-9999-4999-8999-999999999998',
+    'code', 'LOMI-STALE-EDITOR-2026'
+  ))
+) then 'PASS admin batch inserted atomically' else 'FAIL admin batch was not inserted' end;
+select case when (public.save_product_with_storage_provider(current_setting('issue31.stale_product_state')::jsonb) ->> 'status') = 'success'
+  then 'PASS stale editor save succeeds without replacing current codes'
+  else 'FAIL stale editor save failed' end;
+select case when count(*) = 2
+  and count(*) filter (where id = '99999999-9999-4999-8999-999999999992'::uuid) = 1
+  and count(*) filter (where id = '99999999-9999-4999-8999-999999999998'::uuid) = 1
+  then 'PASS stale editor save preserves newly generated batch codes'
+  else 'FAIL stale editor save lost or changed premium codes' end
+from public.premium_codes
+where product_id = '22222222-2222-4222-8222-222222222222';
+select case when (public.save_product(pg_temp.product_state(
+  requested_product_id => '22222222-2222-4222-8222-222222222222',
+  removed_code_id => '99999999-9999-4999-8999-999999999998'
+)) ->> 'status') = 'success'
+  then 'PASS explicit code removal still works after stale-state merge'
+  else 'FAIL explicit code removal was ignored' end;
+select case when count(*) = 0 then 'PASS explicitly removed generated code is deleted'
+  else 'FAIL explicitly removed generated code remains present' end
+from public.premium_codes
+where id = '99999999-9999-4999-8999-999999999998';
+rollback;
 
 \echo 'RLS matrix: premium-code length at request, RPC, and database boundaries'
 begin;
@@ -438,6 +581,13 @@ from public.premium_codes where product_id = '22222222-2222-4222-8222-2222222222
 select case when (public.redeem_premium_code(
   '11111111-1111-4111-8111-111111111111', 'LOMI-BOOK-2026'
 ) ->> 'status') = 'success' then 'PASS used-code fixture redemption' else 'FAIL used-code fixture redemption' end;
+select case when pg_temp.premium_code_identity_change_should_fail(
+  '99999999-9999-4999-8999-999999999991'
+) then 'PASS referenced premium-code text is immutable' else 'FAIL referenced premium-code text changed' end;
+select case when pg_temp.premium_code_identity_change_should_fail(
+  '99999999-9999-4999-8999-999999999991',
+  '22222222-2222-4222-8222-222222222222'
+) then 'PASS referenced premium-code product is immutable' else 'FAIL referenced premium-code product changed' end;
 select case when (public.save_product(pg_temp.product_state(
   requested_product_id => '11111111-1111-4111-8111-111111111111',
   title_suffix => ' used-code-edit'
@@ -458,10 +608,25 @@ select case when (public.save_product(pg_temp.product_state(
 select case when count(*) = 1 and bool_and(not active) then 'PASS removed used code is retained inactive' else 'FAIL removed used code history' end
 from public.premium_codes
 where id = '99999999-9999-4999-8999-999999999991';
+select case when count(*) = 1 and bool_and(redeemed_by = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'::uuid and redeemed_at is not null) then 'PASS disabling a used code preserves its redemption history' else 'FAIL disabled code redemption history' end
+from public.premium_codes
+where id = '99999999-9999-4999-8999-999999999991';
 select case when count(*) = 1 then 'PASS unlock remains after used-code removal' else 'FAIL unlock removed with code' end
 from public.user_product_unlocks
 where user_id = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa'
   and product_id = '11111111-1111-4111-8111-111111111111';
+set local request.jwt.claim.sub = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
+select case when (public.redeem_premium_code(
+  '11111111-1111-4111-8111-111111111111', 'LOMI-BOOK-2026'
+) ->> 'status') = 'already_used' then 'PASS used-code status takes precedence over disabled status' else 'FAIL disabled used-code status' end;
+select case when count(*) = 0 then 'PASS disabled used code grants no second entitlement' else 'FAIL disabled used code granted an entitlement' end
+from public.user_product_unlocks
+where user_id = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb'
+  and product_id = '11111111-1111-4111-8111-111111111111';
+set local request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+select case when (public.redeem_premium_code(
+  '11111111-1111-4111-8111-111111111111', 'LOMI-BOOK-2026'
+) ->> 'status') = 'already_unlocked' then 'PASS original account retains idempotent access after code disable' else 'FAIL original account lost idempotent access' end;
 
 select case when public.record_download_event('11111111-1111-4111-8111-111111111105') is not null then 'PASS historical download fixture recorded' else 'FAIL historical download fixture' end;
 select case when (public.save_product(pg_temp.product_state(
@@ -579,7 +744,7 @@ else 'FAIL admin retains direct product or asset write privileges' end;
 select case when (public.save_product(pg_temp.product_state(
   '11111111-1111-4111-8111-111111111111'::uuid,
   ' admin rpc'
-) ->> 'status') = 'success'
+)) ->> 'status') = 'success'
 then 'PASS admin can mutate product content through the guarded RPC'
 else 'FAIL admin RPC content mutation was rejected' end;
 rollback;
@@ -669,7 +834,12 @@ where id in (
   '44444444-4444-4444-8444-444444444405'
 );
 delete from public.premium_codes
-where id in ('99999999-9999-4999-8999-999999999994', '99999999-9999-4999-8999-999999999995');
+where id in (
+  '99999999-9999-4999-8999-999999999994',
+  '99999999-9999-4999-8999-999999999995',
+  '99999999-9999-4999-8999-999999999997'
+);
+reset storage.allow_delete_query;
 delete from auth.users
 where id in (
   'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
@@ -677,4 +847,4 @@ where id in (
   'cccccccc-3333-4333-8333-cccccccccccc'
 );
 
-\echo 'RLS matrix complete: 72 positive scenarios passed'
+\echo 'RLS matrix complete: single-use premium-code and authorization checks passed'

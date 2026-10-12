@@ -699,6 +699,66 @@ describe("Supabase content admin mutations", () => {
     expect(payload.product_state.translations.find((translation) => translation.locale === "en")?.longDescription).not.toContain("javascript:");
   });
 
+  it("preserves codes created after an editor loaded while honoring explicit removals", async () => {
+    const seededProduct = getSeedContentSnapshot().products[0];
+    const preservedCode = {
+      id: "22222222-2222-4222-8222-222222222221",
+      productId,
+      code: "LOMI-BATCH-PRESERVED-2026",
+      active: true,
+    };
+    const removedCode = {
+      id: "22222222-2222-4222-8222-222222222222",
+      productId,
+      code: "LOMI-BATCH-REMOVED-2026",
+      active: true,
+    };
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [{
+        ...seededProduct,
+        id: productId,
+        slug: "existing-product",
+        coverAssetId: "",
+        videoAssetId: undefined,
+        assets: [],
+        amazonLinks: [],
+        premiumCodes: [preservedCode, removedCode],
+      }],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.rpc.mockResolvedValue({ data: { status: "success" }, error: null });
+
+    const form = new FormData();
+    form.set("id", productId);
+    form.set("slug", "existing-product");
+    form.set("status", "draft");
+    form.set("audience", "kids");
+    form.set("productType", "coloring-book");
+    form.set("title", "Updated product");
+    form.set("shortDescription", "Updated description");
+    form.set("premiumCodeClientId", "removed-code-row");
+    form.set("premiumCodeId", removedCode.id);
+    form.set("premiumCode", removedCode.code);
+    form.set("premiumCodeRemove", removedCode.id);
+    form.set("premiumCodeRemoveClientId", "removed-code-row");
+
+    await expect(saveProductForRequest(form)).resolves.toMatchObject({ ok: true, id: productId });
+
+    const payload = mocks.rpc.mock.calls[0][1] as {
+      product_state: {
+        premiumCodes: Array<{ id: string; code: string }>;
+        premiumCodeRemovals: string[];
+      };
+    };
+    expect(payload.product_state.premiumCodes).toEqual([
+      expect.objectContaining({ id: preservedCode.id, code: preservedCode.code }),
+    ]);
+    expect(payload.product_state.premiumCodeRemovals).toEqual([removedCode.id]);
+  });
+
   it("saves only the English static page while retaining other locale rows", async () => {
     const seededPages = [
       ...getSeedContentSnapshot().staticPages.filter((page) => page.slug === "terms"),

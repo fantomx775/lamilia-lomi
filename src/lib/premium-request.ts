@@ -1,11 +1,11 @@
 import "server-only";
 
 import { getBackendMode, getRequiredSupabaseEnv } from "./config";
-import { getContentSnapshot } from "./content-store";
+import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getSupabaseAuthContext, getDemoSession, setDemoSession } from "./session.server";
 import { mediaBucketForKind, mediaFilenameForDisplay } from "./media-upload";
 import { getAssetByIdForRequest, getProductByIdForRequest } from "./products-request";
-import type { ProductAsset } from "./types";
+import type { DemoSession, ProductAsset } from "./types";
 import { getProductBySlug } from "./products";
 import {
   canDownloadPremiumAsset,
@@ -29,6 +29,7 @@ export type PremiumRedemptionResult =
         | "email_unverified"
         | "invalid_code"
         | "inactive_code"
+        | "already_used"
         | "wrong_product"
         | "product_not_found";
     };
@@ -57,7 +58,8 @@ export async function redeemPremiumCodeForRequest(input: {
       return { ok: false, status: "product_not_found" };
     }
 
-    const matchingCode = getContentSnapshot()
+    const snapshot = getContentSnapshot();
+    const matchingCode = snapshot
       .products
       .flatMap((item) => item.premiumCodes)
       .find((item) => normalizePremiumCode(item.code) === normalizedCode);
@@ -70,22 +72,78 @@ export async function redeemPremiumCodeForRequest(input: {
       return { ok: false, status: "wrong_product" };
     }
 
+    const alreadyUnlocked = session.unlockedProductIds.includes(product.id);
+
+    if (alreadyUnlocked) {
+      return {
+        ok: true,
+        status: "already_unlocked",
+        productId: product.id,
+        premiumCodeId: matchingCode.id,
+        normalizedCode,
+      };
+    }
+
+    const redeemerId = localRedeemerId(session);
+
+    if (!redeemerId) {
+      return { ok: false, status: "auth_required" };
+    }
+
+    const existingRedemption = snapshot.products
+      .find((item) => item.id === product.id)
+      ?.premiumCodes.find(
+        (code) => code.redeemedAt && code.redeemedBy === redeemerId,
+      );
+
+    if (existingRedemption) {
+      await setDemoSession({
+        ...session,
+        unlockedProductIds: [...new Set([...session.unlockedProductIds, product.id])],
+      });
+
+      return {
+        ok: true,
+        status: "already_unlocked",
+        productId: product.id,
+        premiumCodeId: matchingCode.id,
+        normalizedCode,
+      };
+    }
+
+    if (matchingCode.redeemedAt) {
+      return { ok: false, status: "already_used" };
+    }
+
     if (!matchingCode.active) {
       return { ok: false, status: "inactive_code" };
     }
 
-    const alreadyUnlocked = session.unlockedProductIds.includes(product.id);
+    const redeemedAt = new Date().toISOString();
+    saveContentSnapshot({
+      ...snapshot,
+      products: snapshot.products.map((item) =>
+        item.id !== product.id
+          ? item
+          : {
+              ...item,
+              premiumCodes: item.premiumCodes.map((code) =>
+                code.id === matchingCode.id
+                  ? { ...code, redeemedAt, redeemedBy: redeemerId }
+                  : code,
+              ),
+            },
+      ),
+    });
 
-    if (!alreadyUnlocked) {
-      await setDemoSession({
-        ...session,
-        unlockedProductIds: [...session.unlockedProductIds, product.id],
-      });
-    }
+    await setDemoSession({
+      ...session,
+      unlockedProductIds: [...new Set([...session.unlockedProductIds, product.id])],
+    });
 
     return {
       ok: true,
-      status: alreadyUnlocked ? "already_unlocked" : "success",
+      status: "success",
       productId: product.id,
       premiumCodeId: matchingCode.id,
       normalizedCode,
@@ -108,6 +166,17 @@ export async function redeemPremiumCodeForRequest(input: {
   }
 
   return mapPremiumRedemptionResult(data, normalizedCode, input.productId);
+}
+
+function localRedeemerId(session: Pick<DemoSession, "email" | "userId">) {
+  const userId = session.userId?.trim();
+
+  if (userId) {
+    return `user:${userId}`;
+  }
+
+  const email = session.email.trim().toLowerCase();
+  return email ? `email:${email}` : "";
 }
 
 export async function authorizePremiumDownloadForRequest(
@@ -278,6 +347,7 @@ function mapPremiumRedemptionResult(
     status === "email_unverified" ||
     status === "invalid_code" ||
     status === "inactive_code" ||
+    status === "already_used" ||
     status === "wrong_product" ||
     status === "product_not_found"
   ) {

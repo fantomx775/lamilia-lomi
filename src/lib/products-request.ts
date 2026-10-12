@@ -65,6 +65,18 @@ export async function getLocalizedProductViewForRequest(
   return getLocalizedProductViewFromSnapshot(snapshot, slug, requestedLocale, options);
 }
 
+export async function getLocalizedProductViewByIdForRequest(
+  productId: string,
+  requestedLocale: string | undefined,
+) {
+  const snapshot = await getPublicContentSnapshot();
+  const product = snapshot.products.find((item) => item.id === productId);
+
+  return product
+    ? getLocalizedProductViewFromSnapshot(snapshot, product.slug, requestedLocale)
+    : null;
+}
+
 const getLocalizedProductDetailViewForRequestCached = cache(
   async (slug: string, requestedLocale: string | undefined) => {
     await delayProductDetailForE2E();

@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 
 import { getCanonicalAppUrl } from "@/lib/config";
 import { isSupportedLocale } from "@/lib/locale";
-import { getLocalizedProductViewForRequest } from "@/lib/products-request";
+import {
+  getLocalizedProductViewByIdForRequest,
+  getLocalizedProductViewForRequest,
+} from "@/lib/products-request";
 import {
   clearUnlockIntent,
   getUnlockIntent,
@@ -25,7 +28,10 @@ export async function GET(request: Request, { params }: Props) {
   let product;
 
   try {
-    product = await getLocalizedProductViewForRequest(slug, locale);
+    const requestedProductId = new URL(request.url).searchParams.get("productId");
+    product = requestedProductId
+      ? await getLocalizedProductViewByIdForRequest(requestedProductId, locale)
+      : await getLocalizedProductViewForRequest(slug, locale);
   } catch (error) {
     console.error("[qr-unlock] Product lookup failed unexpectedly.", {
       type: error instanceof Error ? error.name : typeof error,

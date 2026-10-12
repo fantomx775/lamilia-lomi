@@ -104,6 +104,8 @@ export type PremiumCode = {
   productId: string;
   code: string;
   active: boolean;
+  redeemedAt?: string;
+  redeemedBy?: string;
 };
 
 export type StaticPageRecord = {
