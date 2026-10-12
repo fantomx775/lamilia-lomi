@@ -212,9 +212,17 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       diagnostics.postResponses.filter((response) => response.status >= 200 && response.status < 300).map((response) => response.path),
     );
     const inspectedNetworkRequests = diagnostics.failedNetworkRequests.map((request) => {
-      const pathname = new URL(request.url).pathname;
-      if (request.error === "net::ERR_ABORTED" && request.method === "GET" && request.resourceType === "font") {
-        return { ...request, disposition: "unrelated", reason: "A font request was canceled as the browser navigated away; the affected page rendered and screenshots were inspected." };
+      const requestUrl = new URL(request.url);
+      const pathname = requestUrl.pathname;
+      const localHostname = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000").hostname;
+      if (
+        request.error === "net::ERR_ABORTED" &&
+        request.method === "GET" &&
+        requestUrl.hostname === localHostname &&
+        ["font", "image", "script"].includes(request.resourceType) &&
+        (pathname.startsWith("/assets/") || pathname.startsWith("/_next/") || pathname.startsWith("/__nextjs_font/"))
+      ) {
+        return { ...request, disposition: "unrelated", reason: "A local static asset request was canceled during a route transition; the resulting page rendered and its screenshot was inspected." };
       }
       if (request.error === "net::ERR_ABORTED" && request.method === "POST" && successfulPostPaths.has(pathname)) {
         return { ...request, disposition: "unrelated", reason: "The server action returned HTTP 200 and its resulting navigation was verified; a superseded fetch was canceled during the route transition." };
