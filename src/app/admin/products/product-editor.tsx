@@ -18,13 +18,13 @@ import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type Admi
 import { imageRatioRequirement, readImageDimensions, validateImageDimensions } from "@/lib/image-ratios";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMedia, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
-import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import {
   PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH,
   PRODUCT_TEXT_WARNING_THRESHOLD,
   PRODUCT_TITLE_MAX_LENGTH,
   validateProductTextLengths,
 } from "@/lib/product-text";
+import { MAX_PREMIUM_CODE_BATCH_SIZE, MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
 
@@ -81,6 +81,7 @@ type PremiumDraft = {
   id: string;
   code: string;
   active: boolean;
+  redeemedAt?: string;
   removed: boolean;
 };
 
@@ -169,6 +170,10 @@ export function ProductEditor({
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product, submittedValues));
   const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product, submittedValues));
   const [premiumErrors, setPremiumErrors] = useState<Partial<Record<string, AdminErrorCode>>>({});
+  const [premiumBatchCount, setPremiumBatchCount] = useState("25");
+  const [isGeneratingPremiumBatch, setIsGeneratingPremiumBatch] = useState(false);
+  const [premiumBatchError, setPremiumBatchError] = useState<string | null>(null);
+  const [premiumBatchMessage, setPremiumBatchMessage] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const savedFormSignatureRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
@@ -804,6 +809,8 @@ export function ProductEditor({
   };
 
   const updatePremium = <K extends keyof PremiumDraft>(clientId: string, field: K, value: PremiumDraft[K]) => {
+    const current = premiumCodes.find((code) => code.clientId === clientId);
+    if (current?.redeemedAt && field === "code") return;
     markDirty();
     setPremiumCodes((current) => current.map((code) => code.clientId === clientId ? { ...code, [field]: value } : code));
     setPremiumErrors((current) => {
@@ -826,12 +833,62 @@ export function ProductEditor({
   };
 
   const removePremium = (code: PremiumDraft) => {
+    if (code.redeemedAt) return;
     if (!code.id) {
       markDirty();
       setPremiumCodes((current) => current.filter((item) => item.clientId !== code.clientId));
       return;
     }
     updatePremium(code.clientId, "removed", true);
+  };
+
+  const generatePremiumBatch = async () => {
+    if (!product?.id || isDirty || isSaving || hasActiveMediaUpload || isGeneratingPremiumBatch) return;
+    const count = Number(premiumBatchCount);
+    if (!Number.isSafeInteger(count) || count < 1 || count > MAX_PREMIUM_CODE_BATCH_SIZE) {
+      setPremiumBatchError(`Podaj liczbę od 1 do ${MAX_PREMIUM_CODE_BATCH_SIZE}.`);
+      setPremiumBatchMessage(null);
+      return;
+    }
+
+    setIsGeneratingPremiumBatch(true);
+    setPremiumBatchError(null);
+    setPremiumBatchMessage(null);
+    try {
+      const response = await fetch(`/api/admin/products/${encodeURIComponent(product.id)}/premium-codes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ count }),
+      });
+      const result = await response.json() as { ok?: boolean; codes?: Array<{ id: string; productId: string; code: string; active: boolean }> };
+      if (!response.ok || !result.ok || !Array.isArray(result.codes)) {
+        setPremiumBatchError("Nie udało się wygenerować kodów. Spróbuj ponownie.");
+        return;
+      }
+
+      const generatedCodes = result.codes.map((code) => ({
+        clientId: `generated-code-${code.id}`,
+        id: code.id,
+        code: code.code,
+        active: code.active,
+        removed: false,
+      }));
+      setPremiumCodes((current) => [
+        ...current,
+        ...generatedCodes,
+      ]);
+      scheduleAfterRender(() => {
+        if (!formRef.current) return;
+        savedFormSignatureRef.current = formSignature(formRef.current);
+        isDirtyRef.current = false;
+        setIsDirty(false);
+      });
+      setPremiumBatchMessage(`Wygenerowano ${result.codes.length} kodów. Partia została zapisana.`);
+    } catch {
+      setPremiumBatchError("Nie udało się wygenerować kodów. Spróbuj ponownie.");
+    } finally {
+      setIsGeneratingPremiumBatch(false);
+    }
   };
 
   const validatePremiumCodesBeforeSubmit = () => {
@@ -862,7 +919,7 @@ export function ProductEditor({
 
   const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSaving || hasActiveMediaUpload || !saveAction) return;
+    if (isSaving || isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction) return;
 
     if (!validatePremiumCodesBeforeSubmit()) {
       setSaveStatus("error");
@@ -961,7 +1018,7 @@ export function ProductEditor({
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
         <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
 
-        <fieldset disabled={isSaving} className="m-0 grid min-w-0 gap-6 border-0 p-0">
+        <fieldset disabled={isSaving || isGeneratingPremiumBatch} className="m-0 grid min-w-0 gap-6 border-0 p-0">
         <AdminEditorHeader
           backHref="/admin/products"
           backLabel="Produkty"
@@ -1040,7 +1097,7 @@ export function ProductEditor({
               </div>
             </AdminEditorSection>
 
-            <AdminEditorSection title="Dostęp premium" description="Kody są pokazywane bez technicznych identyfikatorów; ich aktywność pozostaje zapisywana w obecnym modelu.">
+            <AdminEditorSection title="Dostęp premium" description="Kody są przypisane do tego produktu. Wykorzystanych kodów nie można zmienić ani usunąć.">
               <div id="product-premium-codes" className="grid gap-3">
                 {fieldErrors["product-premium-codes"]?.map((message) => <p key={message} role="alert" className="text-sm text-red-800">{message}</p>)}
                 {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}
@@ -1049,6 +1106,47 @@ export function ProductEditor({
                   <PremiumEditor key={code.clientId} code={code} index={index} error={premiumErrors[code.clientId] ? getAdminErrorMessage(premiumErrors[code.clientId]!, "pl") : undefined} onChange={updatePremium} onRemove={removePremium} onUndo={() => updatePremium(code.clientId, "removed", false)} />
                 ))}
                 <Button type="button" variant="outline" onClick={addPremium} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj kod</Button>
+                {product?.id ? (
+                  <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] p-4 sm:grid-cols-[minmax(9rem,14rem)_auto_auto] sm:items-end">
+                    <Field label="Liczba kodów w partii" htmlFor="premium-code-batch-count">
+                      <Input
+                        id="premium-code-batch-count"
+                        type="number"
+                        min={1}
+                        max={MAX_PREMIUM_CODE_BATCH_SIZE}
+                        step={1}
+                        value={premiumBatchCount}
+                        onChange={(event) => setPremiumBatchCount(event.target.value)}
+                        disabled={isGeneratingPremiumBatch}
+                      />
+                    </Field>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={generatePremiumBatch}
+                      disabled={isDirty || isSaving || hasActiveMediaUpload || isGeneratingPremiumBatch}
+                    >
+                      {isGeneratingPremiumBatch ? "Generowanie…" : "Wygeneruj partię"}
+                    </Button>
+                    {product.status === "published" ? (
+                      <a
+                        className={buttonClassName({ variant: "outline" })}
+                        href={`/api/admin/products/${encodeURIComponent(product.id)}/premium-codes`}
+                      >
+                        Pobierz CSV z QR
+                      </a>
+                    ) : (
+                      <p className="text-xs text-[var(--color-muted)]">Opublikuj produkt, aby pobrać CSV z działającymi QR.</p>
+                    )}
+                    <p className="text-xs leading-5 text-[var(--color-muted)] sm:col-span-3">
+                      Kody są losowe i zapisywane od razu. Limit jednej partii to {MAX_PREMIUM_CODE_BATCH_SIZE} kodów.
+                    </p>
+                    {premiumBatchError ? <p role="alert" className="text-sm text-red-800 sm:col-span-3">{premiumBatchError}</p> : null}
+                    {premiumBatchMessage ? <p role="status" className="text-sm text-green-800 sm:col-span-3">{premiumBatchMessage}</p> : null}
+                  </div>
+                ) : (
+                  <p className="text-sm text-[var(--color-muted)]">Zapisz produkt, aby wygenerować partię kodów.</p>
+                )}
               </div>
             </AdminEditorSection>
           </main>
@@ -1091,7 +1189,7 @@ export function ProductEditor({
       </form>
 
       {product && archiveAction && deleteAction ? (
-        <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving} />
+        <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving || isGeneratingPremiumBatch} />
       ) : null}
 
       {saveBarRoot ? createPortal(
@@ -1100,7 +1198,7 @@ export function ProductEditor({
             <p role={saveStatus === "error" ? "alert" : "status"} aria-live="polite" className={`min-w-0 text-sm ${saveStatus === "error" ? "text-red-800" : "text-[var(--color-muted)]"}`}>
               {isSaving ? "Zapisywanie…" : saveStatus === "saved" ? "Zapisano. Zmiany są aktualne." : saveStatus === "error" ? "Zapis nie powiódł się. Sprawdź wskazane błędy." : isDirty ? "Niezapisane zmiany" : product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"}
             </p>
-            <ProductSubmitButton pending={isSaving} dirty={isDirty} disabled={hasActiveMediaUpload || !saveAction} />
+            <ProductSubmitButton pending={isSaving} dirty={isDirty} disabled={isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction} />
           </div>
         </div>,
         saveBarRoot,
@@ -1369,7 +1467,10 @@ function PremiumEditor({
   const activeValue = code.id || `new-${index}`;
   const inputId = `premium-code-${code.clientId}`;
   const errorId = `${inputId}-error`;
-  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeClientId" value={code.clientId} /><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={inputId}><Input id={inputId} name="premiumCode" value={code.code} maxLength={MAX_PREMIUM_CODE_LENGTH} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />{error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}</Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button></div>;
+  const status = code.redeemedAt
+    ? code.active ? "Wykorzystany" : "Wykorzystany · wyłączony"
+    : code.active ? "Niewykorzystany" : "Wyłączony";
+  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeClientId" value={code.clientId} /><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={inputId}><Input id={inputId} name="premiumCode" value={code.code} maxLength={MAX_PREMIUM_CODE_LENGTH} readOnly={Boolean(code.redeemedAt)} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />{error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}</Field><div className="grid content-end gap-2 pb-3"><span className="text-xs font-medium text-[var(--color-muted)]" aria-label={`Status kodu: ${status}`}>{status}</span><label className="flex items-center gap-2 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label></div>{code.redeemedAt ? <Button type="button" variant="ghost" size="sm" disabled title="Wykorzystanego kodu nie można usunąć." className="self-end text-red-800">Usuń</Button> : <Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button>}</div>;
 }
 
 function CheckboxGroup({ label, name, values, selected }: { label: string; name: string; values: Array<{ id: string; label: string }>; selected: string[] }) {
@@ -1496,6 +1597,18 @@ function mapProductSaveErrors(
           focusTarget ??= `premium-code-${premiumCode.clientId}`;
         });
         if (!focusTarget) focusTarget = "product-premium-codes";
+        break;
+      }
+      case ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED: {
+        const redeemedCodes = premiumCodes.filter((premiumCode) => premiumCode.redeemedAt);
+        if (redeemedCodes.length) {
+          redeemedCodes.forEach((premiumCode) => {
+            premiumErrors[premiumCode.clientId] = code;
+            focusTarget ??= `premium-code-${premiumCode.clientId}`;
+          });
+        } else {
+          addFieldError("product-premium-codes", code);
+        }
         break;
       }
       case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING: {
@@ -1679,6 +1792,7 @@ function buildPremiumCodes(
   product?: Product,
   values?: ProductSaveFormState["values"],
 ): PremiumDraft[] {
+  const redeemedAtById = new Map((product?.premiumCodes ?? []).map((code) => [code.id, code.redeemedAt]));
   if (values) {
     const ids = values.premiumCodeId ?? [];
     const activeValues = new Set(values.premiumCodeActive ?? []);
@@ -1691,12 +1805,13 @@ function buildPremiumCodes(
         id,
         code: values.premiumCode?.[index] ?? "",
         active: activeValues.has(id || `new-${index}`),
+        redeemedAt: id ? redeemedAtById.get(id) : undefined,
         removed: removedClientIds.has(clientId) || (Boolean(id) && removedIds.has(id)),
       };
     });
   }
 
-  return (product?.premiumCodes ?? []).map((code) => ({ clientId: `existing-code-${code.id}`, id: code.id, code: code.code, active: code.active, removed: false }));
+  return (product?.premiumCodes ?? []).map((code) => ({ clientId: `existing-code-${code.id}`, id: code.id, code: code.code, active: code.active, redeemedAt: code.redeemedAt, removed: false }));
 }
 
 function createClientId() {

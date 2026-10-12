@@ -20,6 +20,7 @@ import {
   readAuthResumeIntent,
 } from "@/lib/auth-resume";
 import { getUnlockIntent } from "@/lib/unlock-intent";
+import { selectUnlockPrefillCode } from "@/lib/unlock-prefill";
 import { getProductDetailAccessForRequest, getSupabaseAuthContext } from "@/lib/session.server";
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { createSignedDownloadUrl } from "@/lib/premium-core";
@@ -78,20 +79,23 @@ async function ProductUnlockSection({
     getTranslations("Funnel"),
   ]);
   const access = accessResult.access;
-  const hasCurrentIntent =
-    unlockIntent?.locale === locale && unlockIntent.productSlug === product.slug;
   const backendMode = getBackendMode();
-  const initialCode =
-    backendMode === "supabase" && authContext.user
-      ? getAccountBoundResumeCode(
-          authResumeIntent,
-          authContext.user,
-          locale,
-          product.slug,
-        )
-      : hasCurrentIntent
-        ? unlockIntent?.code
-        : undefined;
+  const accountBoundResumeCode = authContext.user
+    ? getAccountBoundResumeCode(
+        authResumeIntent,
+        authContext.user,
+        locale,
+        product.slug,
+      )
+    : undefined;
+  const initialCode = selectUnlockPrefillCode({
+    currentIntent: unlockIntent,
+    locale,
+    productSlug: product.slug,
+    backendMode,
+    hasSupabaseUser: Boolean(authContext.user),
+    accountBoundResumeCode,
+  });
   const downloadLinks =
     access?.session?.emailVerified && access.isUnlocked
       ? product.premiumAssets
@@ -176,6 +180,8 @@ async function ProductUnlockSection({
                     missing_code: copy("missing_code"),
                     invalid_code: copy("invalid_code"),
                     inactive_code: copy("inactive_code"),
+                    already_used: copy("already_used"),
+                    wrong_product: copy("wrong_product"),
                     product_not_found: copy("product_not_found"),
                     unexpected: copy("unexpected"),
                   },

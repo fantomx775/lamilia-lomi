@@ -155,7 +155,14 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
     try {
       saveResult = await supabase.rpc(
         usesStorageProviderMetadata ? "save_product_with_storage_provider" : "save_product",
-        { product_state: buildProductMutationPayload(product) },
+        {
+          product_state: buildProductMutationPayload(
+            product,
+            formData.getAll("premiumCodeRemove").flatMap((value) =>
+              typeof value === "string" && value.trim() ? [value.trim()] : [],
+            ),
+          ),
+        },
       );
     } catch (error) {
       productSaveOutcomeUnknown = true;
@@ -204,7 +211,7 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   return { ok: true, id: savedProduct.id };
 }
 
-export function buildProductMutationPayload(product: Product) {
+export function buildProductMutationPayload(product: Product, premiumCodeRemovals: string[] = []) {
   return {
     id: product.id,
     slug: product.slug,
@@ -250,6 +257,7 @@ export function buildProductMutationPayload(product: Product) {
       code: code.code,
       active: code.active,
     })),
+    premiumCodeRemovals,
   };
 }
 

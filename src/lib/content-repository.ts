@@ -22,6 +22,7 @@ import type {
 } from "./types";
 
 type DbRow = Record<string, unknown>;
+const PREMIUM_CODE_PAGE_SIZE = 1_000;
 
 export const getPublicContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: false }),
@@ -182,7 +183,7 @@ export async function getContentSnapshotForRequest(options: {
     selectRows(supabase, "static_pages"),
     selectRows(supabase, "catalog_settings"),
     options.includePremiumCodes
-      ? selectRows(supabase, "premium_codes")
+      ? selectRowsAfterId(supabase, "premium_codes")
       : Promise.resolve([]),
   ]);
 
@@ -238,6 +239,41 @@ async function selectRows(
   }
 
   return (data ?? []) as DbRow[];
+}
+
+async function selectRowsAfterId(
+  client: Awaited<ReturnType<typeof createClient>>,
+  table: string,
+) {
+  const rows: DbRow[] = [];
+  let lastId: string | undefined;
+
+  for (;;) {
+    const orderedQuery = client
+      .from(table)
+      .select("*")
+      .order("id", { ascending: true });
+    const { data, error } = lastId
+      ? await orderedQuery.gt("id", lastId).limit(PREMIUM_CODE_PAGE_SIZE)
+      : await orderedQuery.limit(PREMIUM_CODE_PAGE_SIZE);
+
+    if (error) {
+      throw new Error(`Supabase ${table} read failed: ${error.message}`);
+    }
+
+    const page = (data ?? []) as DbRow[];
+    rows.push(...page);
+
+    if (page.length < PREMIUM_CODE_PAGE_SIZE) {
+      return rows;
+    }
+
+    const nextId = optionalString(page[page.length - 1]?.id);
+    if (!nextId || nextId === lastId) {
+      throw new Error(`Supabase ${table} pagination did not advance.`);
+    }
+    lastId = nextId;
+  }
 }
 
 function mapProduct(
@@ -425,11 +461,15 @@ function mapAmazonLink(row: DbRow): AmazonLink {
 }
 
 function mapPremiumCode(row: DbRow): PremiumCode {
+  const redeemedAt = stringValue(row.redeemed_at);
+  const redeemedBy = stringValue(row.redeemed_by);
   return {
     id: stringValue(row.id),
     productId: stringValue(row.product_id),
     code: stringValue(row.code),
     active: Boolean(row.active),
+    ...(redeemedAt ? { redeemedAt } : {}),
+    ...(redeemedBy ? { redeemedBy } : {}),
   };
 }
 

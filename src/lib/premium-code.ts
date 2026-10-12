@@ -1,4 +1,5 @@
 export const MAX_PREMIUM_CODE_LENGTH = 128;
+export const MAX_PREMIUM_CODE_BATCH_SIZE = 250;
 
 export function normalizePremiumCode(code: string | null | undefined) {
   return (code ?? "")
