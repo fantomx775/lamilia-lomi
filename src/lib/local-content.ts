@@ -4,6 +4,7 @@ import {
   tags as seededTags,
 } from "./seed-data";
 import { DEFAULT_CATALOG_SETTINGS } from "./catalog-settings";
+import { DEFAULT_ABOUT_PAGE_SETTINGS } from "./about-settings";
 import type { ContentSnapshot, StaticPageRecord } from "./types";
 
 const seededStaticPages: StaticPageRecord[] = [
@@ -32,5 +33,6 @@ export function getSeedContentSnapshot(): ContentSnapshot {
     tags: seededTags,
     staticPages: seededStaticPages,
     catalogSettings: DEFAULT_CATALOG_SETTINGS,
+    aboutPageSettings: DEFAULT_ABOUT_PAGE_SETTINGS,
   });
 }

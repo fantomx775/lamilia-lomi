@@ -23,5 +23,12 @@ export default async function AdminPagesPage() {
     };
   });
 
+  rows.unshift({
+    id: "about",
+    title: "About Lamilia Lomi",
+    slug: "about",
+    updatedAt: "—",
+  });
+
   return <PagesResourceList rows={rows} />;
 }

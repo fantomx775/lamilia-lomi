@@ -11,6 +11,7 @@ import {
   deleteTagForRequest,
   saveCategoryForRequest,
   saveCatalogSettingsForRequest,
+  saveAboutPageSettingsForRequest,
   savePageForRequest,
   savePagesForRequest,
   saveProductForRequest,
@@ -226,6 +227,21 @@ export async function saveStaticPagesAction(slug: StaticPageRecord["slug"], form
   }
 
   redirect(`/admin/pages/${result.id}?saved=1`);
+}
+
+export async function saveAboutPageAction(formData: FormData) {
+  await assertAdmin();
+
+  const result = await executeAdminMutation("About page settings", () =>
+    saveAboutPageSettingsForRequest(formData),
+  );
+  revalidateContentPaths();
+
+  if (!result.ok) {
+    redirect(withAdminError("/admin/pages/about", result.errors));
+  }
+
+  redirect("/admin/pages/about?saved=1");
 }
 
 async function assertAdmin() {

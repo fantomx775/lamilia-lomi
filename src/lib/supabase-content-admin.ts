@@ -26,6 +26,11 @@ import {
 import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
 import {
+  hasDuplicateAboutProductIds,
+  normalizeAboutPageSettings,
+  parseAboutPageSettingsFormData,
+} from "./about-settings";
+import {
   cleanupNewMediaFromFormData,
   cleanupPersistedMedia,
   finalizeR2MediaUploads,
@@ -44,7 +49,7 @@ import {
   type AdminMutationResult,
   type DatabaseErrorLike,
 } from "./admin-errors";
-import type { CategoryImage, CatalogDesktopColumns, Product } from "./types";
+import type { AboutPageSettings, CatalogDesktopColumns, CategoryImage, Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
   let storageAuthorizationToken: string | null | undefined;
@@ -594,6 +599,150 @@ export async function saveCatalogSettingsForRequest(
       ? { ok: true, id: "global" }
       : { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
   });
+}
+
+export async function saveAboutPageSettingsForRequest(
+  formData: FormData,
+): Promise<AdminMutationResult> {
+  return runAdminMutation("About page settings", async () => {
+    const settings = parseAboutPageSettingsFormData(formData);
+    if (!settings || hasDuplicateAboutProductIds(settings)) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT] };
+    }
+
+    if (getBackendMode() === "local") {
+      const snapshot = getContentSnapshot();
+      const validationError = validateAboutPageProductSelections(
+        settings,
+        snapshot.products,
+        snapshot.aboutPageSettings,
+      );
+
+      if (validationError) {
+        return { ok: false, errors: [validationError] };
+      }
+
+      saveContentSnapshot({ ...snapshot, aboutPageSettings: settings });
+      return { ok: true, id: "global" };
+    }
+
+    const supabase = await createClient();
+    const { data: existingRow, error: readError } = await supabase
+      .from("catalog_settings")
+      .select("about_intro, favorite_coloring_book_ids, favorite_picture_book_ids")
+      .eq("id", "global")
+      .maybeSingle();
+
+    if (readError) {
+      throw new AdminDatabaseError("About page settings read", readError);
+    }
+
+    if (!existingRow) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+    }
+
+    const existingSettings = normalizeAboutPageSettings({
+      intro: existingRow.about_intro,
+      favoriteColoringBookIds: existingRow.favorite_coloring_book_ids,
+      favoritePictureBookIds: existingRow.favorite_picture_book_ids,
+    });
+    const selectedIds = getAboutProductIds(settings);
+    const products = selectedIds.length
+      ? await loadAboutProducts(supabase, selectedIds)
+      : [];
+    const validationError = validateAboutPageProductSelections(
+      settings,
+      products,
+      existingSettings,
+    );
+
+    if (validationError) {
+      return { ok: false, errors: [validationError] };
+    }
+
+    const { data, error } = await supabase
+      .from("catalog_settings")
+      .update({
+        about_intro: settings.intro,
+        favorite_coloring_book_ids: settings.favoriteColoringBookIds,
+        favorite_picture_book_ids: settings.favoritePictureBookIds,
+      })
+      .eq("id", "global")
+      .select("id")
+      .maybeSingle();
+
+    if (error) {
+      throw new AdminDatabaseError("About page settings", error);
+    }
+
+    return data
+      ? { ok: true, id: "global" }
+      : { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+  });
+}
+
+async function loadAboutProducts(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  productIds: string[],
+): Promise<Array<Pick<Product, "id" | "productType" | "status">>> {
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, product_type, status")
+    .in("id", productIds);
+
+  if (error) {
+    throw new AdminDatabaseError("About page products", error);
+  }
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    productType: row.product_type,
+    status: row.status,
+  }));
+}
+
+function getAboutProductIds(settings: AboutPageSettings) {
+  return Array.from(new Set([
+    ...settings.favoriteColoringBookIds,
+    ...settings.favoritePictureBookIds,
+  ].filter(Boolean)));
+}
+
+function validateAboutPageProductSelections(
+  settings: AboutPageSettings,
+  products: readonly Pick<Product, "id" | "productType" | "status">[],
+  existingSettings: AboutPageSettings,
+) {
+  if (hasDuplicateAboutProductIds(settings)) {
+    return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
+  }
+
+  const productsById = new Map(products.map((product) => [product.id, product]));
+  const previousColoringBookIds = new Set(existingSettings.favoriteColoringBookIds.filter(Boolean));
+  const previousPictureBookIds = new Set(existingSettings.favoritePictureBookIds.filter(Boolean));
+  const selections = [
+    ...settings.favoriteColoringBookIds.map((id) => [id, "coloring-book"] as const),
+    ...settings.favoritePictureBookIds.map((id) => [id, "picture-book"] as const),
+  ];
+
+  for (const [id, expectedType] of selections) {
+    if (!id) continue;
+    const previouslySelected = expectedType === "coloring-book"
+      ? previousColoringBookIds.has(id)
+      : previousPictureBookIds.has(id);
+    const product = productsById.get(id);
+    if (product && product.productType !== expectedType && !previouslySelected) {
+      return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
+    }
+    if (product && product.status !== "published" && !previouslySelected) {
+      return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
+    }
+    if (!product && !previouslySelected) {
+      return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
+    }
+  }
+
+  return null;
 }
 
 export async function savePageForRequest(formData: FormData): Promise<AdminMutationResult> {
