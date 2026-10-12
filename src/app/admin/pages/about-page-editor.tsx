@@ -308,8 +308,7 @@ function ProductCombobox({
     <div
       ref={rootRef}
       className="relative min-w-0"
-      onBlur={(event) => {
-        if (event.relatedTarget && event.currentTarget.contains(event.relatedTarget as Node)) return;
+      onBlur={() => {
         setOpen(false);
         setActiveIndex(-1);
       }}

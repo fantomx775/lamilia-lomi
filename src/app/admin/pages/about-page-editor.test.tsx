@@ -115,6 +115,27 @@ describe("AboutPageEditor", () => {
     expect(view.queryByRole("listbox", { name: /pozycja 1/ })).not.toBeInTheDocument();
   });
 
+  it("closes a selected product list before Tab focuses its clear button", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <AboutPageEditor
+        config={{ ...emptyConfig, favoriteColoringBookIds: ["color-ocean", "", ""] }}
+        products={products}
+      />,
+    );
+    const firstSlot = view.getByRole("combobox", { name: "Favorite Coloring Books, pozycja 1" });
+    const clearButton = view.getByRole("button", { name: "Wyczyść wybór: Favorite Coloring Books, pozycja 1" });
+
+    await user.click(firstSlot);
+    expect(firstSlot).toHaveAttribute("aria-expanded", "true");
+
+    await user.tab();
+
+    expect(clearButton).toHaveFocus();
+    expect(firstSlot).toHaveAttribute("aria-expanded", "false");
+    expect(view.queryByRole("listbox", { name: /pozycja 1/ })).not.toBeInTheDocument();
+  });
+
   it("warns about missing and unpublished saved products while allowing their replacement", async () => {
     const user = userEvent.setup();
     const view = render(

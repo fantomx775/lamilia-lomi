@@ -56,8 +56,13 @@ export function hasDuplicateAboutProductIds(settings: AboutPageSettings) {
 }
 
 function normalizeProductIdForDuplicateCheck(id: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-    ? id.toLowerCase()
+  const uuidInput = id.startsWith("{") && id.endsWith("}")
+    ? id.slice(1, -1)
+    : id;
+  const compactUuid = uuidInput.replace(/-/g, "");
+
+  return /^[0-9a-f]{32}$/i.test(compactUuid)
+    ? `${compactUuid.slice(0, 8)}-${compactUuid.slice(8, 12)}-${compactUuid.slice(12, 16)}-${compactUuid.slice(16, 20)}-${compactUuid.slice(20)}`.toLowerCase()
     : id;
 }
 

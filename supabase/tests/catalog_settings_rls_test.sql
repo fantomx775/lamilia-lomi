@@ -188,10 +188,10 @@ SELECT throws_ok(
 );
 SELECT throws_ok(
   $$UPDATE public.catalog_settings
-    SET favorite_coloring_book_ids = ARRAY['AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA', 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', '']::text[]
+    SET favorite_coloring_book_ids = ARRAY['aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa', '{AAAAAAAA111141118111AAAAAAAAAAAA}', '']::text[]
     WHERE id = 'global'$$,
   '23514',
-  'admins cannot bypass duplicate selection validation with UUID casing variants'
+  'admins cannot bypass duplicate selection validation with alternate PostgreSQL UUID spellings'
 );
 RESET ROLE;
 SELECT ok(

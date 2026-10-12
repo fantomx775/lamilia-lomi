@@ -1027,7 +1027,7 @@ describe("Supabase content admin mutations", () => {
     }]);
   });
 
-  it("rejects duplicate IDs within or across sections, including UUID casing variants, before writing", async () => {
+  it("rejects duplicate IDs within or across sections, including alternate UUID formats, before writing", async () => {
     const updates = configureAboutSettingsDatabase();
     const withinSection = aboutSettingsForm(["same-id", "same-id", "coloring-3"]);
     const acrossSections = aboutSettingsForm(
@@ -1037,6 +1037,11 @@ describe("Supabase content admin mutations", () => {
     const uuidCaseVariant = aboutSettingsForm([
       "AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA",
       "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+      "coloring-3",
+    ]);
+    const uuidFormatVariant = aboutSettingsForm([
+      "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa",
+      "{AAAAAAAA111141118111AAAAAAAAAAAA}",
       "coloring-3",
     ]);
 
@@ -1049,6 +1054,10 @@ describe("Supabase content admin mutations", () => {
       errors: ["admin.validation.invalid_input"],
     });
     await expect(saveAboutPageSettingsForRequest(uuidCaseVariant)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.validation.invalid_input"],
+    });
+    await expect(saveAboutPageSettingsForRequest(uuidFormatVariant)).resolves.toEqual({
       ok: false,
       errors: ["admin.validation.invalid_input"],
     });

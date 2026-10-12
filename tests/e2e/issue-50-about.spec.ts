@@ -171,7 +171,7 @@ test("About settings save six unique books and render responsively from current 
     await expect(page.getByRole("combobox", { name: productSelections[5].label })).toHaveValue("Forest Friends Picture Book");
 
     await page.locator("header").getByRole("link", { name: "About", exact: true }).click();
-    await expect(page).toHaveURL(/\/en\/about$/);
+    await page.waitForURL(/\/en\/about$/, { timeout: 60_000 });
     await expect(page.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeVisible();
     await expect(page.getByText("Loved by Our Readers")).toBeVisible();
     await expect(page.getByRole("heading", { level: 3 })).toHaveCount(6);

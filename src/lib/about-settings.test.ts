@@ -59,10 +59,14 @@ describe("About page settings", () => {
     })).toBe(false);
   });
 
-  it("treats UUID casing variants as the same selected product", () => {
+  it.each([
+    ["uppercase casing", "AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA"],
+    ["braces and omitted hyphens", "{AAAAAAAA111141118111AAAAAAAAAAAA}"],
+    ["alternative hyphen placement", "AAAAAAAA11114111-8111-AAAAAAAAAAAA"],
+  ])("treats PostgreSQL UUID input variants with %s as the same selected product", (_variant, duplicateId) => {
     expect(hasDuplicateAboutProductIds({
       ...DEFAULT_ABOUT_PAGE_SETTINGS,
-      favoriteColoringBookIds: ["AAAAAAAA-1111-4111-8111-AAAAAAAAAAAA", "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", ""],
+      favoriteColoringBookIds: ["aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", duplicateId, ""],
     })).toBe(true);
   });
 });

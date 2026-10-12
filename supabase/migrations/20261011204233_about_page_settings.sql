@@ -13,13 +13,24 @@ as $$
     from pg_catalog.unnest(
       pg_catalog.array_cat(coloring_book_ids, picture_book_ids)
     ) as selected(product_id)
+  ), prepared_product_ids as (
+    select selected.product_id,
+      case
+        when selected.product_id ~* '^(\{[0-9a-f-]+\}|[0-9a-f-]+)$'
+          then pg_catalog.regexp_replace(
+            pg_catalog.regexp_replace(selected.product_id, '[{}]', '', 'g'),
+            '-', '', 'g'
+          )
+        else null
+      end as compact_uuid
+    from selected_product_ids as selected
   ), normalized_product_ids as (
     select case
-      when selected.product_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-        then (selected.product_id::uuid)::text
+      when selected.compact_uuid ~* '^[0-9a-f]{32}$'
+        then (selected.compact_uuid::uuid)::text
       else selected.product_id
     end as product_id
-    from selected_product_ids as selected
+    from prepared_product_ids as selected
   )
   select not exists (
     select 1
