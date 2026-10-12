@@ -10,7 +10,10 @@ import {
   storeCollectionImage,
 } from "@/lib/collection-image-storage";
 import { isSafeCollectionImagePath, isUuid } from "@/lib/collection-image-path";
-import { getAdminContentSnapshot } from "@/lib/content-repository";
+import {
+  getCollectionImageForRequest,
+  isCollectionImageReferencedForRequest,
+} from "@/lib/content-repository";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 import { validateMediaFile } from "@/lib/media-upload";
 import { getDemoSession } from "@/lib/session.server";
@@ -78,8 +81,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const snapshot = await getAdminContentSnapshot();
-    const savedCollection = snapshot.collections.find((item) => item.id === collectionId);
+    const savedCollection = await getCollectionImageForRequest(collectionId);
     const isSavedImage = savedCollection?.imagePath === storagePath;
     const provider = isSavedImage
       ? savedCollection.imageStorageProvider
@@ -130,8 +132,7 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const snapshot = await getAdminContentSnapshot();
-    if (snapshot.collections.some((collection) => collection.imagePath === storagePath)) {
+    if (await isCollectionImageReferencedForRequest(storagePath)) {
       return errorResponse(ADMIN_ERROR_CODES.CONFLICT_DATA, 409);
     }
     await removeCollectionImage({

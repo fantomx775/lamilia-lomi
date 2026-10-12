@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
@@ -77,6 +78,9 @@ test("manages collections, assigns products, and preserves products when a colle
   let collectionDeleted = false;
   let productDeleted = false;
   let createdCollectionId = "";
+  const replacementJpeg = await sharp({
+    create: { width: 1, height: 1, channels: 3, background: { r: 40, g: 70, b: 90 } },
+  }).jpeg().toBuffer();
 
   try {
     await signInAsAdmin(page);
@@ -159,8 +163,26 @@ test("manages collections, assigns products, and preserves products when a colle
     await page.goto("/admin/collections");
     await page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first().click();
     await expect(page.getByRole("dialog", { name: "Edytuj kolekcję" })).toBeVisible();
+    const replacementUploadResponse = page.waitForResponse((response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === "/api/admin/collection-image",
+    );
+    await page.locator('input[type="file"][aria-label="Wybierz obraz kolekcji"]').setInputFiles({
+      name: "unsaved-replacement.jfif",
+      mimeType: "image/jpeg",
+      buffer: replacementJpeg,
+    });
+    const replacementUploadResponseValue = await replacementUploadResponse;
+    expect(replacementUploadResponseValue.ok()).toBe(true);
+    const replacementImage = (await replacementUploadResponseValue.json()).image as { path: string };
+    const pendingImageCleanup = page.waitForResponse((response) =>
+      response.request().method() === "DELETE" &&
+      new URL(response.url()).pathname === "/api/admin/collection-image" &&
+      response.request().postData()?.includes(replacementImage.path) === true,
+    );
     page.once("dialog", (dialog) => void dialog.accept());
     await page.getByRole("button", { name: "Usuń kolekcję" }).click();
+    const pendingImageCleanupResponse = await pendingImageCleanup;
+    expect(pendingImageCleanupResponse.status()).toBe(200);
     await expect(page.getByRole("dialog", { name: "Edytuj kolekcję" })).toHaveCount(0);
     collectionDeleted = true;
     await expect(page.getByRole("button", { name: `Edytuj kolekcję ${collection}` })).toHaveCount(0);

@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   removeCategoryImageStorage: vi.fn(),
   deleteCategory: vi.fn(),
   updateCategoryImageInSnapshot: vi.fn(),
+  removeCollectionImage: vi.fn(),
   categoryImageUpdates: [] as Array<{ table: string; fields: unknown }>,
   categoryImageUpdateResult: null as unknown,
 }));
@@ -53,6 +54,10 @@ vi.mock("./category-image-storage", () => ({
   storeCategoryImage: mocks.storeCategoryImage,
   removeCategoryImageStorage: mocks.removeCategoryImageStorage,
 }));
+vi.mock("./collection-image-storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./collection-image-storage")>();
+  return { ...actual, removeCollectionImage: mocks.removeCollectionImage };
+});
 vi.mock("./media-storage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./media-storage")>();
   return { ...actual, finalizeR2MediaUploads: mocks.finalizeR2MediaUploads };
@@ -62,6 +67,7 @@ import {
   archiveProductForRequest,
   assertSupabaseUploadsExist,
   deleteCategoryForRequest,
+  deleteCollectionForRequest,
   removeCategoryImageForRequest,
   saveProductForRequest,
   saveCategoryForRequest,
@@ -133,6 +139,11 @@ describe("Supabase content admin mutations", () => {
         mocks.deletedTables.push(table);
         return { eq: vi.fn(() => resolvedQuery()) };
       }),
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          neq: vi.fn(() => ({ limit: vi.fn().mockResolvedValue({ data: [], error: null }) })),
+        })),
+      })),
       update: vi.fn((fields: unknown) => {
         mocks.categoryImageUpdates.push({ table, fields });
         return {
@@ -164,6 +175,7 @@ describe("Supabase content admin mutations", () => {
       storage: { from: mocks.storageFrom },
     });
     mocks.removeCategoryImageStorage.mockResolvedValue(true);
+    mocks.removeCollectionImage.mockResolvedValue(undefined);
   });
 
   it("persists category image metadata and replaces the previous unique object", async () => {
@@ -583,6 +595,42 @@ describe("Supabase content admin mutations", () => {
       table: "collections",
       rows: expect.objectContaining({ id: collectionId, name: "Forest Stories", slug: "forest-stories" }),
     }));
+  });
+
+  it("reports collection image cleanup failures with the orphaned storage path", async () => {
+    const collectionId = "aaaaaaaa-4999-4999-8999-aaaaaaaaaaaa";
+    const imagePath = `collections/${collectionId}/image/22222222-2222-4222-8222-222222222222-cover.png`;
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      collections: [{
+        id: collectionId,
+        name: "Forest Stories",
+        slug: "forest-stories",
+        imagePath,
+        imageStorageProvider: "supabase",
+        imageContentType: "image/png",
+        sortOrder: 100,
+        createdAt: "2026-10-12T00:00:00.000Z",
+        updatedAt: "2026-10-12T00:00:00.000Z",
+      }],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.removeCollectionImage.mockRejectedValue(new Error("storage unavailable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(deleteCollectionForRequest(collectionId)).resolves.toMatchObject({
+      ok: true,
+      id: collectionId,
+      cleanupDeferred: true,
+      cleanupImagePath: imagePath,
+    });
+
+    expect(mocks.deletedTables).toContain("collections");
+    expect(consoleError).toHaveBeenCalledWith("Collection image cleanup was deferred.", expect.any(Error));
+    consoleError.mockRestore();
   });
 
   it("saves a product with existing non-English content intact", async () => {

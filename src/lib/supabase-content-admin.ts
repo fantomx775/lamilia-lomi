@@ -515,10 +515,15 @@ export async function saveCollectionForRequest(formData: FormData): Promise<Admi
     if (backendMode === "local") {
       const result = saveCollectionFromFormData(formData);
       if (!result.ok) return result;
+      let cleanupDeferred = false;
       if (existing?.imagePath && existing.imagePath !== collection.imagePath && existing.imageStorageProvider) {
-        await cleanupCollectionImageIfUnreferenced(existing, collection.id);
+        cleanupDeferred = !await cleanupCollectionImageIfUnreferenced(existing, collection.id);
       }
-      return result;
+      return {
+        ...result,
+        cleanupDeferred,
+        cleanupImagePath: cleanupDeferred ? existing?.imagePath : undefined,
+      };
     }
 
     assertUuidSet(collection.id);
@@ -536,10 +541,15 @@ export async function saveCollectionForRequest(formData: FormData): Promise<Admi
       updated_at: collection.updatedAt,
     }), "collection");
 
-    if (existing?.imagePath && existing.imagePath !== collection.imagePath && existing.imageStorageProvider) {
-      await cleanupCollectionImageIfUnreferenced(existing, collection.id, authorizationToken);
-    }
-    return { ok: true, id: collection.id };
+    const cleanupDeferred = existing?.imagePath && existing.imagePath !== collection.imagePath && existing.imageStorageProvider
+      ? !await cleanupCollectionImageIfUnreferenced(existing, collection.id, authorizationToken)
+      : false;
+    return {
+      ok: true,
+      id: collection.id,
+      cleanupDeferred,
+      cleanupImagePath: cleanupDeferred ? existing?.imagePath : undefined,
+    };
   });
 }
 
@@ -554,17 +564,27 @@ export async function deleteCollectionForRequest(collectionId: string): Promise<
     if (backendMode === "local") {
       const result = deleteCollection(collectionId);
       if (result.ok && existing.imagePath && existing.imageStorageProvider) {
-        await cleanupCollectionImageIfUnreferenced(existing, collectionId);
+        const cleanupDeferred = !await cleanupCollectionImageIfUnreferenced(existing, collectionId);
+        return {
+          ...result,
+          cleanupDeferred,
+          cleanupImagePath: cleanupDeferred ? existing.imagePath : undefined,
+        };
       }
       return result;
     }
 
     const supabase = await createClient();
     await run(supabase.from("collections").delete().eq("id", collectionId), "collection deletion");
-    if (existing.imagePath && existing.imageStorageProvider) {
-      await cleanupCollectionImageIfUnreferenced(existing, collectionId, authorizationToken);
-    }
-    return { ok: true, id: collectionId };
+    const cleanupDeferred = existing.imagePath && existing.imageStorageProvider
+      ? !await cleanupCollectionImageIfUnreferenced(existing, collectionId, authorizationToken)
+      : false;
+    return {
+      ok: true,
+      id: collectionId,
+      cleanupDeferred,
+      cleanupImagePath: cleanupDeferred ? existing.imagePath : undefined,
+    };
   });
 }
 
@@ -705,15 +725,15 @@ async function cleanupCollectionImageIfUnreferenced(
   collection: Collection,
   excludedCollectionId: string,
   authorizationToken?: string | null,
-) {
-  if (!collection.imagePath || !collection.imageStorageProvider) return;
+): Promise<boolean> {
+  if (!collection.imagePath || !collection.imageStorageProvider) return true;
 
   try {
     if (collection.imageStorageProvider === "local") {
       const referenced = getContentSnapshot().collections.some((item) =>
         item.id !== excludedCollectionId && item.imagePath === collection.imagePath,
       );
-      if (referenced) return;
+      if (referenced) return true;
     } else {
       const supabase = await createClient();
       const { data, error } = await supabase
@@ -723,7 +743,7 @@ async function cleanupCollectionImageIfUnreferenced(
         .neq("id", excludedCollectionId)
         .limit(1);
       if (error) throw new AdminDatabaseError("collection image reference check", error);
-      if (data?.length) return;
+      if (data?.length) return true;
     }
 
     await removeCollectionImage({
@@ -732,8 +752,10 @@ async function cleanupCollectionImageIfUnreferenced(
       provider: collection.imageStorageProvider,
       authorizationToken,
     });
+    return true;
   } catch (error) {
     console.error("Collection image cleanup was deferred.", error);
+    return false;
   }
 }
 

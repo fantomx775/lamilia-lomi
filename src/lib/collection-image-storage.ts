@@ -25,7 +25,7 @@ export async function storeCollectionImage(input: {
   authorizationToken?: string | null;
 }): Promise<{ path: string; provider: CollectionImageProvider; filename: string }> {
   const filename = mediaFilenameForDisplay(input.filename);
-  const storagePath = createCollectionImagePath(input.collectionId, input.imageId, filename);
+  const storagePath = createCollectionImagePath(input.collectionId, input.imageId, filename, input.contentType);
   if (input.bytes.byteLength <= 0 || input.bytes.byteLength > MAX_COLLECTION_IMAGE_BYTES) {
     throw new Error("Invalid collection image size.");
   }

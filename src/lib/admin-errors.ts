@@ -41,7 +41,7 @@ export const ADMIN_ERROR_CODES = {
 export type AdminErrorCode = (typeof ADMIN_ERROR_CODES)[keyof typeof ADMIN_ERROR_CODES];
 
 export type AdminMutationResult =
-  | { ok: true; id: string; categoryImage?: CategoryImage; cleanupDeferred?: boolean }
+  | { ok: true; id: string; categoryImage?: CategoryImage; cleanupDeferred?: boolean; cleanupImagePath?: string }
   | {
       ok: false;
       errors: AdminErrorCode[];

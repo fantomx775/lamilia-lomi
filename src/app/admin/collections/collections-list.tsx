@@ -28,6 +28,12 @@ type ImageDraft = {
 
 type SaveAction = (formData: FormData) => Promise<AdminMutationResult>;
 type DeleteAction = (formData: FormData) => Promise<AdminMutationResult>;
+type SuccessfulMutation = Extract<AdminMutationResult, { ok: true }>;
+
+type CleanupWarning = {
+  collectionId: string;
+  imagePaths: string[];
+};
 
 export function CollectionsResourceList({
   rows,
@@ -43,7 +49,9 @@ export function CollectionsResourceList({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftId, setDraftId] = useState("");
   const [restoreFocusElement, setRestoreFocusElement] = useState<HTMLElement | null>(null);
+  const [cleanupWarning, setCleanupWarning] = useState<CleanupWarning | null>(null);
   const pendingImagesRef = useRef<ImageDraft[]>([]);
+  const uploadInFlightRef = useRef(false);
   const editingItem = rows.find((row) => row.id === editingId);
 
   const openCreate = (trigger: HTMLElement) => {
@@ -62,33 +70,74 @@ export function CollectionsResourceList({
     setOpen(true);
   };
 
-  const discardPendingImage = (image: ImageDraft, collectionId: string) => {
-    pendingImagesRef.current = pendingImagesRef.current.filter((pending) => pending.path !== image.path);
-    void fetch("/api/admin/collection-image", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ collectionId, path: image.path, provider: image.provider }),
-      keepalive: true,
-    });
+  const deletePendingImage = async (image: ImageDraft, collectionId: string) => {
+    try {
+      const response = await fetch("/api/admin/collection-image", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collectionId, path: image.path, provider: image.provider }),
+        keepalive: true,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
+
+  const cleanupPendingImages = async (collectionId: string, pending: ImageDraft[]) => {
+    const results = await Promise.all(pending.map((image) => deletePendingImage(image, collectionId)));
+    return pending.filter((_, index) => !results[index]);
+  };
+
+  const showCleanupWarning = (collectionId: string, paths: Array<string | undefined>) => {
+    const imagePaths = Array.from(new Set(paths.filter((path): path is string => Boolean(path))));
+    setCleanupWarning(imagePaths.length ? { collectionId, imagePaths } : null);
+  };
+
+  const discardPendingImage = async (image: ImageDraft, collectionId: string) => {
+    const deleted = await deletePendingImage(image, collectionId);
+    if (deleted) {
+      pendingImagesRef.current = pendingImagesRef.current.filter((pending) => pending.path !== image.path);
+      return;
+    }
+    showCleanupWarning(collectionId, [image.path]);
   };
 
   const close = () => {
-    const pending = pendingImagesRef.current.splice(0);
-    for (const image of pending) {
-      void fetch("/api/admin/collection-image", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ collectionId: draftId, path: image.path, provider: image.provider }),
-        keepalive: true,
-      });
-    }
+    if (uploadInFlightRef.current) return;
+    const pending = [...pendingImagesRef.current];
+    const collectionId = draftId;
+    pendingImagesRef.current = [];
     setOpen(false);
+    void cleanupPendingImages(collectionId, pending).then((failed) => {
+      showCleanupWarning(collectionId, failed.map((image) => image.path));
+    });
   };
 
-  const saved = () => {
+  const saved = (result: SuccessfulMutation, savedImagePath: string) => {
+    const collectionId = result.id;
+    const pending = pendingImagesRef.current.filter((image) => image.path !== savedImagePath);
     pendingImagesRef.current = [];
     setOpen(false);
     router.refresh();
+    void cleanupPendingImages(collectionId, pending).then((failed) => {
+      showCleanupWarning(collectionId, [
+        result.cleanupDeferred ? result.cleanupImagePath : undefined,
+        ...failed.map((image) => image.path),
+      ]);
+    });
+  };
+
+  const deleted = async (result: SuccessfulMutation, collectionId: string) => {
+    const pending = [...pendingImagesRef.current];
+    const failed = await cleanupPendingImages(collectionId, pending);
+    pendingImagesRef.current = [];
+    setOpen(false);
+    router.refresh();
+    showCleanupWarning(result.id, [
+      result.cleanupDeferred ? result.cleanupImagePath : undefined,
+      ...failed.map((image) => image.path),
+    ]);
   };
 
   const columns = [
@@ -122,6 +171,16 @@ export function CollectionsResourceList({
 
   return (
     <>
+      {cleanupWarning ? (
+        <div role="alert" className="mb-4 flex items-start justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p>
+            Zmiana kolekcji powiodła się, ale prywatnego obrazu nie udało się usunąć. Sprzątnięcie wymaga interwencji administratora. ID kolekcji: <code className="font-mono">{cleanupWarning.collectionId}</code>. Ścieżka obrazu: {cleanupWarning.imagePaths.map((path) => <code key={path} className="ml-1 font-mono">{path}</code>)}
+          </p>
+          <button type="button" className="shrink-0 font-medium underline" onClick={() => setCleanupWarning(null)}>
+            Zamknij komunikat
+          </button>
+        </div>
+      ) : null}
       <AdminResourceList
         title="Kolekcje"
         description="Twórz kolekcje i przypisuj do nich produkty w edytorze produktu."
@@ -173,8 +232,10 @@ export function CollectionsResourceList({
           deleteAction={deleteAction}
           onClose={close}
           onSaved={saved}
+          onDeleted={deleted}
           onImageUploaded={(image) => pendingImagesRef.current.push(image)}
           onImageDiscarded={discardPendingImage}
+          onImageUploadStateChange={(inFlight) => { uploadInFlightRef.current = inFlight; }}
         />
       </AdminDrawer>
     </>
@@ -188,17 +249,21 @@ function CollectionEditorForm({
   deleteAction,
   onClose,
   onSaved,
+  onDeleted,
   onImageUploaded,
   onImageDiscarded,
+  onImageUploadStateChange,
 }: {
   id: string;
   item?: AdminCollectionListRow;
   saveAction: SaveAction;
   deleteAction: DeleteAction;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (result: SuccessfulMutation, savedImagePath: string) => void;
+  onDeleted: (result: SuccessfulMutation, collectionId: string) => Promise<void>;
   onImageUploaded: (image: ImageDraft) => void;
-  onImageDiscarded: (image: ImageDraft, collectionId: string) => void;
+  onImageDiscarded: (image: ImageDraft, collectionId: string) => Promise<void>;
+  onImageUploadStateChange: (inFlight: boolean) => void;
 }) {
   const [name, setName] = useState(item?.name ?? "");
   const [slug, setSlug] = useState(item?.slug ?? "");
@@ -222,6 +287,7 @@ function CollectionEditorForm({
   const uploadImage = async (file: File) => {
     setUploadError(null);
     setIsUploading(true);
+    onImageUploadStateChange(true);
     const formData = new FormData();
     formData.set("collectionId", id);
     formData.set("file", file);
@@ -232,19 +298,20 @@ function CollectionEditorForm({
         setUploadError(body.error ? getAdminErrorMessage(body.error as AdminErrorCode, "pl") : "Nie udało się przesłać obrazu.");
         return;
       }
-      if (image && image.path !== originalImagePath) onImageDiscarded(image, id);
+      if (image && image.path !== originalImagePath) await onImageDiscarded(image, id);
       setImage(body.image);
       onImageUploaded(body.image);
     } catch {
       setUploadError("Nie udało się przesłać obrazu. Sprawdź połączenie i spróbuj ponownie.");
     } finally {
       setIsUploading(false);
+      onImageUploadStateChange(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const clearImage = () => {
-    if (image && image.path !== originalImagePath) onImageDiscarded(image, id);
+    if (image && image.path !== originalImagePath) void onImageDiscarded(image, id);
     setImage(null);
     setUploadError(null);
   };
@@ -259,7 +326,7 @@ function CollectionEditorForm({
         setErrors(result.errors);
         return;
       }
-      onSaved();
+      onSaved(result, String(formData.get("imagePath") ?? ""));
     });
   };
 
@@ -273,7 +340,7 @@ function CollectionEditorForm({
         setErrors(result.errors);
         return;
       }
-      onSaved();
+      await onDeleted(result, item.id);
     });
   };
 
@@ -343,6 +410,7 @@ function CollectionEditorForm({
               <ImagePlus className="size-4" aria-hidden />{isUploading ? "Przesyłanie…" : image ? "Zmień obraz" : "Dodaj obraz"}
             </Button>
             {uploadError ? <p role="alert" className="text-sm text-red-800">{uploadError}</p> : null}
+            {isUploading ? <p aria-live="polite" className="text-sm text-[var(--color-muted)]">Poczekaj na zakończenie przesyłania, zanim zamkniesz panel.</p> : null}
           </section>
 
           {item ? (

@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +9,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { CategoriesResourceList } from "./categories/categories-list";
+import { CollectionsResourceList } from "./collections/collections-list";
 import { PagesResourceList } from "./pages/pages-list";
 import { ProductsResourceList } from "./products/products-list";
 import { TagsResourceList } from "./tags/tags-list";
@@ -185,6 +186,57 @@ describe("admin resource list adapters", () => {
     expect(deleteAction).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("alert")).toHaveTextContent("jej plik obrazu nie został usunięty");
     expect(screen.getByRole("alert")).toHaveTextContent("category-1");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it("cleans an unsaved collection image before finishing collection deletion", async () => {
+    const user = userEvent.setup();
+    const collectionId = "11111111-1111-4111-8111-111111111111";
+    const imagePath = `collections/${collectionId}/image/22222222-2222-4222-8222-222222222222-cover.png`;
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => init?.method === "POST"
+      ? {
+          ok: true,
+          json: async () => ({ image: {
+            path: imagePath,
+            provider: "local",
+            filename: "cover.png",
+            contentType: "image/png",
+            sizeBytes: 16,
+            url: "/api/admin/collection-image?pending=1",
+          } }),
+        }
+      : { ok: true });
+    const deleteAction = vi.fn().mockResolvedValue({ ok: true, id: collectionId });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("confirm", vi.fn(() => true));
+
+    render(
+      <CollectionsResourceList
+        rows={[{
+          id: collectionId,
+          name: "Forest stories",
+          slug: "forest-stories",
+          sortOrder: 100,
+          createdAt: "2026-10-12T00:00:00.000Z",
+          updatedAt: "2026-10-12T00:00:00.000Z",
+          productCount: 0,
+        }]}
+        saveAction={vi.fn()}
+        deleteAction={deleteAction}
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "Edytuj kolekcję Forest stories" })[0]);
+    await user.upload(screen.getByLabelText("Wybierz obraz kolekcji"), new File(["image"], "cover.png", { type: "image/png" }));
+    await screen.findByRole("button", { name: "Usuń obraz kolekcji" });
+    await user.click(screen.getByRole("button", { name: "Usuń kolekcję" }));
+
+    await waitFor(() => expect(deleteAction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/collection-image", expect.objectContaining({
+      method: "DELETE",
+      body: JSON.stringify({ collectionId, path: imagePath, provider: "local" }),
+    })));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     vi.unstubAllGlobals();
   });

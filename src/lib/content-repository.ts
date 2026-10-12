@@ -16,6 +16,7 @@ import type {
   Product,
   ProductAsset,
   ProductTranslation,
+  CollectionImageStorageProvider,
   PremiumCode,
   StaticPageRecord,
   Tag,
@@ -121,6 +122,58 @@ export const getPublicProductDetailSnapshotForRequest = cache(
 export const getAdminContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: true, includeCollections: true }),
 );
+
+export async function getCollectionImageForRequest(collectionId: string): Promise<{
+  imagePath?: string;
+  imageStorageProvider?: CollectionImageStorageProvider;
+  imageContentType?: string;
+} | null> {
+  if (getBackendMode() === "local") {
+    const { getContentSnapshot } = await import("./content-store");
+    const collection = getContentSnapshot().collections.find((item) => item.id === collectionId);
+    return collection
+      ? {
+          imagePath: collection.imagePath,
+          imageStorageProvider: collection.imageStorageProvider,
+          imageContentType: collection.imageContentType,
+        }
+      : null;
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("collections")
+    .select("image_path,image_storage_provider,image_content_type")
+    .eq("id", collectionId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Supabase collection image read failed: ${error.message}`);
+  if (!data) return null;
+
+  const provider = data.image_storage_provider;
+  return {
+    imagePath: optionalString(data.image_path),
+    imageStorageProvider: provider === "local" || provider === "supabase" || provider === "r2" ? provider : undefined,
+    imageContentType: optionalString(data.image_content_type),
+  };
+}
+
+export async function isCollectionImageReferencedForRequest(storagePath: string): Promise<boolean> {
+  if (getBackendMode() === "local") {
+    const { getContentSnapshot } = await import("./content-store");
+    return getContentSnapshot().collections.some((collection) => collection.imagePath === storagePath);
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("collections")
+    .select("id")
+    .eq("image_path", storagePath)
+    .limit(1);
+
+  if (error) throw new Error(`Supabase collection image reference check failed: ${error.message}`);
+  return Boolean(data?.length);
+}
 
 export const getCatalogSettingsForRequest = cache(async (): Promise<CatalogSettings> => {
   if (getBackendMode() === "local") {
