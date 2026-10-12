@@ -8,14 +8,6 @@ import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const contentPath = path.join(process.cwd(), "data", "lamilialomi-content.local.json");
-const fixtureCoverFiles = [
-  "issue50-quiet.svg",
-  "issue50-garden.svg",
-  "issue50-little-star.svg",
-  "issue50-forest-friends.svg",
-] as const;
-const fixtureCoverDirectory = path.join(process.cwd(), "tests", "e2e", "fixtures", "issue-50");
-const publicCoverDirectory = path.join(process.cwd(), "public", "assets", "covers");
 const productSelections = [
   { label: "Favorite Coloring Books, pozycja 1", query: "Moon Garden", title: "Moon Garden Coloring Book", id: "11111111-1111-4111-8111-111111111111" },
   { label: "Favorite Coloring Books, pozycja 2", query: "Mindful Mandalas", title: "Mindful Mandalas for Adults", id: "22222222-2222-4222-8222-222222222222" },
@@ -36,10 +28,6 @@ test("About settings save six unique books and render responsively from current 
 
   const releaseContentStoreLock = await acquireLocalContentStoreLock();
   const originalContent = fs.existsSync(contentPath) ? fs.readFileSync(contentPath) : undefined;
-  const originalFixtureCovers = new Map(fixtureCoverFiles.map((fileName) => {
-    const publicPath = path.join(publicCoverDirectory, fileName);
-    return [publicPath, fs.existsSync(publicPath) ? fs.readFileSync(publicPath) : undefined] as const;
-  }));
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
   const serverErrors: string[] = [];
@@ -71,28 +59,24 @@ test("About settings save six unique books and render responsively from current 
         slug: "issue-50-garden-whispers",
         title: "Garden Whispers Coloring Book",
         description: "A peaceful garden coloring collection.",
-        coverFileName: "issue50-garden.svg",
       }),
       createAboutFixtureProduct(pictureTemplate, {
         id: "66666666-6666-4666-8666-666666666666",
         slug: "issue-50-little-star",
         title: "The Little Star Picture Book",
         description: "A tender story about a curious star.",
-        coverFileName: "issue50-little-star.svg",
       }),
       createAboutFixtureProduct(pictureTemplate, {
         id: "77777777-7777-4777-8777-777777777777",
         slug: "issue-50-forest-friends",
         title: "Forest Friends Picture Book",
         description: "A gentle woodland adventure for little readers.",
-        coverFileName: "issue50-forest-friends.svg",
       }),
       createAboutFixtureProduct(coloringTemplate, {
         id: "88888888-8888-4888-8888-888888888888",
         slug: "issue-50-quiet-patterns",
         title: "Quiet Patterns Coloring Book",
         description: "A calm collection of playful patterns to color.",
-        coverFileName: "issue50-quiet.svg",
       }),
     );
     content.aboutPageSettings = {
@@ -101,10 +85,6 @@ test("About settings save six unique books and render responsively from current 
       favoritePictureBookIds: ["", "", ""],
     };
     fs.mkdirSync(path.dirname(contentPath), { recursive: true });
-    fs.mkdirSync(publicCoverDirectory, { recursive: true });
-    for (const fileName of fixtureCoverFiles) {
-      fs.copyFileSync(path.join(fixtureCoverDirectory, fileName), path.join(publicCoverDirectory, fileName));
-    }
     fs.writeFileSync(contentPath, `${JSON.stringify(content, null, 2)}\n`, "utf8");
 
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -269,11 +249,6 @@ test("About settings save six unique books and render responsively from current 
     try {
       if (originalContent) fs.writeFileSync(contentPath, originalContent);
       else if (fs.existsSync(contentPath)) fs.rmSync(contentPath);
-
-      for (const [publicPath, originalContents] of originalFixtureCovers) {
-        if (originalContents) fs.writeFileSync(publicPath, originalContents);
-        else if (fs.existsSync(publicPath)) fs.rmSync(publicPath);
-      }
     } finally {
       releaseContentStoreLock();
     }
@@ -287,7 +262,6 @@ function createAboutFixtureProduct(
     slug: string;
     title: string;
     description: string;
-    coverFileName: string;
   },
 ): Product {
   const translation = template.translations.find((entry) => entry.locale === "en") ?? template.translations[0];
@@ -317,11 +291,8 @@ function createAboutFixtureProduct(
       ...cover,
       id: coverAssetId,
       productId: fixture.id,
-      path: `/assets/covers/${fixture.coverFileName}`,
       storagePath: undefined,
       storageProvider: undefined,
-      filename: fixture.coverFileName,
-      contentType: "image/svg+xml",
       title: `${fixture.title} cover`,
       isPublic: true,
       isActive: true,
