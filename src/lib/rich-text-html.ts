@@ -84,6 +84,7 @@ export function importRichTextHtml(source: string): RichTextHtmlImport {
     },
     () => addWarning("unsupported-element", "Treść bloku <style> zostanie usunięta podczas konwersji."),
     () => addWarning("invalid-markup", "Nie można odczytać końca komentarza HTML. Dalsza część źródła nie zostanie przekonwertowana."),
+    () => addWarning("invalid-markup", "Błędnie zapisany fragment HTML zostanie pokazany jako tekst podczas konwersji."),
   );
   const parsed = new DOMParser().parseFromString(parserSafeSource, "text/html");
   if (parsed.querySelector("parsererror")) {
@@ -280,6 +281,7 @@ function removeFetchableAttributes(
   onRemovedAttribute: (tag: string, attribute: string) => void,
   onRemovedStyleContent: () => void,
   onMalformedComment: () => void,
+  onMalformedTag: () => void,
 ): string {
   const lowerSource = source.toLowerCase();
   let result = "";
@@ -307,8 +309,10 @@ function removeFetchableAttributes(
 
     const tagEnd = findHtmlTagEnd(source, tagStart);
     if (tagEnd < 0) {
-      result += source.slice(tagStart);
-      break;
+      onMalformedTag();
+      result += "&lt;";
+      cursor = tagStart + 1;
+      continue;
     }
 
     const rawTag = source.slice(tagStart, tagEnd + 1);
@@ -316,7 +320,8 @@ function removeFetchableAttributes(
     if (!tagMatch || /^<\s*\//.test(rawTag)) {
       const nestedTagStart = source.indexOf("<", tagStart + 1);
       if (nestedTagStart >= 0 && nestedTagStart <= tagEnd) {
-        result += source.slice(tagStart, nestedTagStart);
+        onMalformedTag();
+        result += "&lt;" + source.slice(tagStart + 1, nestedTagStart);
         cursor = nestedTagStart;
         continue;
       }
@@ -417,14 +422,19 @@ function stripFetchableAttributesFromTag(
 
 function findHtmlTagEnd(source: string, start: number): number {
   let quote: "\"" | "'" | null = null;
+  let expectsAttributeValue = false;
   for (let index = start + 1; index < source.length; index += 1) {
     const character = source[index];
     if (quote) {
       if (character === quote) quote = null;
-    } else if (character === "\"" || character === "'") {
-      quote = character;
     } else if (character === ">") {
       return index;
+    } else if (expectsAttributeValue) {
+      if (/\s/.test(character)) continue;
+      expectsAttributeValue = false;
+      if (character === "\"" || character === "'") quote = character;
+    } else if (character === "=") {
+      expectsAttributeValue = true;
     }
   }
   return -1;

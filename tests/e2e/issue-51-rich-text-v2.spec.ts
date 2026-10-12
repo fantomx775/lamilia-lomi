@@ -72,13 +72,14 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
     const productField = page.locator('#product-editor-form input[name="longDescription"]');
     const originalProductValue = await productField.inputValue();
-    const productHtml = `<!doctype html><html><head><title>Product source title</title><script>window.__issue51Executed = true</script><style>p { color: red }</style></head><body><h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><img src="https://rich-text-resource.invalid/tracker.png" alt="Product diagram"><!--><img src="https://rich-text-resource.invalid/malformed-comment.png" alt="Recovered after comment"><!-- --!><img src="https://rich-text-resource.invalid/bang-comment.png" alt="Recovered after bang comment"><!-- later normal terminator --><<img src="https://rich-text-resource.invalid/nested-tag.png" alt="Recovered after nested tag"><iframe src="https://rich-text-resource.invalid/frame"></iframe><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><p onclick="window.__issue51Executed = true">Safe paragraph.</p></body></html>`;
+    const productHtml = `<!doctype html><html><head><title>Product source title</title><script>window.__issue51Executed = true</script><style>p { color: red }</style></head><body><h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><img src="https://rich-text-resource.invalid/tracker.png" alt="Product diagram"><!--><img src="https://rich-text-resource.invalid/malformed-comment.png" alt="Recovered after comment"><!-- --!><img src="https://rich-text-resource.invalid/bang-comment.png" alt="Recovered after bang comment"><!-- later normal terminator --><<img src="https://rich-text-resource.invalid/nested-tag.png" alt="Recovered after nested tag"><img foo" src=https://rich-text-resource.invalid/malformed-attribute-name.png alt="Recovered after malformed attribute"><"<img src=https://rich-text-resource.invalid/nested-quoted-opener.png alt="Recovered after nested quote"><iframe src="https://rich-text-resource.invalid/frame"></iframe><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><p onclick="window.__issue51Executed = true">Safe paragraph.</p></body></html>`;
     await page.getByRole("button", { name: "HTML" }).click();
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(productHtml);
     await page.getByRole("button", { name: "Rich Text" }).click();
     await expect(page.getByText("Przed konwersją sprawdź obsługiwane formatowanie:")).toBeVisible();
     await expect(page.getByText("Zawartość sekcji <head> nie jest obsługiwana i zostanie usunięta podczas konwersji.", { exact: true })).toBeVisible();
     await expect(page.getByText("Treść bloku <style> zostanie usunięta podczas konwersji.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Błędnie zapisany fragment HTML zostanie pokazany jako tekst podczas konwersji.", { exact: true })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue(productHtml);
     await expect(productField).toHaveValue(originalProductValue);
     expect(await page.evaluate(() => (window as Window & { __issue51Executed?: boolean }).__issue51Executed)).toBe(false);
@@ -96,6 +97,8 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await expect(productEditor).toContainText("Recovered after comment");
     await expect(productEditor).toContainText("Recovered after bang comment");
     await expect(productEditor).toContainText("Recovered after nested tag");
+    await expect(productEditor).toContainText("Recovered after malformed attribute");
+    await expect(productEditor).toContainText("Recovered after nested quote");
     await expect(productEditor.locator("u")).toHaveText("Underlined product copy");
     await expect(productEditor.locator("blockquote")).toContainText("Product quotation.");
     await expect(productEditor.locator("hr")).toHaveCount(1);

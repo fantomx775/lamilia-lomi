@@ -119,9 +119,44 @@ describe("rich text HTML import and export", () => {
       code: "unsupported-attribute",
       message: "Atrybut „src” w elemencie <img> zostanie usunięty.",
     });
+    expect(imported.warnings).toContainEqual({
+      code: "invalid-markup",
+      message: "Błędnie zapisany fragment HTML zostanie pokazany jako tekst podczas konwersji.",
+    });
     expect(richTextDocumentToHtml(imported.document)).toBe(
       "<p>&lt;</p><p>Recovered nested image</p><p>Keep this paragraph</p>",
     );
+    expect(richTextDocumentToHtml(imported.document)).not.toContain("rich-text-resource.invalid");
+  });
+
+  it.each([
+    {
+      description: "a quote in an attribute name",
+      source: '<img foo" src=https://rich-text-resource.invalid/malformed-attribute-name.png alt="Recovered malformed attribute"><p>Keep this paragraph</p>',
+      expectedHtml: "<p>Recovered malformed attribute</p><p>Keep this paragraph</p>",
+      malformedTagWarning: false,
+    },
+    {
+      description: "a quote before a nested tag opener",
+      source: '<"<img src=https://rich-text-resource.invalid/nested-quoted-opener.png alt="Recovered nested quote"><p>Keep this paragraph</p>',
+      expectedHtml: '<p>&lt;"</p><p>Recovered nested quote</p><p>Keep this paragraph</p>',
+      malformedTagWarning: true,
+    },
+  ])("strips resource attributes after $description", ({ source, expectedHtml, malformedTagWarning }) => {
+    const imported = importRichTextHtml(source);
+
+    expect(imported.canConvert).toBe(true);
+    expect(imported.warnings).toContainEqual({
+      code: "unsupported-attribute",
+      message: "Atrybut „src” w elemencie <img> zostanie usunięty.",
+    });
+    if (malformedTagWarning) {
+      expect(imported.warnings).toContainEqual({
+        code: "invalid-markup",
+        message: "Błędnie zapisany fragment HTML zostanie pokazany jako tekst podczas konwersji.",
+      });
+    }
+    expect(richTextDocumentToHtml(imported.document)).toBe(expectedHtml);
     expect(richTextDocumentToHtml(imported.document)).not.toContain("rich-text-resource.invalid");
   });
 
