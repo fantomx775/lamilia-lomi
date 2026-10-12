@@ -98,11 +98,7 @@ test("manages collections, assigns products, and preserves products when a colle
   });
 
   let collectionCreated = false;
-  let productCreated = false;
   let collectionDeleted = false;
-  let productDeleted = false;
-  let overflowProductCreated = false;
-  let overflowProductDeleted = false;
   let createdCollectionId = "";
   const collectionPng = await sharp({
     create: { width: 1, height: 1, channels: 3, background: { r: 40, g: 70, b: 90 } },
@@ -182,7 +178,6 @@ test("manages collections, assigns products, and preserves products when a colle
     const productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
     await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     await expectProductSaveConfirmation(page);
-    productCreated = true;
     const productPath = `/admin/products/${productId}`;
     await page.goto(productPath);
     await expect(page.getByLabel("Kolekcja")).toHaveValue(createdCollectionId);
@@ -198,7 +193,6 @@ test("manages collections, assigns products, and preserves products when a colle
     await expect(page.getByLabel("Kolekcja")).toHaveValue(createdCollectionId);
 
     const overflowTags = project === "chromium" ? appendOverflowTags(project) : [];
-    let overflowProductPath = "";
     if (project === "chromium") {
       await page.goto("/admin/products/new");
       await page.getByLabel("Tytuł").fill(overflowProduct);
@@ -213,9 +207,7 @@ test("manages collections, assigns products, and preserves products when a colle
       const overflowProductId = await page.locator('#product-editor-form input[name="id"]').inputValue();
       await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
       await expectProductSaveConfirmation(page);
-      overflowProductCreated = true;
-      overflowProductPath = `/admin/products/${overflowProductId}`;
-      await page.goto(overflowProductPath);
+      await page.goto(`/admin/products/${overflowProductId}`);
       await expect(page.getByLabel(overflowTags[49].name, { exact: true })).toBeChecked();
     }
 
@@ -358,24 +350,15 @@ test("manages collections, assigns products, and preserves products when a colle
     collectionDeleted = true;
     await expect(page.getByRole("button", { name: `Edytuj kolekcję ${collection}` })).toHaveCount(0);
     await page.goto(productPath);
+    await expect(page.getByLabel("Tytuł")).toHaveValue(product);
     await expect(page.getByLabel("Kolekcja")).toHaveValue("");
     await expect(page.getByLabel("Adres produktu")).toHaveValue(productAddress);
-
-    await deleteProduct(page, product);
-    productDeleted = true;
-    if (overflowProductPath) {
-      await page.goto(overflowProductPath);
-      await deleteProduct(page, overflowProduct);
-      overflowProductDeleted = true;
-    }
   } finally {
     if (collectionCreated && !collectionDeleted) {
       for (const collectionNameForCleanup of collectionNamesForCleanup) {
         await cleanupCollection(page, collectionNameForCleanup).catch(() => undefined);
       }
     }
-    if (productCreated && !productDeleted) await cleanupProduct(page, product).catch(() => undefined);
-    if (overflowProductCreated && !overflowProductDeleted) await cleanupProduct(page, overflowProduct).catch(() => undefined);
     await testInfo.attach("issue-49-browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify({ consoleErrors, pageErrors, failedRequests }, null, 2)),
       contentType: "application/json",
@@ -459,6 +442,7 @@ async function deleteProduct(page: Page, name: string) {
 }
 
 async function withAcceptedConfirmation(page: Page, action: () => Promise<void>) {
+  const firstDialog = page.waitForEvent("dialog", { timeout: 5_000 });
   let dialogCount = 0;
   let dialogOutcome: Promise<void> | undefined;
   const handleDialog = (dialog: import("@playwright/test").Dialog) => {
@@ -468,7 +452,7 @@ async function withAcceptedConfirmation(page: Page, action: () => Promise<void>)
 
   page.on("dialog", handleDialog);
   try {
-    await action();
+    await Promise.all([firstDialog, action()]);
     expect(dialogCount).toBe(1);
     if (!dialogOutcome) throw new Error("The confirmation dialog was not handled.");
     await dialogOutcome;
