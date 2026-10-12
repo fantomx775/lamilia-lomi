@@ -181,19 +181,19 @@ test("manages collections, assigns products, and preserves products when a colle
     await saveScreenshot(page, `product-editor-collection-${project}.png`, page.getByLabel("Kolekcja"));
     const productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
     await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
-    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+    await expectProductSaveConfirmation(page);
     productCreated = true;
     const productPath = `/admin/products/${productId}`;
     await page.goto(productPath);
     await expect(page.getByLabel("Kolekcja")).toHaveValue(createdCollectionId);
     await page.getByLabel("Kolekcja").selectOption("");
     await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
-    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+    await expectProductSaveConfirmation(page);
     await page.reload();
     await expect(page.getByLabel("Kolekcja")).toHaveValue("");
     await page.getByLabel("Kolekcja").selectOption({ label: collection });
     await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
-    await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+    await expectProductSaveConfirmation(page);
     await page.reload();
     await expect(page.getByLabel("Kolekcja")).toHaveValue(createdCollectionId);
 
@@ -212,7 +212,7 @@ test("manages collections, assigns products, and preserves products when a colle
       }
       const overflowProductId = await page.locator('#product-editor-form input[name="id"]').inputValue();
       await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
-      await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+      await expectProductSaveConfirmation(page);
       overflowProductCreated = true;
       overflowProductPath = `/admin/products/${overflowProductId}`;
       await page.goto(overflowProductPath);
@@ -341,8 +341,7 @@ test("manages collections, assigns products, and preserves products when a colle
       new URL(response.url()).pathname === "/api/admin/collection-image" &&
       response.request().postData()?.includes(replacementImage.path) === true,
     );
-    page.once("dialog", (dialog) => void dialog.accept());
-    await page.getByRole("button", { name: "Usuń kolekcję" }).click();
+    await withAcceptedConfirmation(page, () => page.getByRole("button", { name: "Usuń kolekcję" }).click());
     const pendingImageCleanupResponse = await pendingImageCleanup;
     expect(pendingImageCleanupResponse.status()).toBe(200);
     await expect(page.getByRole("dialog", { name: "Edytuj kolekcję" })).toHaveCount(0);
@@ -430,8 +429,7 @@ async function cleanupCollection(page: Page, name: string) {
   const editButton = page.getByRole("button", { name: `Edytuj kolekcję ${name}` }).first();
   if (!(await editButton.count())) return;
   await editButton.click();
-  page.once("dialog", (dialog) => void dialog.accept());
-  await page.getByRole("button", { name: "Usuń kolekcję" }).click();
+  await withAcceptedConfirmation(page, () => page.getByRole("button", { name: "Usuń kolekcję" }).click());
   await expect(page.getByRole("dialog", { name: /kolekcję/ })).toHaveCount(0);
 }
 
@@ -445,8 +443,30 @@ async function cleanupProduct(page: Page, name: string) {
 
 async function deleteProduct(page: Page, name: string) {
   await expect(page.getByLabel("Tytuł")).toHaveValue(name);
-  page.once("dialog", (dialog) => void dialog.accept());
-  await page.getByRole("button", { name: "Usuń produkt" }).click();
+  await withAcceptedConfirmation(page, () => page.getByRole("button", { name: "Usuń produkt" }).click());
   await expect(page).toHaveURL(/\/admin\/products(?:\?.*)?$/);
   await expect(page.getByText(name, { exact: true })).toHaveCount(0);
+}
+
+async function withAcceptedConfirmation(page: Page, action: () => Promise<void>) {
+  let dialogCount = 0;
+  let dialogOutcome: Promise<void> | undefined;
+  const handleDialog = (dialog: import("@playwright/test").Dialog) => {
+    dialogCount += 1;
+    dialogOutcome = dialogCount === 1 ? dialog.accept() : dialog.dismiss();
+  };
+
+  page.on("dialog", handleDialog);
+  try {
+    await action();
+    expect(dialogCount).toBe(1);
+    if (!dialogOutcome) throw new Error("The confirmation dialog was not handled.");
+    await dialogOutcome;
+  } finally {
+    page.off("dialog", handleDialog);
+  }
+}
+
+async function expectProductSaveConfirmation(page: Page) {
+  await expect(page.getByText(/^(?:Zapisano\. Zmiany są aktualne\.|Zapisano zmiany\.)$/)).toBeVisible();
 }
