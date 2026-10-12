@@ -91,9 +91,13 @@ describe("rich text HTML import and export", () => {
     });
   });
 
-  it("strips resource attributes after an abruptly closed HTML comment", () => {
+  it.each([
+    { comment: "<!-->", description: "abruptly closed comment" },
+    { comment: "<!--->", description: "short abruptly closed comment" },
+    { comment: "<!-- --!>", description: "comment closed with an exclamation mark" },
+  ])("strips resource attributes after a $description", ({ comment }) => {
     const imported = importRichTextHtml(
-      '<!--><img src="https://rich-text-resource.invalid/malformed-comment.png" alt="Recovered image"><p>Keep this paragraph</p>',
+      `${comment}<img src="https://rich-text-resource.invalid/malformed-comment.png" alt="Recovered image"><p>Keep this paragraph</p>`,
     );
 
     expect(imported.canConvert).toBe(true);

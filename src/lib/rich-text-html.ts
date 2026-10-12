@@ -429,6 +429,8 @@ function findHtmlCommentEnd(source: string, start: number): number {
   if (source[start + 4] === "-" && source[start + 5] === ">") return start + 5;
 
   const commentEnd = source.indexOf("-->", start + 4);
+  const bangCommentEnd = source.indexOf("--!>", start + 4);
+  if (bangCommentEnd >= 0 && (commentEnd < 0 || bangCommentEnd < commentEnd)) return bangCommentEnd + 3;
   return commentEnd < 0 ? -1 : commentEnd + 2;
 }
 
