@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(17);
+SELECT plan(18);
 
 SELECT ok(
   (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.collections'::regclass),
@@ -109,6 +109,35 @@ SELECT is(
   (SELECT collection_id FROM public.products WHERE id = 'cccccccc-4999-4999-8999-cccccccccccc'),
   'dddddddd-4999-4999-8999-dddddddddddd'::uuid,
   'the product-save RPC persists collection_id'
+);
+RESET ROLE;
+INSERT INTO public.premium_codes (id, product_id, code, active)
+VALUES (
+  'ffffffff-4999-4999-8999-ffffffffffff',
+  'cccccccc-4999-4999-8999-cccccccccccc',
+  'ISSUE-49-LATE-BATCH',
+  true
+);
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claim.sub = 'aaaaaaaa-4999-4999-8999-aaaaaaaaaaaa';
+SELECT public.save_product(jsonb_build_object(
+  'id', 'cccccccc-4999-4999-8999-cccccccccccc',
+  'slug', 'issue-49-product',
+  'status', 'draft',
+  'audience', 'kids',
+  'productType', 'coloring-book',
+  'collectionId', 'dddddddd-4999-4999-8999-dddddddddddd',
+  'translations', '[]'::jsonb,
+  'categoryIds', '[]'::jsonb,
+  'tagIds', '[]'::jsonb,
+  'assets', '[]'::jsonb,
+  'amazonLinks', '[]'::jsonb,
+  'premiumCodes', '[]'::jsonb
+));
+SELECT is(
+  (SELECT count(*)::integer FROM public.premium_codes WHERE id = 'ffffffff-4999-4999-8999-ffffffffffff'),
+  1,
+  'product save preserves a premium-code batch added after its submitted snapshot'
 );
 SELECT public.save_product(jsonb_build_object(
   'id', 'cccccccc-4999-4999-8999-cccccccccccc',

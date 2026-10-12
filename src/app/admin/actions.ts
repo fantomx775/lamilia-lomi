@@ -149,7 +149,10 @@ export async function saveCollectionInlineAction(formData: FormData) {
 
 export async function deleteCollectionInlineAction(formData: FormData) {
   await assertAdmin();
-  const result = await executeAdminMutation("collection deletion", () => deleteCollectionForRequest(String(formData.get("id") ?? "")));
+  const result = await executeAdminMutation("collection deletion", () => deleteCollectionForRequest(
+    String(formData.get("id") ?? ""),
+    String(formData.get("expectedUpdatedAt") ?? ""),
+  ));
   revalidateContentPaths();
   return result;
 }

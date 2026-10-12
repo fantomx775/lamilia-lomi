@@ -498,6 +498,13 @@ export async function saveCollectionForRequest(formData: FormData): Promise<Admi
     const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
     const snapshot = await getAdminContentSnapshot();
     const existing = snapshot.collections.find((collection) => collection.id === stringField(formData, "id"));
+    const expectedUpdatedAt = stringField(formData, "expectedUpdatedAt");
+    if (
+      (existing && expectedUpdatedAt !== existing.updatedAt) ||
+      (!existing && expectedUpdatedAt)
+    ) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
+    }
     const collection = buildCollectionFromFormData(formData, snapshot, existing);
     const errors = validateCollectionDraft(collection, snapshot.collections, collection.id);
     if (errors.length) return { ok: false, errors };
@@ -536,7 +543,7 @@ export async function saveCollectionForRequest(formData: FormData): Promise<Admi
 
     assertUuidSet(collection.id);
     const supabase = await createClient();
-    await run(supabase.from("collections").upsert({
+    const collectionRow = {
       id: collection.id,
       name: collection.name,
       slug: collection.slug,
@@ -547,7 +554,20 @@ export async function saveCollectionForRequest(formData: FormData): Promise<Admi
       image_size_bytes: collection.imageSizeBytes ?? null,
       sort_order: collection.sortOrder,
       updated_at: collection.updatedAt,
-    }), "collection");
+    };
+    if (existing) {
+      const { data, error } = await supabase
+        .from("collections")
+        .update(collectionRow)
+        .eq("id", collection.id)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("id")
+        .maybeSingle();
+      if (error) throw new AdminDatabaseError("collection save", error);
+      if (!data) return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
+    } else {
+      await run(supabase.from("collections").insert(collectionRow), "collection");
+    }
 
     const cleanupDeferred = existing?.imagePath && existing.imagePath !== collection.imagePath && existing.imageStorageProvider
       ? !await cleanupCollectionImageIfUnreferenced(existing, collection.id, authorizationToken)
@@ -561,16 +581,22 @@ export async function saveCollectionForRequest(formData: FormData): Promise<Admi
   });
 }
 
-export async function deleteCollectionForRequest(collectionId: string): Promise<AdminMutationResult> {
+export async function deleteCollectionForRequest(
+  collectionId: string,
+  expectedUpdatedAt: string,
+): Promise<AdminMutationResult> {
   return runAdminMutation("collection deletion", async () => {
     const snapshot = await getAdminContentSnapshot();
     const existing = snapshot.collections.find((collection) => collection.id === collectionId);
     if (!existing) return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+    if (expectedUpdatedAt !== existing.updatedAt) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
+    }
 
     const backendMode = getBackendMode();
     const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
     if (backendMode === "local") {
-      const result = deleteCollection(collectionId);
+      const result = deleteCollection(collectionId, expectedUpdatedAt);
       if (result.ok && existing.imagePath && existing.imageStorageProvider) {
         const cleanupDeferred = !await cleanupCollectionImageIfUnreferenced(existing, collectionId);
         return {
@@ -583,7 +609,15 @@ export async function deleteCollectionForRequest(collectionId: string): Promise<
     }
 
     const supabase = await createClient();
-    await run(supabase.from("collections").delete().eq("id", collectionId), "collection deletion");
+    const { data, error } = await supabase
+      .from("collections")
+      .delete()
+      .eq("id", collectionId)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new AdminDatabaseError("collection deletion", error);
+    if (!data) return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
     const cleanupDeferred = existing.imagePath && existing.imageStorageProvider
       ? !await cleanupCollectionImageIfUnreferenced(existing, collectionId, authorizationToken)
       : false;

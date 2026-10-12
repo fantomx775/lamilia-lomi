@@ -224,6 +224,12 @@ export function buildCollectionFromFormData(
       ? rawProvider
       : undefined;
   const sizeValue = numberFromValue(textField(formData, "imageSizeBytes"), 0);
+  const now = Date.now();
+  const previousUpdatedAt = existing ? Date.parse(existing.updatedAt) : Number.NaN;
+  const nextUpdatedAt = Math.max(
+    now,
+    Number.isFinite(previousUpdatedAt) ? previousUpdatedAt + 1 : now,
+  );
 
   return {
     id,
@@ -236,13 +242,20 @@ export function buildCollectionFromFormData(
     imageSizeBytes: keepsExistingImage ? existing?.imageSizeBytes : sizeValue || undefined,
     sortOrder: intField(formData, "sortOrder", existing?.sortOrder ?? 100),
     createdAt: existing?.createdAt ?? new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    updatedAt: new Date(nextUpdatedAt).toISOString(),
   };
 }
 
 export function saveCollectionFromFormData(formData: FormData): AdminMutationResult {
   const snapshot = getContentSnapshot();
   const existing = snapshot.collections.find((collection) => collection.id === textField(formData, "id"));
+  const expectedUpdatedAt = textField(formData, "expectedUpdatedAt");
+  if (
+    (existing && expectedUpdatedAt !== existing.updatedAt) ||
+    (!existing && expectedUpdatedAt)
+  ) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
+  }
   const collection = buildCollectionFromFormData(formData, snapshot, existing);
   const errors = validateCollectionDraft(collection, snapshot.collections, collection.id);
 
@@ -255,10 +268,14 @@ export function saveCollectionFromFormData(formData: FormData): AdminMutationRes
   return { ok: true, id: collection.id };
 }
 
-export function deleteCollection(collectionId: string): AdminMutationResult {
+export function deleteCollection(collectionId: string, expectedUpdatedAt: string): AdminMutationResult {
   const snapshot = getContentSnapshot();
-  if (!snapshot.collections.some((collection) => collection.id === collectionId)) {
+  const existing = snapshot.collections.find((collection) => collection.id === collectionId);
+  if (!existing) {
     return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+  }
+  if (expectedUpdatedAt !== existing.updatedAt) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
   }
 
   saveContentSnapshot({

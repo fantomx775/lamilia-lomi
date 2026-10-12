@@ -177,8 +177,8 @@ function CompactBadgeList({ rowId, kind, labels }: { rowId: string; kind: string
           </button>
         ) : null}
       </div>
-      {hidden.length && expanded ? (
-        <ul id={detailsId} className="grid min-w-0 gap-1 text-xs text-[var(--color-muted)]" aria-label={`Pozostałe ${kind}`}>
+      {hidden.length ? (
+        <ul id={detailsId} hidden={!expanded} className="grid min-w-0 gap-1 text-xs text-[var(--color-muted)]" aria-label={`Pozostałe ${kind}`}>
           {hidden.map((label, index) => <li key={`${label}-${index}`} className="break-words">{label}</li>)}
         </ul>
       ) : null}

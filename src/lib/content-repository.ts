@@ -24,7 +24,7 @@ import type {
 } from "./types";
 
 type DbRow = Record<string, unknown>;
-const PREMIUM_CODE_PAGE_SIZE = 1_000;
+const POSTGREST_PAGE_SIZE = 1_000;
 
 export const getPublicContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: false }),
@@ -233,7 +233,9 @@ export async function getContentSnapshotForRequest(options: {
     premiumCodeRows,
     collectionRows,
   ] = await Promise.all([
-    selectRows(supabase, "products"),
+    options.includeCollections
+      ? selectRowsAfterId(supabase, "products")
+      : selectRows(supabase, "products"),
     selectRows(supabase, "product_translations"),
     selectRows(supabase, "product_categories"),
     selectRows(supabase, "product_tags"),
@@ -322,8 +324,8 @@ async function selectRowsAfterId(
       .select("*")
       .order("id", { ascending: true });
     const { data, error } = lastId
-      ? await orderedQuery.gt("id", lastId).limit(PREMIUM_CODE_PAGE_SIZE)
-      : await orderedQuery.limit(PREMIUM_CODE_PAGE_SIZE);
+      ? await orderedQuery.gt("id", lastId).limit(POSTGREST_PAGE_SIZE)
+      : await orderedQuery.limit(POSTGREST_PAGE_SIZE);
 
     if (error) {
       throw new Error(`Supabase ${table} read failed: ${error.message}`);
@@ -332,7 +334,7 @@ async function selectRowsAfterId(
     const page = (data ?? []) as DbRow[];
     rows.push(...page);
 
-    if (page.length < PREMIUM_CODE_PAGE_SIZE) {
+    if (page.length < POSTGREST_PAGE_SIZE) {
       return rows;
     }
 

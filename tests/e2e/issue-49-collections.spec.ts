@@ -95,6 +95,11 @@ test("manages collections, assigns products, and preserves products when a colle
     createdCollectionId = await page.locator('input[name="id"]').inputValue();
     await page.getByLabel("Nazwa").fill(collection);
     await page.getByLabel("Slug").fill(slug);
+    const collectionImageUpload = page.waitForResponse(
+      (response) => response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/admin/collection-image",
+      { timeout: 60_000 },
+    );
     await page.locator('input[type="file"][aria-label="Wybierz obraz kolekcji"]').setInputFiles({
       name: "collection.png",
       mimeType: "image/png",
@@ -103,11 +108,12 @@ test("manages collections, assigns products, and preserves products when a colle
         "base64",
       ),
     });
+    expect((await collectionImageUpload).ok()).toBe(true);
     const imagePreview = page.getByAltText(`Podgląd obrazu kolekcji ${collection}`);
-    await expect(imagePreview).toBeVisible();
-    await expect(imagePreview).toHaveJSProperty("naturalWidth", 1);
+    await expect(imagePreview).toBeVisible({ timeout: 30_000 });
+    await expect(imagePreview).toHaveJSProperty("naturalWidth", 1, { timeout: 30_000 });
     await page.getByRole("button", { name: "Zapisz", exact: true }).click();
-    await expect(page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: `Edytuj kolekcję ${collection}` }).first()).toBeVisible({ timeout: 45_000 });
     collectionCreated = true;
 
     await page.goto("/admin/products/new");

@@ -136,12 +136,38 @@ describe("admin resource list adapters", () => {
     expect(view.getAllByRole("button", { name: "Pokaż 1 kolejnych kategorii" })).toHaveLength(2);
 
     const expand = view.getAllByRole("button", { name: "Pokaż 1 kolejnych kategorii" })[0];
+    const detailsId = expand.getAttribute("aria-controls");
+    expect(detailsId).toBeTruthy();
+    expect(document.getElementById(detailsId!)).toHaveAttribute("hidden");
     expand.focus();
     await user.keyboard("{Enter}");
 
     expect(expand).toHaveAttribute("aria-expanded", "true");
-    expect(view.getByText("A very long category name")).toBeInTheDocument();
+    expect(document.getElementById(detailsId!)).not.toHaveAttribute("hidden");
+    expect(view.getAllByText("A very long category name")).toHaveLength(2);
     expect(view.getAllByText("Forest stories")).toHaveLength(2);
+  });
+
+  it("uses Polish product-count plural forms", () => {
+    const view = render(
+      <CollectionsResourceList
+        rows={[
+          { id: "count-22", name: "Collection 22", slug: "collection-22", sortOrder: 1, createdAt: "today", updatedAt: "today", productCount: 22 },
+          { id: "count-24", name: "Collection 24", slug: "collection-24", sortOrder: 2, createdAt: "today", updatedAt: "today", productCount: 24 },
+          { id: "count-25", name: "Collection 25", slug: "collection-25", sortOrder: 3, createdAt: "today", updatedAt: "today", productCount: 25 },
+          { id: "count-112", name: "Collection 112", slug: "collection-112", sortOrder: 4, createdAt: "today", updatedAt: "today", productCount: 112 },
+          { id: "count-122", name: "Collection 122", slug: "collection-122", sortOrder: 5, createdAt: "today", updatedAt: "today", productCount: 122 },
+        ]}
+        saveAction={vi.fn()}
+        deleteAction={vi.fn()}
+      />,
+    );
+
+    expect(view.getByText("22 produkty")).toBeInTheDocument();
+    expect(view.getByText("24 produkty")).toBeInTheDocument();
+    expect(view.getByText("25 produktów")).toBeInTheDocument();
+    expect(view.getByText("112 produktów")).toBeInTheDocument();
+    expect(view.getByText("122 produkty")).toBeInTheDocument();
   });
 
   it("opens category and user details as accessible drawers", async () => {
@@ -190,7 +216,7 @@ describe("admin resource list adapters", () => {
     vi.unstubAllGlobals();
   });
 
-  it("cleans an unsaved collection image before finishing collection deletion", async () => {
+  it("reports failed cleanup of an unsaved collection image without claiming it was saved", async () => {
     const user = userEvent.setup();
     const collectionId = "11111111-1111-4111-8111-111111111111";
     const imagePath = `collections/${collectionId}/image/22222222-2222-4222-8222-222222222222-cover.png`;
@@ -206,7 +232,7 @@ describe("admin resource list adapters", () => {
             url: "/api/admin/collection-image?pending=1",
           } }),
         }
-      : { ok: true });
+      : { ok: false });
     const deleteAction = vi.fn().mockResolvedValue({ ok: true, id: collectionId });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("confirm", vi.fn(() => true));
@@ -228,15 +254,20 @@ describe("admin resource list adapters", () => {
     );
 
     await user.click(screen.getAllByRole("button", { name: "Edytuj kolekcję Forest stories" })[0]);
+    expect(document.querySelector<HTMLInputElement>('input[name="expectedUpdatedAt"]')?.value).toBe("2026-10-12T00:00:00.000Z");
     await user.upload(screen.getByLabelText("Wybierz obraz kolekcji"), new File(["image"], "cover.png", { type: "image/png" }));
     await screen.findByRole("button", { name: "Usuń obraz kolekcji" });
     await user.click(screen.getByRole("button", { name: "Usuń kolekcję" }));
 
     await waitFor(() => expect(deleteAction).toHaveBeenCalledTimes(1));
+    const deleteForm = deleteAction.mock.calls[0]?.[0] as FormData;
+    expect(deleteForm.get("expectedUpdatedAt")).toBe("2026-10-12T00:00:00.000Z");
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/collection-image", expect.objectContaining({
       method: "DELETE",
       body: JSON.stringify({ collectionId, path: imagePath, provider: "local" }),
     })));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Nie udało się usunąć prywatnego obrazu");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("Zmiana kolekcji powiodła się");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     vi.unstubAllGlobals();
   });

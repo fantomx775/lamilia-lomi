@@ -174,7 +174,7 @@ export function CollectionsResourceList({
       {cleanupWarning ? (
         <div role="alert" className="mb-4 flex items-start justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           <p>
-            Zmiana kolekcji powiodła się, ale prywatnego obrazu nie udało się usunąć. Sprzątnięcie wymaga interwencji administratora. ID kolekcji: <code className="font-mono">{cleanupWarning.collectionId}</code>. Ścieżka obrazu: {cleanupWarning.imagePaths.map((path) => <code key={path} className="ml-1 font-mono">{path}</code>)}
+            Nie udało się usunąć prywatnego obrazu. Sprzątnięcie wymaga interwencji administratora. ID kolekcji: <code className="font-mono">{cleanupWarning.collectionId}</code>. Ścieżka obrazu: {cleanupWarning.imagePaths.map((path) => <code key={path} className="ml-1 font-mono">{path}</code>)}
           </p>
           <button type="button" className="shrink-0 font-medium underline" onClick={() => setCleanupWarning(null)}>
             Zamknij komunikat
@@ -334,6 +334,7 @@ function CollectionEditorForm({
     if (!item || !window.confirm(`Usunąć kolekcję „${item.name}”? Produkty pozostaną i zostaną odłączone.`)) return;
     const formData = new FormData();
     formData.set("id", item.id);
+    formData.set("expectedUpdatedAt", item.updatedAt);
     startTransition(async () => {
       const result = await deleteAction(formData);
       if (!result.ok) {
@@ -348,6 +349,7 @@ function CollectionEditorForm({
     <form className="flex h-full min-h-0 flex-col" onSubmit={submit}>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
         <input type="hidden" name="id" value={id} />
+        <input type="hidden" name="expectedUpdatedAt" value={item?.updatedAt ?? ""} />
         <input type="hidden" name="imagePath" value={image?.path ?? ""} />
         <input type="hidden" name="imageStorageProvider" value={image?.provider ?? ""} />
         <input type="hidden" name="imageFilename" value={image?.filename ?? ""} />
@@ -435,7 +437,11 @@ function CollectionEditorForm({
 }
 
 function formatProductCount(count: number) {
+  const lastTwoDigits = count % 100;
+  const lastDigit = count % 10;
   if (count === 1) return "1 produkt";
-  if (count >= 2 && count <= 4) return `${count} produkty`;
+  if (lastTwoDigits < 12 || lastTwoDigits > 14) {
+    if (lastDigit >= 2 && lastDigit <= 4) return `${count} produkty`;
+  }
   return `${count} produktów`;
 }

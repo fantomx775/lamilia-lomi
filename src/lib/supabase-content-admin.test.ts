@@ -24,7 +24,13 @@ const mocks = vi.hoisted(() => ({
   updateCategoryImageInSnapshot: vi.fn(),
   removeCollectionImage: vi.fn(),
   categoryImageUpdates: [] as Array<{ table: string; fields: unknown }>,
-  categoryImageUpdateResult: null as unknown,
+  categoryImageUpdateResult: null as {
+    data: { id: string } | null;
+    error: unknown;
+  } | null,
+  updateFilters: [] as Array<{ table: string; column: string; value: unknown }>,
+  deleteFilters: [] as Array<{ table: string; column: string; value: unknown }>,
+  storageCreateSignedUrl: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -77,11 +83,19 @@ import {
   saveTagForRequest,
 } from "./supabase-content-admin";
 import { getSeedContentSnapshot } from "./content-store";
+import { ADMIN_ERROR_CODES } from "./admin-errors";
 import { RICH_TEXT_FORMAT_PREFIX, serializeRichTextDocument } from "./rich-text";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const assetId = "11111111-1111-4111-8111-111111111199";
 let validSquareJpeg = new Uint8Array();
+
+type ConditionalMutationQuery = {
+  eq: (column: string, value: unknown) => ConditionalMutationQuery;
+  select: (columns: string) => {
+    maybeSingle: () => Promise<{ data: { id: string } | null; error: unknown }>;
+  };
+};
 
 beforeAll(async () => {
   validSquareJpeg = new Uint8Array(await sharp({
@@ -128,6 +142,8 @@ describe("Supabase content admin mutations", () => {
     mocks.upsertedRows = [];
     mocks.deletedTables = [];
     mocks.categoryImageUpdates = [];
+    mocks.updateFilters = [];
+    mocks.deleteFilters = [];
     mocks.categoryImageUpdateResult = { data: { id: "33333333-3333-4333-8333-333333333333" }, error: null };
     mocks.deleteCategory.mockReturnValue({ ok: true, id: "33333333-3333-4333-8333-333333333333" });
     mocks.from.mockImplementation((table: string) => ({
@@ -137,7 +153,16 @@ describe("Supabase content admin mutations", () => {
       }),
       delete: vi.fn(() => {
         mocks.deletedTables.push(table);
-        return { eq: vi.fn(() => resolvedQuery()) };
+        const query: ConditionalMutationQuery = {
+          eq: vi.fn((column: string, value: unknown) => {
+            mocks.deleteFilters.push({ table, column, value });
+            return query;
+          }),
+          select: vi.fn(() => ({
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: productId }, error: null }),
+          })),
+        };
+        return query;
       }),
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
@@ -146,13 +171,21 @@ describe("Supabase content admin mutations", () => {
       })),
       update: vi.fn((fields: unknown) => {
         mocks.categoryImageUpdates.push({ table, fields });
-        return {
-          eq: vi.fn(() => ({
-            select: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue(mocks.categoryImageUpdateResult) })),
+        const query: ConditionalMutationQuery = {
+          eq: vi.fn((column: string, value: unknown) => {
+            mocks.updateFilters.push({ table, column, value });
+            return query;
+          }),
+          select: vi.fn(() => ({
+            maybeSingle: vi.fn().mockResolvedValue(mocks.categoryImageUpdateResult ?? { data: null, error: null }),
           })),
         };
+        return query;
       }),
-      insert: vi.fn(() => resolvedQuery()),
+      insert: vi.fn((rows) => {
+        mocks.upsertedRows.push({ table, rows });
+        return resolvedQuery();
+      }),
     }));
     mocks.createClient.mockResolvedValue({ from: mocks.from, rpc: mocks.rpc });
     mocks.storageExists.mockResolvedValue({ data: true, error: null });
@@ -165,12 +198,14 @@ describe("Supabase content admin mutations", () => {
       exists: mocks.storageExists,
       info: mocks.storageInfo,
       download: mocks.storageDownload,
+      createSignedUrl: mocks.storageCreateSignedUrl,
       remove: mocks.storageRemove,
     });
     mocks.storageDownload.mockResolvedValue({
       data: new Blob([validSquareJpeg], { type: "image/jpeg" }),
       error: null,
     });
+    mocks.storageCreateSignedUrl.mockResolvedValue({ data: { signedUrl: "https://storage.example.test/signed" }, error: null });
     mocks.createServiceRoleClient.mockReturnValue({
       storage: { from: mocks.storageFrom },
     });
@@ -597,6 +632,52 @@ describe("Supabase content admin mutations", () => {
     }));
   });
 
+  it("does not remove the old image when a concurrent collection edit wins", async () => {
+    const collectionId = "aaaaaaaa-4999-4999-8999-aaaaaaaaaaaa";
+    const expectedUpdatedAt = "2026-10-12T00:00:00.000Z";
+    const oldImagePath = `collections/${collectionId}/image/22222222-2222-4222-8222-222222222222-old.jpg`;
+    const newImagePath = `collections/${collectionId}/image/33333333-3333-4333-8333-333333333333-new.jpg`;
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      collections: [{
+        id: collectionId,
+        name: "Forest Stories",
+        slug: "forest-stories",
+        imagePath: oldImagePath,
+        imageStorageProvider: "supabase",
+        imageContentType: "image/jpeg",
+        imageSizeBytes: validSquareJpeg.byteLength,
+        sortOrder: 100,
+        createdAt: expectedUpdatedAt,
+        updatedAt: expectedUpdatedAt,
+      }],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.categoryImageUpdateResult = { data: null, error: null };
+
+    const form = new FormData();
+    form.set("id", collectionId);
+    form.set("expectedUpdatedAt", expectedUpdatedAt);
+    form.set("name", "Forest Stories revised");
+    form.set("slug", "forest-stories");
+    form.set("imagePath", newImagePath);
+    form.set("imageStorageProvider", "supabase");
+    form.set("imageFilename", "new.jpg");
+    form.set("imageContentType", "image/jpeg");
+    form.set("imageSizeBytes", String(validSquareJpeg.byteLength));
+
+    await expect(saveCollectionForRequest(form)).resolves.toEqual({
+      ok: false,
+      errors: [ADMIN_ERROR_CODES.CONFLICT_DATA],
+    });
+
+    expect(mocks.updateFilters).toContainEqual({ table: "collections", column: "updated_at", value: expectedUpdatedAt });
+    expect(mocks.removeCollectionImage).not.toHaveBeenCalled();
+  });
+
   it("reports collection image cleanup failures with the orphaned storage path", async () => {
     const collectionId = "aaaaaaaa-4999-4999-8999-aaaaaaaaaaaa";
     const imagePath = `collections/${collectionId}/image/22222222-2222-4222-8222-222222222222-cover.png`;
@@ -621,7 +702,7 @@ describe("Supabase content admin mutations", () => {
     mocks.removeCollectionImage.mockRejectedValue(new Error("storage unavailable"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    await expect(deleteCollectionForRequest(collectionId)).resolves.toMatchObject({
+    await expect(deleteCollectionForRequest(collectionId, "2026-10-12T00:00:00.000Z")).resolves.toMatchObject({
       ok: true,
       id: collectionId,
       cleanupDeferred: true,
