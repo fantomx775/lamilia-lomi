@@ -135,7 +135,6 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await page.goto("/admin/pages/terms");
     const termsEditor = page.getByRole("textbox", { name: "Treść" });
     const termsTitle = page.getByRole("textbox", { name: "Tytuł" });
-    const originalTermsTitle = await termsTitle.inputValue();
     await termsTitle.fill("Issue 51 saved terms title");
     const termsHtml = "<h2>Issue 51 Terms</h2><p>Terms copied from the HTML source.</p><ol><li><p>Keep account details current.</p></li><li><p>Use the account responsibly.</p></li></ol><hr>";
     await page.getByRole("button", { name: "HTML" }).click();
@@ -150,7 +149,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await page.getByRole("button", { name: "Zapisz" }).first().click();
     expect((await termsSaveResponse).status()).toBe(200);
     await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
-    await termsTitle.fill(originalTermsTitle);
+    await termsTitle.fill("Issue 51 unsaved terms title");
     const unsavedNavigationMessage = page.waitForEvent("dialog").then(async (dialog) => {
       const message = dialog.message();
       await dialog.dismiss();
@@ -159,10 +158,10 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await page.locator("#page-editor-form").getByRole("link", { name: "Strony" }).click();
     expect(await unsavedNavigationMessage).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
     await expect(page.locator("#page-editor-form")).toBeVisible();
-    await expect(termsTitle).toHaveValue(originalTermsTitle);
-    await termsTitle.fill("Issue 51 Terms");
+    await expect(termsTitle).toHaveValue("Issue 51 unsaved terms title");
+    await termsTitle.fill("Issue 51 saved terms title");
     await page.reload();
-    await expect(termsTitle).toHaveValue("Issue 51 Terms");
+    await expect(termsTitle).toHaveValue("Issue 51 saved terms title");
     await expect(page.locator('#page-editor-form input[name="body"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/terms");
     await expect(page.getByRole("heading", { level: 2, name: "Issue 51 Terms" })).toBeVisible();
