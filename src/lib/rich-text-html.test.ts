@@ -92,10 +92,10 @@ describe("rich text HTML import and export", () => {
   });
 
   it.each([
-    { comment: "<!-->", description: "abruptly closed comment", suffix: "" },
-    { comment: "<!--->", description: "short abruptly closed comment", suffix: "" },
-    { comment: "<!-- --!>", description: "comment closed with an exclamation mark", suffix: "<!-- later normal terminator -->" },
-  ])("strips resource attributes after a $description", ({ comment, suffix }) => {
+    { comment: "<!-->", description: "abruptly closed comment", suffix: "", expectedHtml: "<p>Recovered image</p><p>Keep this paragraph</p>" },
+    { comment: "<!--->", description: "short abruptly closed comment", suffix: "", expectedHtml: "<p>Recovered image</p><p>Keep this paragraph</p>" },
+    { comment: "<!-- --!>", description: "comment closed with an exclamation mark", suffix: "<!-- later normal terminator -->", expectedHtml: "<p>Recovered image</p><p>Keep this paragraph</p>" },
+  ])("strips resource attributes after a $description", ({ comment, suffix, expectedHtml }) => {
     const imported = importRichTextHtml(
       `${comment}<img src="https://rich-text-resource.invalid/malformed-comment.png" alt="Recovered image">${suffix}<p>Keep this paragraph</p>`,
     );
@@ -105,8 +105,23 @@ describe("rich text HTML import and export", () => {
       code: "unsupported-attribute",
       message: "Atrybut „src” w elemencie <img> zostanie usunięty.",
     });
-    expect(richTextDocumentToHtml(imported.document)).toContain("Recovered image");
-    expect(richTextDocumentToHtml(imported.document)).toContain("Keep this paragraph");
+    expect(richTextDocumentToHtml(imported.document)).toBe(expectedHtml);
+    expect(richTextDocumentToHtml(imported.document)).not.toContain("rich-text-resource.invalid");
+  });
+
+  it("strips resource attributes after a malformed opener containing another tag", () => {
+    const imported = importRichTextHtml(
+      '<<img src="https://rich-text-resource.invalid/nested-tag.png" alt="Recovered nested image"><p>Keep this paragraph</p>',
+    );
+
+    expect(imported.canConvert).toBe(true);
+    expect(imported.warnings).toContainEqual({
+      code: "unsupported-attribute",
+      message: "Atrybut „src” w elemencie <img> zostanie usunięty.",
+    });
+    expect(richTextDocumentToHtml(imported.document)).toBe(
+      "<p>&lt;</p><p>Recovered nested image</p><p>Keep this paragraph</p>",
+    );
     expect(richTextDocumentToHtml(imported.document)).not.toContain("rich-text-resource.invalid");
   });
 

@@ -314,6 +314,12 @@ function removeFetchableAttributes(
     const rawTag = source.slice(tagStart, tagEnd + 1);
     const tagMatch = /^<\s*([a-z][a-z0-9:-]*)\b/i.exec(rawTag);
     if (!tagMatch || /^<\s*\//.test(rawTag)) {
+      const nestedTagStart = source.indexOf("<", tagStart + 1);
+      if (nestedTagStart >= 0 && nestedTagStart <= tagEnd) {
+        result += source.slice(tagStart, nestedTagStart);
+        cursor = nestedTagStart;
+        continue;
+      }
       result += rawTag;
       cursor = tagEnd + 1;
       continue;
