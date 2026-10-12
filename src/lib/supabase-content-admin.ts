@@ -718,7 +718,8 @@ function validateAboutPageProductSelections(
   }
 
   const productsById = new Map(products.map((product) => [product.id, product]));
-  const previousIds = new Set(getAboutProductIds(existingSettings));
+  const previousColoringBookIds = new Set(existingSettings.favoriteColoringBookIds.filter(Boolean));
+  const previousPictureBookIds = new Set(existingSettings.favoritePictureBookIds.filter(Boolean));
   const selections = [
     ...settings.favoriteColoringBookIds.map((id) => [id, "coloring-book"] as const),
     ...settings.favoritePictureBookIds.map((id) => [id, "picture-book"] as const),
@@ -726,14 +727,17 @@ function validateAboutPageProductSelections(
 
   for (const [id, expectedType] of selections) {
     if (!id) continue;
+    const previouslySelected = expectedType === "coloring-book"
+      ? previousColoringBookIds.has(id)
+      : previousPictureBookIds.has(id);
     const product = productsById.get(id);
-    if (product && product.productType !== expectedType) {
+    if (product && product.productType !== expectedType && !previouslySelected) {
       return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
     }
-    if (product && product.status !== "published" && !previousIds.has(id)) {
+    if (product && product.status !== "published" && !previouslySelected) {
       return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
     }
-    if (!product && !previousIds.has(id)) {
+    if (!product && !previouslySelected) {
       return ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT;
     }
   }

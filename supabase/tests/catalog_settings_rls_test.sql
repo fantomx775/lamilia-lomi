@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(16);
+SELECT plan(18);
 
 SELECT ok(
   (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.catalog_settings'::regclass),
@@ -169,6 +169,24 @@ SELECT ok(
   ),
   'the admin About settings update is persisted'
 );
+SET LOCAL ROLE authenticated;
+SET LOCAL request.jwt.claim.sub = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+SELECT throws_ok(
+  $$UPDATE public.catalog_settings
+    SET favorite_coloring_book_ids = ARRAY['duplicate', 'duplicate', '']::text[]
+    WHERE id = 'global'$$,
+  '23514',
+  'admins cannot bypass duplicate selection validation within a section using direct SQL'
+);
+SELECT throws_ok(
+  $$UPDATE public.catalog_settings
+    SET favorite_coloring_book_ids = ARRAY['shared', '', '']::text[],
+        favorite_picture_book_ids = ARRAY['shared', '', '']::text[]
+    WHERE id = 'global'$$,
+  '23514',
+  'admins cannot bypass duplicate selection validation across sections using direct SQL'
+);
+RESET ROLE;
 SELECT ok(
   EXISTS (
     SELECT 1

@@ -1113,6 +1113,35 @@ describe("Supabase content admin mutations", () => {
     expect(updates).toHaveLength(1);
   });
 
+  it("allows an existing selection whose product type changed when the intro changes", async () => {
+    const existing = {
+      about_intro: "Old intro",
+      favorite_coloring_book_ids: ["coloring-1", "coloring-2", "coloring-3"],
+      favorite_picture_book_ids: ["picture-1", "picture-2", "picture-3"],
+    };
+    const updates = configureAboutSettingsDatabase({
+      existing,
+      products: [
+        { id: "coloring-1", product_type: "picture-book" },
+        { id: "coloring-2", product_type: "coloring-book" },
+        { id: "coloring-3", product_type: "coloring-book" },
+        { id: "picture-1", product_type: "picture-book" },
+        { id: "picture-2", product_type: "picture-book" },
+        { id: "picture-3", product_type: "picture-book" },
+      ],
+    });
+    const form = aboutSettingsForm(
+      ["coloring-1", "coloring-2", "coloring-3"],
+      ["picture-1", "picture-2", "picture-3"],
+    );
+
+    await expect(saveAboutPageSettingsForRequest(form)).resolves.toEqual({
+      ok: true,
+      id: "global",
+    });
+    expect(updates).toHaveLength(1);
+  });
+
   it("returns authorization denied when Supabase RLS rejects a non-admin settings write", async () => {
     configureAboutSettingsDatabase({
       updateError: { code: "42501", message: "permission denied for table catalog_settings" },
