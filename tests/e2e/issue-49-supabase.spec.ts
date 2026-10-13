@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect as baseExpect, test, type Locator, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
@@ -79,7 +79,7 @@ test("collections persist through the isolated local Supabase database on deskto
     const promotedProfile = await admin.from("profiles").update({ role: "admin" }).eq("id", createdAdmin.data.user.id).select("id").single();
     expect(promotedProfile.error).toBeNull();
     const adminProfile = await admin.from("profiles").select("role").eq("id", createdAdmin.data.user.id).single();
-    expect(adminProfile.error).toBeNull();
+    if (adminProfile.error || !adminProfile.data) throw new Error("Could not verify the isolated local admin profile.");
     expect(adminProfile.data.role).toBe("admin");
 
     await page.addInitScript(() => {
@@ -126,7 +126,7 @@ test("collections persist through the isolated local Supabase database on deskto
     await expect(persistedImage).toBeVisible();
     await expect(persistedImage).toHaveJSProperty("naturalWidth", 1);
     const savedCollection = await admin.from("collections").select("image_path,image_filename,image_content_type,image_size_bytes").eq("id", collectionId).single();
-    expect(savedCollection.error).toBeNull();
+    if (savedCollection.error || !savedCollection.data) throw new Error("Could not verify the saved local collection image metadata.");
     expect(savedCollection.data.image_path).toBe(savedImagePath);
     expect(savedCollection.data.image_content_type).toBe("image/png");
     expect(savedCollection.data.image_size_bytes).toBeGreaterThan(0);
@@ -378,7 +378,7 @@ test("collections persist through the isolated local Supabase database on deskto
   }
 });
 
-async function createOverflowTags(admin: ReturnType<typeof createClient>, project: string, runId: string, registerTagIds: (ids: string[]) => void) {
+async function createOverflowTags(admin: SupabaseClient, project: string, runId: string, registerTagIds: (ids: string[]) => void) {
   const tags = Array.from({ length: 50 }, (_, index) => ({
     id: randomUUID(),
     slug: `issue-49-${project}-${runId}-overflow-${index + 1}`,

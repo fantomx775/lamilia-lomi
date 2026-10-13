@@ -42,3 +42,10 @@ Screenshots (Chromium desktop and Pixel 7 mobile):
 - [Collections list](supabase-collections-chromium.png) · [mobile](supabase-collections-mobile.png)
 
 The independent review of the updated Supabase E2E fixture and assertions found no remaining concrete issues.
+
+## Targeted candidate checks
+
+- `npm run typecheck`: passed.
+- `npm run lint -- tests/e2e/issue-49-supabase.spec.ts src/lib/supabase-content-admin.test.ts`: passed.
+- `npx vitest run src/lib/supabase-content-admin.test.ts`: 47 passed.
+- `git diff --check`: passed.

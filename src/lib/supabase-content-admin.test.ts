@@ -91,11 +91,15 @@ const productId = "11111111-1111-4111-8111-111111111111";
 const assetId = "11111111-1111-4111-8111-111111111199";
 let validSquareJpeg = new Uint8Array();
 
-type ConditionalMutationQuery = PromiseLike<{ error: unknown }> & {
+type ConditionalMutationQuery = {
   eq: (column: string, value: unknown) => ConditionalMutationQuery;
   select: (columns: string) => {
     maybeSingle: () => Promise<{ data: { id: string } | null; error: unknown }>;
   };
+};
+type AwaitableConditionalMutationQuery = PromiseLike<{ error: unknown }> & {
+  eq: (column: string, value: unknown) => AwaitableConditionalMutationQuery;
+  select: ConditionalMutationQuery["select"];
 };
 
 beforeAll(async () => {
@@ -237,7 +241,7 @@ describe("Supabase content admin mutations", () => {
           select: vi.fn(() => ({
             maybeSingle: vi.fn().mockResolvedValue({ data: { id: productId }, error: null }),
           })),
-        }) as ConditionalMutationQuery;
+        }) as AwaitableConditionalMutationQuery;
         return query;
       }),
       select: vi.fn(() => ({
