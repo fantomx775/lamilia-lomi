@@ -369,7 +369,7 @@ const report = {
   summary,
   diagnostic,
   rejectedAttempts,
-  screenshotsDir,
+  screenshotsDir: "screenshots",
 };
 fs.writeFileSync(path.join(outDir, "measurements.json"), JSON.stringify(report, null, 2));
 console.log(

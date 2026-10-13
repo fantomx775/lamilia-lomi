@@ -44,9 +44,9 @@ All six Preview medians were lower than their Production baselines. Treat this a
 | Uncaught page errors | 0 | 0 |
 | Console errors | 0 | 100 captured (diagnostic sample capped at 100) |
 | Same-origin HTTP errors | 0 | 200 captured (diagnostic sample capped at 200) |
-| Failed requests | 485, all `net::ERR_ABORTED` during route transitions | 750, all `net::ERR_ABORTED` during route transitions |
+| Failed requests | 485 `net::ERR_ABORTED` requests observed | 750 `net::ERR_ABORTED` requests observed |
 
-The Preview console and HTTP errors were recurring `503` responses from `/api/media/{id}` fixture endpoints; the captured errors covered 11 distinct media paths. No client page errors occurred. These media failures affect screenshot imagery and should be considered when interpreting the Preview comparison. They are separate from the navigation destination assertions, which passed for all included samples.
+The harness records failed requests through BrowserContext teardown and does not attribute each `net::ERR_ABORTED` to a route transition versus context teardown. The Preview console and HTTP errors were recurring `503` responses from `/api/media/{id}` fixture endpoints; the captured errors covered 11 distinct media paths. No client page errors occurred. These media failures affect screenshot imagery and should be considered when interpreting the Preview comparison. They are separate from the navigation destination assertions, which passed for all included samples.
 
 ## Screenshots
 
