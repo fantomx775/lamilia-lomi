@@ -70,13 +70,12 @@ set name = excluded.name,
 
 -- The collection-media bucket is private. Application routes authorize admins
 -- before using the service role to upload or issue short-lived image URLs.
--- Use a session role switch for compatibility with the CLI's pipelined runner.
-set role supabase_storage_admin;
+-- This project's policy_grants permits postgres to manage storage.objects
+-- policies; supabase_storage_admin is reserved and cannot be assumed.
 create policy admins_manage_collection_images
   on storage.objects for all to authenticated
   using (bucket_id = 'collection-media' and (select private.is_admin()))
   with check (bucket_id = 'collection-media' and (select private.is_admin()));
-reset role;
 -- Wrap the existing Issue 31 serializer so collection assignment does not replace its batch-merge behavior.
 alter function private.save_product(jsonb)
   rename to save_product_with_premium_code_batch_merge;
