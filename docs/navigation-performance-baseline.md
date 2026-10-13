@@ -1,6 +1,8 @@
 # Navigation and performance epic
 
-Captured 2026-09-15 for the navigation/performance work tracked by issues #16–#21. The implementation is in PR #22. The base is `main` at `fef1d30511c69665ca73a953ad2c9acada3ddc20`; the code candidate is `5578573388819840ad30e043c0ac14ebbbd1205a`. The candidate Preview is `https://lamilia-lomi-hb4a3xz9a-fantomxs-projects.vercel.app` (`dpl_2RxNNQRettMb9mC64aqm7pRJxoQH`), verified READY for this branch and SHA. PR #22 remains open and unmerged. No Production resources were changed.
+> **Current status (2026-10-14):** PR #22 was merged to `main` on 2026-09-20 in `9b7509f1fdc156a8e9a09f3afedd5c0aa998efde`. Its original single-sample observations below are historical. The repeatable Production-to-Preview comparison for the three requested storefront routes is recorded in [the 2026-10-14 evidence report](verification/navigation-performance/2026-10-14/README.md).
+
+Captured 2026-09-15 for the navigation/performance work tracked by issues #16–#21. The implementation was delivered in PR #22. The base was `main` at `fef1d30511c69665ca73a953ad2c9acada3ddc20`; the code candidate was `5578573388819840ad30e043c0ac14ebbbd1205a`. The candidate Preview was `https://lamilia-lomi-hb4a3xz9a-fantomxs-projects.vercel.app` (`dpl_2RxNNQRettMb9mC64aqm7pRJxoQH`), verified READY for that branch and SHA. No Production resources were changed by that follow-up.
 
 ## Method and limits
 
@@ -66,4 +68,4 @@ The follow-up also adds focused coverage for guest, unverified, locked, unlocked
 - `git diff --check`, focused ESLint, `npm run lint`, `npm run typecheck`, `npm test` (46 files, 219 tests), and `npm run build` passed for the code candidate. After the full pass, the Admin E2E received a test-only timing attachment; focused ESLint and that Admin test passed twice on the final test code.
 - The full local Playwright suite passed 49 tests with 3 skips before the test-only timing attachment. Coverage included desktop navigation, route pending UI, mobile/tablet layout, keyboard activation, localized unknown-product behavior, account/unlock/download flows, and local demo Admin paths. The final Admin-navigation test also recorded client navigation timing and active-route state for all six resource pages.
 - Playwright used the local demo backend. The Vercel Preview was separately verified READY at the exact code-candidate SHA, with Product Detail, Catalog, mobile navigation, unknown-product handling, and guest `/admin` checked in a real browser. Preview request logs were checked for the expected unknown-product 404 and existing media responses.
-- No Production deploy or merge was performed. The implementation is available for review in [PR #22](https://github.com/fantomx775/lamilia-lomi/pull/22); the six epic issues already exist as #16–#21.
+- At the time of the 2026-09 follow-up, no Production deploy or merge had been performed. PR #22 was subsequently merged as noted above; the six epic issues are #16–#21.
