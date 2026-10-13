@@ -31,7 +31,7 @@ Project-default discovery also ran unrelated SQL files. The two Collections file
 
 The Playwright test `tests/e2e/issue-49-supabase.spec.ts` explicitly required `LAMILIA_BACKEND=supabase`, loopback-only URLs, and the disposable local Supabase keys. It ran against the local app on Chromium desktop and Pixel 7 mobile: **2 passed**.
 
-The flow created, renamed, and deleted a collection; uploaded, reloaded, removed, and replaced its image; created a product with categories/tags; assigned, cleared, and restored its collection; confirmed persistence after reload; verified collection/category/tag cells and the 50-tag `+48` overflow; checked non-admin UI, PostgREST, API, and Storage write denials; and confirmed deleting the collection left its product and taxonomy relationships intact. Temporary users, products, tags, collections, and image objects were removed successfully.
+The flow created, renamed, and deleted a collection; uploaded, reloaded, removed, and replaced its image; created a product with categories/tags; assigned, cleared, and restored its collection; confirmed persistence after reload; verified collection/category/tag cells and the 50-tag `+48` overflow; checked non-admin UI, PostgREST, API, and Storage write denials; confirmed deleting a collection left its product and taxonomy relationships intact; and deleted the overflow product through the admin UI, verifying its database row was gone. Temporary users, products, tags, collections, and image objects were removed successfully.
 
 Screenshots (Chromium desktop and Pixel 7 mobile):
 

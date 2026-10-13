@@ -325,6 +325,14 @@ test("collections persist through the isolated local Supabase database on deskto
     await expect(page.getByLabel("Calm evening")).toBeChecked();
     const survivingProduct = await admin.from("products").select("id").eq("id", productIds[0]).single();
     expect(survivingProduct.error).toBeNull();
+
+    await page.goto(`/admin/products/${productIds[1]}`);
+    await expect(page.getByLabel("Tytuł")).toHaveValue(overflowProductTitle);
+    await withAcceptedConfirmation(page, () => page.getByRole("button", { name: "Usuń produkt" }).click());
+    await expect(page).toHaveURL(/\/admin\/products(?:\?.*)?$/);
+    const deletedProduct = await admin.from("products").select("id").eq("id", productIds[1]!).maybeSingle();
+    expect(deletedProduct.error).toBeNull();
+    expect(deletedProduct.data).toBeNull();
   } finally {
     const cleanupErrors: string[] = [];
     const attemptCleanup = async (label: string, action: () => PromiseLike<unknown>) => {
