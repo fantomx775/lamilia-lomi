@@ -10,6 +10,7 @@ import { getAdminLayoutAccessForRequest } from "@/lib/session.server";
 const nav: DashboardNavItem[] = [
   { href: "/admin", label: "Dashboard", icon: "dashboard" },
   { href: "/admin/products", label: "Produkty", icon: "products" },
+  { href: "/admin/collections", label: "Kolekcje", icon: "collections" },
   { href: "/admin/categories", label: "Kategorie", icon: "categories" },
   { href: "/admin/tags", label: "Tagi", icon: "tags" },
   { href: "/admin/users", label: "Użytkownicy", icon: "users" },

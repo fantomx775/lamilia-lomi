@@ -31,6 +31,7 @@ const dashboardNavIcons = {
   dashboard: LayoutDashboard,
   products: Box,
   categories: Tags,
+  collections: Library,
   tags: Tags,
   users: Users,
   pages: FileText,

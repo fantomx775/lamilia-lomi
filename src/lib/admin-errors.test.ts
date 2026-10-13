@@ -17,6 +17,10 @@ describe("admin error contract", () => {
       code: "23505",
       constraint: "premium_codes_code_key",
     })).toBe(ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE);
+    expect(classifyAdminDatabaseError({
+      code: "23505",
+      constraint: "collections_name_normalized_key",
+    })).toBe(ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME);
     expect(classifyAdminDatabaseError({ code: "23503" })).toBe(ADMIN_ERROR_CODES.CONFLICT_DATA);
     expect(classifyAdminDatabaseError({ code: "42501" })).toBe(ADMIN_ERROR_CODES.AUTHORIZATION_DENIED);
     expect(classifyAdminDatabaseError({ code: "22P02" })).toBe(ADMIN_ERROR_CODES.VALIDATION_INVALID_INPUT);
