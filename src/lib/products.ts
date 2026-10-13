@@ -5,6 +5,7 @@ import type { Locale } from "@/i18n/routing";
 import { defaultLocale, normalizeLocale } from "./locale";
 import { getCanonicalAppUrl } from "./config";
 import { getContentSnapshot } from "./content-store";
+import { sortFeaturedProductCandidates } from "./featured-product-ranking";
 import { getRichTextTextContent } from "./rich-text";
 import type {
   Audience,
@@ -176,9 +177,11 @@ export function getFeaturedProductsFromSnapshot(
   locale: Locale,
   audience?: Audience,
 ) {
-  return getPublishedProductViewsFromSnapshot(snapshot, locale)
-    .filter((product) => (audience ? product.audience === audience : true))
-    .sort((a, b) => a.reviewDelayDays - b.reviewDelayDays || a.title.localeCompare(b.title))
+  return sortFeaturedProductCandidates(
+    getPublishedProductViewsFromSnapshot(snapshot, locale).filter((product) =>
+      audience ? product.audience === audience : true,
+    ),
+  )
     .slice(0, audience ? 2 : 4);
 }
 

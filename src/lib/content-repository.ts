@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 
 import { normalizeCatalogSettings } from "./catalog-settings";
 import { normalizeAboutPageSettings } from "./about-settings";
+import { sortFeaturedProductCandidates } from "./featured-product-ranking";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
 import type {
   AmazonLink,
@@ -130,9 +131,24 @@ export const getPublicHomeProductSnapshotForRequest = cache(
     }
 
     const supabase = await createClient();
+    const audienceCandidates = await Promise.all(
+      HOME_PRODUCT_AUDIENCES.map(async (audience) => ({
+        audience,
+        rows: await getHomeProductCandidateRankingsForAudience(
+          supabase,
+          locale,
+          audience,
+        ),
+      })),
+    );
     const audienceRows = await Promise.all(
-      HOME_PRODUCT_AUDIENCES.map((audience) =>
-        getHomeProductCandidatesForAudience(supabase, locale, audience),
+      audienceCandidates.map(({ audience, rows }) =>
+        getHomeProductDetailsByIds(
+          supabase,
+          locale,
+          audience,
+          selectTopHomeProductIds(rows, locale),
+        ),
       ),
     );
 
@@ -159,6 +175,8 @@ export const getPublicHomeProductSnapshotForRequest = cache(
 );
 
 const HOME_PRODUCT_AUDIENCES: readonly Audience[] = ["kids", "adults"];
+const HOME_PRODUCT_RANKING_SELECT =
+  "id, audience, review_delay_days, product_translations!inner ( locale, title )";
 const HOME_PRODUCT_SELECT = `
   id,
   slug,
@@ -187,7 +205,7 @@ const HOME_PRODUCT_SELECT = `
   )
 `;
 
-async function getHomeProductCandidatesForAudience(
+async function getHomeProductCandidateRankingsForAudience(
   supabase: Awaited<ReturnType<typeof createClient>>,
   locale: string,
   audience: Audience,
@@ -195,8 +213,8 @@ async function getHomeProductCandidatesForAudience(
   // Four candidates per audience cover the global Home top four as well: a
   // fifth product from one audience already has four same-audience products
   // ahead of it. The extra row is only a numeric lookahead; tied cutoff rows
-  // are expanded so products.ts remains authoritative for localeCompare.
-  const { data, error } = await createHomeProductQuery(
+  // are expanded before the shared localeCompare ordering is applied.
+  const { data, error } = await createHomeProductRankingQuery(
     supabase,
     locale,
     audience,
@@ -222,7 +240,7 @@ async function getHomeProductCandidatesForAudience(
   const earlierRows = firstRows.filter(
     (row) => numberValue(row.review_delay_days, 14) < cutoffDelay,
   );
-  const cutoffRows = await getAllHomeProductsAtReviewDelay(
+  const cutoffRows = await getAllHomeProductRankingsAtReviewDelay(
     supabase,
     locale,
     audience,
@@ -232,7 +250,31 @@ async function getHomeProductCandidatesForAudience(
   return [...earlierRows, ...cutoffRows];
 }
 
-async function getAllHomeProductsAtReviewDelay(
+function selectTopHomeProductIds(rows: DbRow[], locale: string) {
+  const candidates = rows.flatMap((row) => {
+    const translation = rowsValue(row.product_translations).find(
+      (item) => item.locale === locale,
+    );
+    const id = optionalString(row.id);
+    if (!translation || !id) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        reviewDelayDays: numberValue(row.review_delay_days, 14),
+        title: stringValue(translation.title),
+      },
+    ];
+  });
+
+  return sortFeaturedProductCandidates(candidates)
+    .slice(0, 4)
+    .map((candidate) => candidate.id);
+}
+
+async function getAllHomeProductRankingsAtReviewDelay(
   supabase: Awaited<ReturnType<typeof createClient>>,
   locale: string,
   audience: Audience,
@@ -242,7 +284,7 @@ async function getAllHomeProductsAtReviewDelay(
   let lastId: string | undefined;
 
   for (;;) {
-    let query = createHomeProductQuery(supabase, locale, audience)
+    let query = createHomeProductRankingQuery(supabase, locale, audience)
       .eq("review_delay_days", reviewDelayDays)
       .order("id", { ascending: true });
     if (lastId) {
@@ -266,6 +308,53 @@ async function getAllHomeProductsAtReviewDelay(
     }
     lastId = nextId;
   }
+}
+
+async function getHomeProductDetailsByIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+  ids: string[],
+): Promise<DbRow[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await createHomeProductQuery(
+    supabase,
+    locale,
+    audience,
+  ).in("id", ids);
+  if (error) {
+    throw new Error("Supabase Home product details read failed: " + error.message);
+  }
+
+  const rowsById = new Map(
+    rowsValue(data).flatMap((row) => {
+      const id = optionalString(row.id);
+      return id ? [[id, row] as const] : [];
+    }),
+  );
+
+  // PostgREST does not promise that an `in` filter returns rows in the input
+  // ID order. Restore the ranking query's stable order for equal title ties.
+  return ids.flatMap((id) => {
+    const row = rowsById.get(id);
+    return row ? [row] : [];
+  });
+}
+
+function createHomeProductRankingQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+) {
+  return supabase
+    .from("products")
+    .select(HOME_PRODUCT_RANKING_SELECT)
+    .eq("status", "published")
+    .eq("product_translations.locale", locale)
+    .eq("audience", audience);
 }
 
 function createHomeProductQuery(
