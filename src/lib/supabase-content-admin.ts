@@ -49,7 +49,10 @@ import {
   type AdminMutationResult,
   type DatabaseErrorLike,
 } from "./admin-errors";
-import { blocksStaleRichTextWrite } from "./rich-text";
+import {
+  blocksStaleRichTextWrite,
+  RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX,
+} from "./rich-text";
 import type { AboutPageSettings, CatalogDesktopColumns, CategoryImage, Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
@@ -167,6 +170,7 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
             formData.getAll("premiumCodeRemove").flatMap((value) =>
               typeof value === "string" && value.trim() ? [value.trim()] : [],
             ),
+            formData.get(`longDescription${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`) === "2",
           ),
         },
       );
@@ -217,8 +221,13 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
   return { ok: true, id: savedProduct.id };
 }
 
-export function buildProductMutationPayload(product: Product, premiumCodeRemovals: string[] = []) {
+export function buildProductMutationPayload(
+  product: Product,
+  premiumCodeRemovals: string[] = [],
+  usesRichTextV2Editor = false,
+) {
   return {
+    richTextEditorVersion: usesRichTextV2Editor ? "2" : null,
     id: product.id,
     slug: product.slug,
     status: product.status,
@@ -556,16 +565,41 @@ export async function savePagesForRequest(
 
     for (const page of pages) {
       const pageId = isUuid(page.id) ? page.id : randomUUID();
+      const previousPage = snapshot.staticPages.find((record) =>
+        record.slug === page.slug && record.locale === page.locale,
+      );
+      const pagePayload = {
+        id: pageId,
+        slug: page.slug,
+        locale: page.locale,
+        title: page.title,
+        body: page.body,
+        updated_at: page.updatedAt,
+      };
+
+      if (
+        formData.get(`body${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`) !== "2" &&
+        previousPage
+      ) {
+        const { data, error } = await supabase
+          .from("static_pages")
+          .update(pagePayload)
+          .eq("id", pageId)
+          .eq("body", previousPage.body)
+          .select("id")
+          .maybeSingle();
+
+        if (error) {
+          throw new AdminDatabaseError("static page", error);
+        }
+        if (!data) {
+          return { ok: false, errors: [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED] };
+        }
+        continue;
+      }
 
       await run(
-        supabase.from("static_pages").upsert({
-          id: pageId,
-          slug: page.slug,
-          locale: page.locale,
-          title: page.title,
-          body: page.body,
-          updated_at: page.updatedAt,
-        }, { onConflict: "slug,locale" }),
+        supabase.from("static_pages").upsert(pagePayload, { onConflict: "slug,locale" }),
         "static page",
       );
     }
@@ -658,6 +692,8 @@ export async function saveAboutPageSettingsForRequest(
       favoriteColoringBookIds: existingRow.favorite_coloring_book_ids,
       favoritePictureBookIds: existingRow.favorite_picture_book_ids,
     });
+    const usesRichTextV2Editor =
+      formData.get(`aboutIntro${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`) === "2";
     if (blocksStaleRichTextWrite(formData, "aboutIntro", existingSettings.intro)) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED] };
     }
@@ -675,16 +711,20 @@ export async function saveAboutPageSettingsForRequest(
       return { ok: false, errors: [validationError] };
     }
 
-    const { data, error } = await supabase
+    let updateQuery = supabase
       .from("catalog_settings")
       .update({
         about_intro: settings.intro,
         favorite_coloring_book_ids: settings.favoriteColoringBookIds,
         favorite_picture_book_ids: settings.favoritePictureBookIds,
       })
-      .eq("id", "global")
-      .select("id")
-      .maybeSingle();
+      .eq("id", "global");
+
+    if (!usesRichTextV2Editor) {
+      updateQuery = updateQuery.eq("about_intro", existingSettings.intro);
+    }
+
+    const { data, error } = await updateQuery.select("id").maybeSingle();
 
     if (error) {
       throw new AdminDatabaseError("About page settings", error);
@@ -692,7 +732,12 @@ export async function saveAboutPageSettingsForRequest(
 
     return data
       ? { ok: true, id: "global" }
-      : { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+      : {
+          ok: false,
+          errors: [usesRichTextV2Editor
+            ? ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE
+            : ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED],
+        };
   });
 }
 

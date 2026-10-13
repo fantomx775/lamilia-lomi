@@ -297,6 +297,13 @@ export function classifyAdminDatabaseError(
   }
 
   if (
+    code === "P0001" &&
+    diagnosticText.includes(ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED)
+  ) {
+    return ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED;
+  }
+
+  if (
     code === "22001" ||
     code === "22003" ||
     code === "22004" ||
