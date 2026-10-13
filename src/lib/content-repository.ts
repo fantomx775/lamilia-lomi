@@ -120,6 +120,189 @@ export const getPublicProductDetailSnapshotForRequest = cache(
   },
 );
 
+export const getPublicHomeProductSnapshotForRequest = cache(
+  async (locale: string): Promise<ContentSnapshot> => {
+    if (getBackendMode() === "local") {
+      return getPublicContentSnapshot();
+    }
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("products")
+      .select(`
+        id,
+        slug,
+        status,
+        audience,
+        product_type,
+        cover_asset_id,
+        review_delay_days,
+        sort_order,
+        product_translations!inner ( locale, title, short_description ),
+        product_assets!product_assets_product_id_fkey (
+          id,
+          product_id,
+          kind,
+          bucket,
+          path,
+          filename,
+          content_type,
+          size_bytes,
+          locale,
+          title,
+          sort_order,
+          is_public,
+          is_active,
+          storage_provider
+        )
+      `)
+      .eq("status", "published")
+      .eq("product_translations.locale", locale)
+      .eq("product_assets.is_active", true)
+      .eq("product_assets.kind", "cover");
+
+    if (error) {
+      throw new Error(`Supabase Home products read failed: ${error.message}`);
+    }
+
+    return {
+      products: rowsValue(data).map((row) =>
+        mapProduct(
+          row,
+          rowsValue(row.product_translations),
+          [],
+          [],
+          rowsValue(row.product_assets),
+          [],
+          [],
+        ),
+      ),
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: normalizeCatalogSettings(undefined),
+      aboutPageSettings: normalizeAboutPageSettings(undefined),
+    };
+  },
+);
+
+export const getPublicCatalogSnapshotForRequest = cache(
+  async (locale: string): Promise<ContentSnapshot> => {
+    if (getBackendMode() === "local") {
+      return getPublicContentSnapshot();
+    }
+
+    const supabase = await createClient();
+    const [productResult, categoryResult, tagResult, settingsResult] =
+      await Promise.all([
+        supabase
+          .from("products")
+          .select(`
+            id,
+            slug,
+            status,
+            audience,
+            product_type,
+            cover_asset_id,
+            review_delay_days,
+            sort_order,
+            created_at,
+            product_translations!inner ( locale, title, short_description, long_description, seo_title, seo_description ),
+            product_categories ( category_id ),
+            product_tags ( tag_id ),
+            product_assets!product_assets_product_id_fkey (
+              id,
+              product_id,
+              kind,
+              bucket,
+              path,
+              filename,
+              content_type,
+              size_bytes,
+              locale,
+              title,
+              sort_order,
+              is_public,
+              is_active,
+              storage_provider
+            )
+          `)
+          .eq("status", "published")
+          .eq("product_translations.locale", locale)
+          .eq("product_assets.is_active", true)
+          .eq("product_assets.kind", "cover"),
+        supabase
+          .from("categories")
+          .select(`
+            id,
+            slug,
+            sort_order,
+            image_asset_id,
+            image_storage_path,
+            image_storage_provider,
+            image_filename,
+            image_content_type,
+            image_size_bytes,
+            category_translations!inner ( locale, name, description )
+          `)
+          .eq("category_translations.locale", locale),
+        supabase
+          .from("tags")
+          .select(`
+            id,
+            slug,
+            tag_translations!inner ( locale, name )
+          `)
+          .eq("tag_translations.locale", locale),
+        supabase
+          .from("catalog_settings")
+          .select("desktop_columns")
+          .eq("id", "global")
+          .maybeSingle(),
+      ]);
+
+    if (productResult.error) {
+      throw new Error(`Supabase catalog products read failed: ${productResult.error.message}`);
+    }
+    if (categoryResult.error) {
+      throw new Error(`Supabase catalog categories read failed: ${categoryResult.error.message}`);
+    }
+    if (tagResult.error) {
+      throw new Error(`Supabase catalog tags read failed: ${tagResult.error.message}`);
+    }
+    if (settingsResult.error) {
+      throw new Error(`Supabase catalog settings read failed: ${settingsResult.error.message}`);
+    }
+
+    const settings = settingsResult.data as DbRow | null;
+
+    return {
+      products: rowsValue(productResult.data).map((row) =>
+        mapProduct(
+          row,
+          rowsValue(row.product_translations),
+          rowsValue(row.product_categories),
+          rowsValue(row.product_tags),
+          rowsValue(row.product_assets),
+          [],
+          [],
+        ),
+      ),
+      categories: rowsValue(categoryResult.data).map((row) =>
+        mapCategory(row, rowsValue(row.category_translations)),
+      ),
+      tags: rowsValue(tagResult.data).map((row) =>
+        mapTag(row, rowsValue(row.tag_translations)),
+      ),
+      staticPages: [],
+      catalogSettings: normalizeCatalogSettings(
+        settings ? { desktopColumns: settings.desktop_columns } : undefined,
+      ),
+      aboutPageSettings: normalizeAboutPageSettings(undefined),
+    };
+  },
+);
+
 export const getAdminContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: true }),
 );
