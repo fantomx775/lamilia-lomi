@@ -414,7 +414,7 @@ describe("targeted Home and Catalog product reads", () => {
           tagId: "tag-kids",
           coverId: "cover-kid-boundary-" + index,
         }),
-      ),
+      ).reverse(),
     ];
     const adults = Array.from({ length: 6 }, (_, index) =>
       productRow({
