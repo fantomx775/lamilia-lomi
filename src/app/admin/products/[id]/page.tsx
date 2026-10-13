@@ -32,6 +32,7 @@ export default async function EditProductPage({ params, searchParams }: Props) {
     <ProductEditor
       title={`Edycja: ${product.translations.find((translation) => translation.locale === "en")?.title || product.slug}`}
       product={product}
+      collections={snapshot.collections}
       categories={snapshot.categories}
       tags={snapshot.tags}
       feedback={error ?? saved}

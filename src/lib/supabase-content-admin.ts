@@ -8,23 +8,28 @@ import { createClient, getCurrentAccessToken } from "@/lib/supabase/server";
 import {
   archiveProduct,
   buildProductFromFormData,
+  buildCollectionFromFormData,
   buildCategoryFromFormData,
   buildTagFromFormData,
   buildStaticPagesFromFormData,
   deleteCategory,
+  deleteCollection,
   deleteProduct,
   deleteTag,
   saveCategoryFromFormData,
   updateCategoryImageInSnapshot,
+  saveCollectionFromFormData,
   saveProductFromFormData,
   validateProductAssetSubmission,
   validateProductMediaSubmission,
+  validateCollectionDraft,
   saveStaticPageFromFormData,
   saveStaticPagesFromFormData,
   saveTagFromFormData,
 } from "./admin-content";
 import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
+import { assertCollectionImageExists, removeCollectionImage } from "./collection-image-storage";
 import {
   hasDuplicateAboutProductIds,
   normalizeAboutPageSettings,
@@ -53,7 +58,7 @@ import {
   blocksStaleRichTextWrite,
   RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX,
 } from "./rich-text";
-import type { AboutPageSettings, CatalogDesktopColumns, CategoryImage, Product } from "./types";
+import type { AboutPageSettings, CategoryImage, CatalogDesktopColumns, Collection, Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
   let storageAuthorizationToken: string | null | undefined;
@@ -233,6 +238,7 @@ export function buildProductMutationPayload(
     status: product.status,
     audience: product.audience,
     productType: product.productType,
+    collectionId: product.collectionId ?? null,
     coverAssetId: product.coverAssetId || null,
     videoAssetId: product.videoAssetId || null,
     reviewDelayDays: product.reviewDelayDays,
@@ -498,6 +504,144 @@ export async function deleteCategoryForRequest(categoryId: string): Promise<Admi
       })
       : false;
     return { ok: true, id: categoryId, cleanupDeferred };
+  });
+}
+
+export async function saveCollectionForRequest(formData: FormData): Promise<AdminMutationResult> {
+  return runAdminMutation("collection", async () => {
+    const backendMode = getBackendMode();
+    const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
+    const snapshot = await getAdminContentSnapshot();
+    const existing = snapshot.collections.find((collection) => collection.id === stringField(formData, "id"));
+    const expectedUpdatedAt = stringField(formData, "expectedUpdatedAt");
+    if (
+      (existing && expectedUpdatedAt !== existing.updatedAt) ||
+      (!existing && expectedUpdatedAt)
+    ) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
+    }
+    const collection = buildCollectionFromFormData(formData, snapshot, existing);
+    const errors = validateCollectionDraft(collection, snapshot.collections, collection.id);
+    if (errors.length) return { ok: false, errors };
+
+    if (
+      (backendMode === "local" && collection.imagePath && collection.imageStorageProvider !== "local") ||
+      (backendMode === "supabase" && collection.imagePath && collection.imageStorageProvider === "local")
+    ) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.VALIDATION_COLLECTION_IMAGE] };
+    }
+
+    if (collection.imagePath && collection.imageStorageProvider && collection.imagePath !== existing?.imagePath) {
+      await assertCollectionImageExists({
+        collectionId: collection.id,
+        storagePath: collection.imagePath,
+        provider: collection.imageStorageProvider,
+        contentType: collection.imageContentType ?? "",
+        sizeBytes: collection.imageSizeBytes ?? 0,
+        authorizationToken,
+      });
+    }
+
+    if (backendMode === "local") {
+      const result = saveCollectionFromFormData(formData);
+      if (!result.ok) return result;
+      let cleanupDeferred = false;
+      if (existing?.imagePath && existing.imagePath !== collection.imagePath && existing.imageStorageProvider) {
+        cleanupDeferred = !await cleanupCollectionImageIfUnreferenced(existing, collection.id);
+      }
+      return {
+        ...result,
+        cleanupDeferred,
+        cleanupImagePath: cleanupDeferred ? existing?.imagePath : undefined,
+      };
+    }
+
+    assertUuidSet(collection.id);
+    const supabase = await createClient();
+    const collectionRow = {
+      id: collection.id,
+      name: collection.name,
+      slug: collection.slug,
+      image_path: collection.imagePath ?? null,
+      image_storage_provider: collection.imageStorageProvider ?? null,
+      image_filename: collection.imageFilename ?? null,
+      image_content_type: collection.imageContentType ?? null,
+      image_size_bytes: collection.imageSizeBytes ?? null,
+      sort_order: collection.sortOrder,
+      updated_at: collection.updatedAt,
+    };
+    if (existing) {
+      const { data, error } = await supabase
+        .from("collections")
+        .update(collectionRow)
+        .eq("id", collection.id)
+        .eq("updated_at", expectedUpdatedAt)
+        .select("id")
+        .maybeSingle();
+      if (error) throw new AdminDatabaseError("collection save", error);
+      if (!data) return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
+    } else {
+      await run(supabase.from("collections").insert(collectionRow), "collection");
+    }
+
+    const cleanupDeferred = existing?.imagePath && existing.imagePath !== collection.imagePath && existing.imageStorageProvider
+      ? !await cleanupCollectionImageIfUnreferenced(existing, collection.id, authorizationToken)
+      : false;
+    return {
+      ok: true,
+      id: collection.id,
+      cleanupDeferred,
+      cleanupImagePath: cleanupDeferred ? existing?.imagePath : undefined,
+    };
+  });
+}
+
+export async function deleteCollectionForRequest(
+  collectionId: string,
+  expectedUpdatedAt: string,
+): Promise<AdminMutationResult> {
+  return runAdminMutation("collection deletion", async () => {
+    const snapshot = await getAdminContentSnapshot();
+    const existing = snapshot.collections.find((collection) => collection.id === collectionId);
+    if (!existing) return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_RESOURCE] };
+    if (expectedUpdatedAt !== existing.updatedAt) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
+    }
+
+    const backendMode = getBackendMode();
+    const authorizationToken = backendMode === "supabase" ? await getCurrentAccessToken() : undefined;
+    if (backendMode === "local") {
+      const result = deleteCollection(collectionId, expectedUpdatedAt);
+      if (result.ok && existing.imagePath && existing.imageStorageProvider) {
+        const cleanupDeferred = !await cleanupCollectionImageIfUnreferenced(existing, collectionId);
+        return {
+          ...result,
+          cleanupDeferred,
+          cleanupImagePath: cleanupDeferred ? existing.imagePath : undefined,
+        };
+      }
+      return result;
+    }
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("collections")
+      .delete()
+      .eq("id", collectionId)
+      .eq("updated_at", expectedUpdatedAt)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new AdminDatabaseError("collection deletion", error);
+    if (!data) return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_DATA] };
+    const cleanupDeferred = existing.imagePath && existing.imageStorageProvider
+      ? !await cleanupCollectionImageIfUnreferenced(existing, collectionId, authorizationToken)
+      : false;
+    return {
+      ok: true,
+      id: collectionId,
+      cleanupDeferred,
+      cleanupImagePath: cleanupDeferred ? existing.imagePath : undefined,
+    };
   });
 }
 
@@ -825,6 +969,44 @@ async function run(query: PromiseLike<{ error: DatabaseErrorLike | null }>, labe
 
   if (error) {
     throw new AdminDatabaseError(label, error);
+  }
+}
+
+async function cleanupCollectionImageIfUnreferenced(
+  collection: Collection,
+  excludedCollectionId: string,
+  authorizationToken?: string | null,
+): Promise<boolean> {
+  if (!collection.imagePath || !collection.imageStorageProvider) return true;
+
+  try {
+    if (collection.imageStorageProvider === "local") {
+      const referenced = getContentSnapshot().collections.some((item) =>
+        item.id !== excludedCollectionId && item.imagePath === collection.imagePath,
+      );
+      if (referenced) return true;
+    } else {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("collections")
+        .select("id")
+        .eq("image_path", collection.imagePath)
+        .neq("id", excludedCollectionId)
+        .limit(1);
+      if (error) throw new AdminDatabaseError("collection image reference check", error);
+      if (data?.length) return true;
+    }
+
+    await removeCollectionImage({
+      collectionId: collection.id,
+      storagePath: collection.imagePath,
+      provider: collection.imageStorageProvider,
+      authorizationToken,
+    });
+    return true;
+  } catch (error) {
+    console.error("Collection image cleanup was deferred.", error);
+    return false;
   }
 }
 

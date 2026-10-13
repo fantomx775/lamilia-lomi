@@ -20,6 +20,7 @@ export default async function NewProductPage({ searchParams }: Props) {
   return (
     <ProductEditor
       title="Nowy produkt"
+      collections={snapshot.collections}
       categories={snapshot.categories}
       tags={snapshot.tags}
       feedback={error}

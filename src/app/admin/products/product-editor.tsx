@@ -26,7 +26,7 @@ import {
 } from "@/lib/product-text";
 import { MAX_PREMIUM_CODE_BATCH_SIZE, MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
-import type { AmazonLink, Category, Product, ProductAsset, Tag } from "@/lib/types";
+import type { AmazonLink, Category, Collection, Product, ProductAsset, Tag } from "@/lib/types";
 
 type ProductContentDraft = {
   title: string;
@@ -127,6 +127,7 @@ const statusLabels = {
 export function ProductEditor({
   title,
   product,
+  collections = [],
   categories,
   tags,
   feedback,
@@ -137,6 +138,7 @@ export function ProductEditor({
 }: {
   title: string;
   product?: Product;
+  collections?: Collection[];
   categories: Category[];
   tags: Tag[];
   feedback?: string;
@@ -1189,6 +1191,7 @@ export function ProductEditor({
               <div className="grid gap-4">
                 <Field label="Segment" htmlFor="product-audience"><select id="product-audience" name="audience" defaultValue={submittedValue(submittedValues, "audience", product?.audience ?? "kids")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="kids">Dzieci</option><option value="adults">Dorośli</option></select></Field>
                 <Field label="Typ produktu" htmlFor="product-type"><select id="product-type" name="productType" defaultValue={submittedValue(submittedValues, "productType", product?.productType ?? "coloring-book")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{product?.productType && !productTypes.includes(product.productType) ? <option value={product.productType}>{formatProductType(product.productType)}</option> : null}{productTypes.map((type) => <option key={type} value={type}>{formatProductType(type)}</option>)}</select></Field>
+                <Field label="Kolekcja" htmlFor="product-collection"><select id="product-collection" name="collectionId" defaultValue={submittedValue(submittedValues, "collectionId", product?.collectionId ?? "")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="">Bez kolekcji</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></Field>
                 <CheckboxGroup label="Kategorie" name="categoryIds" values={categories.map((category) => ({ id: category.id, label: taxonomyLabel(category.translations, category.slug) }))} selected={submittedValuesFor(submittedValues, "categoryIds", product?.categoryIds ?? [])} />
                 <CheckboxGroup label="Tagi" name="tagIds" values={tags.map((tag) => ({ id: tag.id, label: taxonomyLabel(tag.translations, tag.slug) }))} selected={submittedValuesFor(submittedValues, "tagIds", product?.tagIds ?? [])} />
               </div>

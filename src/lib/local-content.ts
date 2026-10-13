@@ -29,6 +29,7 @@ const seededStaticPages: StaticPageRecord[] = [
 export function getSeedContentSnapshot(): ContentSnapshot {
   return structuredClone({
     products: seededProducts,
+    collections: [],
     categories: seededCategories,
     tags: seededTags,
     staticPages: seededStaticPages,

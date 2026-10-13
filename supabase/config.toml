@@ -129,6 +129,11 @@ public = false
 file_size_limit = "20MiB"
 allowed_mime_types = ["image/png", "image/jpeg", "image/webp", "application/pdf"]
 
+[storage.buckets.collection-media]
+public = false
+file_size_limit = "20MiB"
+allowed_mime_types = ["image/png", "image/jpeg", "image/webp"]
+
 [storage.buckets.public-videos]
 public = false
 file_size_limit = "50MiB"

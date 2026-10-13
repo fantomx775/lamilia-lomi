@@ -13,10 +13,12 @@ import type {
   AboutPageSettings,
   Category,
   CatalogSettings,
+  Collection,
   ContentSnapshot,
   Product,
   ProductAsset,
   ProductTranslation,
+  CollectionImageStorageProvider,
   PremiumCode,
   StaticPageRecord,
   Tag,
@@ -24,7 +26,7 @@ import type {
 } from "./types";
 
 type DbRow = Record<string, unknown>;
-const PREMIUM_CODE_PAGE_SIZE = 1_000;
+const POSTGREST_PAGE_SIZE = 1_000;
 
 export const getPublicContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: false }),
@@ -304,8 +306,60 @@ export const getPublicCatalogSnapshotForRequest = cache(
 );
 
 export const getAdminContentSnapshot = cache(async () =>
-  getContentSnapshotForRequest({ includePremiumCodes: true }),
+  getContentSnapshotForRequest({ includePremiumCodes: true, includeCollections: true }),
 );
+
+export async function getCollectionImageForRequest(collectionId: string): Promise<{
+  imagePath?: string;
+  imageStorageProvider?: CollectionImageStorageProvider;
+  imageContentType?: string;
+} | null> {
+  if (getBackendMode() === "local") {
+    const { getContentSnapshot } = await import("./content-store");
+    const collection = getContentSnapshot().collections.find((item) => item.id === collectionId);
+    return collection
+      ? {
+          imagePath: collection.imagePath,
+          imageStorageProvider: collection.imageStorageProvider,
+          imageContentType: collection.imageContentType,
+        }
+      : null;
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("collections")
+    .select("image_path,image_storage_provider,image_content_type")
+    .eq("id", collectionId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Supabase collection image read failed: ${error.message}`);
+  if (!data) return null;
+
+  const provider = data.image_storage_provider;
+  return {
+    imagePath: optionalString(data.image_path),
+    imageStorageProvider: provider === "local" || provider === "supabase" || provider === "r2" ? provider : undefined,
+    imageContentType: optionalString(data.image_content_type),
+  };
+}
+
+export async function isCollectionImageReferencedForRequest(storagePath: string): Promise<boolean> {
+  if (getBackendMode() === "local") {
+    const { getContentSnapshot } = await import("./content-store");
+    return getContentSnapshot().collections.some((collection) => collection.imagePath === storagePath);
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("collections")
+    .select("id")
+    .eq("image_path", storagePath)
+    .limit(1);
+
+  if (error) throw new Error(`Supabase collection image reference check failed: ${error.message}`);
+  return Boolean(data?.length);
+}
 
 export const getCatalogSettingsForRequest = cache(async (): Promise<CatalogSettings> => {
   if (getBackendMode() === "local") {
@@ -357,11 +411,19 @@ export const getAboutPageSettingsForRequest = cache(async (): Promise<AboutPageS
 
 export async function getContentSnapshotForRequest(options: {
   includePremiumCodes?: boolean;
+  includeCollections?: boolean;
 } = {}): Promise<ContentSnapshot> {
   if (getBackendMode() === "local") {
     const { getContentSnapshot } = await import("./content-store");
+    const snapshot = getContentSnapshot();
 
-    return getContentSnapshot();
+    return options.includeCollections
+      ? snapshot
+      : {
+          ...snapshot,
+          collections: [],
+          products: snapshot.products.map((product) => ({ ...product, collectionId: undefined })),
+        };
   }
 
   const supabase = await createClient();
@@ -379,8 +441,12 @@ export async function getContentSnapshotForRequest(options: {
     staticPageRows,
     catalogSettingsRows,
     premiumCodeRows,
+    collectionRows,
+    productCollectionRows,
   ] = await Promise.all([
-    selectRows(supabase, "products"),
+    options.includeCollections
+      ? selectRowsAfterId(supabase, "products")
+      : selectRows(supabase, "products"),
     selectRows(supabase, "product_translations"),
     selectRows(supabase, "product_categories"),
     selectRows(supabase, "product_tags"),
@@ -395,6 +461,12 @@ export async function getContentSnapshotForRequest(options: {
     options.includePremiumCodes
       ? selectRowsAfterId(supabase, "premium_codes")
       : Promise.resolve([]),
+    options.includeCollections
+      ? selectRows(supabase, "collections")
+      : Promise.resolve([]),
+    options.includeCollections
+      ? selectRowsAfterId(supabase, "product_collections")
+      : Promise.resolve([]),
   ]);
 
   const categoryTranslations = groupByString(categoryTranslationRows, "category_id");
@@ -405,6 +477,9 @@ export async function getContentSnapshotForRequest(options: {
   const premiumCodes = groupByString(premiumCodeRows, "product_id");
   const productCategories = groupByString(productCategoryRows, "product_id");
   const productTags = groupByString(productTagRows, "product_id");
+  const productCollections = new Map(
+    productCollectionRows.map((row) => [stringValue(row.product_id), stringValue(row.collection_id)]),
+  );
 
   const categories = categoryRows.map((row) =>
     mapCategory(row, categoryTranslations.get(stringValue(row.id)) ?? []),
@@ -423,8 +498,10 @@ export async function getContentSnapshotForRequest(options: {
         assets.get(stringValue(row.id)) ?? [],
         amazonLinks.get(stringValue(row.id)) ?? [],
         premiumCodes.get(stringValue(row.id)) ?? [],
+        productCollections.get(stringValue(row.id)),
       ),
     ),
+    collections: collectionRows.map(mapCollection),
     categories,
     tags,
     staticPages: staticPageRows
@@ -471,8 +548,8 @@ async function selectRowsAfterId(
       .select("*")
       .order("id", { ascending: true });
     const { data, error } = lastId
-      ? await orderedQuery.gt("id", lastId).limit(PREMIUM_CODE_PAGE_SIZE)
-      : await orderedQuery.limit(PREMIUM_CODE_PAGE_SIZE);
+      ? await orderedQuery.gt("id", lastId).limit(POSTGREST_PAGE_SIZE)
+      : await orderedQuery.limit(POSTGREST_PAGE_SIZE);
 
     if (error) {
       throw new Error(`Supabase ${table} read failed: ${error.message}`);
@@ -481,7 +558,7 @@ async function selectRowsAfterId(
     const page = (data ?? []) as DbRow[];
     rows.push(...page);
 
-    if (page.length < PREMIUM_CODE_PAGE_SIZE) {
+    if (page.length < POSTGREST_PAGE_SIZE) {
       return rows;
     }
 
@@ -501,6 +578,7 @@ function mapProduct(
   assetRows: DbRow[],
   amazonRows: DbRow[],
   premiumCodeRows: DbRow[],
+  collectionId?: string,
 ): Product {
   return {
     id: stringValue(row.id),
@@ -508,6 +586,7 @@ function mapProduct(
     status: row.status as Product["status"],
     audience: row.audience as Product["audience"],
     productType: stringValue(row.product_type),
+    collectionId,
     coverAssetId: stringValue(row.cover_asset_id),
     videoAssetId: optionalString(row.video_asset_id),
     reviewDelayDays: numberValue(row.review_delay_days, 14),
@@ -553,6 +632,7 @@ function mapPublicProductDetailRow(row: DbRow): ContentSnapshot {
         [],
       ),
     ],
+    collections: [],
     categories,
     tags,
     staticPages: [],
@@ -619,6 +699,25 @@ function mapTag(row: DbRow, translationRows: DbRow[]): Tag {
     id: stringValue(row.id),
     slug: stringValue(row.slug),
     translations: translationRows.map(mapTaxonomyTranslation),
+  };
+}
+
+function mapCollection(row: DbRow): Collection {
+  const imagePath = optionalString(row.image_path);
+  const rawProvider = row.image_storage_provider;
+
+  return {
+    id: stringValue(row.id),
+    name: stringValue(row.name),
+    slug: stringValue(row.slug),
+    imagePath,
+    imageStorageProvider: rawProvider === "r2" || rawProvider === "supabase" ? rawProvider : undefined,
+    imageFilename: optionalString(row.image_filename),
+    imageContentType: optionalString(row.image_content_type),
+    imageSizeBytes: numberOrUndefined(row.image_size_bytes),
+    sortOrder: numberValue(row.sort_order, 100),
+    createdAt: stringValue(row.created_at),
+    updatedAt: stringValue(row.updated_at),
   };
 }
 
