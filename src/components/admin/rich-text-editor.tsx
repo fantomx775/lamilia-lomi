@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "re
 import { Button } from "@/components/ui/button";
 import { importRichTextHtml, richTextDocumentToHtml, type RichTextHtmlWarning } from "@/lib/rich-text-html";
 import {
+  RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX,
   richTextDocumentForEditor,
   sanitizeRichTextHref,
   serializeRichTextDocument,
@@ -242,6 +243,7 @@ export function RichTextEditor({
   return (
     <div className="grid min-w-0 gap-2">
       <input type="hidden" name={name} value={formValue} disabled={!editor} />
+      <input type="hidden" name={`${name}${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`} value="2" />
       <input type="hidden" data-rich-text-draft="true" value={htmlHasUnappliedChanges ? htmlSource : ""} />
       <noscript>
         <div className="grid gap-2">

@@ -33,6 +33,7 @@ export const ADMIN_ERROR_CODES = {
   CONFLICT_AMAZON_MARKET_DUPLICATE: "admin.conflict.amazon_market_duplicate",
   CONFLICT_SLUG: "admin.conflict.slug",
   CONFLICT_DATA: "admin.conflict.data",
+  RICH_TEXT_CLIENT_OUTDATED: "admin.rich_text.client_outdated",
 } as const;
 
 export type AdminErrorCode = (typeof ADMIN_ERROR_CODES)[keyof typeof ADMIN_ERROR_CODES];
@@ -118,6 +119,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Each Amazon market can be listed only once.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "This slug is already in use.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "These changes conflict with existing data. Refresh and try again.",
+    [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED]: "This editor is out of date. Refresh the page and reapply your changes before saving.",
   },
   pl: {
     [ADMIN_ERROR_CODES.INTERNAL]: "Nie udało się zapisać zmian. Spróbuj ponownie.",
@@ -152,6 +154,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Każdy rynek Amazon może wystąpić tylko raz.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Ten slug jest już używany.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Zmiany kolidują z istniejącymi danymi. Odśwież stronę i spróbuj ponownie.",
+    [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED]: "Ta karta edytora jest nieaktualna. Odśwież stronę i ponownie wprowadź zmiany przed zapisem.",
   },
   de: {
     [ADMIN_ERROR_CODES.INTERNAL]: "Die Änderungen konnten nicht gespeichert werden. Bitte versuche es erneut.",
@@ -186,6 +189,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Jeder Amazon-Markt darf nur einmal aufgeführt werden.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Dieser Slug wird bereits verwendet.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Die Änderungen stehen im Konflikt mit vorhandenen Daten. Aktualisiere die Seite und versuche es erneut.",
+    [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED]: "Dieser Editor ist veraltet. Aktualisiere die Seite und gib deine Änderungen erneut ein, bevor du speicherst.",
   },
   es: {
     [ADMIN_ERROR_CODES.INTERNAL]: "No se pudieron guardar los cambios. Inténtalo de nuevo.",
@@ -220,6 +224,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE]: "Cada mercado de Amazon solo puede aparecer una vez.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Este slug ya está en uso.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Los cambios entran en conflicto con datos existentes. Actualiza e inténtalo de nuevo.",
+    [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED]: "Este editor está desactualizado. Actualiza la página y vuelve a introducir tus cambios antes de guardar.",
   },
 } satisfies Record<StoredLocale, Record<AdminErrorCode, string>>;
 

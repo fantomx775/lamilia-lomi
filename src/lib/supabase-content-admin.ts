@@ -49,6 +49,7 @@ import {
   type AdminMutationResult,
   type DatabaseErrorLike,
 } from "./admin-errors";
+import { blocksStaleRichTextWrite } from "./rich-text";
 import type { AboutPageSettings, CatalogDesktopColumns, CategoryImage, Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
@@ -546,6 +547,10 @@ export async function savePagesForRequest(
     }
 
     const snapshot = await getAdminContentSnapshot();
+    const existingBody = snapshot.staticPages.find((page) => page.slug === slug && page.locale === "en")?.body ?? "";
+    if (blocksStaleRichTextWrite(formData, "body", existingBody)) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED] };
+    }
     const { pages } = buildStaticPagesFromFormData(formData, snapshot, slug);
     const supabase = await createClient();
 
@@ -612,6 +617,13 @@ export async function saveAboutPageSettingsForRequest(
 
     if (getBackendMode() === "local") {
       const snapshot = getContentSnapshot();
+      if (blocksStaleRichTextWrite(
+        formData,
+        "aboutIntro",
+        snapshot.aboutPageSettings.intro,
+      )) {
+        return { ok: false, errors: [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED] };
+      }
       const validationError = validateAboutPageProductSelections(
         settings,
         snapshot.products,
@@ -646,6 +658,9 @@ export async function saveAboutPageSettingsForRequest(
       favoriteColoringBookIds: existingRow.favorite_coloring_book_ids,
       favoritePictureBookIds: existingRow.favorite_picture_book_ids,
     });
+    if (blocksStaleRichTextWrite(formData, "aboutIntro", existingSettings.intro)) {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED] };
+    }
     const selectedIds = getAboutProductIds(settings);
     const products = selectedIds.length
       ? await loadAboutProducts(supabase, selectedIds)

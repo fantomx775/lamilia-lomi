@@ -42,6 +42,7 @@ export default async function EditPage({ params, searchParams }: Props) {
         config={snapshot.aboutPageSettings}
         products={products}
         feedback={feedback}
+        saved={Boolean(query.saved)}
         saveAction={saveAboutPageAction}
       />
     );

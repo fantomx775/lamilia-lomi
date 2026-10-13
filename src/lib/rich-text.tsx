@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 export const RICH_TEXT_FORMAT_PREFIX = "lamilia-rich-text:v1:";
 const RICH_TEXT_V2_EXTENSION_KEY = "richTextV2";
+export const RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX = "__richTextEditorVersion";
 
 export type RichTextMark =
   | { type: "bold" }
@@ -70,6 +71,22 @@ export function serializeRichTextDocument(document: unknown): string {
 export function sanitizeRichTextValue(value: string): string {
   const parsed = parseRichTextValue(value);
   return parsed.kind === "rich" ? serializeRichTextDocument(parsed.document) : value;
+}
+
+export function blocksStaleRichTextWrite(
+  formData: FormData,
+  fieldName: string,
+  existingValue: string,
+): boolean {
+  if (!existingValue.startsWith(RICH_TEXT_FORMAT_PREFIX)) return false;
+
+  try {
+    const parsed: unknown = JSON.parse(existingValue.slice(RICH_TEXT_FORMAT_PREFIX.length));
+    if (!isRecord(parsed) || !(RICH_TEXT_V2_EXTENSION_KEY in parsed)) return false;
+    return formData.get(`${fieldName}${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`) !== "2";
+  } catch {
+    return false;
+  }
 }
 
 export function getRichTextTextContent(value: string): string {

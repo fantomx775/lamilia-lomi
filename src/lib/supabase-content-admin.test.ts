@@ -758,6 +758,37 @@ describe("Supabase content admin mutations", () => {
     expect(mocks.deletedTables).toHaveLength(0);
   });
 
+  it("rejects an old static-page editor before a V2 body can be overwritten", async () => {
+    const v2Body = serializeRichTextDocument({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Underlined", marks: [{ type: "underline" }] }] }],
+    });
+    const payload = JSON.parse(v2Body.slice(RICH_TEXT_FORMAT_PREFIX.length)) as Record<string, unknown>;
+    delete payload.richTextV2;
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [],
+      tags: [],
+      staticPages: [{
+        id: "legacy-terms-en",
+        slug: "terms",
+        locale: "en",
+        title: "Terms",
+        body: v2Body,
+      }],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    const staleForm = new FormData();
+    staleForm.set("title", "Terms");
+    staleForm.set("body", `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify(payload)}`);
+
+    await expect(savePagesForRequest(staleForm, "terms")).resolves.toEqual({
+      ok: false,
+      errors: ["admin.rich_text.client_outdated"],
+    });
+    expect(mocks.upsertedRows.filter((row) => row.table === "static_pages")).toHaveLength(0);
+  });
+
   it("archives through the update-only RPC without saving a stale product snapshot", async () => {
     mocks.getAdminContentSnapshot.mockResolvedValue({
       products: [{ id: productId, assets: [] }],
@@ -1025,6 +1056,28 @@ describe("Supabase content admin mutations", () => {
       favorite_coloring_book_ids: ["coloring-1", "coloring-2", "coloring-3"],
       favorite_picture_book_ids: ["picture-1", "picture-2", "picture-3"],
     }]);
+  });
+
+  it("rejects an old About editor before a V2 intro can be overwritten", async () => {
+    const v2Intro = serializeRichTextDocument({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Underlined", marks: [{ type: "underline" }] }] }],
+    });
+    const updates = configureAboutSettingsDatabase({
+      existing: {
+        about_intro: v2Intro,
+        favorite_coloring_book_ids: ["", "", ""],
+        favorite_picture_book_ids: ["", "", ""],
+      },
+    });
+    const staleForm = aboutSettingsForm();
+    staleForm.set("aboutIntro", "V1 replacement");
+
+    await expect(saveAboutPageSettingsForRequest(staleForm)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.rich_text.client_outdated"],
+    });
+    expect(updates).toEqual([]);
   });
 
   it("rejects duplicate IDs within or across sections, including alternate UUID formats, before writing", async () => {
