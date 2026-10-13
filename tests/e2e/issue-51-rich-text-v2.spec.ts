@@ -213,14 +213,45 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `privacy-storefront-${testInfo.project.name}.png`, page.getByRole("heading", { level: 2, name: "Issue 51 Privacy" }));
 
+    await page.goto("/admin/pages/about");
+    const aboutEditor = page.getByRole("textbox", { name: "Wprowadzenie" });
+    const aboutHtml = "<p>Issue 51 About intro with <u>underlined copy</u>.</p>";
+    await page.getByRole("button", { name: "HTML" }).click();
+    await page.getByRole("textbox", { name: "Źródło HTML" }).fill(aboutHtml);
+    const aboutNavigationMessage = page.waitForEvent("dialog").then(async (dialog) => {
+      const message = dialog.message();
+      await dialog.dismiss();
+      return message;
+    });
+    await page.locator("#about-page-editor-form").getByRole("link", { name: "Strony" }).click();
+    expect(await aboutNavigationMessage).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
+    await expect(page.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue(aboutHtml);
+    await page.getByRole("button", { name: "Rich Text" }).click();
+    await expect(aboutEditor.locator("u")).toHaveText("underlined copy");
+    await expectNoHorizontalOverflow(page);
+    await saveScreenshot(page, screenshotDirectory, `about-editor-${testInfo.project.name}.png`, page.locator("#about-page-editor-form [role='toolbar']"));
+    const aboutSaveResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/pages/about");
+    await page.locator("#about-page-editor-form").getByRole("button", { name: "Zapisz" }).first().click();
+    expect((await aboutSaveResponse).status()).toBe(200);
+    await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
+    await page.reload();
+    await expect(page.locator('#about-page-editor-form input[name="aboutIntro"]')).toHaveValue(/lamilia-rich-text:v1:/);
+    await page.goto("/en/about");
+    const aboutIntro = page.locator("main article u");
+    await expect(aboutIntro).toHaveText("underlined copy");
+    await expectNoHorizontalOverflow(page);
+    await saveScreenshot(page, screenshotDirectory, `about-storefront-${testInfo.project.name}.png`, aboutIntro);
+
     const persistedContent = JSON.parse(fs.readFileSync(contentStorePath, "utf8")) as {
       products: Array<{ id: string; translations: Array<{ locale: string; longDescription: string }> }>;
       staticPages: Array<{ slug: string; locale: string; body: string }>;
+      aboutPageSettings: { intro: string };
     };
     const savedProduct = persistedContent.products.find((product) => product.id === productId);
     expect(savedProduct?.translations.find((translation) => translation.locale === "en")?.longDescription).toBe(savedProductDescription);
     expect(persistedContent.staticPages.find((record) => record.slug === "terms" && record.locale === "en")?.body).toContain("lamilia-rich-text:v1:");
     expect(persistedContent.staticPages.find((record) => record.slug === "privacy" && record.locale === "en")?.body).toContain("lamilia-rich-text:v1:");
+    expect(persistedContent.aboutPageSettings.intro).toContain("lamilia-rich-text:v1:");
 
     const successfulPostPaths = new Set(
       diagnostics.postResponses.filter((response) => response.status >= 200 && response.status < 300).map((response) => response.path),
@@ -248,7 +279,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       testedAt: new Date().toISOString(),
       testedSha: process.env.ISSUE_51_TESTED_SHA ?? "not-recorded",
       project: testInfo.project.name,
-      flows: ["product-description", "terms", "privacy"],
+      flows: ["product-description", "terms", "privacy", "about-page"],
       consoleErrors: diagnostics.consoleErrors,
       pageErrors: diagnostics.pageErrors,
       attemptedHtmlResourceRequests,
