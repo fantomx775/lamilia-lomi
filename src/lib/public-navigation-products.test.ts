@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
     table: string;
     columns: string;
     filters: Array<[string, unknown]>;
+    gtFilters: Array<[string, unknown]>;
+    orders: Array<{ column: string; ascending: boolean }>;
+    limit?: number;
   }>,
   requestCaches: [] as Array<Map<string, unknown>>,
 }));
@@ -42,6 +45,8 @@ import {
   getCatalogProductsForRequest,
   getFeaturedProductsForRequest,
 } from "./products-request";
+import { getFeaturedProductsFromSnapshot } from "./products";
+import type { ContentSnapshot, Product } from "./types";
 
 describe("targeted Home and Catalog product reads", () => {
   beforeEach(() => {
@@ -128,9 +133,85 @@ describe("targeted Home and Catalog product reads", () => {
     };
     mocks.singleRows = { catalog_settings: { desktop_columns: 5 } };
     mocks.from.mockImplementation((table: string) => {
-      const queryRecord = { table, columns: "", filters: [] as Array<[string, unknown]> };
+      const queryRecord = {
+        table,
+        columns: "",
+        filters: [] as Array<[string, unknown]>,
+        gtFilters: [] as Array<[string, unknown]>,
+        orders: [] as Array<{ column: string; ascending: boolean }>,
+        limit: undefined as number | undefined,
+      };
       mocks.queries.push(queryRecord);
-      const result = { data: mocks.rows[table] ?? [], error: null };
+
+      const readRows = () => {
+        let result = (mocks.rows[table] ?? [])
+          .filter(isRecord)
+          .map((row) => ({ ...row }));
+        const relationNames = new Set(
+          queryRecord.filters
+            .filter(([column]) => column.includes("."))
+            .map(([column]) => column.split(".")[0])
+            .filter((name) => name !== undefined && name !== ""),
+        );
+
+        for (const relation of relationNames) {
+          const relationFilters = queryRecord.filters.filter(([column]) =>
+            column.startsWith(relation + "."),
+          );
+          result = result.map((row) => {
+            const children = Array.isArray(row[relation])
+              ? row[relation].filter(isRecord)
+              : [];
+            return {
+              ...row,
+              [relation]: children.filter((child) =>
+                relationFilters.every(([column, value]) =>
+                  child[column.slice(relation.length + 1)] === value,
+                ),
+              ),
+            };
+          });
+
+          if (relation === "product_translations") {
+            result = result.filter(
+              (row) => (row[relation] as unknown[]).length > 0,
+            );
+          }
+        }
+
+        result = result.filter((row) =>
+          queryRecord.filters
+            .filter(([column]) => !column.includes("."))
+            .every(([column, value]) => row[column] === value),
+        );
+        result = result.filter((row) =>
+          queryRecord.gtFilters.every(([column, value]) =>
+            typeof row[column] === "string" &&
+            typeof value === "string" &&
+            row[column] > value,
+          ),
+        );
+
+        for (const { column, ascending } of queryRecord.orders) {
+          result.sort((left, right) => {
+            const leftValue = left[column];
+            const rightValue = right[column];
+            const comparison =
+              typeof leftValue === "number" && typeof rightValue === "number"
+                ? leftValue - rightValue
+                : String(leftValue ?? "") < String(rightValue ?? "")
+                  ? -1
+                  : String(leftValue ?? "") > String(rightValue ?? "")
+                    ? 1
+                    : 0;
+            return ascending ? comparison : -comparison;
+          });
+        }
+
+        return queryRecord.limit === undefined
+          ? result
+          : result.slice(0, queryRecord.limit);
+      };
       const query = {
         select(columns: string) {
           queryRecord.columns = columns;
@@ -140,15 +221,33 @@ describe("targeted Home and Catalog product reads", () => {
           queryRecord.filters.push([column, value]);
           return query;
         },
+        gt(column: string, value: unknown) {
+          queryRecord.gtFilters.push([column, value]);
+          return query;
+        },
+        order(column: string, options?: { ascending?: boolean }) {
+          queryRecord.orders.push({
+            column,
+            ascending: options?.ascending ?? true,
+          });
+          return query;
+        },
+        limit(value: number) {
+          queryRecord.limit = value;
+          return query;
+        },
         maybeSingle: vi.fn().mockResolvedValue({
           data: mocks.singleRows[table] ?? null,
           error: null,
         }),
         then(
-          onFulfilled: (value: typeof result) => unknown,
+          onFulfilled: (value: { data: unknown[]; error: null }) => unknown,
           onRejected?: (reason: unknown) => unknown,
         ) {
-          return Promise.resolve(result).then(onFulfilled, onRejected);
+          return Promise.resolve({ data: readRows(), error: null }).then(
+            onFulfilled,
+            onRejected,
+          );
         },
       };
 
@@ -157,7 +256,7 @@ describe("targeted Home and Catalog product reads", () => {
     mocks.createClient.mockResolvedValue({ from: mocks.from });
   });
 
-  it("loads Home cards from one localized products-and-covers query", async () => {
+  it("loads Home cards from bounded localized products-and-covers queries", async () => {
     const snapshot = await getPublicHomeProductSnapshotForRequest("en");
     const [kids, adults, featured] = await Promise.all([
       getFeaturedProductsForRequest("en", "kids"),
@@ -178,24 +277,191 @@ describe("targeted Home and Catalog product reads", () => {
       "moon-garden-coloring-book",
     ]);
     expect(snapshot.collections).toEqual([]);
-    expect(mocks.queries.map((query) => query.table)).toEqual(["products"]);
+    const productQueries = mocks.queries.filter((query) => query.table === "products");
+    expect(productQueries).toHaveLength(2);
+    expect(
+      productQueries.map(
+        (query) => query.filters.find(([column]) => column === "audience")?.[1],
+      ),
+    ).toEqual(["kids", "adults"]);
 
-    const [productQuery] = mocks.queries;
-    expect(productQuery.columns).toContain(
-      "product_translations!inner ( locale, title, short_description )",
+    for (const productQuery of productQueries) {
+      expect(productQuery.columns).toContain(
+        "product_translations!inner ( locale, title, short_description )",
+      );
+      expect(productQuery.columns).toContain("product_assets!product_assets_product_id_fkey");
+      expect(productQuery.columns).not.toContain("product_categories");
+      expect(productQuery.columns).not.toContain("product_tags");
+      expect(productQuery.columns).not.toContain("amazon_links");
+      expect(productQuery.columns).not.toContain("static_pages");
+      expect(productQuery.columns).not.toContain("*");
+      expect(productQuery.filters.slice(0, 4)).toEqual([
+        ["status", "published"],
+        ["product_translations.locale", "en"],
+        ["product_assets.is_active", true],
+        ["product_assets.kind", "cover"],
+      ]);
+      expect(productQuery.orders).toEqual([
+        { column: "review_delay_days", ascending: true },
+      ]);
+      expect(productQuery.limit).toBe(5);
+    }
+  });
+
+  it("matches full Home selections and pages every row in a tied cutoff group", async () => {
+    const noCover = productRow({
+      id: "kid-no-cover",
+      slug: "kid-no-cover",
+      audience: "kids",
+      title: "No Cover",
+      reviewDelayDays: 1,
+      sortOrder: 1,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      categoryId: "category-kids",
+      tagId: "tag-kids",
+      coverId: "cover-kid-no-cover",
+    });
+    noCover.product_assets = [];
+    const kids = [
+      noCover,
+      ...[2, 3].map((reviewDelayDays, index) =>
+        productRow({
+          id: "kid-earlier-" + index,
+          slug: "kid-earlier-" + index,
+          audience: "kids",
+          title: "Earlier " + index,
+          reviewDelayDays,
+          sortOrder: index,
+          createdAt: "2026-10-01T00:00:00.000Z",
+          categoryId: "category-kids",
+          tagId: "tag-kids",
+          coverId: "cover-kid-earlier-" + index,
+        }),
+      ),
+      ...Array.from({ length: 1_001 }, (_, index) =>
+        productRow({
+          id: "kid-boundary-" + String(index).padStart(4, "0"),
+          slug: "kid-boundary-" + index,
+          audience: "kids",
+          title:
+            ["äther", "Alpha", "_underscore", "Éclair", "éclair", "Omega"][
+              index % 6
+            ] + " " + index,
+          reviewDelayDays: 4,
+          sortOrder: index,
+          createdAt: "2026-10-01T00:00:00.000Z",
+          categoryId: "category-kids",
+          tagId: "tag-kids",
+          coverId: "cover-kid-boundary-" + index,
+        }),
+      ),
+    ];
+    const adults = Array.from({ length: 6 }, (_, index) =>
+      productRow({
+        id: "adult-" + index,
+        slug: "adult-" + index,
+        audience: "adults",
+        title: "Adult " + index,
+        reviewDelayDays: index + 20,
+        sortOrder: index,
+        createdAt: "2026-10-01T00:00:00.000Z",
+        categoryId: "category-adults",
+        tagId: "tag-adults",
+        coverId: "cover-adult-" + index,
+      }),
     );
-    expect(productQuery.columns).toContain("product_assets!product_assets_product_id_fkey");
-    expect(productQuery.columns).not.toContain("product_categories");
-    expect(productQuery.columns).not.toContain("product_tags");
-    expect(productQuery.columns).not.toContain("amazon_links");
-    expect(productQuery.columns).not.toContain("static_pages");
-    expect(productQuery.columns).not.toContain("*");
-    expect(productQuery.filters).toEqual([
-      ["status", "published"],
-      ["product_translations.locale", "en"],
-      ["product_assets.is_active", true],
-      ["product_assets.kind", "cover"],
+    const wrongLocale = productRow({
+      id: "wrong-locale",
+      slug: "wrong-locale",
+      audience: "kids",
+      title: "Wrong locale",
+      reviewDelayDays: 1,
+      sortOrder: 1,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      categoryId: "category-kids",
+      tagId: "tag-kids",
+      coverId: "cover-wrong-locale",
+    });
+    wrongLocale.product_translations = wrongLocale.product_translations.map(
+      (translation) => ({ ...translation, locale: "pl" }),
+    );
+    const draft = productRow({
+      id: "draft",
+      slug: "draft",
+      audience: "kids",
+      title: "Draft",
+      reviewDelayDays: 1,
+      sortOrder: 1,
+      createdAt: "2026-10-01T00:00:00.000Z",
+      categoryId: "category-kids",
+      tagId: "tag-kids",
+      coverId: "cover-draft",
+    });
+    draft.status = "draft";
+    const allRows = [...kids, ...adults, wrongLocale, draft];
+    mocks.rows.products = allRows;
+
+    const expectedSnapshot = fullHomeSnapshot(allRows, "en");
+    const actualSnapshot = await getPublicHomeProductSnapshotForRequest("en");
+
+    for (const audience of ["kids", "adults"] as const) {
+      expect(
+        getFeaturedProductsFromSnapshot(actualSnapshot, "en", audience).map(
+          (product) => product.slug,
+        ),
+      ).toEqual(
+        getFeaturedProductsFromSnapshot(expectedSnapshot, "en", audience).map(
+          (product) => product.slug,
+        ),
+      );
+    }
+    expect(
+      getFeaturedProductsFromSnapshot(actualSnapshot, "en").map(
+        (product) => product.slug,
+      ),
+    ).toEqual(
+      getFeaturedProductsFromSnapshot(expectedSnapshot, "en").map(
+        (product) => product.slug,
+      ),
+    );
+    expect(actualSnapshot.products).toHaveLength(kids.length + 4);
+    expect(
+      actualSnapshot.products.find((product) => product.slug === "kid-no-cover")?.assets,
+    ).toEqual([]);
+    expect(actualSnapshot.products.some((product) => product.slug === "wrong-locale")).toBe(
+      false,
+    );
+    expect(actualSnapshot.products.some((product) => product.slug === "draft")).toBe(false);
+    expect(
+      actualSnapshot.products.filter(
+        (product) => product.audience === "kids" && product.reviewDelayDays === 4,
+      ),
+    ).toHaveLength(1_001);
+
+    const productQueries = mocks.queries.filter((query) => query.table === "products");
+    expect(productQueries).toHaveLength(4);
+    const tieQueries = productQueries.filter((query) =>
+      query.filters.some(
+        ([column, value]) => column === "review_delay_days" && value === 4,
+      ),
+    );
+    expect(tieQueries).toHaveLength(2);
+    expect(tieQueries.map((query) => query.limit)).toEqual([1_000, 1_000]);
+    expect(
+      tieQueries.some((query) =>
+        query.gtFilters.some(
+          ([column, value]) => column === "id" && value === "kid-boundary-0999",
+        ),
+      ),
+    ).toBe(true);
+    const adultQuery = productQueries.find((query) =>
+      query.filters.some(([column, value]) => column === "audience" && value === "adults"),
+    );
+    expect(adultQuery?.limit).toBe(5);
+    expect(adultQuery?.orders).toEqual([
+      { column: "review_delay_days", ascending: true },
     ]);
+    expect(adultQuery?.gtFilters).toEqual([]);
   });
 
   it("loads Catalog products and taxonomy with four explicit reads", async () => {
@@ -337,4 +603,70 @@ function productRow({
       },
     ],
   };
+}
+
+function fullHomeSnapshot(
+  rows: Array<Record<string, unknown>>,
+  locale: string,
+): ContentSnapshot {
+  const products = rows.flatMap((row): Product[] => {
+    if (row.status !== "published") {
+      return [];
+    }
+
+    const translations = Array.isArray(row.product_translations)
+      ? row.product_translations.filter(isRecord)
+      : [];
+    const translation = translations.find((item) => item.locale === locale);
+    if (!translation) {
+      return [];
+    }
+
+    return [
+      {
+        id: String(row.id ?? ""),
+        slug: String(row.slug ?? ""),
+        status: "published",
+        audience: row.audience as Product["audience"],
+        productType: String(row.product_type ?? ""),
+        coverAssetId: String(row.cover_asset_id ?? ""),
+        reviewDelayDays:
+          typeof row.review_delay_days === "number" ? row.review_delay_days : 14,
+        sortOrder: typeof row.sort_order === "number" ? row.sort_order : 100,
+        createdAt: String(row.created_at ?? ""),
+        updatedAt: String(row.updated_at ?? ""),
+        translations: [
+          {
+            locale: translation.locale as Product["translations"][number]["locale"],
+            title: String(translation.title ?? ""),
+            shortDescription: String(translation.short_description ?? ""),
+            longDescription: "",
+          },
+        ],
+        categoryIds: [],
+        tagIds: [],
+        assets: [],
+        amazonLinks: [],
+        premiumCodes: [],
+      },
+    ];
+  });
+
+  return {
+    products,
+    collections: [],
+    categories: [],
+    tags: [],
+    staticPages: [],
+    catalogSettings: { desktopColumns: 4 },
+    aboutPageSettings: {
+      intro: "",
+      favoriteColoringBookIds: ["", "", ""],
+      favoritePictureBookIds: ["", "", ""],
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

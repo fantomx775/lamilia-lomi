@@ -11,6 +11,7 @@ import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
 import type {
   AmazonLink,
   AboutPageSettings,
+  Audience,
   Category,
   CatalogSettings,
   Collection,
@@ -129,46 +130,14 @@ export const getPublicHomeProductSnapshotForRequest = cache(
     }
 
     const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("products")
-      .select(`
-        id,
-        slug,
-        status,
-        audience,
-        product_type,
-        cover_asset_id,
-        review_delay_days,
-        sort_order,
-        product_translations!inner ( locale, title, short_description ),
-        product_assets!product_assets_product_id_fkey (
-          id,
-          product_id,
-          kind,
-          bucket,
-          path,
-          filename,
-          content_type,
-          size_bytes,
-          locale,
-          title,
-          sort_order,
-          is_public,
-          is_active,
-          storage_provider
-        )
-      `)
-      .eq("status", "published")
-      .eq("product_translations.locale", locale)
-      .eq("product_assets.is_active", true)
-      .eq("product_assets.kind", "cover");
-
-    if (error) {
-      throw new Error(`Supabase Home products read failed: ${error.message}`);
-    }
+    const audienceRows = await Promise.all(
+      HOME_PRODUCT_AUDIENCES.map((audience) =>
+        getHomeProductCandidatesForAudience(supabase, locale, audience),
+      ),
+    );
 
     return {
-      products: rowsValue(data).map((row) =>
+      products: audienceRows.flat().map((row) =>
         mapProduct(
           row,
           rowsValue(row.product_translations),
@@ -188,6 +157,131 @@ export const getPublicHomeProductSnapshotForRequest = cache(
     };
   },
 );
+
+const HOME_PRODUCT_AUDIENCES: readonly Audience[] = ["kids", "adults"];
+const HOME_PRODUCT_SELECT = `
+  id,
+  slug,
+  status,
+  audience,
+  product_type,
+  cover_asset_id,
+  review_delay_days,
+  sort_order,
+  product_translations!inner ( locale, title, short_description ),
+  product_assets!product_assets_product_id_fkey (
+    id,
+    product_id,
+    kind,
+    bucket,
+    path,
+    filename,
+    content_type,
+    size_bytes,
+    locale,
+    title,
+    sort_order,
+    is_public,
+    is_active,
+    storage_provider
+  )
+`;
+
+async function getHomeProductCandidatesForAudience(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+): Promise<DbRow[]> {
+  // Four candidates per audience cover the global Home top four as well: a
+  // fifth product from one audience already has four same-audience products
+  // ahead of it. The extra row is only a numeric lookahead; tied cutoff rows
+  // are expanded so products.ts remains authoritative for localeCompare.
+  const { data, error } = await createHomeProductQuery(
+    supabase,
+    locale,
+    audience,
+  )
+    .order("review_delay_days", { ascending: true })
+    .limit(5);
+
+  if (error) {
+    throw new Error(`Supabase Home products read failed: ${error.message}`);
+  }
+
+  const firstRows = rowsValue(data);
+  if (firstRows.length < 5) {
+    return firstRows;
+  }
+
+  const cutoffDelay = numberValue(firstRows[3]?.review_delay_days, 14);
+  const lookaheadDelay = numberValue(firstRows[4]?.review_delay_days, 14);
+  if (cutoffDelay !== lookaheadDelay) {
+    return firstRows.slice(0, 4);
+  }
+
+  const earlierRows = firstRows.filter(
+    (row) => numberValue(row.review_delay_days, 14) < cutoffDelay,
+  );
+  const cutoffRows = await getAllHomeProductsAtReviewDelay(
+    supabase,
+    locale,
+    audience,
+    cutoffDelay,
+  );
+
+  return [...earlierRows, ...cutoffRows];
+}
+
+async function getAllHomeProductsAtReviewDelay(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+  reviewDelayDays: number,
+): Promise<DbRow[]> {
+  const rows: DbRow[] = [];
+  let lastId: string | undefined;
+
+  for (;;) {
+    let query = createHomeProductQuery(supabase, locale, audience)
+      .eq("review_delay_days", reviewDelayDays)
+      .order("id", { ascending: true });
+    if (lastId) {
+      query = query.gt("id", lastId);
+    }
+
+    const { data, error } = await query.limit(POSTGREST_PAGE_SIZE);
+    if (error) {
+      throw new Error(`Supabase Home products tie read failed: ${error.message}`);
+    }
+
+    const page = rowsValue(data);
+    rows.push(...page);
+    if (page.length < POSTGREST_PAGE_SIZE) {
+      return rows;
+    }
+
+    const nextId = optionalString(page[page.length - 1]?.id);
+    if (!nextId || nextId === lastId) {
+      throw new Error("Supabase Home products tie pagination did not advance.");
+    }
+    lastId = nextId;
+  }
+}
+
+function createHomeProductQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+) {
+  return supabase
+    .from("products")
+    .select(HOME_PRODUCT_SELECT)
+    .eq("status", "published")
+    .eq("product_translations.locale", locale)
+    .eq("product_assets.is_active", true)
+    .eq("product_assets.kind", "cover")
+    .eq("audience", audience);
+}
 
 export const getPublicCatalogSnapshotForRequest = cache(
   async (locale: string): Promise<ContentSnapshot> => {
