@@ -479,6 +479,35 @@ describe("admin behavior", () => {
     expect(result.product.premiumCodes).toEqual(existing.premiumCodes);
   });
 
+  it("blocks a stale V1 product editor from replacing V2-only description marks", () => {
+    const snapshot = getSeedContentSnapshot();
+    const source = snapshot.products[0];
+    const v2Description = serializeRichTextDocument({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Underlined", marks: [{ type: "underline" }] }] }],
+    });
+    const v1Payload = JSON.parse(v2Description.slice(RICH_TEXT_FORMAT_PREFIX.length)) as Record<string, unknown>;
+    delete v1Payload.richTextV2;
+    const staleV1Value = `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify(v1Payload)}`;
+    const existing = {
+      ...source,
+      translations: source.translations.map((translation) => translation.locale === "en"
+        ? { ...translation, longDescription: v2Description }
+        : translation),
+    };
+    const form = new FormData();
+    form.set("longDescription", staleV1Value);
+
+    expect(buildProductFromFormData(form, { existing, snapshot }).errors).toContain(
+      ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED,
+    );
+
+    form.set("longDescription__richTextEditorVersion", "2");
+    expect(buildProductFromFormData(form, { existing, snapshot }).errors).not.toContain(
+      ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED,
+    );
+  });
+
   it("clears submitted SEO overrides while preserving omitted overrides", () => {
     const snapshot = getSeedContentSnapshot();
     const existing = {

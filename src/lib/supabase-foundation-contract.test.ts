@@ -8,6 +8,20 @@ const read = (relativePath: string) =>
   fs.readFileSync(path.join(root, relativePath), "utf8");
 
 describe("Supabase production foundation contracts", () => {
+  it("checks Rich Text V2 compatibility under the product-save lock", () => {
+    const migration = read(
+      "supabase/migrations/20261013084706_issue_51_atomic_rich_text_v2_compatibility_guard.sql",
+    );
+
+    expect(migration).toContain("rename to save_product_before_rich_text_v2_compatibility_guard");
+    expect(migration).toContain("pg_advisory_xact_lock(hashtextextended(requested_product_id::text, 0))");
+    expect(migration).toContain("product_state ->> 'richTextEditorVersion' is distinct from '2'");
+    expect(migration).toContain("position('\"richTextV2\"' in coalesce(current_translation.long_description, '')) > 0");
+    expect(migration).toContain("errcode = 'P0001'");
+    expect(migration).toContain("message = 'admin.rich_text.client_outdated'");
+    expect(migration).toContain("grant execute on function private.save_product(jsonb) to authenticated");
+  });
+
   it("keeps the production adapter and service role server-only", () => {
     expect(read("src/lib/supabase/admin.ts")).toContain('import "server-only"');
     expect(read("src/lib/content-repository.ts")).toContain('import "server-only"');

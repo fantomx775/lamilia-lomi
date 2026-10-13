@@ -148,7 +148,8 @@ describe("ProductEditor V2", () => {
 
     expect(view.getByRole("textbox", { name: "Długi opis" })).toHaveTextContent(english?.longDescription ?? "");
     expect(view.getByLabelText("Krótki opis")).toHaveValue(english?.shortDescription);
-    expect(view.getByRole("button", { name: "Podgląd" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "Rich Text" })).toBeInTheDocument();
+    expect(view.getByRole("button", { name: "HTML" })).toBeInTheDocument();
   });
 
   it("shows five purpose-built media sections without the legacy asset builder", () => {

@@ -1063,7 +1063,17 @@ export function ProductEditor({
                     {shortDescriptionLimitWarning ? <p id="product-short-description-warning" role="status" className="text-sm text-amber-800">{shortDescriptionLimitWarning}</p> : null}
                   </Field>
                   <Field label="Długi opis" htmlFor="product-long-description">
-                    <RichTextEditor id="product-long-description" name="longDescription" label="Długi opis" value={content.longDescription} onChange={(value) => updateContent("longDescription", value)} />
+                    <RichTextEditor
+                      id="product-long-description"
+                      name="longDescription"
+                      label="Długi opis"
+                      value={content.longDescription}
+                      onChange={(value) => updateContent("longDescription", value)}
+                      onSourceDraftChange={(hasDraft) => {
+                        if (hasDraft) markDirty();
+                        else scheduleAfterRender(refreshDirtyState);
+                      }}
+                    />
                   </Field>
                   <AdminDisclosure className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] p-4" summary="SEO i wygląd w Google">
                     <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Puste pole użyje fallbacku: tytułu produktu lub krótkiego opisu.</p>
@@ -1650,7 +1660,9 @@ function mapProductSaveErrors(
 }
 
 function formSignature(form: HTMLFormElement) {
-  return formDataSignature(new FormData(form));
+  const editorDrafts = Array.from(form.querySelectorAll<HTMLInputElement>("[data-rich-text-draft]"))
+    .map((field) => ["richTextDraft", field.value] as const);
+  return JSON.stringify([formDataSignature(new FormData(form)), editorDrafts]);
 }
 
 function readProductEditorHistoryGuard(state: unknown): ProductEditorHistoryGuard | null {
