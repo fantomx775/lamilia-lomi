@@ -19,7 +19,7 @@ import type {
 import { mediaBucketForKind, validateMediaFile } from "./media-upload";
 import { ADMIN_ERROR_CODES, type AdminErrorCode, type AdminMutationResult } from "./admin-errors";
 import { normalizePremiumCode, validatePremiumCodeEntries } from "./premium-code";
-import { sanitizeRichTextValue } from "./rich-text";
+import { blocksStaleRichTextWrite, sanitizeRichTextValue } from "./rich-text";
 import { validateProductTextLengths } from "./product-text";
 import { slugify } from "./utils";
 
@@ -90,6 +90,11 @@ export function buildProductFromFormData(
     errors: Array.from(new Set([
       ...validateProductDraft(product, snapshot),
       ...parsedPremiumCodes.errors,
+      ...(existing && blocksStaleRichTextWrite(
+        formData,
+        "longDescription",
+        existing.translations.find((translation) => translation.locale === "en")?.longDescription ?? "",
+      ) ? [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED] : []),
     ])),
   };
 }
@@ -339,6 +344,9 @@ export function saveStaticPageFromFormData(formData: FormData): AdminMutationRes
   const existing = snapshot.staticPages.find(
     (page) => page.slug === slug && page.locale === locale,
   );
+  if (blocksStaleRichTextWrite(formData, "body", existing?.body ?? "")) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED] };
+  }
   const title = optionalTextField(formData, "title");
   const body = optionalTextField(formData, "body");
   const page: StaticPageRecord = {
@@ -367,6 +375,15 @@ export function saveStaticPagesFromFormData(
   expectedSlug: StaticPageRecord["slug"],
 ): AdminMutationResult {
   const snapshot = getContentSnapshot();
+
+  if (blocksStaleRichTextWrite(
+    formData,
+    "body",
+    snapshot.staticPages.find((page) => page.slug === expectedSlug && page.locale === "en")?.body ?? "",
+  )) {
+    return { ok: false, errors: [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED] };
+  }
+
   const { slug, pages: nextPages } = buildStaticPagesFromFormData(formData, snapshot, expectedSlug);
 
   saveContentSnapshot({

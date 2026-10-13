@@ -193,4 +193,22 @@ describe("AboutPageEditor", () => {
     expect(view.getByRole("alert")).toHaveTextContent(/wybrany w kilku pozycjach/);
     expect(saveAction).not.toHaveBeenCalled();
   });
+
+  it("warns before leaving with an unapplied HTML draft", async () => {
+    const user = userEvent.setup();
+    const view = render(<AboutPageEditor config={emptyConfig} products={products} />);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    await user.click(view.getByRole("button", { name: "HTML" }));
+    fireEvent.change(view.getByRole("textbox", { name: "Źródło HTML" }), {
+      target: { value: "<p>Unapplied About intro</p>" },
+    });
+
+    expect(view.getByRole("status")).toHaveTextContent("Masz niezapisane zmiany.");
+    await user.click(view.getByRole("link", { name: "Strony" }));
+
+    expect(confirm).toHaveBeenCalledWith("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
+    expect(view.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue("<p>Unapplied About intro</p>");
+    confirm.mockRestore();
+  });
 });

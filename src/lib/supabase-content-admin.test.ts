@@ -86,9 +86,11 @@ beforeAll(async () => {
 function aboutSettingsForm(
   coloringIds = ["coloring-1", "coloring-2", "coloring-3"],
   pictureIds = ["picture-1", "picture-2", "picture-3"],
+  editorVersion?: "2",
 ) {
   const form = new FormData();
   form.set("aboutIntro", "About these books");
+  if (editorVersion) form.set("aboutIntro__richTextEditorVersion", editorVersion);
   coloringIds.forEach((id) => form.append("favoriteColoringBookIds", id));
   pictureIds.forEach((id) => form.append("favoritePictureBookIds", id));
   return form;
@@ -102,6 +104,7 @@ function configureAboutSettingsDatabase(options: {
   };
   products?: Array<{ id: string; product_type: string; status?: string }>;
   updateError?: { code: string; message: string } | null;
+  updateMatches?: boolean;
 } = {}) {
   const existing = options.existing ?? {
     about_intro: "",
@@ -144,7 +147,7 @@ function configureAboutSettingsDatabase(options: {
       }),
       maybeSingle: vi.fn(async () => updatePayload
         ? {
-            data: options.updateError ? null : { id: "global" },
+            data: options.updateError || options.updateMatches === false ? null : { id: "global" },
             error: options.updateError ?? null,
           }
         : { data: existing, error: null }),
@@ -206,11 +209,12 @@ describe("Supabase content admin mutations", () => {
       }),
       update: vi.fn((fields: unknown) => {
         mocks.categoryImageUpdates.push({ table, fields });
-        return {
-          eq: vi.fn(() => ({
-            select: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue(mocks.categoryImageUpdateResult) })),
-          })),
-        };
+        const query = { eq: vi.fn(), select: vi.fn() };
+        query.eq.mockImplementation(() => query);
+        query.select.mockImplementation(() => ({
+          maybeSingle: vi.fn().mockResolvedValue(mocks.categoryImageUpdateResult),
+        }));
+        return query;
       }),
       insert: vi.fn(() => resolvedQuery()),
     }));
@@ -629,10 +633,17 @@ describe("Supabase content admin mutations", () => {
         { type: "rawHTML", attrs: { html: "<script>alert(1)</script>" } },
       ],
     })}`);
+    form.set("longDescription__richTextEditorVersion", "2");
 
     await expect(saveProductForRequest(form)).resolves.toMatchObject({ ok: true, id: productId });
 
-    const payload = mocks.rpc.mock.calls[0][1] as { product_state: { translations: Array<{ locale: string; title: string; longDescription: string }> } };
+    const payload = mocks.rpc.mock.calls[0][1] as {
+      product_state: {
+        richTextEditorVersion: string | null;
+        translations: Array<{ locale: string; title: string; longDescription: string }>;
+      };
+    };
+    expect(payload.product_state.richTextEditorVersion).toBe("2");
     expect(payload.product_state.translations).toEqual(expect.arrayContaining([
       expect.objectContaining({
         locale: "en",
@@ -645,6 +656,48 @@ describe("Supabase content admin mutations", () => {
       expect.objectContaining({ locale: "pl", title: "Legacy Polish product" }),
     ]));
     expect(payload.product_state.translations.find((translation) => translation.locale === "en")?.longDescription).not.toContain("javascript:");
+  });
+
+  it("maps an atomic database rejection to the stale-editor message", async () => {
+    const seededProduct = getSeedContentSnapshot().products[0];
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [{
+        ...seededProduct,
+        id: productId,
+        slug: "stale-v1-product",
+        coverAssetId: "",
+        videoAssetId: undefined,
+        assets: [],
+        amazonLinks: [],
+        premiumCodes: [],
+        categoryIds: [],
+        tagIds: [],
+      }],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: "P0001", message: "admin.rich_text.client_outdated" },
+    });
+    const form = new FormData();
+    form.set("id", productId);
+    form.set("slug", "stale-v1-product");
+    form.set("status", "draft");
+    form.set("audience", "kids");
+    form.set("productType", "coloring-book");
+    form.set("title", "Updated title from a stale editor");
+    form.set("longDescription", "Legacy V1 description");
+
+    await expect(saveProductForRequest(form)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.rich_text.client_outdated"],
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("save_product", expect.objectContaining({
+      product_state: expect.objectContaining({ richTextEditorVersion: null }),
+    }));
   });
 
   it("preserves codes created after an editor loaded while honoring explicit removals", async () => {
@@ -735,6 +788,7 @@ describe("Supabase content admin mutations", () => {
         { type: "paragraph", content: [{ type: "text", text: "Terms body", marks: [{ type: "link", attrs: { href: "data:text/html,unsafe" } }] }] },
       ],
     })}`);
+    form.set("body__richTextEditorVersion", "2");
 
     await expect(savePagesForRequest(form, "terms")).resolves.toMatchObject({ ok: true, id: "terms" });
 
@@ -756,6 +810,67 @@ describe("Supabase content admin mutations", () => {
       options: { onConflict: "slug,locale" },
     }));
     expect(mocks.deletedTables).toHaveLength(0);
+  });
+
+  it("rejects an old static-page editor before a V2 body can be overwritten", async () => {
+    const v2Body = serializeRichTextDocument({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Underlined", marks: [{ type: "underline" }] }] }],
+    });
+    const payload = JSON.parse(v2Body.slice(RICH_TEXT_FORMAT_PREFIX.length)) as Record<string, unknown>;
+    delete payload.richTextV2;
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [],
+      tags: [],
+      staticPages: [{
+        id: "legacy-terms-en",
+        slug: "terms",
+        locale: "en",
+        title: "Terms",
+        body: v2Body,
+      }],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    const staleForm = new FormData();
+    staleForm.set("title", "Terms");
+    staleForm.set("body", `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify(payload)}`);
+
+    await expect(savePagesForRequest(staleForm, "terms")).resolves.toEqual({
+      ok: false,
+      errors: ["admin.rich_text.client_outdated"],
+    });
+    expect(mocks.upsertedRows.filter((row) => row.table === "static_pages")).toHaveLength(0);
+  });
+
+  it("rejects a stale static-page writer when the body changes after its snapshot", async () => {
+    mocks.getAdminContentSnapshot.mockResolvedValue({
+      products: [],
+      categories: [],
+      tags: [],
+      staticPages: [{
+        id: "terms-en",
+        slug: "terms",
+        locale: "en",
+        title: "Terms",
+        body: "Previous body",
+      }],
+      catalogSettings: { desktopColumns: 4 },
+    });
+    mocks.categoryImageUpdateResult = { data: null, error: null };
+    const staleForm = new FormData();
+    staleForm.set("title", "Updated Terms");
+    staleForm.set("body", "Stale V1 body");
+
+    await expect(savePagesForRequest(staleForm, "terms")).resolves.toEqual({
+      ok: false,
+      errors: ["admin.rich_text.client_outdated"],
+    });
+    expect(mocks.categoryImageUpdates).toContainEqual(expect.objectContaining({
+      table: "static_pages",
+      fields: expect.objectContaining({ body: "Stale V1 body" }),
+    }));
+    expect(mocks.upsertedRows.filter((row) => row.table === "static_pages")).toHaveLength(0);
   });
 
   it("archives through the update-only RPC without saving a stale product snapshot", async () => {
@@ -1027,6 +1142,28 @@ describe("Supabase content admin mutations", () => {
     }]);
   });
 
+  it("rejects an old About editor before a V2 intro can be overwritten", async () => {
+    const v2Intro = serializeRichTextDocument({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Underlined", marks: [{ type: "underline" }] }] }],
+    });
+    const updates = configureAboutSettingsDatabase({
+      existing: {
+        about_intro: v2Intro,
+        favorite_coloring_book_ids: ["", "", ""],
+        favorite_picture_book_ids: ["", "", ""],
+      },
+    });
+    const staleForm = aboutSettingsForm();
+    staleForm.set("aboutIntro", "V1 replacement");
+
+    await expect(saveAboutPageSettingsForRequest(staleForm)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.rich_text.client_outdated"],
+    });
+    expect(updates).toEqual([]);
+  });
+
   it("rejects duplicate IDs within or across sections, including alternate UUID formats, before writing", async () => {
     const updates = configureAboutSettingsDatabase();
     const withinSection = aboutSettingsForm(["same-id", "same-id", "coloring-3"]);
@@ -1122,6 +1259,7 @@ describe("Supabase content admin mutations", () => {
     const form = aboutSettingsForm(
       ["stale-coloring", "coloring-2", "coloring-3"],
       ["picture-1", "picture-2", "picture-3"],
+      "2",
     );
 
     await expect(saveAboutPageSettingsForRequest(form)).resolves.toEqual({
@@ -1129,6 +1267,24 @@ describe("Supabase content admin mutations", () => {
       id: "global",
     });
     expect(updates).toHaveLength(1);
+  });
+
+  it("rejects stale About settings when a newer intro lands after the snapshot", async () => {
+    configureAboutSettingsDatabase({
+      existing: {
+        about_intro: "Previous intro",
+        favorite_coloring_book_ids: ["coloring-1", "coloring-2", "coloring-3"],
+        favorite_picture_book_ids: ["picture-1", "picture-2", "picture-3"],
+      },
+      updateMatches: false,
+    });
+    const form = aboutSettingsForm();
+    form.set("aboutIntro", "Stale intro");
+
+    await expect(saveAboutPageSettingsForRequest(form)).resolves.toEqual({
+      ok: false,
+      errors: ["admin.rich_text.client_outdated"],
+    });
   });
 
   it("allows an existing selection whose product type changed when the intro changes", async () => {

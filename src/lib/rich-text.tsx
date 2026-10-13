@@ -1,10 +1,13 @@
 import type { ReactNode } from "react";
 
 export const RICH_TEXT_FORMAT_PREFIX = "lamilia-rich-text:v1:";
+const RICH_TEXT_V2_EXTENSION_KEY = "richTextV2";
+export const RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX = "__richTextEditorVersion";
 
 export type RichTextMark =
   | { type: "bold" }
   | { type: "italic" }
+  | { type: "underline" }
   | { type: "link"; attrs: { href: string } };
 
 export type RichTextNode = {
@@ -28,6 +31,7 @@ const MARK_ORDER: Record<RichTextMark["type"], number> = {
   link: 0,
   bold: 1,
   italic: 2,
+  underline: 3,
 };
 
 const MAX_DOCUMENT_DEPTH = 32;
@@ -40,7 +44,11 @@ export function parseRichTextValue(value: string): ParsedRichText {
 
   try {
     const parsed: unknown = JSON.parse(value.slice(RICH_TEXT_FORMAT_PREFIX.length));
-    const document = sanitizeRichTextDocument(parsed);
+    const richTextV2Extension = isRecord(parsed) ? parsed[RICH_TEXT_V2_EXTENSION_KEY] : null;
+    const richTextV2Content = isRecord(richTextV2Extension) ? richTextV2Extension.content : null;
+    const document = Array.isArray(richTextV2Content)
+      ? sanitizeRichTextDocument({ type: "doc", content: richTextV2Content })
+      : sanitizeRichTextDocument(parsed);
     return document ? { kind: "rich", document } : { kind: "plain", text: value };
   } catch {
     return { kind: "plain", text: value };
@@ -49,12 +57,36 @@ export function parseRichTextValue(value: string): ParsedRichText {
 
 export function serializeRichTextDocument(document: unknown): string {
   const safeDocument = sanitizeRichTextDocument(document) ?? emptyRichTextDocument();
-  return `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify(safeDocument)}`;
+  const legacyReadableDocument = documentForLegacyReaders(safeDocument);
+  const serializedDocument = hasRichTextV2Features(safeDocument)
+    ? {
+        ...legacyReadableDocument,
+        // Older v1 readers ignore this field and can still display the compatible content above.
+        [RICH_TEXT_V2_EXTENSION_KEY]: { content: safeDocument.content },
+      }
+    : legacyReadableDocument;
+  return `${RICH_TEXT_FORMAT_PREFIX}${JSON.stringify(serializedDocument)}`;
 }
 
 export function sanitizeRichTextValue(value: string): string {
   const parsed = parseRichTextValue(value);
   return parsed.kind === "rich" ? serializeRichTextDocument(parsed.document) : value;
+}
+
+export function blocksStaleRichTextWrite(
+  formData: FormData,
+  fieldName: string,
+  existingValue: string,
+): boolean {
+  if (!existingValue.startsWith(RICH_TEXT_FORMAT_PREFIX)) return false;
+
+  try {
+    const parsed: unknown = JSON.parse(existingValue.slice(RICH_TEXT_FORMAT_PREFIX.length));
+    if (!isRecord(parsed) || !(RICH_TEXT_V2_EXTENSION_KEY in parsed)) return false;
+    return formData.get(`${fieldName}${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`) !== "2";
+  } catch {
+    return false;
+  }
 }
 
 export function getRichTextTextContent(value: string): string {
@@ -104,6 +136,7 @@ export function sanitizeRichTextDocument(value: unknown): RichTextDocument | nul
     }
 
     if (node.type === "hardBreak") return { type: "hardBreak" };
+    if (node.type === "horizontalRule") return { type: "horizontalRule" };
 
     if (node.type === "paragraph") {
       return { type: "paragraph", content: sanitizeInlineContent(node.content, depth + 1) };
@@ -139,6 +172,18 @@ export function sanitizeRichTextDocument(value: unknown): RichTextDocument | nul
       return content.length ? { type: "listItem", content } : null;
     }
 
+    if (node.type === "blockquote") {
+      const content = Array.isArray(node.content)
+        ? node.content.flatMap((child) => {
+            const safeChild = sanitizeNode(child, depth + 1);
+            return safeChild && ["paragraph", "heading", "bulletList", "orderedList", "blockquote"].includes(safeChild.type)
+              ? [safeChild]
+              : [];
+          })
+        : [];
+      return { type: "blockquote", content };
+    }
+
     // Unsupported nodes such as images, code blocks, and arbitrary HTML are dropped.
     return null;
   };
@@ -154,13 +199,54 @@ export function sanitizeRichTextDocument(value: unknown): RichTextDocument | nul
   const content = Array.isArray(value.content)
     ? value.content.flatMap((node) => {
         const safeNode = sanitizeNode(node, 1);
-        return safeNode && ["paragraph", "heading", "bulletList", "orderedList"].includes(safeNode.type)
+        return safeNode && ["paragraph", "heading", "bulletList", "orderedList", "blockquote", "horizontalRule"].includes(safeNode.type)
           ? [safeNode]
           : [];
       })
     : [];
 
   return { type: "doc", content };
+}
+
+function documentForLegacyReaders(document: RichTextDocument): RichTextDocument {
+  return {
+    type: "doc",
+    content: document.content.flatMap(toLegacyReadableBlock),
+  };
+}
+
+function toLegacyReadableBlock(node: RichTextNode): RichTextNode[] {
+  if (node.type === "blockquote") {
+    return (node.content ?? []).flatMap(toLegacyReadableBlock);
+  }
+
+  if (node.type === "horizontalRule") {
+    // The old schema can retain an empty paragraph where the visual separator appeared.
+    return [{ type: "paragraph", content: [] }];
+  }
+
+  if (node.type === "bulletList" || node.type === "orderedList") {
+    const content = (node.content ?? []).flatMap((item) => {
+      if (item.type !== "listItem") return [];
+      const itemContent = (item.content ?? []).flatMap(toLegacyReadableBlock).filter((child) =>
+        ["paragraph", "heading", "bulletList", "orderedList"].includes(child.type),
+      );
+      return itemContent.length ? [{ type: "listItem", content: itemContent }] : [];
+    });
+    return [{ type: node.type, content }];
+  }
+
+  return [node];
+}
+
+function hasRichTextV2Features(document: RichTextDocument): boolean {
+  const hasFeature = (node: RichTextNode): boolean =>
+    node.type === "blockquote" ||
+    node.type === "horizontalRule" ||
+    node.marks?.some((mark) => mark.type === "underline") === true ||
+    node.content?.some(hasFeature) === true;
+
+  return document.content.some(hasFeature);
 }
 
 export function sanitizeRichTextHref(value: unknown): string | null {
@@ -206,6 +292,8 @@ function sanitizeMarks(value: unknown): RichTextMark[] {
     if (!isRecord(mark)) continue;
     if (mark.type === "bold" || mark.type === "italic") {
       marks.set(mark.type, { type: mark.type });
+    } else if (mark.type === "underline") {
+      marks.set(mark.type, { type: mark.type });
     } else if (mark.type === "link" && isRecord(mark.attrs)) {
       const href = sanitizeRichTextHref(mark.attrs.href);
       if (href) marks.set("link", { type: "link", attrs: { href } });
@@ -249,6 +337,18 @@ function renderBlock(node: RichTextNode, key: string): ReactNode {
       : <ol className="list-decimal space-y-1 pl-6" key={key}>{items}</ol>;
   }
 
+  if (node.type === "blockquote") {
+    return (
+      <blockquote className="border-l-2 border-[var(--color-terracotta)] pl-4 text-[var(--color-ink)]" key={key}>
+        {node.content?.map((child, index) => renderBlock(child, key + "-quote-" + index))}
+      </blockquote>
+    );
+  }
+
+  if (node.type === "horizontalRule") {
+    return <hr className="my-6 border-[var(--color-border)]" key={key} />;
+  }
+
   if (node.type === "listItem") {
     return <li className="pl-1" key={key}>{node.content?.map((child, index) => renderBlock(child, `${key}-block-${index}`))}</li>;
   }
@@ -265,6 +365,7 @@ function renderInline(nodes: RichTextNode[] | undefined): ReactNode {
     for (const mark of node.marks ?? []) {
       if (mark.type === "bold") content = <strong>{content}</strong>;
       if (mark.type === "italic") content = <em>{content}</em>;
+      if (mark.type === "underline") content = <u>{content}</u>;
       if (mark.type === "link") {
         const href = sanitizeRichTextHref(mark.attrs.href);
         if (href) {

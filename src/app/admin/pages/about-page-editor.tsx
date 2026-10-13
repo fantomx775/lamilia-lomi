@@ -24,6 +24,12 @@ type AboutProductOption = {
 type SlotGroup = "favoriteColoringBookIds" | "favoritePictureBookIds";
 type ProductIdSlots = AboutPageSettings[SlotGroup];
 type AboutEditorState = AboutPageSettings;
+type AboutNavigateEvent = Event & { destination?: { url?: string } };
+type AboutNavigation = {
+  addEventListener(type: "navigate", listener: (event: AboutNavigateEvent) => void): void;
+  removeEventListener(type: "navigate", listener: (event: AboutNavigateEvent) => void): void;
+};
+type AboutEditorWindow = Window & { navigation?: AboutNavigation };
 
 const GROUPS: Array<{
   key: SlotGroup;
@@ -49,19 +55,91 @@ export function AboutPageEditor({
   config,
   products,
   feedback,
+  saved = false,
   saveAction,
 }: {
   config: AboutPageSettings;
   products: AboutProductOption[];
   feedback?: string;
+  saved?: boolean;
   saveAction?: (formData: FormData) => void | Promise<void>;
 }) {
-  const [value, setValue] = useState<AboutEditorState>(() => normalizeConfig(config));
+  const savedValue = useMemo(() => normalizeConfig(config), [config]);
+  const savedValueSignature = JSON.stringify(savedValue);
+  const [baselineValue, setBaselineValue] = useState<AboutEditorState>(() => savedValue);
+  const baselineSignatureRef = useRef(savedValueSignature);
+  const isDirtyRef = useRef(false);
+  const [value, setValue] = useState<AboutEditorState>(() => savedValue);
+  const [hasUnappliedHtmlDraft, setHasUnappliedHtmlDraft] = useState(false);
   const [showDuplicateError, setShowDuplicateError] = useState(false);
   const selectedIdCounts = useMemo(() => countSelectedIds(value), [value]);
   const duplicateIds = Array.from(selectedIdCounts.entries())
     .filter(([, count]) => count > 1)
     .map(([id]) => id);
+  const isDirty = hasUnappliedHtmlDraft || JSON.stringify(value) !== JSON.stringify(baselineValue);
+
+  useEffect(() => {
+    if (!saved || savedValueSignature === baselineSignatureRef.current) return;
+    baselineSignatureRef.current = savedValueSignature;
+    setBaselineValue(savedValue);
+    setValue(savedValue);
+    setHasUnappliedHtmlDraft(false);
+    isDirtyRef.current = false;
+  }, [saved, savedValue, savedValueSignature]);
+
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
+
+  useEffect(() => {
+    const owner = window.location.href;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!isDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    const confirmNavigation = () => {
+      if (!isDirtyRef.current) return true;
+      const confirmed = window.confirm("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
+      if (confirmed) isDirtyRef.current = false;
+      return confirmed;
+    };
+
+    const handleInternalClick = (event: globalThis.MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (!(event.target instanceof Element)) return;
+      const link = event.target.closest<HTMLAnchorElement>("a[href]");
+      if (!link || link.target || link.hasAttribute("download")) return;
+      const destination = new URL(link.href, window.location.href);
+      if (destination.origin !== window.location.origin || destination.href === owner) return;
+      if (confirmNavigation()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if ("stopImmediatePropagation" in event) event.stopImmediatePropagation();
+    };
+
+    const navigation = (window as AboutEditorWindow).navigation;
+    const handleNavigate = (event: AboutNavigateEvent) => {
+      const destination = event.destination?.url;
+      if (!destination || new URL(destination, window.location.href).href === owner) return;
+      if (!confirmNavigation()) event.preventDefault();
+    };
+    const handlePopState = () => {
+      if (!confirmNavigation()) window.history.forward();
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleInternalClick, true);
+    if (navigation) navigation.addEventListener("navigate", handleNavigate);
+    else window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleInternalClick, true);
+      if (navigation) navigation.removeEventListener("navigate", handleNavigate);
+      else window.removeEventListener("popstate", handlePopState);
+    };
+  }, []);
 
   const updateIntro = (intro: string) => {
     setValue((current) => ({ ...current, intro }));
@@ -87,11 +165,17 @@ export function AboutPageEditor({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     if (duplicateIds.length === 0) {
       setShowDuplicateError(false);
+      isDirtyRef.current = false;
       return;
     }
 
     event.preventDefault();
     setShowDuplicateError(true);
+  };
+
+  const updateHtmlDraftState = (hasDraft: boolean) => {
+    setHasUnappliedHtmlDraft(hasDraft);
+    isDirtyRef.current = hasDraft || JSON.stringify(value) !== JSON.stringify(baselineValue);
   };
 
   return (
@@ -125,6 +209,7 @@ export function AboutPageEditor({
             label="Wprowadzenie"
             value={value.intro}
             onChange={updateIntro}
+            onSourceDraftChange={updateHtmlDraftState}
           />
         </div>
       </AdminEditorSection>
@@ -195,6 +280,8 @@ export function AboutPageEditor({
           </div>
         </AdminEditorSection>
       ))}
+
+      {isDirty ? <p className="text-sm text-[var(--color-terracotta)]" role="status" aria-live="polite">Masz niezapisane zmiany.</p> : null}
 
       <div className="flex justify-end"><AboutSubmitButton /></div>
     </form>
