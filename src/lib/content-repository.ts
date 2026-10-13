@@ -179,6 +179,7 @@ export const getPublicHomeProductSnapshotForRequest = cache(
           [],
         ),
       ),
+      collections: [],
       categories: [],
       tags: [],
       staticPages: [],
@@ -290,6 +291,7 @@ export const getPublicCatalogSnapshotForRequest = cache(
           [],
         ),
       ),
+      collections: [],
       categories: rowsValue(categoryResult.data).map((row) =>
         mapCategory(row, rowsValue(row.category_translations)),
       ),

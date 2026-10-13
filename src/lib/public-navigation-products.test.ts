@@ -36,6 +36,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
 
 import {
   getPublicCatalogSnapshotForRequest,
+  getPublicHomeProductSnapshotForRequest,
 } from "./content-repository";
 import {
   getCatalogProductsForRequest,
@@ -157,6 +158,7 @@ describe("targeted Home and Catalog product reads", () => {
   });
 
   it("loads Home cards from one localized products-and-covers query", async () => {
+    const snapshot = await getPublicHomeProductSnapshotForRequest("en");
     const [kids, adults, featured] = await Promise.all([
       getFeaturedProductsForRequest("en", "kids"),
       getFeaturedProductsForRequest("en", "adults"),
@@ -175,6 +177,7 @@ describe("targeted Home and Catalog product reads", () => {
       "forest-story-coloring-book",
       "moon-garden-coloring-book",
     ]);
+    expect(snapshot.collections).toEqual([]);
     expect(mocks.queries.map((query) => query.table)).toEqual(["products"]);
 
     const [productQuery] = mocks.queries;
@@ -207,6 +210,7 @@ describe("targeted Home and Catalog product reads", () => {
     });
 
     expect(snapshot.catalogSettings.desktopColumns).toBe(5);
+    expect(snapshot.collections).toEqual([]);
     expect(
       snapshot.categories.map((category) => category.translations[0]?.name).sort(),
     ).toEqual([
