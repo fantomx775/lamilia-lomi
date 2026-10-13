@@ -10,7 +10,7 @@ const read = (relativePath: string) =>
 describe("Supabase production foundation contracts", () => {
   it("checks Rich Text V2 compatibility under the product-save lock", () => {
     const migration = read(
-      "supabase/migrations/20261013081817_issue_51_atomic_rich_text_v2_compatibility_guard.sql",
+      "supabase/migrations/20261013084706_issue_51_atomic_rich_text_v2_compatibility_guard.sql",
     );
 
     expect(migration).toContain("rename to save_product_before_rich_text_v2_compatibility_guard");
