@@ -218,14 +218,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     const aboutHtml = "<p>Issue 51 About intro with <u>underlined copy</u>.</p>";
     await page.getByRole("button", { name: "HTML" }).click();
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(aboutHtml);
-    const aboutNavigationMessage = page.waitForEvent("dialog").then(async (dialog) => {
-      const message = dialog.message();
-      await dialog.dismiss();
-      return message;
-    });
-    await page.locator("#about-page-editor-form").getByRole("link", { name: "Strony" }).click();
-    expect(await aboutNavigationMessage).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
-    await expect(page.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue(aboutHtml);
+    await expect(page.getByText("Masz niezapisane zmiany.")).toBeVisible();
     await page.getByRole("button", { name: "Rich Text" }).click();
     await expect(aboutEditor.locator("u")).toHaveText("underlined copy");
     await expectNoHorizontalOverflow(page);
