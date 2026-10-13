@@ -75,7 +75,7 @@ describe("Supabase production foundation contracts", () => {
       "supabase/migrations/20261009113000_r2_media_publication_revoking.sql",
     );
     const collectionMigration = read(
-      "supabase/migrations/20261011204732_issue_49_collections_admin.sql",
+      "supabase/migrations/20261013213631_issue_49_collections_admin.sql",
     );
     const collectionRlsTest = read("supabase/tests/collections-rls.test.sql");
     const r2BackfillScript = read("scripts/media-r2-backfill.mjs");
