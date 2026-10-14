@@ -1,6 +1,49 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 
 const productSlug = "moon-garden-coloring-book";
+
+type BrowserDiagnostics = {
+  consoleErrors: string[];
+  pageErrors: string[];
+  failedRequests: string[];
+  serverErrors: string[];
+};
+
+function collectBrowserDiagnostics(page: Page): BrowserDiagnostics {
+  const diagnostics: BrowserDiagnostics = {
+    consoleErrors: [],
+    pageErrors: [],
+    failedRequests: [],
+    serverErrors: [],
+  };
+
+  page.on("console", (message) => {
+    if (message.type() === "error") diagnostics.consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
+  page.on("requestfailed", (request) => {
+    diagnostics.failedRequests.push(
+      `${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText ?? "request failed"}`,
+    );
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      diagnostics.serverErrors.push(`${response.status()} ${new URL(response.url()).pathname}`);
+    }
+  });
+
+  return diagnostics;
+}
+
+async function attachBrowserDiagnostics(testInfo: TestInfo, diagnostics: BrowserDiagnostics) {
+  await testInfo.attach("browser-diagnostics.json", {
+    body: JSON.stringify(diagnostics, null, 2),
+    contentType: "application/json",
+  });
+  console.log(`Issue 19 browser diagnostics: ${JSON.stringify(diagnostics)}`);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -235,6 +278,101 @@ test("a delayed Product Detail read shows its route skeleton before the final pa
   await expect(page.getByTestId("product-detail-loading")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("product-detail-after-slow-read.png"), fullPage: true });
   expect(serverRequests.length).toBeGreaterThan(0);
+});
+
+async function expectPublicProductContentBeforeAccess(
+  page: Page,
+  testInfo: TestInfo,
+  scenario: string,
+  navigate = true,
+) {
+  if (navigate) {
+    await page.goto(`/en/products/${productSlug}`, { waitUntil: "commit" });
+  }
+
+  await expect(page).toHaveTitle(/Moon Garden Coloring Book by LamiliaLomi/);
+  await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
+  await expect(page.getByTestId("product-unlock-loading")).toBeVisible();
+  await expect(page.getByTestId("product-unlock-section")).toHaveCount(0);
+
+  const screenshotRunId = process.env.ISSUE_19_STREAMING_SCREENSHOT_RUN_ID;
+  if (screenshotRunId && /^[a-zA-Z0-9-]+$/.test(screenshotRunId)) {
+    const directory = join("docs", "verification", "issue-19");
+    await mkdir(directory, { recursive: true });
+    await page.screenshot({
+      path: join(directory, `${screenshotRunId}-${testInfo.project.name}-${scenario}.png`),
+      fullPage: true,
+      animations: "disabled",
+      style: "nextjs-portal { display: none !important; }",
+    });
+  }
+
+  await expect(page.getByText(/Moon Garden invites children into a soft world/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "View on Amazon" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Inside the book" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Stars and little houses" })).toBeVisible();
+  await expect(page.getByText("Flip-through · 8 sec")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Moon Garden free guide/ })).toBeVisible();
+
+  const cover = page.getByRole("img", { name: "Moon Garden cover" });
+  await expect(cover).toBeVisible();
+  await expect(page.getByRole("link", { name: "View on Amazon" })).toHaveAttribute(
+    "href",
+    /amazon\.com/,
+  );
+}
+
+async function expectAccessContentAfterDelay(page: Page, expectedState: string) {
+  await expect(page.getByTestId("product-unlock-loading")).toHaveCount(0);
+  await expect(page.getByTestId("product-unlock-section")).toBeVisible();
+  await expect(page.getByTestId(expectedState)).toBeVisible();
+}
+
+function skipWithoutDelayedLocalDemo() {
+  test.skip(
+    process.env.PLAYWRIGHT_LOCAL_DEMO !== "true" ||
+      !process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS,
+    "Requires the opt-in local demo backend and Product Detail access delay.",
+  );
+}
+
+test("anonymous public Product Detail streams before personalized access", async ({ page }, testInfo) => {
+  skipWithoutDelayedLocalDemo();
+  const diagnostics = collectBrowserDiagnostics(page);
+  await expectPublicProductContentBeforeAccess(page, testInfo, "anonymous");
+  await expectAccessContentAfterDelay(page, "unlock-guest-state");
+  await attachBrowserDiagnostics(testInfo, diagnostics);
+});
+
+test("logged-in locked Product Detail streams before personalized access", async ({ page }, testInfo) => {
+  skipWithoutDelayedLocalDemo();
+  const diagnostics = collectBrowserDiagnostics(page);
+  await page.goto(`/en/login?returnTo=/en/products/${productSlug}`);
+  await page.getByLabel("Email").fill("locked@example.com");
+  await page.getByLabel("Password").fill("demo-password");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
+
+  await expectPublicProductContentBeforeAccess(page, testInfo, "locked", false);
+  await expectAccessContentAfterDelay(page, "unlock-code-state");
+  await attachBrowserDiagnostics(testInfo, diagnostics);
+});
+
+test("logged-in unlocked Product Detail streams before personalized access", async ({ page }, testInfo) => {
+  skipWithoutDelayedLocalDemo();
+  const diagnostics = collectBrowserDiagnostics(page);
+  await page.goto(`/en/unlock/${productSlug}`);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("Email").fill("locked@example.com");
+  await page.getByLabel("Password").fill("demo-password");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByLabel("Premium code").fill("LOMI-BOOK-2026");
+  await page.getByRole("button", { name: "Unlock premium content" }).click();
+  await expect(page.getByTestId("unlock-success-state")).toBeVisible();
+
+  await expectPublicProductContentBeforeAccess(page, testInfo, "unlocked");
+  await expectAccessContentAfterDelay(page, "premium-download-links");
+  await attachBrowserDiagnostics(testInfo, diagnostics);
 });
 
 test("mobile primary navigation exposes Catalog and Library without horizontal overflow", async ({ page }, testInfo) => {

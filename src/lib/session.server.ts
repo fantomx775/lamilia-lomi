@@ -176,6 +176,8 @@ export type ProductDetailAccess = {
 
 export const getProductDetailAccessForRequest = cache(
   async (productId: string): Promise<ProductDetailAccess> => {
+    await delayProductDetailAccessForE2E();
+
     if (getBackendMode() === "local") {
       const session = await getDemoSession();
 
@@ -215,6 +217,23 @@ export const getProductDetailAccessForRequest = cache(
     return { session, isUnlocked: Boolean(data) };
   },
 );
+
+async function delayProductDetailAccessForE2E() {
+  if (
+    process.env.NODE_ENV === "production" ||
+    getBackendMode() !== "local"
+  ) {
+    return;
+  }
+
+  const delayMs = Number(process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS);
+
+  if (!Number.isSafeInteger(delayMs) || delayMs < 1 || delayMs > 5_000) {
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
 
 export async function getSupabaseAuthContext() {
   if (getBackendMode() !== "supabase") {
