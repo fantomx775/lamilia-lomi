@@ -1,7 +1,7 @@
 import { ArrowRight, Sparkles } from "lucide-react";
-import Link from "next/link";
 
 import { ProductCard } from "@/components/product-card";
+import { NavigationLink } from "@/components/navigation-link";
 import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
@@ -42,25 +42,27 @@ export default async function HomePage({ params }: Props) {
             printable bonuses unlocked from the physical book.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link className={buttonClassName()} href={`/${locale}/products`}>
+            <NavigationLink className={buttonClassName()} href={`/${locale}/products`} pendingLabel="Opening catalog">
               Browse catalog
               <ArrowRight className="size-4" aria-hidden />
-            </Link>
-            <Link
+            </NavigationLink>
+            <NavigationLink
               className={buttonClassName({ variant: "outline" })}
               href={`/${locale}/unlock/moon-garden-coloring-book`}
+              pendingLabel="Opening bonus unlock"
             >
               Try QR unlock
-            </Link>
+            </NavigationLink>
           </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           {[kids, adults].filter(Boolean).map((product) => (
-            <Link
+            <NavigationLink
               href={getAudiencePath(product!.audience, locale)}
               key={product!.id}
               className="group overflow-hidden rounded-lg border border-[var(--color-border)] bg-white/80 p-3 shadow-[0_18px_46px_rgba(62,52,47,0.1)] transition-[transform,box-shadow] duration-150 motion-reduce:transition-none hover:-translate-y-0.5 motion-reduce:hover:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
+              pendingLabel="Opening catalog"
             >
               <div className="relative aspect-[8.5/11] overflow-hidden rounded-md bg-[var(--color-blush)]">
                 <ImageWithFallback
@@ -82,7 +84,7 @@ export default async function HomePage({ params }: Props) {
                 </div>
                 <ArrowRight className="size-5 text-[var(--color-terracotta)]" />
               </div>
-            </Link>
+            </NavigationLink>
           ))}
         </div>
       </section>
@@ -135,12 +137,13 @@ export default async function HomePage({ params }: Props) {
               Real product paths from the first screen
             </h2>
           </div>
-          <Link
+          <NavigationLink
             className="hidden rounded-sm text-sm font-medium text-[var(--color-ink)] transition-colors duration-100 motion-reduce:transition-none hover:text-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)] active:opacity-70 sm:inline"
             href={`/${locale}/products`}
+            pendingLabel="Opening catalog"
           >
             View all
-          </Link>
+          </NavigationLink>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {featured.slice(0, 3).map((product) => (

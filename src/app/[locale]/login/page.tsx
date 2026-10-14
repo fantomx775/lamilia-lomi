@@ -1,8 +1,8 @@
 import { LogIn } from "lucide-react";
-import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
 import { loginDemoAction, resendSupabaseVerificationEmailAction } from "@/app/actions";
+import { NavigationLink } from "@/components/navigation-link";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -107,21 +107,22 @@ export default async function LoginPage({ params, searchParams }: Props) {
             </form>
           ) : null}
           <div className="mt-5 flex items-center justify-between gap-3 text-sm">
-            <Link className="text-[var(--color-terracotta)]" href={`/${locale}/reset-password`}>
+            <NavigationLink pendingLabel="Opening password reset" className="text-[var(--color-terracotta)]" href={`/${locale}/reset-password`}>
               {t("reset")}
-            </Link>
+            </NavigationLink>
             <span>
               {t("noAccount")} {" "}
-              <Link
+              <NavigationLink
                 className="text-[var(--color-terracotta)]"
                 href={
                   canCreateAccount
                     ? `/${locale}/register?returnTo=${encodeURIComponent(redirectTo)}`
                     : `/${locale}/register`
                 }
+                pendingLabel="Opening registration"
               >
                 {t("createAccount")}
-              </Link>
+              </NavigationLink>
             </span>
           </div>
         </CardContent>

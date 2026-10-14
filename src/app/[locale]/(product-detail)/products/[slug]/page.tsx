@@ -1,4 +1,4 @@
-import { Download, FileText, LockKeyhole } from "lucide-react";
+import { ArrowLeft, Download, FileText, LockKeyhole } from "lucide-react";
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import { notFound, redirect } from "next/navigation";
@@ -6,6 +6,7 @@ import { Suspense } from "react";
 
 import { AmazonLink } from "@/components/amazon-link";
 import { ImageWithFallback } from "@/components/image-with-fallback";
+import { NavigationLink } from "@/components/navigation-link";
 import { ProductImageGallery } from "@/components/product-image-gallery";
 import { ProductVideoPreview } from "@/components/product-video-preview";
 import { ScrollToFragment } from "@/components/scroll-to-fragment";
@@ -299,6 +300,16 @@ export default async function ProductPage({ params, searchParams }: Props) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
+      <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8">
+        <NavigationLink
+          href={`/${locale}/products`}
+          pendingLabel="Opening catalog"
+          className={buttonClassName({ variant: "ghost", size: "sm" })}
+        >
+          <ArrowLeft className="size-4" aria-hidden />
+          Back to catalog
+        </NavigationLink>
+      </div>
       <section className="mx-auto grid max-w-7xl gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[0.85fr_1.15fr] lg:px-8">
         <div className="space-y-5">
           <div className="relative aspect-[8.5/11] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] shadow-[0_18px_46px_rgba(62,52,47,0.12)]">

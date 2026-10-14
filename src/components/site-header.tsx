@@ -1,7 +1,7 @@
 import { BookOpen, Info, Library, LogIn } from "lucide-react";
-import Link from "next/link";
 import { Suspense } from "react";
 
+import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 import { getHeaderAccountStateForRequest } from "@/lib/session.server";
 
@@ -22,8 +22,9 @@ export function SiteHeader({ locale }: {
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]/92 backdrop-blur">
       <div className="mx-auto flex min-h-16 w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-        <Link
+        <NavigationLink
           href={`/${locale}`}
+          pendingLabel="Opening home"
           className="flex items-center gap-3 rounded-sm transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
         >
           <span className="grid size-10 place-items-center rounded-md bg-[var(--color-sage)] font-serif text-lg font-semibold text-[var(--color-ink)]">
@@ -37,20 +38,20 @@ export function SiteHeader({ locale }: {
               Premium creative books
             </span>
           </span>
-        </Link>
+        </NavigationLink>
         <nav aria-label={labels.navigation} className="hidden items-center gap-1 md:flex">
-          <Link className={headerLinkClassName()} href={`/${locale}/products`}>
+          <NavigationLink className={headerLinkClassName()} href={`/${locale}/products`} pendingLabel="Opening catalog">
             <BookOpen className="size-4" aria-hidden />
             {labels.products}
-          </Link>
-          <Link className={headerLinkClassName()} href={`/${locale}/about`}>
+          </NavigationLink>
+          <NavigationLink className={headerLinkClassName()} href={`/${locale}/about`} pendingLabel="Opening about page">
             <Info className="size-4" aria-hidden />
             {labels.about}
-          </Link>
-          <Link className={headerLinkClassName()} href={`/${locale}/library`}>
+          </NavigationLink>
+          <NavigationLink className={headerLinkClassName()} href={`/${locale}/library`} pendingLabel="Opening library">
             <Library className="size-4" aria-hidden />
             {labels.library}
-          </Link>
+          </NavigationLink>
         </nav>
         <div className="flex items-center gap-2">
           <Suspense fallback={<HeaderAccountFallback />}>
@@ -58,18 +59,18 @@ export function SiteHeader({ locale }: {
           </Suspense>
         </div>
         <nav aria-label={labels.navigation} className="grid w-full grid-cols-3 gap-1 border-t border-[var(--color-border)] py-2 md:hidden">
-          <Link className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/products`}>
+          <NavigationLink className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/products`} pendingLabel="Opening catalog">
             <BookOpen className="size-4" aria-hidden />
             {labels.products}
-          </Link>
-          <Link className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/about`}>
+          </NavigationLink>
+          <NavigationLink className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/about`} pendingLabel="Opening about page">
             <Info className="size-4" aria-hidden />
             {labels.about}
-          </Link>
-          <Link className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/library`}>
+          </NavigationLink>
+          <NavigationLink className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/library`} pendingLabel="Opening library">
             <Library className="size-4" aria-hidden />
             {labels.library}
-          </Link>
+          </NavigationLink>
         </nav>
       </div>
     </header>
@@ -91,7 +92,7 @@ async function HeaderAccountLink({
   const label = isSignedIn ? labels.account : labels.login;
 
   return (
-    <Link
+    <NavigationLink
       aria-label={label}
       className={buttonClassName({
         variant: isSignedIn ? "outline" : "default",
@@ -106,10 +107,11 @@ async function HeaderAccountLink({
             : `/${locale}/account`
           : `/${locale}/login`
       }
+      pendingLabel={isSignedIn ? "Opening account" : "Opening login"}
     >
       <LogIn className="size-4" aria-hidden />
       <span className="hidden sm:inline">{label}</span>
-    </Link>
+    </NavigationLink>
   );
 }
 

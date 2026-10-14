@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
+import { NavigationLink } from "@/components/navigation-link";
 import { ProductCard } from "@/components/product-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
@@ -28,12 +28,13 @@ export default async function LibraryPage({ params }: Props) {
           </CardHeader>
           <CardContent>
             <p className="text-[var(--color-muted)]">{t("guest")}</p>
-            <Link
+            <NavigationLink
               className="mt-4 inline-flex rounded-sm text-[var(--color-terracotta)] transition-colors duration-100 motion-reduce:transition-none hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-[var(--color-terracotta)] active:opacity-70"
               href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/library`)}`}
+              pendingLabel="Opening login"
             >
               {t("login")}
-            </Link>
+            </NavigationLink>
           </CardContent>
         </Card>
       </div>
@@ -73,9 +74,9 @@ export default async function LibraryPage({ params }: Props) {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-[var(--color-muted)]">{t("emptyDescription")}</p>
-            <Link className="mt-5 inline-flex rounded-sm text-sm font-medium text-[var(--color-terracotta)] transition-colors duration-100 motion-reduce:transition-none hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-[var(--color-terracotta)] active:opacity-70" href={`/${locale}/products`}>
+            <NavigationLink pendingLabel="Opening catalog" className="mt-5 inline-flex rounded-sm text-sm font-medium text-[var(--color-terracotta)] transition-colors duration-100 motion-reduce:transition-none hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-3 focus-visible:outline-[var(--color-terracotta)] active:opacity-70" href={`/${locale}/products`}>
               {t("browse")}
-            </Link>
+            </NavigationLink>
           </CardContent>
         </Card>
       )}
