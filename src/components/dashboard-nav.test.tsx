@@ -41,5 +41,6 @@ describe("DashboardNav", () => {
     expect(navigation).not.toHaveClass("overflow-x-auto");
     expect(view.getAllByRole("link")).toHaveLength(nav.length);
     expect(view.getByRole("link", { name: "Users" })).toHaveAttribute("aria-current", "page");
+    expect(view.getAllByTestId("navigation-link-pending")).toHaveLength(nav.length);
   });
 });

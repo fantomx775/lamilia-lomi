@@ -12,9 +12,9 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { NavigationLink } from "@/components/navigation-link";
 import { buttonClassName } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -65,10 +65,11 @@ export function DashboardNav({ nav }: { nav: DashboardNavItem[] }) {
         const Icon = dashboardNavIcons[item.icon];
 
         return (
-          <Link
+          <NavigationLink
             key={item.href}
             href={item.href}
             aria-current={isActive ? "page" : undefined}
+            pendingLabel={`Otwieranie: ${item.label}`}
             className={buttonClassName({
               variant: "ghost",
               className: cn(
@@ -79,7 +80,7 @@ export function DashboardNav({ nav }: { nav: DashboardNavItem[] }) {
           >
             <Icon className="size-4" aria-hidden />
             {item.label}
-          </Link>
+          </NavigationLink>
         );
       })}
     </nav>

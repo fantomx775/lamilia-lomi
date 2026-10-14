@@ -1,7 +1,6 @@
-import Link from "next/link";
-
 import { AdminProductEditorHistoryGuard } from "@/app/admin/admin-product-editor-history-guard";
 import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
+import { NavigationLink } from "@/components/navigation-link";
 import { SiteHeader } from "@/components/site-header";
 import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -47,9 +46,9 @@ async function AdminAccessLayout({ children }: { children: React.ReactNode }) {
                 Panel admina jest dostępny tylko dla użytkownika z rolą admin.
                 Zaloguj się jako `admin@lamilialomi.test`, aby zobaczyć tryb demo.
               </p>
-              <Link className={buttonClassName({ className: "mt-5" })} href="/en/login?redirectTo=/admin">
+              <NavigationLink pendingLabel="Przechodzenie do logowania" className={buttonClassName({ className: "mt-5" })} href="/en/login?redirectTo=/admin">
                 Logowanie demo
-              </Link>
+              </NavigationLink>
             </CardContent>
           </Card>
         </main>

@@ -1,7 +1,6 @@
-import Link from "next/link";
-
 import { AdminPageTransition } from "@/components/admin-page-transition";
 import { DashboardNav, type DashboardNavItem } from "@/components/dashboard-nav";
+import { NavigationLink } from "@/components/navigation-link";
 import { cn } from "@/lib/utils";
 
 export type { DashboardNavItem };
@@ -27,15 +26,16 @@ export function DashboardShell({
       )}
     >
       <aside className="min-w-0 border-b border-[var(--color-border)] bg-white/72 px-4 py-4 lg:fixed lg:inset-y-16 lg:left-0 lg:w-64 lg:border-b-0 lg:border-r lg:px-5">
-        <Link
+        <NavigationLink
           href={nav[0]?.href ?? "/"}
+          pendingLabel="Otwieranie panelu administracyjnego"
           className="block rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)] active:opacity-70"
         >
           <span className="block font-serif text-2xl font-semibold text-[var(--color-ink)]">
             {title}
           </span>
           <span className="mt-1 block text-xs text-[var(--color-muted)]">{subtitle}</span>
-        </Link>
+        </NavigationLink>
         <DashboardNav nav={nav} />
       </aside>
       <main className="min-w-0 lg:pl-64">

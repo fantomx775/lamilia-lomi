@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 
 import { registerDemoAction } from "@/app/actions";
+import { NavigationLink } from "@/components/navigation-link";
 import { SubmitButton } from "@/components/submit-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -74,12 +74,12 @@ export default async function RegisterPage({ params, searchParams }: Props) {
               <input className="mt-1 size-4" type="checkbox" name="termsAccepted" required />
               <span>
                 {t("terms")} {" "}
-                <Link className="text-[var(--color-terracotta)]" href={`/${locale}/terms`}>
+                <NavigationLink pendingLabel="Opening terms" className="text-[var(--color-terracotta)]" href={`/${locale}/terms`}>
                   {t("termsLink")}
-                </Link>{" "}
-                <Link className="text-[var(--color-terracotta)]" href={`/${locale}/privacy`}>
+                </NavigationLink>{" "}
+                <NavigationLink pendingLabel="Opening privacy policy" className="text-[var(--color-terracotta)]" href={`/${locale}/privacy`}>
                   {t("privacyLink")}
-                </Link>
+                </NavigationLink>
               </span>
             </label>
             <label className="flex gap-3 text-sm leading-6">
@@ -92,9 +92,9 @@ export default async function RegisterPage({ params, searchParams }: Props) {
           </form>
           <p className="mt-5 text-sm text-[var(--color-muted)]">
             {t("haveAccount")} {" "}
-            <Link className="text-[var(--color-terracotta)]" href={loginHref}>
+            <NavigationLink pendingLabel="Opening login" className="text-[var(--color-terracotta)]" href={loginHref}>
               {t("logIn")}
-            </Link>
+            </NavigationLink>
           </p>
         </CardContent>
       </Card>

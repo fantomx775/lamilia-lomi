@@ -1,7 +1,7 @@
 import { Filter, Search } from "lucide-react";
-import Link from "next/link";
 
 import { ImageWithFallback } from "@/components/image-with-fallback";
+import { NavigationLink } from "@/components/navigation-link";
 import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,21 +65,22 @@ export default async function ProductsPage({ params, searchParams }: Props) {
         <section aria-label="Categories" className="mt-8">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="font-serif text-2xl font-semibold">Categories</h2>
-            {filters.category ? <Link href={`/${locale}/products`} className="text-sm text-[var(--color-terracotta)] underline-offset-4 hover:underline">Clear category</Link> : null}
+            {filters.category ? <NavigationLink pendingLabel="Clearing catalog filter" href={`/${locale}/products`} className="text-sm text-[var(--color-terracotta)] underline-offset-4 hover:underline">Clear category</NavigationLink> : null}
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
             {categories.map((category) => (
-              <Link
+              <NavigationLink
                 key={category.id}
                 href={`/${locale}/products?category=${encodeURIComponent(category.slug)}`}
                 aria-current={filters.category === category.slug ? "true" : undefined}
                 className="group grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 rounded-lg border border-[var(--color-border)] bg-white/80 p-2 transition hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+                pendingLabel={`Opening ${category.name} products`}
               >
                 <span className="relative aspect-square overflow-hidden rounded-md bg-[var(--color-bg)]">
                   <ImageWithFallback src={category.image?.path} alt={category.name} className="object-contain p-1" sizes="56px" />
                 </span>
                 <span className="line-clamp-2 text-sm font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{category.name}</span>
-              </Link>
+              </NavigationLink>
             ))}
           </div>
         </section>
@@ -154,9 +155,9 @@ export default async function ProductsPage({ params, searchParams }: Props) {
           <p className="mt-2 text-sm text-[var(--color-muted)]">
             Try clearing search or choosing a broader audience.
           </p>
-          <Link className="mt-5 inline-flex text-sm font-medium text-[var(--color-terracotta)]" href={`/${locale}/products`}>
+          <NavigationLink pendingLabel="Opening catalog" className="mt-5 inline-flex text-sm font-medium text-[var(--color-terracotta)]" href={`/${locale}/products`}>
             Reset catalog
-          </Link>
+          </NavigationLink>
         </div>
       )}
     </div>
