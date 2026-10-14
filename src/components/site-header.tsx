@@ -44,7 +44,12 @@ export function SiteHeader({ locale }: {
             <BookOpen className="size-4" aria-hidden />
             {labels.products}
           </NavigationLink>
-          <NavigationLink className={headerLinkClassName()} href={`/${locale}/about`} pendingLabel="Opening about page">
+          <NavigationLink
+            className={headerLinkClassName()}
+            href={`/${locale}/about`}
+            pendingLabel="Opening about page"
+            showPendingBar={false}
+          >
             <Info className="size-4" aria-hidden />
             {labels.about}
           </NavigationLink>
@@ -63,7 +68,12 @@ export function SiteHeader({ locale }: {
             <BookOpen className="size-4" aria-hidden />
             {labels.products}
           </NavigationLink>
-          <NavigationLink className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/about`} pendingLabel="Opening about page">
+          <NavigationLink
+            className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")}
+            href={`/${locale}/about`}
+            pendingLabel="Opening about page"
+            showPendingBar={false}
+          >
             <Info className="size-4" aria-hidden />
             {labels.about}
           </NavigationLink>

@@ -6,9 +6,11 @@ import { useEffect, useState } from "react";
 export function LinkPendingIndicator({
   label,
   variant = "card",
+  showInlineBar = true,
 }: {
   label: string;
   variant?: "card" | "inline";
+  showInlineBar?: boolean;
 }) {
   const { pending } = useLinkStatus();
   const [announcePending, setAnnouncePending] = useState(false);
@@ -28,12 +30,14 @@ export function LinkPendingIndicator({
   if (variant === "inline") {
     return (
       <>
-        <span
-          aria-hidden="true"
-          className={`pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--color-terracotta)] transition-opacity duration-100 delay-100 motion-reduce:transition-none ${pending ? "opacity-100" : "opacity-0"}`}
-          data-pending={pending ? "true" : "false"}
-          data-testid="navigation-link-pending"
-        />
+        {showInlineBar ? (
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--color-terracotta)] transition-opacity duration-100 delay-100 motion-reduce:transition-none ${pending ? "opacity-100" : "opacity-0"}`}
+            data-pending={pending ? "true" : "false"}
+            data-testid="navigation-link-pending"
+          />
+        ) : null}
         <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {announcePending ? label : ""}
         </span>
