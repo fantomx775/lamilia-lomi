@@ -20,6 +20,7 @@ vi.mock("@/lib/products-request", () => ({
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: ReactNode; [key: string]: unknown }) =>
     createElement("a", { ...props, href }, children),
+  useLinkStatus: () => ({ pending: false }),
 }));
 
 vi.mock("next/image", () => ({

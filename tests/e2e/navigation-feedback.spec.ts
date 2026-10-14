@@ -82,6 +82,15 @@ test("admin navigation shows pending feedback for local demo admins", async ({ p
   test.skip(!process.env.PLAYWRIGHT_LOCAL_DEMO, "Uses the local demo admin session only");
   test.skip(testInfo.project.name !== "chromium", "Admin sidebar is verified in the desktop project");
 
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const failedRequests: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()}`));
+
   let releaseRequest!: () => void;
   const requestGate = new Promise<void>((resolve) => {
     releaseRequest = resolve;
@@ -115,4 +124,10 @@ test("admin navigation shows pending feedback for local demo admins", async ({ p
   await expect(page).toHaveURL(/\/admin\/products$/);
   await expect(page.getByRole("heading", { name: "Produkty" })).toBeVisible();
   await expect(productsLink.getByTestId("navigation-link-pending")).toHaveAttribute("data-pending", "false");
+  await page.screenshot({ path: testInfo.outputPath("admin-products.png"), fullPage: true });
+  expect(pageErrors).toEqual([]);
+  await testInfo.attach("admin-navigation-diagnostics.json", {
+    body: JSON.stringify({ consoleErrors, failedRequests, delayedRequests }, null, 2),
+    contentType: "application/json",
+  });
 });
