@@ -132,6 +132,7 @@ describe("getSupabaseAuthContext", () => {
 
 describe("getProductDetailAccessForRequest", () => {
   const originalBackendMode = process.env.LAMILIA_BACKEND;
+  const originalNodeEnv = process.env.NODE_ENV;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -163,6 +164,13 @@ describe("getProductDetailAccessForRequest", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS;
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
     if (originalBackendMode === undefined) {
       delete process.env.LAMILIA_BACKEND;
     } else {
@@ -180,6 +188,47 @@ describe("getProductDetailAccessForRequest", () => {
     });
 
     expect(mocks.supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("applies the test delay only to local demo access", async () => {
+    process.env.LAMILIA_BACKEND = "local";
+    process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS = "25";
+    mocks.cookies.mockResolvedValue({ get: () => undefined });
+    vi.useFakeTimers();
+    const { getProductDetailAccessForRequest } = await import("./session.server");
+
+    const access = getProductDetailAccessForRequest("product-guest");
+    await vi.advanceTimersByTimeAsync(24);
+    expect(mocks.cookies).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(access).resolves.toEqual({ session: null, isUnlocked: false });
+    expect(mocks.cookies).toHaveBeenCalledOnce();
+  });
+
+  it("never applies the test delay to Supabase access", async () => {
+    process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS = "25";
+    vi.useFakeTimers();
+    const { getProductDetailAccessForRequest } = await import("./session.server");
+
+    await expect(getProductDetailAccessForRequest("product-locked")).resolves.toEqual({
+      session: { emailVerified: true, isDemo: false },
+      isUnlocked: false,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("never applies the test delay in production", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.LAMILIA_BACKEND = "local";
+    process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS = "25";
+    vi.useFakeTimers();
+    const { getProductDetailAccessForRequest } = await import("./session.server");
+
+    await expect(getProductDetailAccessForRequest("product-guest")).rejects.toThrow(
+      "LAMILIA_BACKEND=local is not allowed in production.",
+    );
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("does not look up unlocks for a signed-in user whose email is unverified", async () => {
