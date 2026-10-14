@@ -1,0 +1,104 @@
+{
+  "sourceSha": "571c487037ed79d740f02c16439b5058675385b2",
+  "deploymentId": "dpl_BqPBrvEnNqBTjCk2Ab2U3XwXRJnk",
+  "method": "Read-only CUA navigation in an existing authenticated session. Interaction checks only; no trusted-pointerdown performance timings, no cookie export.",
+  "checks": [
+    {
+      "viewport": "desktop-1440x900",
+      "target": "Produkty",
+      "url": "https://www.lamilialomi.com/admin/products",
+      "headingVisible": true
+    },
+    {
+      "viewport": "desktop-1440x900",
+      "target": "Kolekcje",
+      "url": "https://www.lamilialomi.com/admin/collections",
+      "headingVisible": true
+    },
+    {
+      "viewport": "desktop-1440x900",
+      "target": "Kategorie",
+      "url": "https://www.lamilialomi.com/admin/categories",
+      "headingVisible": true
+    },
+    {
+      "viewport": "desktop-1440x900",
+      "target": "Tagi",
+      "url": "https://www.lamilialomi.com/admin/tags",
+      "headingVisible": true
+    },
+    {
+      "viewport": "desktop-1440x900",
+      "target": "Użytkownicy",
+      "url": "https://www.lamilialomi.com/admin/users",
+      "headingVisible": true
+    },
+    {
+      "viewport": "desktop-1440x900",
+      "target": "Strony",
+      "url": "https://www.lamilialomi.com/admin/pages",
+      "headingVisible": true
+    },
+    {
+      "viewport": "desktop-1440x900",
+      "target": "Ustawienia",
+      "url": "https://www.lamilialomi.com/admin/settings",
+      "heading": "Konfiguracja",
+      "headingVisible": true
+    },
+    {
+      "viewport": "desktop-1440x900",
+      "target": "Dashboard",
+      "url": "https://www.lamilialomi.com/admin",
+      "headingVisible": true
+    },
+    {
+      "viewport": "mobile-responsive-412x839",
+      "target": "Produkty",
+      "url": "https://www.lamilialomi.com/admin/products",
+      "headingVisible": true
+    },
+    {
+      "viewport": "mobile-responsive-412x839",
+      "target": "Kolekcje",
+      "url": "https://www.lamilialomi.com/admin/collections",
+      "headingVisible": true
+    },
+    {
+      "viewport": "mobile-responsive-412x839",
+      "target": "Kategorie",
+      "url": "https://www.lamilialomi.com/admin/categories",
+      "headingVisible": true
+    },
+    {
+      "viewport": "mobile-responsive-412x839",
+      "target": "Tagi",
+      "url": "https://www.lamilialomi.com/admin/tags",
+      "headingVisible": true
+    },
+    {
+      "viewport": "mobile-responsive-412x839",
+      "target": "Użytkownicy",
+      "url": "https://www.lamilialomi.com/admin/users",
+      "headingVisible": true
+    },
+    {
+      "viewport": "mobile-responsive-412x839",
+      "target": "Strony",
+      "url": "https://www.lamilialomi.com/admin/pages",
+      "headingVisible": true
+    },
+    {
+      "viewport": "mobile-responsive-412x839",
+      "target": "Ustawienia",
+      "url": "https://www.lamilialomi.com/admin/settings",
+      "headingVisible": true
+    },
+    {
+      "viewport": "mobile-responsive-412x839",
+      "target": "Dashboard",
+      "url": "https://www.lamilialomi.com/admin",
+      "headingVisible": true
+    }
+  ]
+}
