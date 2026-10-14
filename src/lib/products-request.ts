@@ -4,6 +4,8 @@ import { cache } from "react";
 
 import {
   getAdminContentSnapshot,
+  getPublicCatalogSnapshotForRequest,
+  getPublicHomeProductSnapshotForRequest,
   getPublicContentSnapshot,
   getPublicProductDetailSnapshotForRequest,
 } from "./content-repository";
@@ -117,11 +119,19 @@ export async function getPublishedProductViewsForRequest(locale: Locale) {
 }
 
 export async function getFeaturedProductsForRequest(locale: Locale, audience?: Audience) {
-  return getFeaturedProductsFromSnapshot(await getPublicContentSnapshot(), locale, audience);
+  return getFeaturedProductsFromSnapshot(
+    await getPublicHomeProductSnapshotForRequest(locale),
+    locale,
+    audience,
+  );
 }
 
 export async function getCatalogProductsForRequest(locale: Locale, filters: CatalogFilters) {
-  return getCatalogProductsFromSnapshot(await getPublicContentSnapshot(), locale, filters);
+  return getCatalogProductsFromSnapshot(
+    await getPublicCatalogSnapshotForRequest(locale),
+    locale,
+    filters,
+  );
 }
 
 export async function getAllProductTypesForRequest() {

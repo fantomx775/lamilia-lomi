@@ -7,10 +7,12 @@ import { createClient } from "@/lib/supabase/server";
 
 import { normalizeCatalogSettings } from "./catalog-settings";
 import { normalizeAboutPageSettings } from "./about-settings";
+import { sortFeaturedProductCandidates } from "./featured-product-ranking";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
 import type {
   AmazonLink,
   AboutPageSettings,
+  Audience,
   Category,
   CatalogSettings,
   Collection,
@@ -119,6 +121,372 @@ export const getPublicProductDetailSnapshotForRequest = cache(
     }
 
     return data ? mapPublicProductDetailRow(data as DbRow) : null;
+  },
+);
+
+export const getPublicHomeProductSnapshotForRequest = cache(
+  async (locale: string): Promise<ContentSnapshot> => {
+    if (getBackendMode() === "local") {
+      return getPublicContentSnapshot();
+    }
+
+    const supabase = await createClient();
+    const audienceCandidates = await Promise.all(
+      HOME_PRODUCT_AUDIENCES.map(async (audience) => ({
+        audience,
+        rows: await getHomeProductCandidateRankingsForAudience(
+          supabase,
+          locale,
+          audience,
+        ),
+      })),
+    );
+    const audienceRows = await Promise.all(
+      audienceCandidates.map(({ audience, rows }) =>
+        getHomeProductDetailsByIds(
+          supabase,
+          locale,
+          audience,
+          selectTopHomeProductIds(rows, locale),
+        ),
+      ),
+    );
+
+    return {
+      products: audienceRows.flat().map((row) =>
+        mapProduct(
+          row,
+          rowsValue(row.product_translations),
+          [],
+          [],
+          rowsValue(row.product_assets),
+          [],
+          [],
+        ),
+      ),
+      collections: [],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: normalizeCatalogSettings(undefined),
+      aboutPageSettings: normalizeAboutPageSettings(undefined),
+    };
+  },
+);
+
+const HOME_PRODUCT_AUDIENCES: readonly Audience[] = ["kids", "adults"];
+const HOME_PRODUCT_RANKING_SELECT =
+  "id, audience, review_delay_days, product_translations!inner ( locale, title )";
+const HOME_PRODUCT_SELECT = `
+  id,
+  slug,
+  status,
+  audience,
+  product_type,
+  cover_asset_id,
+  review_delay_days,
+  sort_order,
+  product_translations!inner ( locale, title, short_description ),
+  product_assets!product_assets_product_id_fkey (
+    id,
+    product_id,
+    kind,
+    bucket,
+    path,
+    filename,
+    content_type,
+    size_bytes,
+    locale,
+    title,
+    sort_order,
+    is_public,
+    is_active,
+    storage_provider
+  )
+`;
+
+async function getHomeProductCandidateRankingsForAudience(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+): Promise<DbRow[]> {
+  // Four candidates per audience cover the global Home top four as well: a
+  // fifth product from one audience already has four same-audience products
+  // ahead of it. The extra row is only a numeric lookahead; tied cutoff rows
+  // are expanded before the shared localeCompare ordering is applied.
+  const { data, error } = await createHomeProductRankingQuery(
+    supabase,
+    locale,
+    audience,
+  )
+    .order("review_delay_days", { ascending: true })
+    .limit(5);
+
+  if (error) {
+    throw new Error(`Supabase Home products read failed: ${error.message}`);
+  }
+
+  const firstRows = rowsValue(data);
+  if (firstRows.length < 5) {
+    return firstRows;
+  }
+
+  const cutoffDelay = numberValue(firstRows[3]?.review_delay_days, 14);
+  const lookaheadDelay = numberValue(firstRows[4]?.review_delay_days, 14);
+  if (cutoffDelay !== lookaheadDelay) {
+    return firstRows.slice(0, 4);
+  }
+
+  const earlierRows = firstRows.filter(
+    (row) => numberValue(row.review_delay_days, 14) < cutoffDelay,
+  );
+  const cutoffRows = await getAllHomeProductRankingsAtReviewDelay(
+    supabase,
+    locale,
+    audience,
+    cutoffDelay,
+  );
+
+  return [...earlierRows, ...cutoffRows];
+}
+
+function selectTopHomeProductIds(rows: DbRow[], locale: string) {
+  const candidates = rows.flatMap((row) => {
+    const translation = rowsValue(row.product_translations).find(
+      (item) => item.locale === locale,
+    );
+    const id = optionalString(row.id);
+    if (!translation || !id) {
+      return [];
+    }
+
+    return [
+      {
+        id,
+        reviewDelayDays: numberValue(row.review_delay_days, 14),
+        title: stringValue(translation.title),
+      },
+    ];
+  });
+
+  return sortFeaturedProductCandidates(candidates)
+    .slice(0, 4)
+    .map((candidate) => candidate.id);
+}
+
+async function getAllHomeProductRankingsAtReviewDelay(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+  reviewDelayDays: number,
+): Promise<DbRow[]> {
+  const rows: DbRow[] = [];
+  let lastId: string | undefined;
+
+  for (;;) {
+    let query = createHomeProductRankingQuery(supabase, locale, audience)
+      .eq("review_delay_days", reviewDelayDays)
+      .order("id", { ascending: true });
+    if (lastId) {
+      query = query.gt("id", lastId);
+    }
+
+    const { data, error } = await query.limit(POSTGREST_PAGE_SIZE);
+    if (error) {
+      throw new Error(`Supabase Home products tie read failed: ${error.message}`);
+    }
+
+    const page = rowsValue(data);
+    rows.push(...page);
+    if (page.length < POSTGREST_PAGE_SIZE) {
+      return rows;
+    }
+
+    const nextId = optionalString(page[page.length - 1]?.id);
+    if (!nextId || nextId === lastId) {
+      throw new Error("Supabase Home products tie pagination did not advance.");
+    }
+    lastId = nextId;
+  }
+}
+
+async function getHomeProductDetailsByIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+  ids: string[],
+): Promise<DbRow[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await createHomeProductQuery(
+    supabase,
+    locale,
+    audience,
+  ).in("id", ids);
+  if (error) {
+    throw new Error("Supabase Home product details read failed: " + error.message);
+  }
+
+  const rowsById = new Map(
+    rowsValue(data).flatMap((row) => {
+      const id = optionalString(row.id);
+      return id ? [[id, row] as const] : [];
+    }),
+  );
+
+  // PostgREST does not promise that an `in` filter returns rows in the input
+  // ID order. Restore the ranking query's stable order for equal title ties.
+  return ids.flatMap((id) => {
+    const row = rowsById.get(id);
+    return row ? [row] : [];
+  });
+}
+
+function createHomeProductRankingQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+) {
+  return supabase
+    .from("products")
+    .select(HOME_PRODUCT_RANKING_SELECT)
+    .eq("status", "published")
+    .eq("product_translations.locale", locale)
+    .eq("audience", audience);
+}
+
+function createHomeProductQuery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  locale: string,
+  audience: Audience,
+) {
+  return supabase
+    .from("products")
+    .select(HOME_PRODUCT_SELECT)
+    .eq("status", "published")
+    .eq("product_translations.locale", locale)
+    .eq("product_assets.is_active", true)
+    .eq("product_assets.kind", "cover")
+    .eq("audience", audience);
+}
+
+export const getPublicCatalogSnapshotForRequest = cache(
+  async (locale: string): Promise<ContentSnapshot> => {
+    if (getBackendMode() === "local") {
+      return getPublicContentSnapshot();
+    }
+
+    const supabase = await createClient();
+    const [productResult, categoryResult, tagResult, settingsResult] =
+      await Promise.all([
+        supabase
+          .from("products")
+          .select(`
+            id,
+            slug,
+            status,
+            audience,
+            product_type,
+            cover_asset_id,
+            review_delay_days,
+            sort_order,
+            created_at,
+            product_translations!inner ( locale, title, short_description, long_description, seo_title, seo_description ),
+            product_categories ( category_id ),
+            product_tags ( tag_id ),
+            product_assets!product_assets_product_id_fkey (
+              id,
+              product_id,
+              kind,
+              bucket,
+              path,
+              filename,
+              content_type,
+              size_bytes,
+              locale,
+              title,
+              sort_order,
+              is_public,
+              is_active,
+              storage_provider
+            )
+          `)
+          .eq("status", "published")
+          .eq("product_translations.locale", locale)
+          .eq("product_assets.is_active", true)
+          .eq("product_assets.kind", "cover"),
+        supabase
+          .from("categories")
+          .select(`
+            id,
+            slug,
+            sort_order,
+            image_asset_id,
+            image_storage_path,
+            image_storage_provider,
+            image_filename,
+            image_content_type,
+            image_size_bytes,
+            category_translations!inner ( locale, name, description )
+          `)
+          .eq("category_translations.locale", locale),
+        supabase
+          .from("tags")
+          .select(`
+            id,
+            slug,
+            tag_translations!inner ( locale, name )
+          `)
+          .eq("tag_translations.locale", locale),
+        supabase
+          .from("catalog_settings")
+          .select("desktop_columns")
+          .eq("id", "global")
+          .maybeSingle(),
+      ]);
+
+    if (productResult.error) {
+      throw new Error(`Supabase catalog products read failed: ${productResult.error.message}`);
+    }
+    if (categoryResult.error) {
+      throw new Error(`Supabase catalog categories read failed: ${categoryResult.error.message}`);
+    }
+    if (tagResult.error) {
+      throw new Error(`Supabase catalog tags read failed: ${tagResult.error.message}`);
+    }
+    if (settingsResult.error) {
+      throw new Error(`Supabase catalog settings read failed: ${settingsResult.error.message}`);
+    }
+
+    const settings = settingsResult.data as DbRow | null;
+
+    return {
+      products: rowsValue(productResult.data).map((row) =>
+        mapProduct(
+          row,
+          rowsValue(row.product_translations),
+          rowsValue(row.product_categories),
+          rowsValue(row.product_tags),
+          rowsValue(row.product_assets),
+          [],
+          [],
+        ),
+      ),
+      collections: [],
+      categories: rowsValue(categoryResult.data).map((row) =>
+        mapCategory(row, rowsValue(row.category_translations)),
+      ),
+      tags: rowsValue(tagResult.data).map((row) =>
+        mapTag(row, rowsValue(row.tag_translations)),
+      ),
+      staticPages: [],
+      catalogSettings: normalizeCatalogSettings(
+        settings ? { desktopColumns: settings.desktop_columns } : undefined,
+      ),
+      aboutPageSettings: normalizeAboutPageSettings(undefined),
+    };
   },
 );
 

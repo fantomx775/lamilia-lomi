@@ -6,7 +6,7 @@ import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Locale } from "@/i18n/routing";
-import { getPublicContentSnapshot } from "@/lib/content-repository";
+import { getPublicCatalogSnapshotForRequest } from "@/lib/content-repository";
 import {
   getAllProductTypesFromSnapshot,
   getCatalogProductsFromSnapshot,
@@ -22,7 +22,7 @@ type Props = {
 export default async function ProductsPage({ params, searchParams }: Props) {
   const { locale } = await params;
   const filters = parseCatalogFilters(await searchParams);
-  const snapshot = await getPublicContentSnapshot();
+  const snapshot = await getPublicCatalogSnapshotForRequest(locale);
   const products = getCatalogProductsFromSnapshot(snapshot, locale, filters);
   const categories = snapshot.categories
     .slice()

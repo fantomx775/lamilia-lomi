@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getBackendMode: vi.fn(),
   selectedColumns: "",
   filters: [] as Array<[string, unknown]>,
+  requestCaches: [] as Array<Map<string, unknown>>,
   productAssetRow: {} as {
     id: string;
     product_id: string;
@@ -25,6 +26,22 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
+vi.mock("react", () => ({
+  cache: (fn: (...args: unknown[]) => unknown) => {
+    const entries = new Map<string, unknown>();
+    mocks.requestCaches.push(entries);
+
+    return (...args: unknown[]) => {
+      const key = JSON.stringify(args);
+
+      if (!entries.has(key)) {
+        entries.set(key, fn(...args));
+      }
+
+      return entries.get(key);
+    };
+  },
+}));
 vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
 
@@ -41,6 +58,9 @@ describe("targeted public product detail read", () => {
     mocks.getBackendMode.mockReturnValue("supabase");
     mocks.selectedColumns = "";
     mocks.filters = [];
+    for (const requestCache of mocks.requestCaches) {
+      requestCache.clear();
+    }
     mocks.productAssetRow = {
       id: "cover-1",
       product_id: "product-1",
@@ -159,6 +179,17 @@ describe("targeted public product detail read", () => {
       ["status", "published"],
       ["product_assets.is_active", true],
     ]);
+  });
+
+  it("shares one targeted read between metadata and page calls for the same product", async () => {
+    const [metadataProduct, pageProduct] = await Promise.all([
+      getLocalizedProductDetailViewForRequest("moon-garden-coloring-book", "en"),
+      getLocalizedProductDetailViewForRequest("moon-garden-coloring-book", "en"),
+    ]);
+
+    expect(metadataProduct).toEqual(pageProduct);
+    expect(mocks.from).toHaveBeenCalledTimes(1);
+    expect(mocks.from).toHaveBeenCalledWith("products");
   });
 
   it("keeps publication-pending product images on the private media route", async () => {
