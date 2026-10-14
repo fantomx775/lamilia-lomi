@@ -1,0 +1,1071 @@
+{
+  "runId": "navigation-production-public-2026-10-14T13-13-58-521Z",
+  "checkedAt": "2026-10-14T13:15:37.561Z",
+  "origin": "https://www.lamilialomi.com",
+  "sourceSha": "571c487037ed79d740f02c16439b5058675385b2",
+  "vercelDeploymentId": "dpl_BqPBrvEnNqBTjCk2Ab2U3XwXRJnk",
+  "githubDeploymentId": "7059889271",
+  "identityVerification": "deployment ID and source SHA must be confirmed externally immediately before/after the run; this runner verifies checkout SHA and public origin only",
+  "productionHealthResponse": {
+    "status": 200,
+    "finalUrl": "https://www.lamilialomi.com/en",
+    "headers": {
+      "date": "Wed, 14 Oct 2026 13:13:59 GMT",
+      "x-vercel-id": "arn1::iad1::n9g49-1791983639690-9526c5dcd340",
+      "x-vercel-cache": "MISS",
+      "x-nextjs-cache": null,
+      "cache-control": "private, no-cache, no-store, max-age=0, must-revalidate",
+      "age": "0"
+    }
+  },
+  "runtime": "read-only anonymous guest navigation against the public Production origin",
+  "runtimeMetadata": {
+    "nodeVersion": "v22.15.0",
+    "chromiumVersion": "148.0.7778.96",
+    "platform": "win32 10.0.26200",
+    "memoryAtRunCompletion": {
+      "totalBytes": 17099583488,
+      "freeBytes": 2310565888
+    }
+  },
+  "method": {
+    "cold": "new isolated BrowserContext with fresh client cache and source loaded before activation; Next/server caches are not cleared and Link prefetch may populate the destination",
+    "warm": "same context after destination, browser Back to source, then repeated activation; source reload fallback is recorded",
+    "start": "trusted pointerdown on the actual visible semantic destination anchor",
+    "firstVisibleUi": "minimum of an observed pressed CSS :active transform, new visible loading UI, or destination H1, sampled on animation frames",
+    "loadingUi": "first new viewport-visible [aria-busy=true], [role=status], or [data-testid*=loading]; excludes screen-reader-only/clipped/pre-existing indicators",
+    "content": "first viewport-intersecting destination H1 matching the route expectation",
+    "repetitions": "3 accepted cold/warm pairs per device and transition; up to 6 attempts",
+    "interactionBoundary": "anonymous GET/navigation only; no account sign-in, Admin routes, forms, or writes"
+  },
+  "devices": [
+    {
+      "id": "desktop",
+      "label": "Chromium desktop",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "deviceScaleFactor": 1,
+      "isMobile": false,
+      "hasTouch": false
+    },
+    {
+      "id": "pixel7",
+      "label": "Pixel 7 emulation",
+      "viewport": {
+        "width": 412,
+        "height": 839
+      },
+      "deviceScaleFactor": 2.625,
+      "isMobile": true,
+      "hasTouch": true
+    }
+  ],
+  "transitions": [
+    {
+      "id": "home_to_catalog",
+      "label": "Home → Catalog",
+      "source": {
+        "path": "/en",
+        "heading": "LamiliaLomi",
+        "screenshot": "home"
+      },
+      "target": {
+        "path": "/en/products",
+        "heading": "Browse LamiliaLomi books"
+      }
+    },
+    {
+      "id": "catalog_to_product_detail",
+      "label": "Catalog → Product Detail",
+      "source": {
+        "path": "/en/products",
+        "heading": "Browse LamiliaLomi books",
+        "screenshot": "catalog"
+      },
+      "target": {
+        "path": "/en/products/https-www-amazon-com-dp-b0h8tttsny",
+        "headingIncludes": "Cinderella"
+      }
+    },
+    {
+      "id": "product_detail_to_catalog_header",
+      "label": "Product Detail → Catalog (header navigation)",
+      "source": {
+        "path": "/en/products/https-www-amazon-com-dp-b0h8tttsny",
+        "headingIncludes": "Cinderella",
+        "screenshot": "product-detail"
+      },
+      "target": {
+        "path": "/en/products",
+        "heading": "Browse LamiliaLomi books"
+      }
+    },
+    {
+      "id": "header_to_library_guest",
+      "label": "Header → Library (guest)",
+      "source": {
+        "path": "/en/products",
+        "heading": "Browse LamiliaLomi books",
+        "screenshot": "catalog"
+      },
+      "target": {
+        "path": "/en/library",
+        "heading": "My Library"
+      }
+    },
+    {
+      "id": "header_to_login_guest",
+      "label": "Header → Login (guest)",
+      "source": {
+        "path": "/en/products",
+        "heading": "Browse LamiliaLomi books",
+        "screenshot": "catalog"
+      },
+      "target": {
+        "path": "/en/login",
+        "heading": "Log in"
+      }
+    }
+  ],
+  "blockedScope": [
+    "Header → signed-in Account",
+    "authenticated Admin navigation"
+  ],
+  "groups": [
+    {
+      "device": "desktop",
+      "transition": "home_to_catalog",
+      "label": "Home → Catalog",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 25.4,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 25.4,
+            "clickToUrlMs": 25.6,
+            "clickToMeaningfulContentMs": 584,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 30.3,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 30.3,
+            "clickToUrlMs": 30.4,
+            "clickToMeaningfulContentMs": 686.1,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 578.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 76.2,
+            "clickToMeaningfulContentMs": 578.1,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 28.9,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 28.9,
+            "clickToUrlMs": 29,
+            "clickToMeaningfulContentMs": 563.6,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 593.2,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 259.2,
+            "clickToMeaningfulContentMs": 593.2,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 29.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 29.1,
+            "clickToUrlMs": 29.3,
+            "clickToMeaningfulContentMs": 563,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "desktop",
+      "transition": "catalog_to_product_detail",
+      "label": "Catalog → Product Detail",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 261,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 261,
+            "clickToUrlMs": 261.1,
+            "clickToMeaningfulContentMs": 611,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 262.7,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 262.7,
+            "clickToUrlMs": 262.9,
+            "clickToMeaningfulContentMs": 578.2,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 276.7,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 276.7,
+            "clickToUrlMs": 276.9,
+            "clickToMeaningfulContentMs": 588.7,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 246.2,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 246.2,
+            "clickToUrlMs": 246.3,
+            "clickToMeaningfulContentMs": 629.1,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 261.8,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 261.8,
+            "clickToUrlMs": 261.9,
+            "clickToMeaningfulContentMs": 614.1,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 261,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 261,
+            "clickToUrlMs": 261.2,
+            "clickToMeaningfulContentMs": 568.2,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "desktop",
+      "transition": "product_detail_to_catalog_header",
+      "label": "Product Detail → Catalog (header navigation)",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 28.3,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 28.3,
+            "clickToUrlMs": 28.3,
+            "clickToMeaningfulContentMs": 651.8,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 30.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 30.1,
+            "clickToUrlMs": 30.2,
+            "clickToMeaningfulContentMs": 398.6,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 587.8,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 277,
+            "clickToMeaningfulContentMs": 587.8,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 29.3,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 29.3,
+            "clickToUrlMs": 29.4,
+            "clickToMeaningfulContentMs": 566.6,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 620.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 226.4,
+            "clickToMeaningfulContentMs": 620.1,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 28.5,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 28.5,
+            "clickToUrlMs": 28.6,
+            "clickToMeaningfulContentMs": 548.7,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "desktop",
+      "transition": "header_to_library_guest",
+      "label": "Header → Library (guest)",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 327,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 326.7,
+            "clickToMeaningfulContentMs": 327,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 29.7,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 29.7,
+            "clickToUrlMs": 29.8,
+            "clickToMeaningfulContentMs": 330.1,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 476.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 475.9,
+            "clickToMeaningfulContentMs": 476.1,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 29.4,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 29.4,
+            "clickToUrlMs": 29.4,
+            "clickToMeaningfulContentMs": 330.4,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 259,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 243.2,
+            "clickToMeaningfulContentMs": 259,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 31.3,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 31.3,
+            "clickToUrlMs": 31.4,
+            "clickToMeaningfulContentMs": 329.8,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "desktop",
+      "transition": "header_to_login_guest",
+      "label": "Header → Login (guest)",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 443.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 442.9,
+            "clickToMeaningfulContentMs": 443.1,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 279.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 278.9,
+            "clickToMeaningfulContentMs": 279.1,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 376.4,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 376.1,
+            "clickToMeaningfulContentMs": 376.4,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 228.5,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 228.3,
+            "clickToMeaningfulContentMs": 228.5,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 328.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 327.9,
+            "clickToMeaningfulContentMs": 328.1,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 214.7,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 214.5,
+            "clickToMeaningfulContentMs": 214.7,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "pixel7",
+      "transition": "home_to_catalog",
+      "label": "Home → Catalog",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 29.6,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 29.6,
+            "clickToUrlMs": 29.8,
+            "clickToMeaningfulContentMs": 554.6,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.7,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.7,
+            "clickToUrlMs": 32.9,
+            "clickToMeaningfulContentMs": 637.1,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 426.4,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 182.4,
+            "clickToMeaningfulContentMs": 426.4,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.4,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.4,
+            "clickToUrlMs": 32.5,
+            "clickToMeaningfulContentMs": 553.1,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 365.2,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 365.2,
+            "clickToUrlMs": 365.3,
+            "clickToMeaningfulContentMs": 670.5,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 33.6,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 33.6,
+            "clickToUrlMs": 33.8,
+            "clickToMeaningfulContentMs": 675,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "pixel7",
+      "transition": "catalog_to_product_detail",
+      "label": "Catalog → Product Detail",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 579.6,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 579.2,
+            "clickToMeaningfulContentMs": 579.6,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.3,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.3,
+            "clickToUrlMs": 32.4,
+            "clickToMeaningfulContentMs": 438.4,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 642.3,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 615.3,
+            "clickToMeaningfulContentMs": 642.3,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.6,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.6,
+            "clickToUrlMs": 32.7,
+            "clickToMeaningfulContentMs": 421.6,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 670.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 645.4,
+            "clickToMeaningfulContentMs": 670.1,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.4,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.4,
+            "clickToUrlMs": 32.5,
+            "clickToMeaningfulContentMs": 419,
+            "meaningfulContentHeading": "Cinderella: A Magical Bedtime Story for Kids Ages 3–10: A Beautifully Illustrated Retelling of the Classic Cinderella Fairy Tale (Classic Story Collection)",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "pixel7",
+      "transition": "product_detail_to_catalog_header",
+      "label": "Product Detail → Catalog (header navigation)",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 33.2,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 33.2,
+            "clickToUrlMs": 33.4,
+            "clickToMeaningfulContentMs": 459.1,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.9,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.9,
+            "clickToUrlMs": 33.1,
+            "clickToMeaningfulContentMs": 436,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 630.4,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 65.7,
+            "clickToMeaningfulContentMs": 630.4,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 31.3,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 31.3,
+            "clickToUrlMs": 31.4,
+            "clickToMeaningfulContentMs": 569.9,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 687.9,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 131.9,
+            "clickToMeaningfulContentMs": 687.9,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.2,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.2,
+            "clickToUrlMs": 32.4,
+            "clickToMeaningfulContentMs": 554.3,
+            "meaningfulContentHeading": "Browse LamiliaLomi books",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "pixel7",
+      "transition": "header_to_library_guest",
+      "label": "Header → Library (guest)",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 230.5,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 132.7,
+            "clickToMeaningfulContentMs": 230.5,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.5,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.5,
+            "clickToUrlMs": 32.6,
+            "clickToMeaningfulContentMs": 333.5,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 251,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 250.7,
+            "clickToMeaningfulContentMs": 251,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 32.6,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 32.6,
+            "clickToUrlMs": 32.7,
+            "clickToMeaningfulContentMs": 334.5,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 311.1,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 244.1,
+            "clickToMeaningfulContentMs": 311.1,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 33.4,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": 33.4,
+            "clickToUrlMs": 33.5,
+            "clickToMeaningfulContentMs": 332.9,
+            "meaningfulContentHeading": "My Library",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    },
+    {
+      "device": "pixel7",
+      "transition": "header_to_login_guest",
+      "label": "Header → Login (guest)",
+      "acceptedPairs": 3,
+      "attempts": 3,
+      "accepted": [
+        {
+          "attempt": 1,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 364.9,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 364.7,
+            "clickToMeaningfulContentMs": 364.9,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 218.9,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 218.7,
+            "clickToMeaningfulContentMs": 218.9,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 2,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 466.6,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 466.4,
+            "clickToMeaningfulContentMs": 466.6,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 233,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 232.7,
+            "clickToMeaningfulContentMs": 233,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          }
+        },
+        {
+          "attempt": 3,
+          "returnMethod": "history-back",
+          "cold": {
+            "clickToFirstVisibleUiMs": 349,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 348.8,
+            "clickToMeaningfulContentMs": 349,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          },
+          "warm": {
+            "clickToFirstVisibleUiMs": 248.9,
+            "clickToPressedFeedbackMs": null,
+            "clickToLoadingUiMs": null,
+            "clickToUrlMs": 248.7,
+            "clickToMeaningfulContentMs": 248.9,
+            "meaningfulContentHeading": "Log in",
+            "trustedPointerDown": true
+          }
+        }
+      ]
+    }
+  ],
+  "summary": [
+    {
+      "device": "desktop",
+      "transition": "home_to_catalog",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 578.1,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 25.4,
+        "meaningfulContentMedianMs": 584
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 29.1,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 29.1,
+        "meaningfulContentMedianMs": 563.6
+      }
+    },
+    {
+      "device": "desktop",
+      "transition": "catalog_to_product_detail",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 261.8,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 261.8,
+        "meaningfulContentMedianMs": 611
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 261,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 261,
+        "meaningfulContentMedianMs": 578.2
+      }
+    },
+    {
+      "device": "desktop",
+      "transition": "product_detail_to_catalog_header",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 587.8,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 28.3,
+        "meaningfulContentMedianMs": 620.1
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 29.3,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 29.3,
+        "meaningfulContentMedianMs": 548.7
+      }
+    },
+    {
+      "device": "desktop",
+      "transition": "header_to_library_guest",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 327,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": null,
+        "meaningfulContentMedianMs": 327
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 29.7,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 29.7,
+        "meaningfulContentMedianMs": 330.1
+      }
+    },
+    {
+      "device": "desktop",
+      "transition": "header_to_login_guest",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 376.4,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": null,
+        "meaningfulContentMedianMs": 376.4
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 228.5,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": null,
+        "meaningfulContentMedianMs": 228.5
+      }
+    },
+    {
+      "device": "pixel7",
+      "transition": "home_to_catalog",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 365.2,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 197.4,
+        "meaningfulContentMedianMs": 554.6
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 32.7,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 32.7,
+        "meaningfulContentMedianMs": 637.1
+      }
+    },
+    {
+      "device": "pixel7",
+      "transition": "catalog_to_product_detail",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 642.3,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": null,
+        "meaningfulContentMedianMs": 642.3
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 32.4,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 32.4,
+        "meaningfulContentMedianMs": 421.6
+      }
+    },
+    {
+      "device": "pixel7",
+      "transition": "product_detail_to_catalog_header",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 630.4,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 33.2,
+        "meaningfulContentMedianMs": 630.4
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 32.2,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 32.2,
+        "meaningfulContentMedianMs": 554.3
+      }
+    },
+    {
+      "device": "pixel7",
+      "transition": "header_to_library_guest",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 251,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": null,
+        "meaningfulContentMedianMs": 251
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 32.6,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": 32.6,
+        "meaningfulContentMedianMs": 333.5
+      }
+    },
+    {
+      "device": "pixel7",
+      "transition": "header_to_login_guest",
+      "acceptedPairs": 3,
+      "cold": {
+        "firstVisibleUiMedianMs": 364.9,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": null,
+        "meaningfulContentMedianMs": 364.9
+      },
+      "warm": {
+        "firstVisibleUiMedianMs": 233,
+        "pressedFeedbackMedianMs": null,
+        "loadingUiMedianMs": null,
+        "meaningfulContentMedianMs": 233
+      }
+    }
+  ],
+  "diagnostics": {
+    "consoleErrors": [],
+    "pageErrors": [],
+    "sameOriginHttpErrors": [],
+    "requestFailures": {
+      "net::ERR_ABORTED": 145
+    }
+  },
+  "rejectedAttempts": [],
+  "runError": null,
+  "screenshotsDir": "screenshots"
+}
