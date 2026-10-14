@@ -4,6 +4,47 @@ import { join } from "node:path";
 
 const productSlug = "moon-garden-coloring-book";
 
+type BrowserDiagnostics = {
+  consoleErrors: string[];
+  pageErrors: string[];
+  failedRequests: string[];
+  serverErrors: string[];
+};
+
+function collectBrowserDiagnostics(page: Page): BrowserDiagnostics {
+  const diagnostics: BrowserDiagnostics = {
+    consoleErrors: [],
+    pageErrors: [],
+    failedRequests: [],
+    serverErrors: [],
+  };
+
+  page.on("console", (message) => {
+    if (message.type() === "error") diagnostics.consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
+  page.on("requestfailed", (request) => {
+    diagnostics.failedRequests.push(
+      `${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText ?? "request failed"}`,
+    );
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      diagnostics.serverErrors.push(`${response.status()} ${new URL(response.url()).pathname}`);
+    }
+  });
+
+  return diagnostics;
+}
+
+async function attachBrowserDiagnostics(testInfo: TestInfo, diagnostics: BrowserDiagnostics) {
+  await testInfo.attach("browser-diagnostics.json", {
+    body: JSON.stringify(diagnostics, null, 2),
+    contentType: "application/json",
+  });
+  console.log(`Issue 19 browser diagnostics: ${JSON.stringify(diagnostics)}`);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem(
@@ -255,12 +296,14 @@ async function expectPublicProductContentBeforeAccess(
   await expect(page.getByTestId("product-unlock-section")).toHaveCount(0);
 
   const screenshotRunId = process.env.ISSUE_19_STREAMING_SCREENSHOT_RUN_ID;
-  if (screenshotRunId) {
+  if (screenshotRunId && /^[a-zA-Z0-9-]+$/.test(screenshotRunId)) {
     const directory = join("docs", "verification", "issue-19");
     await mkdir(directory, { recursive: true });
     await page.screenshot({
       path: join(directory, `${screenshotRunId}-${testInfo.project.name}-${scenario}.png`),
       fullPage: true,
+      animations: "disabled",
+      style: "nextjs-portal { display: none !important; }",
     });
   }
 
@@ -295,12 +338,15 @@ function skipWithoutDelayedLocalDemo() {
 
 test("anonymous public Product Detail streams before personalized access", async ({ page }, testInfo) => {
   skipWithoutDelayedLocalDemo();
+  const diagnostics = collectBrowserDiagnostics(page);
   await expectPublicProductContentBeforeAccess(page, testInfo, "anonymous");
   await expectAccessContentAfterDelay(page, "unlock-guest-state");
+  await attachBrowserDiagnostics(testInfo, diagnostics);
 });
 
 test("logged-in locked Product Detail streams before personalized access", async ({ page }, testInfo) => {
   skipWithoutDelayedLocalDemo();
+  const diagnostics = collectBrowserDiagnostics(page);
   await page.goto(`/en/login?returnTo=/en/products/${productSlug}`);
   await page.getByLabel("Email").fill("locked@example.com");
   await page.getByLabel("Password").fill("demo-password");
@@ -309,10 +355,12 @@ test("logged-in locked Product Detail streams before personalized access", async
 
   await expectPublicProductContentBeforeAccess(page, testInfo, "locked", false);
   await expectAccessContentAfterDelay(page, "unlock-code-state");
+  await attachBrowserDiagnostics(testInfo, diagnostics);
 });
 
 test("logged-in unlocked Product Detail streams before personalized access", async ({ page }, testInfo) => {
   skipWithoutDelayedLocalDemo();
+  const diagnostics = collectBrowserDiagnostics(page);
   await page.goto(`/en/unlock/${productSlug}`);
   await page.getByRole("button", { name: "Log in" }).click();
   await page.getByLabel("Email").fill("locked@example.com");
@@ -324,6 +372,7 @@ test("logged-in unlocked Product Detail streams before personalized access", asy
 
   await expectPublicProductContentBeforeAccess(page, testInfo, "unlocked");
   await expectAccessContentAfterDelay(page, "premium-download-links");
+  await attachBrowserDiagnostics(testInfo, diagnostics);
 });
 
 test("mobile primary navigation exposes Catalog and Library without horizontal overflow", async ({ page }, testInfo) => {

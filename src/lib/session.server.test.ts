@@ -132,7 +132,6 @@ describe("getSupabaseAuthContext", () => {
 
 describe("getProductDetailAccessForRequest", () => {
   const originalBackendMode = process.env.LAMILIA_BACKEND;
-  const originalNodeEnv = process.env.NODE_ENV;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -165,12 +164,8 @@ describe("getProductDetailAccessForRequest", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
     delete process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS;
-    if (originalNodeEnv === undefined) {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = originalNodeEnv;
-    }
     if (originalBackendMode === undefined) {
       delete process.env.LAMILIA_BACKEND;
     } else {
@@ -219,7 +214,7 @@ describe("getProductDetailAccessForRequest", () => {
   });
 
   it("never applies the test delay in production", async () => {
-    process.env.NODE_ENV = "production";
+    vi.stubEnv("NODE_ENV", "production");
     process.env.LAMILIA_BACKEND = "local";
     process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS = "25";
     vi.useFakeTimers();
