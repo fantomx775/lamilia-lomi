@@ -978,7 +978,7 @@
       "cold": {
         "firstVisibleUiMedianMs": 365.2,
         "pressedFeedbackMedianMs": null,
-        "loadingUiMedianMs": 365.2,
+        "loadingUiMedianMs": 197.4,
         "meaningfulContentMedianMs": 554.6
       },
       "warm": {

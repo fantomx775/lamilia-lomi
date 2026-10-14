@@ -3,6 +3,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { median } from "./statistics.mjs";
 
 const origin = process.env.LL_NAV_PROD_ORIGIN ?? "https://www.lamilialomi.com";
 const outputRoot = process.env.LL_NAV_OUTPUT;
@@ -215,11 +216,6 @@ async function returnToSource(page, route, heading) {
   }
   await waitForHeading(page, heading);
   return method;
-}
-
-function median(values) {
-  const valid = values.filter(Number.isFinite).sort((left, right) => left - right);
-  return valid.length ? Number(valid[Math.floor(valid.length / 2)].toFixed(1)) : null;
 }
 
 async function measureGroup(device, transition) {
