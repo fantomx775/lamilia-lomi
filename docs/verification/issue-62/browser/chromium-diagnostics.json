@@ -1,0 +1,45 @@
+{
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "pageErrors": [],
+  "failedResponses": [
+    {
+      "path": "/api/category-media/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "status": 404,
+      "disposition": "intentional-missing-image"
+    },
+    {
+      "path": "/api/category-media/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "status": 404,
+      "disposition": "intentional-missing-image"
+    },
+    {
+      "path": "/api/category-media/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "status": 404,
+      "disposition": "intentional-missing-image"
+    },
+    {
+      "path": "/api/category-media/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "status": 404,
+      "disposition": "intentional-missing-image"
+    },
+    {
+      "path": "/api/category-media/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "status": 404,
+      "disposition": "intentional-missing-image"
+    },
+    {
+      "path": "/api/category-media/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "status": 404,
+      "disposition": "intentional-missing-image"
+    }
+  ],
+  "failedRequests": [],
+  "expectedFailureReason": "A deliberately absent versioned category image exercises error recovery; no real category image was changed."
+}
