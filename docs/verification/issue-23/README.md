@@ -21,7 +21,13 @@ The screenshots are local synthetic/browser-fixture evidence, not screenshots of
 | Category admin and storefront | [uploaded](category/chromium/category-admin-uploaded.png), [storefront](category/chromium/category-storefront.png), [cleanup warning](category/chromium/category-cleanup-warning.png) | [uploaded](category/mobile/category-admin-uploaded.png), [storefront](category/mobile/category-storefront.png), [cleanup warning](category/mobile/category-cleanup-warning.png) |
 | Product gallery and lightbox | [gallery](gallery/gallery-chromium.png), [lightbox](gallery/lightbox-chromium.png) | [gallery](gallery/gallery-mobile.png), [lightbox](gallery/lightbox-mobile.png) |
 
-The existing [read-only Production image audit](production-image-audit-2026-10-14.md) records public source dimensions, cache headers, and the lack of a representative live category assignment. It sampled Production URLs, but did not capture browser screenshots at desktop DPR 1/DPR 2 or Pixel 7. The evidence in this directory does not claim those Production viewport checks.
+The existing [read-only Production image audit](production-image-audit-2026-10-14.md) records public source dimensions, cache headers, and the lack of a representative live category assignment.
+
+## Public Production quality, 2026-10-15
+
+The reproducible `node docs/verification/issue-23/probe-public-quality.mjs` probe performs public reads only. It checks the current Catalog cover, Product Detail cover, gallery thumbnail and expanded lightbox on Chromium 1440x900 at DPR 1 and DPR 2, plus Pixel 7. All three contexts passed image decoding and no-horizontal-overflow checks, with no console/page errors or failed HTTP responses. Aborted navigation/prefetch requests are classified in `public-quality/diagnostics.json`, separately from HTTP/media failures.
+
+The parent visually inspected the sampled covers, gallery thumbnails and expanded lightbox. The artwork and text are sharp at their actual rendered sizes, including desktop high DPI; there was no observed avoidable pixelation requiring processing changes or upscaling. Original media were preserved. The screenshots and measured source/rendered dimensions are in `public-quality/`; these are live Production observations, not candidate-SHA runtime claims. This does not establish a post-delete cache bound, and there was no configured representative Production category image to inspect. Synthetic local category rendering is proven separately above.
 
 ## Integration boundary
 
