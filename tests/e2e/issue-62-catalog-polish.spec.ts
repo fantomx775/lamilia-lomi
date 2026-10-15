@@ -17,6 +17,7 @@ test("catalog category recovery, full titles and configurable responsive cards",
   const directory = path.resolve(process.env.ISSUE_62_EVIDENCE_DIR ?? testInfo.outputPath("screenshots"));
   const missingImage = "/api/category-media/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb?v=62626262-6262-4262-8262-626262626262";
   const longTitle = "The Wonderful Garden of Stories and Adventures for Curious Readers " + "W".repeat(60);
+  const responsiveTitle = "A delightful garden adventure with secret paths, tiny creatures and fun activities";
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const failedResponses: { path: string; status: number; disposition: string }[] = [];
@@ -49,7 +50,7 @@ test("catalog category recovery, full titles and configurable responsive cards",
       product.slug = `issue-62-product-${index}`;
       product.status = "published";
       product.sortOrder = index;
-      const title = index === 0 ? "Moon Garden" : index === 1 ? longTitle : `Creative Stories ${index}`;
+      const title = index === 0 ? "Moon Garden" : index === 1 ? longTitle : index === 2 ? responsiveTitle : `Creative Stories ${index}`;
       product.translations = [{ locale: "en", title, shortDescription: "Gentle stories and creative activities for curious readers.", longDescription: "Catalog browser fixture." }];
       return product;
     });
@@ -77,6 +78,17 @@ test("catalog category recovery, full titles and configurable responsive cards",
       }
       await grid.locator("article").first().scrollIntoViewIfNeeded();
       await expect.poll(() => grid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(testInfo.project.name === "chromium" ? columns : 1);
+      const shortCard = grid.locator("article").first();
+      const longCard = grid.locator("article").nth(1);
+      const responsiveCard = grid.locator("article").nth(2);
+      const matchesTitleTruncation = async (card: typeof shortCard) => {
+        const truncated = await card.locator("h3").evaluate(element => element.scrollHeight > element.clientHeight + 1);
+        await expect(card.locator("summary")).toHaveCount(truncated ? 1 : 0);
+        return truncated;
+      };
+      await expect.poll(() => longCard.locator("summary").count()).toBe(1);
+      await expect(shortCard.locator("details")).toHaveCount(0);
+      await matchesTitleTruncation(responsiveCard);
       const titleHeights = await grid.locator("h3").evaluateAll(headings => headings.map(heading => heading.getBoundingClientRect().height));
       expect(Math.max(...titleHeights) - Math.min(...titleHeights)).toBeLessThan(1);
       const titleRegion = await grid.locator("h3").first().evaluate(element => ({ height: element.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(element).lineHeight) }));
@@ -94,7 +106,8 @@ test("catalog category recovery, full titles and configurable responsive cards",
       await page.getByTestId("product-catalog-grid").locator("article").first().scrollIntoViewIfNeeded();
       await screenshot("grid", false);
     }
-    const longCard = page.getByTestId("product-catalog-grid").locator("article").nth(1);
+    const grid = page.getByTestId("product-catalog-grid");
+    const longCard = grid.locator("article").nth(1);
     const disclosure = longCard.locator("summary");
     await disclosure.scrollIntoViewIfNeeded();
     if (testInfo.project.name === "chromium") {
@@ -106,12 +119,29 @@ test("catalog category recovery, full titles and configurable responsive cards",
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     await screenshot("full-title", false);
     if (testInfo.project.name === "chromium") {
+      const responsiveCard = grid.locator("article").nth(2);
+      const responsiveHeading = responsiveCard.locator("h3");
+      expect(await responsiveHeading.evaluate(element => element.scrollHeight > element.clientHeight + 1)).toBe(true);
+      await expect(responsiveCard.locator("summary")).toHaveCount(1);
       await page.setViewportSize({ width: 800, height: 1024 });
       await expect.poll(() => page.getByTestId("product-catalog-grid").evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(2);
+      await expect.poll(async () => {
+        const truncated = await responsiveHeading.evaluate(element => element.scrollHeight > element.clientHeight + 1);
+        return !truncated && await responsiveCard.locator("summary").count() === 0;
+      }).toBe(true);
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
       await page.evaluate(() => scrollTo(0, 0));
       await screenshot("tablet");
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await expect.poll(() => responsiveCard.locator("summary").count()).toBe(1);
     }
+    if (testInfo.project.name === "chromium") {
+      await disclosure.focus();
+      await page.keyboard.press("Enter");
+    } else {
+      await disclosure.tap();
+    }
+    await expect(longCard.locator("details")).not.toHaveAttribute("open", "");
     expect(pageErrors).toEqual([]);
     expect(failedResponses.filter(entry => entry.disposition === "unresolved")).toEqual([]);
     expect(failedRequests.filter(entry => entry.disposition === "unresolved")).toEqual([]);

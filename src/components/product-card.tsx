@@ -6,6 +6,7 @@ import type { Locale } from "@/i18n/routing";
 import type { LocalizedProductView } from "@/lib/types";
 
 import { Badge } from "./ui/badge";
+import { ProductCardTitleDisclosure } from "./product-card-title-disclosure";
 
 export function ProductCard({
   product,
@@ -40,7 +41,7 @@ export function ProductCard({
             <Badge className="bg-[var(--color-sage)]">{product.productType}</Badge>
           </div>
           <div className="min-w-0">
-            <h3 aria-label={product.title} className="line-clamp-3 min-h-[3lh] [overflow-wrap:anywhere] font-serif text-xl font-semibold leading-tight text-[var(--color-ink)]">
+            <h3 aria-label={product.title} data-product-card-title className="line-clamp-3 min-h-[3lh] [overflow-wrap:anywhere] font-serif text-xl font-semibold leading-tight text-[var(--color-ink)]">
               {product.title}
             </h3>
             <p className="mt-2 line-clamp-3 text-sm leading-6 text-[var(--color-muted)]">
@@ -49,14 +50,7 @@ export function ProductCard({
           </div>
         </div>
       </Link>
-      <details className="rounded-b-lg border-t border-[var(--color-border)] bg-white/70 px-3 sm:px-4">
-        <summary className="cursor-pointer py-2 text-xs font-medium text-[var(--color-terracotta)] underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">
-          Read full title
-        </summary>
-        <p className="[overflow-wrap:anywhere] pb-3 text-sm font-medium text-[var(--color-ink)]" data-testid="full-product-title">
-          {product.title}
-        </p>
-      </details>
+      <ProductCardTitleDisclosure title={product.title} />
     </article>
   );
 }

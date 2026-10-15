@@ -1,14 +1,14 @@
 # Catalog polish verification
 
-The Catalog now uses a neutral book icon for missing or failed category images, while valid images and the legacy category proxy keep their existing delivery behavior. Product cards preserve the 8.5:11 uncropped cover, reserve three actual text lines for the title, and expose the complete title with a native keyboard/touch disclosure. Long unbroken words wrap within the card.
+The Catalog now uses a neutral book icon for missing or failed category images, while valid images and the legacy category proxy keep their existing delivery behavior. Product cards preserve the 8.5:11 uncropped cover, reserve three actual text lines for the title, and show the native keyboard/touch full-title disclosure only when the rendered title is clipped. The disclosure responds to card resizing, including 3/4/5-column settings. Long unbroken words wrap within the card.
 
 ## Local targeted checks
 
 - PASS: changed-file ESLint and `git diff --check`.
-- PASS: `node node_modules/vitest/vitest.mjs run src/components/category-tile-image.test.tsx src/components/product-card.test.tsx` — 4 tests.
-- PASS: `PLAYWRIGHT_BASE_URL=http://127.0.0.1:3103 node node_modules/@playwright/test/cli.js test tests/e2e/issue-62-catalog-polish.spec.ts --workers=1` — Chromium 1440x900 and Pixel 7, 2 scenarios.
+- PASS: `node node_modules/vitest/vitest.mjs run src/components/product-card.test.tsx --maxWorkers=1` — 2 focused component tests.
+- PASS: Playwright issue-62 flow — desktop Chromium and Pixel 7, 2 scenarios; committed screenshots and diagnostics are in `browser/`.
 
-The browser flow uses a disposable local snapshot, restores the original snapshot in `finally`, and never writes Production. It checks a valid category image, an intentionally absent versioned image, no image, short and long/unbroken product names, all desktop settings (3/4/5), tablet two-column layout, mobile one-column layout, image decoding, 8.5:11 cover geometry, equal title regions, keyboard/touch disclosure, and no horizontal overflow. The early desktop overflow regression was reproduced, fixed, and retested.
+The browser flow uses a disposable local snapshot, restores the original snapshot in `finally`, and never writes Production. It checks a valid category image, an intentionally absent versioned image, no image, short and long/unbroken product names, title disclosure visibility against actual overflow at all desktop settings (3/4/5), tablet two-column layout, mobile one-column layout, image decoding, 8.5:11 cover geometry, equal title regions, keyboard/touch open and close, viewport resizing, and no horizontal overflow. The early desktop overflow regression was reproduced, fixed, and retested.
 
 ## Browser evidence
 
