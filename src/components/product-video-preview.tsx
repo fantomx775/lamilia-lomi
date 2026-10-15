@@ -26,7 +26,7 @@ export function ProductVideoPreview({
             controls
             preload="metadata"
             playsInline
-            className="absolute inset-0 size-full object-cover"
+            className="absolute inset-0 size-full object-contain"
             aria-label={playableVideo.title ?? "Video preview"}
           >
             Your browser does not support the video tag.

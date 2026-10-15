@@ -8,6 +8,8 @@ import { AmazonLink } from "@/components/amazon-link";
 import { ImageWithFallback } from "@/components/image-with-fallback";
 import { NavigationLink } from "@/components/navigation-link";
 import { ProductImageGallery } from "@/components/product-image-gallery";
+import { ProductDescription } from "@/components/product-description";
+import { getRichTextTextContent } from "@/lib/rich-text";
 import { ProductVideoPreview } from "@/components/product-video-preview";
 import { ScrollToFragment } from "@/components/scroll-to-fragment";
 import { UnlockForm } from "@/components/unlock-form";
@@ -274,6 +276,8 @@ export default async function ProductPage({ params, searchParams }: Props) {
     unoptimized: isMediaProxyPath(asset.path),
   }));
   const galleryLabels = {
+    moreImages: "more",
+    viewAllImages: `View all ${product.gallery.length} pages`,
     previewTitle: productCopy("imagePreview"),
     closePreview: productCopy("closeImagePreview"),
     previousImage: productCopy("previousImage"),
@@ -310,20 +314,20 @@ export default async function ProductPage({ params, searchParams }: Props) {
           Back to catalog
         </NavigationLink>
       </div>
-      <section className="mx-auto grid max-w-7xl gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[0.85fr_1.15fr] lg:px-8">
-        <div className="space-y-5">
-          <div className="relative aspect-[8.5/11] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] shadow-[0_18px_46px_rgba(62,52,47,0.12)]">
+      <section data-testid="product-hero" className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)] lg:gap-12 lg:px-8">
+        <div className="min-w-0">
+          <div className="relative mx-auto aspect-[8.5/11] w-full max-w-[360px] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] shadow-[0_18px_46px_rgba(62,52,47,0.12)] lg:mx-0">
             <ImageWithFallback
               src={product.cover.path}
               alt={product.cover.title ?? product.title}
               loading="eager"
               className="object-contain"
-              sizes="(min-width: 1024px) 38vw, 100vw"
+              sizes="(min-width: 392px) 360px, calc(100vw - 32px)"
             />
           </div>
         </div>
 
-        <div className="flex flex-col justify-center">
+        <div className="flex min-w-0 flex-col justify-center">
           <div className="flex flex-wrap gap-2">
             <Badge>{product.audienceLabel}</Badge>
             {product.categories.map((category) => (
@@ -333,11 +337,11 @@ export default async function ProductPage({ params, searchParams }: Props) {
               </Badge>
             ))}
           </div>
-          <h1 className="mt-5 font-serif text-4xl font-semibold leading-tight sm:text-5xl">
+          <h1 className="mt-4 break-words font-serif text-3xl font-semibold leading-tight sm:text-4xl">
             {product.title}
           </h1>
-          <RichTextContent value={product.longDescription} className="mt-5 max-w-2xl space-y-4 text-lg leading-8 text-[var(--color-muted)]" />
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+          {product.shortDescription ? <RichTextContent value={product.shortDescription} className="mt-4 max-w-2xl space-y-3 text-lg leading-7 text-[var(--color-muted)]" /> : null}
+          <div data-testid="product-primary-actions" className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             {product.primaryAmazonLink ? (
               <AmazonLink
                 href={product.primaryAmazonLink.url}
@@ -355,6 +359,13 @@ export default async function ProductPage({ params, searchParams }: Props) {
               Premium materials
             </a>
           </div>
+          {product.longDescription ? (
+            <div className="mt-6 border-t border-[var(--color-border)] pt-5">
+              <ProductDescription previewText={getRichTextTextContent(product.longDescription)} readMore="Read more" showLess="Show less">
+                <RichTextContent value={product.longDescription} className="max-w-2xl space-y-3 text-base leading-7 text-[var(--color-muted)]" />
+              </ProductDescription>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -362,7 +373,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
         aria-labelledby="inside-book-title"
         className="border-y border-[var(--color-border)] bg-white/50"
       >
-        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
+        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">
             <h2
               id="inside-book-title"
@@ -370,12 +381,12 @@ export default async function ProductPage({ params, searchParams }: Props) {
             >
               {productCopy("insideBookTitle")}
             </h2>
-            <p className="mx-auto mt-4 max-w-xl text-base leading-7 text-[var(--color-muted)] sm:text-lg">
+            <p className="mx-auto mt-3 max-w-xl text-base leading-7 text-[var(--color-muted)]">
               {productCopy("insideBookDescription")}
             </p>
           </div>
 
-          <div className="mt-10 grid gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:items-start">
+          <div className="mt-7 grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-start">
             <ProductImageGallery images={galleryImages} labels={galleryLabels} />
             <ProductVideoPreview
               video={product.video}

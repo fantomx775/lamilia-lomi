@@ -20,6 +20,8 @@ export type ProductImageGalleryLabels = {
   previousImage: string;
   nextImage: string;
   imagePositions: string[];
+  moreImages?: string;
+  viewAllImages?: string;
 };
 
 type ProductImageGalleryProps = {
@@ -33,6 +35,8 @@ export function ProductImageGallery({
 }: ProductImageGalleryProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const openingButtonRef = useRef<HTMLButtonElement>(null);
   const touchStartX = useRef<number | null>(null);
   const imageCount = images.length;
   const activeImage = activeIndex === null ? null : images[activeIndex];
@@ -46,7 +50,10 @@ export function ProductImageGallery({
       return;
     }
 
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      dialog.showModal();
+      closeButtonRef.current?.focus();
+    }
   }, [activeIndex]);
 
   useEffect(() => {
@@ -106,27 +113,46 @@ export function ProductImageGallery({
     else showPrevious();
   };
 
+  if (imageCount === 0) return null;
+
+  const visibleImages = images.slice(0, 4);
+
   return (
     <>
-      <div className="grid gap-5 sm:grid-cols-2">
-        {images.map((image, index) => (
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+        {visibleImages.map((image, index) => (
           <figure key={image.id} className="group">
             <button
               type="button"
-              aria-label={labels.openImages[index] ?? labels.previewTitle}
-              onClick={() => setActiveIndex(index)}
+              aria-label={
+                index === 3 && imageCount > 4
+                  ? `${labels.openImages[index] ?? labels.previewTitle}, ${(labels.viewAllImages ?? labels.previewTitle).replace("{count}", String(imageCount))}`
+                  : labels.openImages[index] ?? labels.previewTitle
+              }
+              onClick={(event) => {
+                openingButtonRef.current = event.currentTarget;
+                setActiveIndex(index);
+              }}
               className="group block w-full rounded-[1.25rem] text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
             >
-              <span className="relative block aspect-square overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
+              <span className="relative block aspect-[8.5/11] overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
                 <Image
                   src={image.path}
                   alt={image.alt}
                   fill
-                  loading={index === 0 ? "eager" : undefined}
+                  loading="lazy"
                   unoptimized={image.unoptimized}
                   className="object-contain"
-                  sizes="(min-width: 1024px) 32vw, (min-width: 640px) 50vw, 100vw"
+                  sizes="(min-width: 1024px) 300px, 46vw"
                 />
+                {index === 3 && imageCount > 4 ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-0 grid place-items-center bg-[rgba(44,36,32,0.55)] text-3xl font-medium tabular-nums text-white"
+                  >
+                    +{imageCount - 4} {labels.moreImages ?? "more"}
+                  </span>
+                ) : null}
                 <span
                   aria-hidden
                   className="absolute right-3 top-3 grid size-9 place-items-center rounded-full border border-white/80 bg-white/90 text-[var(--color-ink-soft)] shadow-sm transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-visible:opacity-100"
@@ -147,11 +173,44 @@ export function ProductImageGallery({
       <dialog
         ref={dialogRef}
         aria-label={labels.previewTitle}
-        onClose={() => setActiveIndex(null)}
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+
+          const dialog = event.currentTarget;
+          const focusableElements = Array.from(
+            dialog.querySelectorAll<HTMLElement>(
+              'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter(
+            (element) =>
+              !element.hidden &&
+              element.getAttribute("aria-hidden") !== "true" &&
+              getComputedStyle(element).visibility !== "hidden" &&
+              getComputedStyle(element).display !== "none",
+          );
+
+          if (focusableElements.length === 0) return;
+
+          const first = focusableElements[0];
+          const last = focusableElements[focusableElements.length - 1];
+          const activeElement = document.activeElement;
+          const isAtBoundary = event.shiftKey
+            ? activeElement === first || !dialog.contains(activeElement)
+            : activeElement === last || !dialog.contains(activeElement);
+
+          if (!isAtBoundary) return;
+
+          event.preventDefault();
+          (event.shiftKey ? last : first).focus();
+        }}
+        onClose={() => {
+          setActiveIndex(null);
+          openingButtonRef.current?.focus();
+        }}
         onClick={(event) => {
           if (event.target === event.currentTarget) dialogRef.current?.close();
         }}
-        className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[min(94vw,76rem)] max-w-none overflow-y-auto border-0 bg-transparent p-0 text-[var(--color-ink)] backdrop:bg-[rgba(44,36,32,0.78)] backdrop:backdrop-blur-sm"
+        className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[min(94vw,calc(52.5dvh_+_2.5rem))] max-w-none overflow-y-auto border-0 bg-transparent p-0 text-[var(--color-ink)] backdrop:bg-[rgba(44,36,32,0.78)] backdrop:backdrop-blur-sm"
       >
         {activeImage && activeIndex !== null ? (
           <div className="rounded-[1.5rem] border border-white/70 bg-[var(--color-bg)] p-3 shadow-[0_30px_100px_rgba(26,21,18,0.36)] sm:p-5">
@@ -168,9 +227,10 @@ export function ProductImageGallery({
                 </p>
                 <button
                   type="button"
+                  ref={closeButtonRef}
                   aria-label={labels.closePreview}
                   onClick={() => dialogRef.current?.close()}
-                  className="grid size-9 place-items-center rounded-full border border-[var(--color-border)] bg-white/90 text-[var(--color-ink)] transition hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+                  className="grid size-11 place-items-center rounded-full border border-[var(--color-border)] bg-white/90 text-[var(--color-ink)] transition hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
                 >
                   <X className="size-4" aria-hidden />
                 </button>
@@ -181,7 +241,7 @@ export function ProductImageGallery({
               data-testid="product-gallery-preview-frame"
               onPointerDown={handlePointerDown}
               onPointerUp={handlePointerUp}
-              className="relative flex h-[min(68dvh,52rem)] w-full touch-pan-y items-center justify-center overflow-hidden rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)]"
+              className="relative mx-auto flex w-[min(100%,52.5dvh)] max-w-[40rem] aspect-[8.5/11] touch-pan-y items-center justify-center overflow-hidden rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)]"
             >
               <Image
                 key={activeImage.id}
@@ -190,8 +250,8 @@ export function ProductImageGallery({
                 fill
                 loading="eager"
                 unoptimized={activeImage.unoptimized}
-                className="object-contain p-2 sm:p-4"
-                sizes="(max-width: 768px) 94vw, 76rem"
+                className="object-contain"
+                sizes="(max-width: 768px) 90vw, 40rem"
               />
 
               {imageCount > 1 ? (
