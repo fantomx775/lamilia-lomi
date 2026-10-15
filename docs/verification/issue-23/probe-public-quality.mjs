@@ -19,7 +19,7 @@ try {
     await context.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
     const page = await context.newPage();
     page.setDefaultTimeout(90_000);
-    const record = { name, environment: "Production public read-only", observedAt: new Date().toISOString(), consoleErrors: [], pageErrors: [], failedResponses: [], failedRequests: [], images: [] };
+    const record = { name, environment: "Production public read-only", observedAt: new Date().toISOString(), consoleErrors: [], pageErrors: [], failedResponses: [], failedRequests: [], images: [], overflowChecks: [] };
     const safeUrl = value => { const url = new URL(value); return url.origin + url.pathname; };
     page.on("console", message => { if (message.type() === "error") record.consoleErrors.push(message.text()); });
     page.on("pageerror", error => record.pageErrors.push(error.message));
@@ -34,13 +34,20 @@ try {
       await image.evaluate(image => image.decode());
       record.images.push({ label, ...await image.evaluate(image => ({ naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight, cssWidth: image.getBoundingClientRect().width, cssHeight: image.getBoundingClientRect().height, dpr: devicePixelRatio, currentSrc: image.currentSrc })) });
     };
+    const checkOverflow = async route => {
+      const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+      record.overflowChecks.push({ route, horizontalOverflow });
+      if (horizontalOverflow) throw new Error(`Horizontal overflow on ${route}`);
+    };
     try {
       await page.goto(origin + "/en/products", { waitUntil: "domcontentloaded" });
       const firstCard = page.getByTestId("product-catalog-grid").locator("a").first();
       await decoded(firstCard.locator("img").first(), "catalog cover");
+      await checkOverflow("catalog");
       await firstCard.screenshot({ path: path.join(directory, `${name}-catalog-cover.png`), animations: "disabled" });
       await page.goto(origin + productPath, { waitUntil: "domcontentloaded" });
       await decoded(page.getByTestId("product-hero").locator("img").first(), "product main cover");
+      await checkOverflow("product detail");
       await page.screenshot({ path: path.join(directory, `${name}-product-cover.png`), animations: "disabled" });
       const open = page.getByRole("button", { name: "Open image 1", exact: true });
       await decoded(open.locator("img"), "gallery thumbnail");
@@ -50,8 +57,8 @@ try {
       await dialog.waitFor({ state: "visible" });
       await decoded(dialog.locator("img"), "expanded gallery image");
       await page.screenshot({ path: path.join(directory, `${name}-lightbox.png`), animations: "disabled" });
-      record.horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
-      record.status = record.consoleErrors.length || record.pageErrors.length || record.failedResponses.length || record.failedRequests.some(request => request.disposition === "unresolved") || record.horizontalOverflow ? "FAIL" : "PASS";
+      await checkOverflow("lightbox");
+      record.status = record.consoleErrors.length || record.pageErrors.length || record.failedResponses.length || record.failedRequests.some(request => request.disposition === "unresolved") ? "FAIL" : "PASS";
     } catch (error) {
       record.status = "FAIL";
       record.error = String(error);

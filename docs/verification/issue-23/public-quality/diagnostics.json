@@ -2,33 +2,12 @@
   {
     "name": "desktop-1x",
     "environment": "Production public read-only",
-    "observedAt": "2026-10-15T17:42:18.926Z",
+    "observedAt": "2026-10-15T17:47:03.472Z",
     "consoleErrors": [],
     "pageErrors": [],
     "failedResponses": [],
     "failedRequests": [
       {
-        "url": "https://www.lamilialomi.com/en/library",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/login",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
         "url": "https://www.lamilialomi.com/en/about",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
@@ -36,21 +15,7 @@
         "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
       },
       {
-        "url": "https://www.lamilialomi.com/en/library",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
         "url": "https://www.lamilialomi.com/en/login",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
         "disposition": "unrelated",
@@ -64,20 +29,6 @@
         "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
       },
       {
-        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0h8brl13v",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0hlthrwdh",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
         "url": "https://www.lamilialomi.com/en/products",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
@@ -85,14 +36,7 @@
         "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
       },
       {
-        "url": "https://www.lamilialomi.com/en/products",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0h8tttsny",
+        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0hjgwml3q",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
         "disposition": "unrelated",
@@ -100,20 +44,6 @@
       },
       {
         "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0h8brl13v",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/about",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
         "disposition": "unrelated",
@@ -121,34 +51,6 @@
       },
       {
         "url": "https://www.lamilialomi.com/en/library",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/login",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/about",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/login",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
         "disposition": "unrelated",
@@ -193,25 +95,31 @@
         "currentSrc": "https://www.lamilialomi.com/_next/image?url=https%3A%2F%2Fmedia.lamilialomi.com%2Fproducts%2Fc167b49f-bbb5-43be-9f85-4a7f3a6c4aab%2Fgallery%2Fd955e543-ba16-4d9c-83cc-fc05dd2d3d28-L1-1.png&w=640&q=75"
       }
     ],
-    "horizontalOverflow": false,
+    "overflowChecks": [
+      {
+        "route": "catalog",
+        "horizontalOverflow": false
+      },
+      {
+        "route": "product detail",
+        "horizontalOverflow": false
+      },
+      {
+        "route": "lightbox",
+        "horizontalOverflow": false
+      }
+    ],
     "status": "PASS"
   },
   {
     "name": "desktop-2x",
     "environment": "Production public read-only",
-    "observedAt": "2026-10-15T17:42:21.990Z",
+    "observedAt": "2026-10-15T17:47:08.178Z",
     "consoleErrors": [],
     "pageErrors": [],
     "failedResponses": [],
     "failedRequests": [
       {
-        "url": "https://www.lamilialomi.com/en",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
         "url": "https://www.lamilialomi.com/en/library",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
@@ -220,76 +128,6 @@
       },
       {
         "url": "https://www.lamilialomi.com/en/login",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0hhjd2s67",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0hlthrwdh",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0hjgwml3q",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0h8tttsny",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0h8brl13v",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/login",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/library",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/products",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
         "disposition": "unrelated",
@@ -303,13 +141,6 @@
         "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
       },
       {
-        "url": "https://www.lamilialomi.com/en/login",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
         "url": "https://www.lamilialomi.com/en",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
@@ -317,7 +148,21 @@
         "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
       },
       {
-        "url": "https://www.lamilialomi.com/en/login",
+        "url": "https://www.lamilialomi.com/en/library",
+        "error": "net::ERR_ABORTED",
+        "resourceType": "fetch",
+        "disposition": "unrelated",
+        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
+      },
+      {
+        "url": "https://www.lamilialomi.com/en/products",
+        "error": "net::ERR_ABORTED",
+        "resourceType": "fetch",
+        "disposition": "unrelated",
+        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
+      },
+      {
+        "url": "https://www.lamilialomi.com/en",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
         "disposition": "unrelated",
@@ -362,26 +207,32 @@
         "currentSrc": "https://www.lamilialomi.com/_next/image?url=https%3A%2F%2Fmedia.lamilialomi.com%2Fproducts%2Fc167b49f-bbb5-43be-9f85-4a7f3a6c4aab%2Fgallery%2Fd955e543-ba16-4d9c-83cc-fc05dd2d3d28-L1-1.png&w=1920&q=75"
       }
     ],
-    "horizontalOverflow": false,
+    "overflowChecks": [
+      {
+        "route": "catalog",
+        "horizontalOverflow": false
+      },
+      {
+        "route": "product detail",
+        "horizontalOverflow": false
+      },
+      {
+        "route": "lightbox",
+        "horizontalOverflow": false
+      }
+    ],
     "status": "PASS"
   },
   {
     "name": "pixel-7",
     "environment": "Production public read-only",
-    "observedAt": "2026-10-15T17:42:25.945Z",
+    "observedAt": "2026-10-15T17:47:17.549Z",
     "consoleErrors": [],
     "pageErrors": [],
     "failedResponses": [],
     "failedRequests": [
       {
         "url": "https://www.lamilialomi.com/en/products/https-www-amazon-com-dp-b0hlthrwdh",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
-        "url": "https://www.lamilialomi.com/en/library",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
         "disposition": "unrelated",
@@ -402,13 +253,6 @@
         "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
       },
       {
-        "url": "https://www.lamilialomi.com/en/products",
-        "error": "net::ERR_ABORTED",
-        "resourceType": "fetch",
-        "disposition": "unrelated",
-        "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
-      },
-      {
         "url": "https://www.lamilialomi.com/en/library",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
@@ -416,7 +260,7 @@
         "reason": "Navigation canceled a prefetch or other catalog image request. All four inspected images are separately decoded successfully; HTTP failures are checked independently."
       },
       {
-        "url": "https://www.lamilialomi.com/en",
+        "url": "https://www.lamilialomi.com/en/login",
         "error": "net::ERR_ABORTED",
         "resourceType": "fetch",
         "disposition": "unrelated",
@@ -461,7 +305,20 @@
         "currentSrc": "https://www.lamilialomi.com/_next/image?url=https%3A%2F%2Fmedia.lamilialomi.com%2Fproducts%2Fc167b49f-bbb5-43be-9f85-4a7f3a6c4aab%2Fgallery%2Fd955e543-ba16-4d9c-83cc-fc05dd2d3d28-L1-1.png&w=1080&q=75"
       }
     ],
-    "horizontalOverflow": false,
+    "overflowChecks": [
+      {
+        "route": "catalog",
+        "horizontalOverflow": false
+      },
+      {
+        "route": "product detail",
+        "horizontalOverflow": false
+      },
+      {
+        "route": "lightbox",
+        "horizontalOverflow": false
+      }
+    ],
     "status": "PASS"
   }
 ]

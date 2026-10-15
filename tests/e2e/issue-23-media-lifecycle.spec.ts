@@ -90,12 +90,10 @@ test("replacing a synthetic product cover keeps one active image and retires the
   });
 
   let productId: string | undefined;
-  let productPath: string | undefined;
-  let productSaved = false;
 
   try {
     await signInAsAdmin(page);
-    await cleanupPreviousSyntheticProducts(page);
+    cleanupPreviousSyntheticProducts();
     await page.goto("/admin/products/new");
     productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
     await page.getByLabel("Tytuł").fill(title);
@@ -111,9 +109,8 @@ test("replacing a synthetic product cover keeps one active image and retires the
 
     await page.getByRole("button", { name: /Zapisz/ }).click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
-    productSaved = true;
     await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+\?saved=1$/i);
-    productPath = new URL(page.url()).pathname;
+    const productPath = new URL(page.url()).pathname;
     productId = productPath.split("/").at(-1);
     await page.reload();
 
@@ -142,7 +139,6 @@ test("replacing a synthetic product cover keeps one active image and retires the
     await page.getByRole("button", { name: /Zapisz/ }).click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
     await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+\?saved=1$/i);
-    productPath = new URL(page.url()).pathname;
     await page.reload();
     const savedCoverSection = page.locator("#media-section-cover");
     await expect(savedCoverSection.getByRole("img", { name: `Podgląd ${replacementFilename}` })).toBeVisible();
@@ -165,24 +161,33 @@ test("replacing a synthetic product cover keeps one active image and retires the
       unresolvedConsole: [], pageErrors: [], unresolvedRequests: [], unresolvedResponses: [],
     });
   } finally {
-    if (productSaved && productPath) {
-      page.on("dialog", (dialog) => void dialog.accept());
-      await page.goto(productPath).catch(() => undefined);
-      const deleteButton = page.getByRole("button", { name: "Usuń produkt" });
-      if (await deleteButton.count().catch(() => 0)) {
-        await deleteButton.click().catch(() => undefined);
-        await page.waitForURL(/\/admin\/products\?deleted=1$/).catch(() => undefined);
-      }
-    } else if (productId) {
-      const uploadDirectory = path.resolve(process.cwd(), "public", "uploads", productId);
-      if (fs.existsSync(uploadDirectory)) fs.rmSync(uploadDirectory, { recursive: true, force: true });
-    }
+    // The browser may already be closed after a timeout or failed navigation.
+    // Remove only this locked local fixture even when UI cleanup cannot run.
+    if (productId) cleanupSyntheticProduct(productId);
     await testInfo.attach("browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify(diagnostics, null, 2)),
       contentType: "application/json",
     });
   }
 });
+
+function cleanupSyntheticProduct(productId: string) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(productId)) {
+    throw new Error("Invalid synthetic product ID for local cleanup.");
+  }
+  const contentPath = path.resolve("data/lamilialomi-content.local.json");
+  if (fs.existsSync(contentPath)) {
+    const snapshot = JSON.parse(fs.readFileSync(contentPath, "utf8")) as { products?: Array<{ id?: string }> };
+    if (snapshot.products?.some(product => product.id === productId)) {
+      snapshot.products = snapshot.products.filter(product => product.id !== productId);
+      fs.writeFileSync(contentPath, JSON.stringify(snapshot));
+    }
+  }
+  const uploadsRoot = path.resolve("public/uploads");
+  const uploadDirectory = path.resolve(uploadsRoot, productId);
+  if (path.dirname(uploadDirectory) !== uploadsRoot) throw new Error("Unsafe fixture cleanup path.");
+  if (fs.existsSync(uploadDirectory)) fs.rmSync(uploadDirectory, { recursive: true, force: true });
+}
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/en/login?redirectTo=/admin");
@@ -194,7 +199,7 @@ async function signInAsAdmin(page: Page) {
   ]);
 }
 
-async function cleanupPreviousSyntheticProducts(page: Page) {
+function cleanupPreviousSyntheticProducts() {
   const contentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
   if (!fs.existsSync(contentPath)) return;
   const snapshot = JSON.parse(fs.readFileSync(contentPath, "utf8")) as {
@@ -205,12 +210,7 @@ async function cleanupPreviousSyntheticProducts(page: Page) {
     .map((product) => product.id!);
 
   for (const id of ids) {
-    await page.goto(`/admin/products/${id}`);
-    const deleteButton = page.getByRole("button", { name: "Usuń produkt" });
-    await expect(deleteButton).toBeVisible();
-    page.once("dialog", (dialog) => void dialog.accept());
-    await deleteButton.click();
-    await expect(page).toHaveURL(/\/admin\/products\?deleted=1$/);
+    cleanupSyntheticProduct(id);
   }
 }
 
