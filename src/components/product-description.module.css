@@ -3,16 +3,26 @@
 }
 
 .clip {
+  position: relative;
   overflow: hidden;
-  transition: max-height 200ms ease;
+  transition: height 200ms ease;
 }
 
 .content {
   overflow-wrap: anywhere;
 }
 
-.clip[data-collapsed="true"] {
-  mask-image: linear-gradient(to bottom, black calc(100% - 1.75rem), transparent);
+.content[data-hidden="true"] {
+  position: absolute;
+  inset: 0 0 auto;
+  visibility: hidden;
+}
+
+.preview {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-muted);
+  line-height: 1.75rem;
 }
 
 .controls {

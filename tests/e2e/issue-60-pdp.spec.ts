@@ -21,7 +21,7 @@ test("Issue 60 route skeleton retains streaming geometry", async ({page}, testIn
   await page.addStyleTag({content:"nextjs-portal { display: none; }"});
   const directory=path.resolve(process.env.ISSUE_60_SCREENSHOT_DIR??"docs/verification/issue-60");
   fs.mkdirSync(directory,{recursive:true});
-  await page.screenshot({path:path.join(directory,`loading-${testInfo.project.name}.png`),fullPage:true,animations:"disabled"});
+  await page.screenshot({path:path.join(directory,`loading-${testInfo.project.name}.png`),fullPage:true,animations:"disabled",caret:"initial"});
   await expect(page.getByTestId("product-detail-loading")).toHaveCount(0);
   await expect(page.getByTestId("product-hero")).toBeVisible();
 });
@@ -49,7 +49,7 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
   const shot = async (name: string, fullPage = false) => {
     fs.mkdirSync(directory, {recursive:true});
     await page.addStyleTag({content:"nextjs-portal { display: none; }"});
-    await page.screenshot({path:path.join(directory,`${name}-${testInfo.project.name}.png`),fullPage,animations:"disabled"});
+    await page.screenshot({path:path.join(directory,`${name}-${testInfo.project.name}.png`),fullPage,animations:"disabled",caret:"initial"});
   };
   try {
     const snapshot = getSeedContentSnapshot();
@@ -120,6 +120,14 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
     await expect(more).toHaveAttribute("aria-expanded","false");
     await page.evaluate(()=>document.fonts.ready);
     await shot("initial",true);
+    const noJsContext=await page.context().browser()!.newContext({javaScriptEnabled:false});
+    try {
+      const noJsPage=await noJsContext.newPage();
+      await noJsPage.goto(page.url(),{waitUntil:"domcontentloaded"});
+      await noJsPage.getByRole("link",{name:"Read the full product description without JavaScript"}).click();
+      await expect(noJsPage.locator("body")).toContainText(frog.title);
+      await expect(noJsPage.locator("body")).toContainText(paragraphs.at(-1)!);
+    } finally { await noJsContext.close(); }
     await more.click();
     const less=page.getByRole("button",{name:"Show less",exact:true});
     await expect(less).toHaveAttribute("aria-expanded","true");
@@ -128,7 +136,8 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
     await expect.poll(()=>content.evaluate(el=>Math.abs(el.clientHeight-el.scrollHeight))).toBeLessThan(2);
     await shot("expanded",true);
     await less.click();
-    await expect(content).toHaveAttribute("inert");
+    await expect(content).not.toHaveAttribute("inert");
+    await expect(content.locator('[data-hidden="true"]')).toHaveAttribute("inert");
     await expect.poll(()=>content.evaluate(el=>el.clientHeight)).toBeLessThanOrEqual(168);
     const inside=page.locator('section[aria-labelledby="inside-book-title"]');
     await inside.scrollIntoViewIfNeeded();
@@ -182,7 +191,16 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
     product.assets=product.assets.filter(a=>a.kind!=="video");
     save();
     await page.goto(`/en/products/${product.slug}`,{waitUntil:"domcontentloaded"});
-    await page.getByRole("button",{name:"Read more",exact:true}).click();
+    const richMore=page.getByRole("button",{name:"Read more",exact:true});
+    const richRegion=page.locator('[id="'+await richMore.getAttribute("aria-controls")+'"]');
+    await expect(richRegion).not.toHaveAttribute("aria-hidden");
+    await expect(richRegion.locator("p").first()).toBeVisible();
+    await expect(page.getByRole("link",{name:"the story",exact:true})).toHaveCount(0);
+    await richMore.focus();
+    await page.keyboard.press("Shift+Tab");
+    expect(await richRegion.evaluate(el=>el.contains(document.activeElement))).toBe(false);
+    await richMore.focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByRole("link",{name:"the story",exact:true})).toBeVisible();
     await expect(page.getByRole("heading",{name:"Explore the story"})).toBeVisible();
     await expect(hero.locator("ul li")).toHaveCount(2);

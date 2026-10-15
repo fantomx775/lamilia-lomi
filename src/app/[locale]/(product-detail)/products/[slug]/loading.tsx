@@ -1,3 +1,5 @@
+import { ProductDescriptionNoScript } from "@/components/product-description-no-script";
+
 function SkeletonBlock({ className }: { className: string }) {
   return (
     <div
@@ -16,6 +18,7 @@ export default function ProductDetailLoading() {
       aria-live="polite"
     >
       <span className="sr-only">Loading product details</span>
+      <ProductDescriptionNoScript />
 
       <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8">
         <SkeletonBlock className="h-9 w-36 rounded-md" />

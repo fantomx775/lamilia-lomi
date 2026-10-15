@@ -37,3 +37,15 @@ PLAYWRIGHT_BASE_URL=http://127.0.0.1:3060 node node_modules/@playwright/test/cli
 ```
 
 GitHub CI is the authoritative final broad gate for typecheck, full lint, unit tests and the Production build. This PR is for review only: Issue 60 stays open, with no merge or Production deployment.
+
+## Final accessibility fix and delivery candidate
+
+The visible collapsed preview is now an escaped, extracted text excerpt (up to 180 characters), separate from the hidden inert rich-text subtree. The accessible preview container has no inert/aria-hidden. Expanding exposes the original full rich content, including headings, lists and links. Short descriptions stay fully visible with no toggle. A measured explicit height preserves the 200ms expand/collapse transition and reduced-motion override. Before hydration the component renders unrestricted full content.
+
+A real JavaScript-disabled browser uncovered a pre-existing Next streaming limitation: the route's loading boundary stays visible without scripts. The loading fallback now server-renders a noscript reading link, using the router slug, to `/api/product-description/[slug]`. This read-only public endpoint returns the entire title, short description and extracted long description as non-executable UTF-8 plain text, without truncation, cookies, private assets or mutations. It uses the same published-product lookup as the PDP. Rich formatting and actionable rich links remain in the normal expanded view; the no-JS fallback is a complete plain-text reading view.
+
+Focused tests include collapsed/expanded accessibility, keyboard disclosure, inert rich content, short/empty content, static SSR, escaping, the fallback link and public-only text response. Browser regression uses a real JS-disabled context and follows the fallback, checks the final original paragraph, real Tab/Enter, reduced motion, rich formatting/link, 0/1/4/5 images, lightbox focus/keys/touch, actual video playback, Amazon destination and guest premium entry. Screenshots are under `final/`; current-SHA run provenance is recorded on PR #61.
+
+Screenshot capture uses `caret: initial` to avoid Playwright temporarily adding caret-color attributes to not-yet-hydrated streaming form inputs. An earlier run detected that screenshot-induced hydration warning; final checks require zero browser console/page/HTTP errors.
+
+Production delivery is now explicitly authorized by the owner. No database migration, Cloudflare change, dependency change, published-product mutation or real premium redemption is included.

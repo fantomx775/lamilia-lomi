@@ -7,19 +7,25 @@ import styles from "./product-description.module.css";
 
 type ProductDescriptionProps = {
   children: ReactNode;
+  previewText: string;
   readMore: string;
   showLess: string;
 };
 
 const PREVIEW_HEIGHT = 168;
 
-export function ProductDescription({ children, readMore, showLess }: ProductDescriptionProps) {
+export function ProductDescription({ children, previewText, readMore, showLess }: ProductDescriptionProps) {
   const descriptionId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLParagraphElement>(null);
   const [hasOverflow, setHasOverflow] = useState(false);
   const [isMeasured, setIsMeasured] = useState(false);
   const [contentHeight, setContentHeight] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  const [previewHeight, setPreviewHeight] = useState(PREVIEW_HEIGHT);
+  const collapsed = isMeasured && hasOverflow && !expanded;
+  const excerpt = previewText.trim().replace(/\s+/g, " ");
+  const preview = excerpt.length > 180 ? `${excerpt.slice(0, 180).trimEnd()}…` : excerpt;
 
   useEffect(() => {
     const content = contentRef.current;
@@ -28,6 +34,7 @@ export function ProductDescription({ children, readMore, showLess }: ProductDesc
     const measure = () => {
       const fullHeight = content.scrollHeight;
       setContentHeight(fullHeight);
+      setPreviewHeight(previewRef.current?.scrollHeight || PREVIEW_HEIGHT);
       setHasOverflow(fullHeight > PREVIEW_HEIGHT + 1);
       setIsMeasured(true);
     };
@@ -40,19 +47,18 @@ export function ProductDescription({ children, readMore, showLess }: ProductDesc
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [children]);
+  }, [children, collapsed, preview]);
 
   return (
     <div className={styles.root}>
       <div
         id={descriptionId}
         className={styles.clip}
-        data-collapsed={!expanded && hasOverflow}
-        style={{ maxHeight: expanded ? contentHeight : PREVIEW_HEIGHT }}
-        inert={!expanded && (!isMeasured || hasOverflow)}
-        aria-hidden={!expanded && hasOverflow}
+        data-collapsed={collapsed}
+        style={{ height: isMeasured && hasOverflow ? (collapsed ? previewHeight : contentHeight) : undefined }}
       >
-        <div ref={contentRef} className={styles.content}>
+        {collapsed ? <p ref={previewRef} className={styles.preview}>{preview}</p> : null}
+        <div ref={contentRef} className={styles.content} data-hidden={collapsed} inert={collapsed} aria-hidden={collapsed ? true : undefined}>
           {children}
         </div>
       </div>

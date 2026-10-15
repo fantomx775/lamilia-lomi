@@ -9,6 +9,7 @@ import { ImageWithFallback } from "@/components/image-with-fallback";
 import { NavigationLink } from "@/components/navigation-link";
 import { ProductImageGallery } from "@/components/product-image-gallery";
 import { ProductDescription } from "@/components/product-description";
+import { getRichTextTextContent } from "@/lib/rich-text";
 import { ProductVideoPreview } from "@/components/product-video-preview";
 import { ScrollToFragment } from "@/components/scroll-to-fragment";
 import { UnlockForm } from "@/components/unlock-form";
@@ -360,7 +361,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
           </div>
           {product.longDescription ? (
             <div className="mt-6 border-t border-[var(--color-border)] pt-5">
-              <ProductDescription readMore="Read more" showLess="Show less">
+              <ProductDescription previewText={getRichTextTextContent(product.longDescription)} readMore="Read more" showLess="Show less">
                 <RichTextContent value={product.longDescription} className="max-w-2xl space-y-3 text-base leading-7 text-[var(--color-muted)]" />
               </ProductDescription>
             </div>
