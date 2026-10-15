@@ -6,7 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/image", () => ({
-  default: ({ src, alt }: { src: string; alt: string }) => createElement("img", { src, alt }),
+  default: ({ src, alt, loading, className }: { src: string; alt: string; loading?: string; className?: string }) =>
+    createElement("img", { src, alt, loading, className }),
 }));
 
 import { ProductImageGallery } from "@/components/product-image-gallery";
@@ -35,7 +36,27 @@ const labels = {
   previousImage: "Previous image",
   nextImage: "Next image",
   imagePositions: ["1 of 2", "2 of 2"],
+  moreImages: "more",
+  viewAllImages: "View all {count} pages",
 };
+
+function makeImages(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `page-${index + 1}`,
+    path: `/page-${index + 1}.svg`,
+    alt: `Page ${index + 1}`,
+    caption: null,
+    unoptimized: false,
+  }));
+}
+
+function makeLabels(count: number) {
+  return {
+    ...labels,
+    openImages: Array.from({ length: count }, (_, index) => `Open image ${index + 1}`),
+    imagePositions: Array.from({ length: count }, (_, index) => `${index + 1} of ${count}`),
+  };
+}
 
 let showModalDescriptor: PropertyDescriptor | undefined;
 let closeDescriptor: PropertyDescriptor | undefined;
@@ -113,5 +134,88 @@ describe("ProductImageGallery", () => {
     expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
     expect(within(dialog).getByRole("img", { name: "Stars and little houses" })).toBeVisible();
+  });
+
+  it("renders no gallery for an empty image list", () => {
+    const { container } = render(<ProductImageGallery images={[]} labels={makeLabels(0)} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("keeps a single image usable without carousel controls", async () => {
+    const user = userEvent.setup();
+    render(<ProductImageGallery images={makeImages(1)} labels={makeLabels(1)} />);
+
+    const thumbnail = screen.getByRole("button", { name: "Open image 1" });
+    expect(thumbnail.querySelector("img")).toHaveAttribute("loading", "lazy");
+    expect(thumbnail.firstElementChild).toHaveClass("aspect-[8.5/11]");
+    await user.click(thumbnail);
+
+    const dialog = screen.getByRole("dialog", { name: "Image preview" });
+    expect(within(dialog).getByRole("img", { name: "Page 1" })).toBeVisible();
+    expect(within(dialog).getByTestId("product-gallery-preview-frame"))
+      .toHaveClass("aspect-[8.5/11]");
+    expect(within(dialog).getByRole("button", { name: "Close image preview" }))
+      .toHaveClass("size-11");
+    expect(within(dialog).queryByRole("button", { name: "Next image" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: "Previous image" })).not.toBeInTheDocument();
+  });
+
+  it("shows up to four portrait thumbnails and indicates the remaining images", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ProductImageGallery images={makeImages(4)} labels={makeLabels(4)} />,
+    );
+
+    expect(screen.getAllByRole("button", { name: /^Open image/ })).toHaveLength(4);
+    expect(screen.queryByText(/^\+/)).not.toBeInTheDocument();
+
+    rerender(<ProductImageGallery images={makeImages(6)} labels={makeLabels(6)} />);
+
+    expect(screen.getAllByRole("button", { name: /^Open image/ })).toHaveLength(4);
+    expect(screen.getAllByRole("img")).toHaveLength(4);
+    expect(screen.getByText("+2 more")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open image 2" }).querySelector("img"))
+      .toHaveAttribute("loading", "lazy");
+    const lastThumbnail = screen.getByRole("button", { name: "Open image 4, View all 6 pages" });
+    expect(lastThumbnail.firstElementChild)
+      .toHaveClass("aspect-[8.5/11]");
+
+    await user.click(lastThumbnail);
+    const dialog = screen.getByRole("dialog", { name: "Image preview" });
+    expect(within(dialog).getByRole("img", { name: "Page 4" })).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Next image" }));
+    expect(within(dialog).getByRole("img", { name: "Page 5" })).toBeVisible();
+  });
+
+  it("restores focus to the thumbnail that opened the viewer", async () => {
+    const user = userEvent.setup();
+    render(<ProductImageGallery images={images} labels={labels} />);
+
+    const opener = screen.getByRole("button", { name: "Open image 2" });
+    await user.click(opener);
+    const dialog = screen.getByRole("dialog", { name: "Image preview" });
+    expect(within(dialog).getByRole("button", { name: "Close image preview" })).toHaveFocus();
+
+    await user.click(within(dialog).getByRole("button", { name: "Close image preview" }));
+    expect(opener).toHaveFocus();
+  });
+
+  it("wraps Tab focus inside the open dialog in both directions", async () => {
+    const user = userEvent.setup();
+    render(<ProductImageGallery images={images} labels={labels} />);
+    await user.click(screen.getByRole("button", { name: "Open image 1" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Image preview" });
+    expect(dialog).toHaveClass("w-[min(94vw,calc(52.5dvh_+_2.5rem))]");
+    const closeButton = within(dialog).getByRole("button", { name: "Close image preview" });
+    const nextButton = within(dialog).getByRole("button", { name: "Next image" });
+
+    await user.click(nextButton);
+    expect(nextButton).toHaveFocus();
+    await user.tab();
+    expect(closeButton).toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(nextButton).toHaveFocus();
   });
 });
