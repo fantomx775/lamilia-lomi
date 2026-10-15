@@ -1,12 +1,14 @@
 # Issue #23 read-only Production image audit
 
+This 2026-10-14 audit recorded headers from public HTTP responses. Its `Source Cache-Control` column describes the public custom-domain response, not the stored R2 object metadata. A follow-up read-only R2 `HeadObject` on 2026-10-15 confirmed that the sampled gallery object's stored metadata is `public, max-age=60, s-maxage=60, must-revalidate`, matching the application. The public response still advertises a four-hour browser TTL; see the [2026-10-15 cache probe](production-cache-probe-2026-10-15.md) for the source-versus-CDN distinction and current optimizer evidence.
+
 Audited 2026-10-14 at approximately 11:34 UTC. Requests used the public storefront and public R2 media URLs only. No credentials, private assets, upload endpoints, category assignments, or Production writes were used.
 
 ## Public product image sample
 
 The public `/en/products/https-www-amazon-com-dp-b0hlthrwdh` product page rendered one cover and four gallery images from `media.lamilialomi.com`.
 
-| Asset | Source dimensions | Source bytes | Source `Cache-Control` | Observation |
+| Asset | Source dimensions | Source bytes | Public response `Cache-Control` | Observation |
 | --- | ---: | ---: | --- | --- |
 | Cover `020c4704…-ok-adka2-gigapixel-standard-v2-2-5x.png` | 2758×3565 | 15,997,125 | `public, must-revalidate, max-age=14400, s-maxage=60` | Public `HEAD` returned 200 `image/png`; downloaded and decoded with Pillow. |
 | Gallery `d955e543…-L1-1.png` | 1533×2000 | 1,285,705 | `public, must-revalidate, max-age=14400, s-maxage=60` | Public `HEAD` returned 200 `image/png`; downloaded and decoded with Pillow. |
@@ -17,7 +19,7 @@ The Next image optimizer request for the gallery source at `w=3840&q=75` returne
 
 ## Cache result
 
-The sampled R2 source objects advertise a four-hour browser `max-age` and a one-minute shared-cache `s-maxage`. The sampled optimized image advertises a one-hour `max-age`. This conflicts with the current runbook statement that both public objects and optimized images have a one-minute TTL. The application code's R2 promotion sets `public, max-age=60, s-maxage=60, must-revalidate`, and `next.config.ts` sets `images.minimumCacheTTL: 60`; the live response headers show that those code settings alone do not establish a one-minute browser cache bound for existing objects or optimized responses.
+The sampled public image responses advertised a four-hour browser `max-age` and a one-minute shared-cache `s-maxage`. The sampled optimized image advertised a one-hour `max-age`. A follow-up origin metadata check confirmed that the stored R2 object metadata has the application's one-minute directives; the public response differs. The live browser response and optimized response headers do not establish a one-minute cache bound. The dated follow-up also found the optimized response marked stale well after that one-hour freshness period.
 
 Before claiming a one-minute stale-delivery bound, inspect and correct the deployed R2 object metadata/Cloudflare cache configuration and the Next image response policy, then repeat these read-only checks. This audit does not modify cache configuration, objects, or the database.
 
