@@ -390,7 +390,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
             <ProductImageGallery images={galleryImages} labels={galleryLabels} />
             <ProductVideoPreview
               video={product.video}
-              label={productCopy("flipthroughLabel")}
+              poster={product.cover.path}
             />
           </div>
         </div>
