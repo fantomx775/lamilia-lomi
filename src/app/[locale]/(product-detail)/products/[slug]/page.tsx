@@ -7,10 +7,9 @@ import { Suspense } from "react";
 import { AmazonLink } from "@/components/amazon-link";
 import { ImageWithFallback } from "@/components/image-with-fallback";
 import { NavigationLink } from "@/components/navigation-link";
-import { ProductImageGallery } from "@/components/product-image-gallery";
 import { ProductDescription } from "@/components/product-description";
+import { ProductInsideBookSection } from "@/components/product-inside-book-section";
 import { getRichTextTextContent } from "@/lib/rich-text";
-import { ProductVideoPreview } from "@/components/product-video-preview";
 import { ScrollToFragment } from "@/components/scroll-to-fragment";
 import { UnlockForm } from "@/components/unlock-form";
 import { Badge } from "@/components/ui/badge";
@@ -369,32 +368,14 @@ export default async function ProductPage({ params, searchParams }: Props) {
         </div>
       </section>
 
-      <section
-        aria-labelledby="inside-book-title"
-        className="border-y border-[var(--color-border)] bg-white/50"
-      >
-        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-2xl text-center">
-            <h2
-              id="inside-book-title"
-              className="font-serif text-3xl font-semibold tracking-tight sm:text-4xl"
-            >
-              {productCopy("insideBookTitle")}
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-base leading-7 text-[var(--color-muted)]">
-              {productCopy("insideBookDescription")}
-            </p>
-          </div>
-
-          <div className="mt-7 grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-start">
-            <ProductImageGallery images={galleryImages} labels={galleryLabels} />
-            <ProductVideoPreview
-              video={product.video}
-              poster={product.cover.path}
-            />
-          </div>
-        </div>
-      </section>
+      <ProductInsideBookSection
+        title={productCopy("insideBookTitle")}
+        description={productCopy("insideBookDescription")}
+        images={galleryImages}
+        labels={galleryLabels}
+        video={product.video}
+        poster={product.cover.path}
+      />
 
       {product.publicDownloads.length ? (
         <section aria-labelledby="public-downloads-title" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">

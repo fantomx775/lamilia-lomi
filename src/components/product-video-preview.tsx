@@ -2,6 +2,15 @@ import type { ProductAsset } from "@/lib/types";
 
 type VideoPreviewAsset = Pick<ProductAsset, "contentType" | "path" | "title">;
 
+export function isPlayableVideoAsset(
+  asset: VideoPreviewAsset | null | undefined,
+): asset is VideoPreviewAsset {
+  return Boolean(
+    asset?.path.trim() &&
+      asset.contentType.trim().toLowerCase().startsWith("video/"),
+  );
+}
+
 type ProductVideoPreviewProps = {
   video?: VideoPreviewAsset | null;
   poster: string;
@@ -11,9 +20,7 @@ export function ProductVideoPreview({
   video,
   poster,
 }: ProductVideoPreviewProps) {
-  const playableVideo = video?.contentType.toLowerCase().startsWith("video/")
-    ? video
-    : null;
+  const playableVideo = isPlayableVideoAsset(video) ? video : null;
 
   if (!playableVideo) {
     return null;

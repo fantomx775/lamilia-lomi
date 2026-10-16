@@ -112,6 +112,30 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
       fs.writeFileSync(videoFile, Buffer.from(await videoResponse.arrayBuffer()));
     }
 
+    const galleryAssets: ProductAsset[] = [];
+    for (const [index, image] of frog.images.entries()) {
+      const filename = `page-${index + 1}.png`;
+      const imageFile = path.join(mediaDirectory, filename);
+      if (!fs.existsSync(imageFile)) {
+        const imageResponse = await fetch(image.path, { signal: AbortSignal.timeout(90_000) });
+        if (!imageResponse.ok) throw new Error(`Public gallery fixture returned ${imageResponse.status}`);
+        fs.writeFileSync(imageFile, Buffer.from(await imageResponse.arrayBuffer()));
+      }
+
+      galleryAssets.push({
+        id: `issue-67-gallery-${index + 1}`,
+        productId,
+        kind: "gallery",
+        bucket: "public-media",
+        path: `/uploads/issue-67-browser/${filename}`,
+        filename: image.alt ?? filename,
+        contentType: "image/png",
+        sortOrder: index + 1,
+        isPublic: true,
+        title: image.alt,
+      });
+    }
+
     const localPosterPath = "/uploads/issue-67-browser/cover.png";
     const posterAsset: ProductAsset = {
       id: "issue-67-cover",
@@ -160,10 +184,11 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
       isPublic: true,
       title: frog.video.title,
     };
-    product.assets = [posterAsset, videoAsset];
+    product.assets = [posterAsset, ...galleryAssets, videoAsset];
     snapshot.products.push(product);
     fs.mkdirSync(path.dirname(store), { recursive: true });
-    fs.writeFileSync(store, JSON.stringify(snapshot));
+    const saveProduct = () => fs.writeFileSync(store, JSON.stringify(snapshot));
+    saveProduct();
 
     await page.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
     if (testInfo.project.name === "chromium") await page.setViewportSize({ width: 1440, height: 900 });
@@ -173,6 +198,17 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     await page.evaluate(async () => { await document.fonts.ready; });
 
     const video = page.locator("video");
+    const insideBook = page.locator('section[aria-labelledby="inside-book-title"]');
+    const bothMediaLayout = insideBook.getByTestId("product-media-layout");
+    await expect(bothMediaLayout).toHaveAttribute("data-layout", "gallery-video");
+    await expect(bothMediaLayout.getByRole("button", { name: /Open image/ })).toHaveCount(4);
+    await expect.poll(() => bothMediaLayout.locator("img").evaluateAll((images) =>
+      images.every((image) => (image as HTMLImageElement).naturalWidth > 0),
+    ), { timeout: 45_000 }).toBe(true);
+    const expectedColumnCount = testInfo.project.name === "chromium" ? 2 : 1;
+    await expect.poll(() => bothMediaLayout.evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length,
+    )).toBe(expectedColumnCount);
     await expect(video).toHaveAttribute("controls", "");
     await expect(video).toHaveAttribute("playsinline", "");
     await expect(video).toHaveAttribute("preload", "none");
@@ -213,6 +249,38 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     expect(await video.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
+    product.assets = product.assets.filter((asset) => asset.kind !== "video");
+    product.videoAssetId = "";
+    saveProduct();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const imagesOnlyLayout = page.getByTestId("product-media-layout");
+    await expect(imagesOnlyLayout).toHaveAttribute("data-layout", "gallery");
+    await expect(imagesOnlyLayout).not.toHaveClass(/grid/);
+    await expect(imagesOnlyLayout.getByRole("button", { name: /Open image/ })).toHaveCount(4);
+    await expect(imagesOnlyLayout.locator("video")).toHaveCount(0);
+
+    product.assets = product.assets.filter((asset) => asset.kind !== "gallery");
+    product.assets.push(videoAsset);
+    product.videoAssetId = videoAsset.id;
+    saveProduct();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const videoOnlyLayout = page.getByTestId("product-media-layout");
+    await expect(videoOnlyLayout).toHaveAttribute("data-layout", "video");
+    await expect(videoOnlyLayout).not.toHaveClass(/grid/);
+    await expect(videoOnlyLayout.locator("video")).toBeVisible();
+    await expect(videoOnlyLayout.getByRole("button", { name: /Open image/ })).toHaveCount(0);
+
+    product.assets = product.assets.filter((asset) => asset.kind !== "video");
+    product.videoAssetId = "";
+    saveProduct();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator('section[aria-labelledby="inside-book-title"]')).toHaveCount(0);
+    await expect(page.getByTestId("product-media-layout")).toHaveCount(0);
+
+    product.assets = [posterAsset, ...galleryAssets, videoAsset];
+    product.videoAssetId = videoAsset.id;
+    saveProduct();
+
     if (testInfo.project.name === "chromium") {
       webkitBrowser = await webkit.launch();
       const webkitContext = await webkitBrowser.newContext({ ...devices["iPhone 13"] });
@@ -221,6 +289,12 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
       await webkitPage.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
       await webkitPage.goto(new URL(`/en/products/${product.slug}`, String(testInfo.project.use.baseURL)).toString(), { waitUntil: "domcontentloaded" });
       await webkitPage.evaluate(async () => { await document.fonts.ready; });
+      const webkitMediaLayout = webkitPage.getByTestId("product-media-layout");
+      await expect(webkitMediaLayout).toHaveAttribute("data-layout", "gallery-video");
+      await webkitMediaLayout.scrollIntoViewIfNeeded();
+      await expect.poll(() => webkitMediaLayout.locator("img").evaluateAll((images) =>
+        images.every((image) => (image as HTMLImageElement).naturalWidth > 0),
+      ), { timeout: 45_000 }).toBe(true);
       const webkitVideo = webkitPage.locator("video");
       await expect(webkitVideo).toHaveAttribute("poster", localPosterPath);
       await expect(webkitVideo).toHaveAttribute("controls", "");
@@ -260,7 +334,7 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     else if (fs.existsSync(store)) fs.unlinkSync(store);
     fs.mkdirSync(path.dirname(evidenceDirectory), { recursive: true });
     fs.mkdirSync("test-results", { recursive: true });
-    fs.writeFileSync(path.join("test-results", `issue-67-diagnostics-${testInfo.project.name}.json`), JSON.stringify({ runId, diagnostics }, null, 2));
+    fs.writeFileSync(path.join("test-results", `issue-67-diagnostics-${runId}-${testInfo.project.name}.json`), JSON.stringify({ runId, diagnostics }, null, 2));
     release();
   }
 });
