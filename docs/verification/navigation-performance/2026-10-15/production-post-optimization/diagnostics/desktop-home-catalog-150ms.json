@@ -1,0 +1,19 @@
+{
+  "runId": "navigation-production-public-2026-10-15T21-29-59-980Z",
+  "sourceSha": "3076389db0ca8abea8e536a46810c13fc400f74d",
+  "vercelDeploymentId": "dpl_3Uxmfp6v7nGuus8qaXXb3nxvRFeC",
+  "githubDeploymentId": "7101183636",
+  "origin": "https://www.lamilialomi.com",
+  "device": "Chromium desktop",
+  "viewport": { "width": 1440, "height": 900, "deviceScaleFactor": 1 },
+  "transition": "Home → Catalog",
+  "captureTargetMs": 150,
+  "capturedAroundMs": 154,
+  "pathAtCapture": "/en/products",
+  "destinationHeadingVisible": false,
+  "mainTextAtCapture": "",
+  "visiblePendingMarkerCount": 0,
+  "ariaBusyPresent": false,
+  "screenshot": "desktop-home-catalog-150ms.png",
+  "finalScreenshot": "desktop-home-catalog-final.png"
+}

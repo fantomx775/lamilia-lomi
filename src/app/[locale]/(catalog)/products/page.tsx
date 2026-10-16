@@ -1,7 +1,9 @@
 import { Filter, Search } from "lucide-react";
+import { Suspense } from "react";
 
 import { CategoryTileImage } from "@/components/category-tile-image";
 import { NavigationLink } from "@/components/navigation-link";
+import { ProductCatalogLoading } from "@/components/product-catalog-loading";
 import { ProductCard } from "@/components/product-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,9 +21,18 @@ type Props = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function ProductsPage({ params, searchParams }: Props) {
+export default function ProductsPage(props: Props) {
+  return (
+    <Suspense fallback={<ProductCatalogLoading />}>
+      <ProductsPageContent {...props} />
+    </Suspense>
+  );
+}
+
+async function ProductsPageContent({ params, searchParams }: Props) {
   const { locale } = await params;
   const filters = parseCatalogFilters(await searchParams);
+  await delayCatalogForE2E();
   const snapshot = await getPublicCatalogSnapshotForRequest(locale);
   const products = getCatalogProductsFromSnapshot(snapshot, locale, filters);
   const categories = snapshot.categories
@@ -162,4 +173,21 @@ export default async function ProductsPage({ params, searchParams }: Props) {
       )}
     </div>
   );
+}
+
+async function delayCatalogForE2E() {
+  if (
+    process.env.NODE_ENV === "production" ||
+    process.env.LAMILIA_BACKEND?.trim().toLowerCase() !== "local"
+  ) {
+    return;
+  }
+
+  const delayMs = Number(process.env.LAMILIA_TEST_CATALOG_LOADING_DELAY_MS);
+
+  if (!Number.isSafeInteger(delayMs) || delayMs < 1 || delayMs > 5_000) {
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }

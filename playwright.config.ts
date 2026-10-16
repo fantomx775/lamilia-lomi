@@ -34,6 +34,8 @@ export default defineConfig({
             process.env.LAMILIA_TEST_PRODUCT_DETAIL_DELAY_MS ?? "",
           LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS:
             process.env.LAMILIA_TEST_PRODUCT_ACCESS_DELAY_MS ?? "",
+          LAMILIA_TEST_CATALOG_LOADING_DELAY_MS:
+            process.env.LAMILIA_TEST_CATALOG_LOADING_DELAY_MS ?? "",
         },
         url: "http://127.0.0.1:3000/en",
         reuseExistingServer: true,

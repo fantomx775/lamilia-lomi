@@ -1,5 +1,149 @@
 import { expect, test } from "@playwright/test";
 
+const navigationTestBaseUrl = new URL(
+  process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
+);
+const usesLocalNavigationTestServer = ["127.0.0.1", "localhost", "[::1]"].includes(
+  navigationTestBaseUrl.hostname,
+);
+
+test("Catalog fallback remains visible while local catalog data is held", async ({ page }, testInfo) => {
+  test.skip(
+    !process.env.LAMILIA_TEST_CATALOG_LOADING_DELAY_MS || !usesLocalNavigationTestServer,
+    "Requires the local demo catalog delay for a deterministic pending state",
+  );
+  if (testInfo.project.name === "chromium") {
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const failedNetworkRequests: Array<{ url: string; errorText: string }> = [];
+  const sameOriginHttpErrors: Array<{ url: string; status: number }> = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("requestfailed", (request) => {
+    failedNetworkRequests.push({
+      url: request.url(),
+      errorText: request.failure()?.errorText ?? "unknown",
+    });
+  });
+  page.on("response", (response) => {
+    if (
+      new URL(response.url()).origin === navigationTestBaseUrl.origin &&
+      response.status() >= 400
+    ) {
+      sameOriginHttpErrors.push({ url: response.url(), status: response.status() });
+    }
+  });
+
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "ll_cookie_consent",
+      JSON.stringify({ essential: true, analytics: false }),
+    );
+  });
+  await page.goto("/en");
+
+  const browseCatalog = page.getByRole("link", { name: "Browse catalog", exact: true });
+  const startedAt = Date.now();
+  await browseCatalog.click();
+
+  const loading = page.getByTestId("product-catalog-loading");
+  const catalogHeading = page.getByRole("heading", { name: "Browse LamiliaLomi books" });
+  await expect(page).toHaveURL(/\/en\/products$/);
+  await expect(loading).toBeVisible();
+  // Local next dev latency is diagnostic only; Production owns the 150 ms feedback budget.
+  const loadingUiMs = Date.now() - startedAt;
+  expect(Number.isFinite(loadingUiMs)).toBe(true);
+  await expect(catalogHeading).not.toBeVisible();
+  const pendingState = await page.evaluate(() => {
+    const fallback = document.querySelector<HTMLElement>("[data-testid='product-catalog-loading']");
+    const heading = [...document.querySelectorAll("h1")].find((element) =>
+      element.textContent?.includes("Browse LamiliaLomi books"),
+    );
+
+    return {
+      fallbackOpacity: fallback ? Number(getComputedStyle(fallback).opacity) : 0,
+      headingVisible: Boolean(heading && heading.getBoundingClientRect().height > 0),
+      pathname: window.location.pathname,
+    };
+  });
+  expect(pendingState.pathname).toBe("/en/products");
+  expect(pendingState.fallbackOpacity).toBeGreaterThanOrEqual(0.1);
+  expect(pendingState.headingVisible).toBe(false);
+  await page.screenshot({
+    path: testInfo.outputPath("catalog-destination-pending.png"),
+    fullPage: false,
+    animations: "disabled",
+    style: "nextjs-portal { display: none !important; }",
+  });
+
+  await expect(catalogHeading).toBeVisible();
+  await expect(loading).toBeHidden();
+  await page.screenshot({
+    path: testInfo.outputPath("catalog-destination-final.png"),
+    fullPage: false,
+    animations: "disabled",
+    style: "nextjs-portal { display: none !important; }",
+  });
+
+  expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+  expect(sameOriginHttpErrors).toEqual([]);
+  const classifiedNetworkFailures = failedNetworkRequests.map((request) => {
+    const requestUrl = new URL(request.url);
+    const isCanceledDestinationRsc =
+      request.errorText === "net::ERR_ABORTED" &&
+      requestUrl.origin === navigationTestBaseUrl.origin &&
+      requestUrl.pathname === "/en/products" &&
+      requestUrl.searchParams.has("_rsc");
+
+    return isCanceledDestinationRsc
+      ? {
+          ...request,
+          disposition: "unrelated",
+          reason:
+            "The destination RSC request was canceled during client navigation; the Catalog URL and H1 loaded and no HTTP status error occurred.",
+        }
+      : {
+          ...request,
+          disposition: "unexpected",
+          reason: "Unexpected failed request during the Catalog navigation regression.",
+        };
+  });
+  expect(classifiedNetworkFailures.filter((request) => request.disposition !== "unrelated")).toEqual([]);
+  await testInfo.attach("catalog-browser-diagnostics.json", {
+    body: JSON.stringify(
+      {
+        pageErrors,
+        consoleErrors,
+        failedNetworkRequests: classifiedNetworkFailures,
+        sameOriginHttpErrors,
+      },
+      null,
+      2,
+    ),
+    contentType: "application/json",
+  });
+  await testInfo.attach("catalog-pending-timing.json", {
+    body: JSON.stringify(
+      {
+        timingScope: "Local next dev visibility diagnostic only; not a Production 150 ms SLA.",
+        loadingUiMs,
+        pendingState,
+        pageErrors,
+        consoleErrors,
+      },
+      null,
+      2,
+    ),
+    contentType: "application/json",
+  });
+});
+
 test("primary navigation feedback keeps the storefront journey semantic and responsive", async ({ page }, testInfo) => {
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
