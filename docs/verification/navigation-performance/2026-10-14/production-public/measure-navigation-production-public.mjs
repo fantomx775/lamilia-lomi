@@ -3,7 +3,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { median } from "./statistics.mjs";
+import { summarizeGroups } from "./summary.mjs";
 
 const origin = process.env.LL_NAV_PROD_ORIGIN ?? "https://www.lamilialomi.com";
 const outputRoot = process.env.LL_NAV_OUTPUT;
@@ -77,6 +77,7 @@ fs.mkdirSync(screenshotsDir, { recursive: true });
 const diagnostics = { consoleErrors: [], pageErrors: [], sameOriginHttpErrors: [], requestFailures: {} };
 const rejectedAttempts = [];
 const groups = [];
+const keyboardChecks = [];
 const screenshots = new Set();
 let browser;
 let healthSnapshot = null;
@@ -135,6 +136,16 @@ async function armMarkers(page, target, targetLink) {
     page.__llNavBindingInstalled = true;
   }
   await targetLink.evaluate((anchor, { targetPath, heading, headingIncludes }) => {
+    const feedbackTargets = [anchor, anchor.closest("article")].filter(Boolean);
+    const styleSignature = (element) => {
+      const style = getComputedStyle(element);
+      return [style.transform, style.scale, style.translate, style.boxShadow, style.borderColor, style.backgroundColor, style.color, style.opacity, style.outlineWidth, style.outlineColor].join("|");
+    };
+    let baselineStyles = new Map(feedbackTargets.map((element) => [element, styleSignature(element)]));
+    const captureBaselineStyles = () => {
+      baselineStyles = new Map(feedbackTargets.map((element) => [element, styleSignature(element)]));
+    };
+    anchor.addEventListener("pointerenter", captureBaselineStyles, { capture: true });
     anchor.addEventListener("pointerdown", (event) => {
       if (!event.isTrusted) return;
       const start = performance.now();
@@ -144,20 +155,29 @@ async function armMarkers(page, target, targetLink) {
       let loadingRecorded = false;
       let urlRecorded = false;
       const mark = (key, value) => { if (!finished) void window.__llNavMark({ [key]: Number((value - start).toFixed(1)) }); };
+      const markPressedFeedback = () => {
+        if (pressedRecorded) return;
+        const changedActiveStyle = feedbackTargets.some((element) =>
+          element.matches(":active") && styleSignature(element) !== baselineStyles.get(element)
+        );
+        if (changedActiveStyle) {
+          pressedRecorded = true;
+          mark("pressedFeedbackMs", performance.now());
+        }
+      };
       const visible = (element) => {
         if (!element) return false;
         const style = getComputedStyle(element);
         const rect = element.getBoundingClientRect();
-        return !element.classList.contains("sr-only") && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) > 0 && rect.width > 4 && rect.height > 4 && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth && style.clip === "auto" && style.clipPath === "none";
+        const minHeight = element.matches('[data-pending="true"]') ? 0.5 : 4;
+        return !element.classList.contains("sr-only") && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) >= 0.1 && rect.width > 4 && rect.height > minHeight && rect.bottom > 0 && rect.top < innerHeight && rect.right > 0 && rect.left < innerWidth && style.clip === "auto" && style.clipPath === "none";
       };
-      const priorLoaders = new Set([...document.querySelectorAll('[aria-busy="true"], [role="status"], [data-testid*="loading"]')].filter(visible));
+      const loaderSelector = '[aria-busy="true"], [role="status"], [data-testid*="loading"], [data-pending="true"]';
+      const priorLoaders = new Set([...document.querySelectorAll(loaderSelector)].filter(visible));
       const frame = () => {
         if (finished) return;
-        if (!pressedRecorded && anchor.matches(":active") && getComputedStyle(anchor).transform !== "none") {
-          pressedRecorded = true;
-          mark("pressedFeedbackMs", performance.now());
-        }
-        const loader = [...document.querySelectorAll('[aria-busy="true"], [role="status"], [data-testid*="loading"]')].find((element) => visible(element) && !priorLoaders.has(element));
+        markPressedFeedback();
+        const loader = [...document.querySelectorAll(loaderSelector)].find((element) => visible(element) && !priorLoaders.has(element));
         if (!loadingRecorded && loader) {
           loadingRecorded = true;
           mark("loadingUiMs", performance.now());
@@ -178,6 +198,7 @@ async function armMarkers(page, target, targetLink) {
         }
         requestAnimationFrame(frame);
       };
+      markPressedFeedback();
       requestAnimationFrame(frame);
     }, { once: true, capture: true });
   }, { targetPath: target.path, heading: target.heading, headingIncludes: target.headingIncludes });
@@ -204,6 +225,31 @@ async function measure(page, device, transition) {
     meaningfulContentHeading: marks.contentText || content,
     trustedPointerDown: marks.trusted,
   };
+}
+
+async function checkKeyboardNavigation(device) {
+  const { context, page } = await freshPage(device);
+  try {
+    await page.goto(origin + "/en/products", { waitUntil: "domcontentloaded" });
+    await waitForHeading(page, { heading: "Browse LamiliaLomi books" });
+
+    const productLink = page.getByRole("link", { name: /Cinderella/i });
+    await productLink.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL((url) => url.pathname === `/en/products/${productSlug}`, { timeout: 45_000 });
+    const productHeading = await waitForHeading(page, { headingIncludes: productTitleMatch });
+    keyboardChecks.push({ device: device.id, transition: "Catalog → Product Detail", key: "Enter", result: productHeading });
+
+    await returnToSource(page, "/en/products", { heading: "Browse LamiliaLomi books" });
+    const libraryLink = page.locator('nav[aria-label="Primary navigation"]:visible').getByRole("link", { name: "My Library" });
+    await libraryLink.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL((url) => url.pathname === "/en/library", { timeout: 45_000 });
+    const libraryHeading = await waitForHeading(page, { heading: "My Library" });
+    keyboardChecks.push({ device: device.id, transition: "Header → Library", key: "Enter", result: libraryHeading });
+  } finally {
+    await context.close().catch(() => {});
+  }
 }
 
 async function returnToSource(page, route, heading) {
@@ -254,29 +300,14 @@ try {
     headers: Object.fromEntries(["date", "x-vercel-id", "x-vercel-cache", "x-nextjs-cache", "cache-control", "age"].map((name) => [name, response.headers.get(name)])),
   };
   for (const device of devices) for (const transition of transitions) await measureGroup(device, transition);
+  for (const device of devices) await checkKeyboardNavigation(device);
 } catch (error) {
   runError = String(error?.message || error).slice(0, 500);
 } finally {
   if (browser) await browser.close().catch(() => {});
 }
 
-const summary = groups.map((group) => ({
-  device: group.device,
-  transition: group.transition,
-  acceptedPairs: group.acceptedPairs,
-  cold: {
-    firstVisibleUiMedianMs: median(group.accepted.map((sample) => sample.cold.clickToFirstVisibleUiMs)),
-    pressedFeedbackMedianMs: median(group.accepted.map((sample) => sample.cold.clickToPressedFeedbackMs)),
-    loadingUiMedianMs: median(group.accepted.map((sample) => sample.cold.clickToLoadingUiMs)),
-    meaningfulContentMedianMs: median(group.accepted.map((sample) => sample.cold.clickToMeaningfulContentMs)),
-  },
-  warm: {
-    firstVisibleUiMedianMs: median(group.accepted.map((sample) => sample.warm.clickToFirstVisibleUiMs)),
-    pressedFeedbackMedianMs: median(group.accepted.map((sample) => sample.warm.clickToPressedFeedbackMs)),
-    loadingUiMedianMs: median(group.accepted.map((sample) => sample.warm.clickToLoadingUiMs)),
-    meaningfulContentMedianMs: median(group.accepted.map((sample) => sample.warm.clickToMeaningfulContentMs)),
-  },
-}));
+const summary = summarizeGroups(groups);
 const report = {
   runId,
   checkedAt: new Date().toISOString(),
@@ -292,24 +323,25 @@ const report = {
     cold: "new isolated BrowserContext with fresh client cache and source loaded before activation; Next/server caches are not cleared and Link prefetch may populate the destination",
     warm: "same context after destination, browser Back to source, then repeated activation; source reload fallback is recorded",
     start: "trusted pointerdown on the actual visible semantic destination anchor",
-    firstVisibleUi: "minimum of an observed pressed CSS :active transform, new visible loading UI, or destination H1, sampled on animation frames",
-    loadingUi: "first new viewport-visible [aria-busy=true], [role=status], or [data-testid*=loading]; excludes screen-reader-only/clipped/pre-existing indicators",
+    firstVisibleUi: "minimum of a visible CSS :active style change on the route link or nearest card article, new visible loading UI, or destination H1; the press-state style is sampled on animation frames against a pointerenter baseline",
+    loadingUi: "first new viewport-visible [aria-busy=true], [role=status], [data-testid*=loading], or [data-pending=true] whose computed opacity is at least 0.1; excludes screen-reader-only/clipped/pre-existing indicators",
     content: "first viewport-intersecting destination H1 matching the route expectation",
-    repetitions: `${acceptedTarget} accepted cold/warm pairs per device and transition; up to ${maxAttempts} attempts`,
-    interactionBoundary: "anonymous GET/navigation only; no account sign-in, Admin routes, forms, or writes",
+    repetitions: `${acceptedTarget} accepted cold/warm pairs per device and transition; up to ${maxAttempts} attempts; p95 uses nearest-rank empirical quantile`,
+    interactionBoundary: "anonymous GET/navigation only; keyboard checks activate links with Enter; no account sign-in, Admin routes, forms, or writes",
   },
   devices: devices.map(({ id, label, viewport, deviceScaleFactor, isMobile, hasTouch }) => ({ id, label, viewport, deviceScaleFactor, isMobile, hasTouch })),
   transitions: transitions.map(({ id, label, source, target }) => ({ id, label, source, target })),
   blockedScope: ["Header → signed-in Account", "authenticated Admin navigation"],
   groups,
   summary,
+  keyboardChecks,
   diagnostics,
   rejectedAttempts,
   runError,
   screenshotsDir: "screenshots",
 };
 fs.writeFileSync(path.join(outDir, "measurements.json"), JSON.stringify(report, null, 2));
-console.log(JSON.stringify({ runId, outDir, sourceSha, vercelDeploymentId, githubDeploymentId, productionHealthResponse: healthSnapshot, summary, diagnostics: { consoleErrors: diagnostics.consoleErrors.length, pageErrors: diagnostics.pageErrors.length, sameOriginHttpErrors: diagnostics.sameOriginHttpErrors.length, requestFailures: diagnostics.requestFailures, rejectedAttempts: rejectedAttempts.length, screenshots: [...screenshots] }, runError }, null, 2));
+console.log(JSON.stringify({ runId, outDir, sourceSha, vercelDeploymentId, githubDeploymentId, productionHealthResponse: healthSnapshot, summary, keyboardChecks, diagnostics: { consoleErrors: diagnostics.consoleErrors.length, pageErrors: diagnostics.pageErrors.length, sameOriginHttpErrors: diagnostics.sameOriginHttpErrors.length, requestFailures: diagnostics.requestFailures, rejectedAttempts: rejectedAttempts.length, screenshots: [...screenshots] }, runError }, null, 2));
 if (runError) {
   console.error(`Production public measurement incomplete; partial evidence was saved: ${runError}`);
   process.exitCode = 1;
