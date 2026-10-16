@@ -100,6 +100,7 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
     const primaryDiagnostics = recordDiagnostics(page, testInfo.project.name);
     await page.goto(catalogPath, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
+    await page.evaluate(async () => { await document.fonts.ready; });
 
     const header = page.locator("header");
     const accountAction = header.getByRole("link", { name: "Log in", exact: true });
@@ -110,6 +111,7 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await expect(header.getByRole("button", { name: /navigation menu/ })).toHaveCount(0);
       await expect(page.getByTestId("catalog-desktop-filters")).toBeVisible();
       await expect(page.getByTestId("product-catalog-grid").locator("article")).toHaveCount(1);
+      await expect(page.getByTestId("product-catalog-grid").locator("article summary")).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await saveScreenshot(page, "desktop-catalog", true);
     } else {
@@ -247,6 +249,7 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await webkitPage.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
       const webkitDiagnostics = recordDiagnostics(webkitPage, "webkit-iphone-13");
       await webkitPage.goto(new URL("/en/products?campaign=webkit", String(testInfo.project.use.baseURL)).toString(), { waitUntil: "domcontentloaded" });
+      await webkitPage.evaluate(async () => { await document.fonts.ready; });
       const webkitHeader = webkitPage.locator("header");
       await expect(webkitHeader.getByRole("link", { name: "Log in", exact: true })).toBeVisible();
       const webkitMenuButton = webkitHeader.getByRole("button", { name: "Open navigation menu" });
