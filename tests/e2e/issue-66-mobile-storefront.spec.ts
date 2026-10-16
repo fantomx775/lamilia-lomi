@@ -173,8 +173,6 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await expect(filterForm.getByLabel("Tag filter")).toHaveValue(tag.slug);
       await expect(filterForm.getByLabel("Sort products")).toHaveValue("newest");
       await expect(filterForm.getByText("Audience: Kids")).toHaveCount(product.audience === "kids" ? 1 : 0);
-      await saveScreenshot(page, "pixel7-catalog-filters");
-
       const allCategories = page.getByTestId("catalog-category-all");
       const allCategoriesHref = await allCategories.getAttribute("href");
       expect(new URL(allCategoriesHref!, page.url()).searchParams.get("category")).toBeNull();
