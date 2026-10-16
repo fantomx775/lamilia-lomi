@@ -7,7 +7,7 @@ const usesLocalNavigationTestServer = ["127.0.0.1", "localhost", "[::1]"].includ
   navigationTestBaseUrl.hostname,
 );
 
-test("Catalog shows its destination fallback while catalog data is pending", async ({ page }, testInfo) => {
+test("Catalog fallback remains visible while local catalog data is held", async ({ page }, testInfo) => {
   test.skip(
     !process.env.LAMILIA_TEST_CATALOG_LOADING_DELAY_MS || !usesLocalNavigationTestServer,
     "Requires the local demo catalog delay for a deterministic pending state",
@@ -55,7 +55,9 @@ test("Catalog shows its destination fallback while catalog data is pending", asy
   const catalogHeading = page.getByRole("heading", { name: "Browse LamiliaLomi books" });
   await expect(page).toHaveURL(/\/en\/products$/);
   await expect(loading).toBeVisible();
+  // Local next dev latency is diagnostic only; Production owns the 150 ms feedback budget.
   const loadingUiMs = Date.now() - startedAt;
+  expect(Number.isFinite(loadingUiMs)).toBe(true);
   await expect(catalogHeading).not.toBeVisible();
   const pendingState = await page.evaluate(() => {
     const fallback = document.querySelector<HTMLElement>("[data-testid='product-catalog-loading']");
@@ -127,7 +129,17 @@ test("Catalog shows its destination fallback while catalog data is pending", asy
     contentType: "application/json",
   });
   await testInfo.attach("catalog-pending-timing.json", {
-    body: JSON.stringify({ loadingUiMs, pendingState, pageErrors, consoleErrors }, null, 2),
+    body: JSON.stringify(
+      {
+        timingScope: "Local next dev visibility diagnostic only; not a Production 150 ms SLA.",
+        loadingUiMs,
+        pendingState,
+        pageErrors,
+        consoleErrors,
+      },
+      null,
+      2,
+    ),
     contentType: "application/json",
   });
 });

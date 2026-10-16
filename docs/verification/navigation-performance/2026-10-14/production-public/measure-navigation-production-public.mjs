@@ -10,8 +10,9 @@ const outputRoot = process.env.LL_NAV_OUTPUT;
 const sampleInput = process.env.LL_NAV_SAMPLES ?? "3";
 const acceptedTarget = Number(sampleInput);
 const maxAttempts = acceptedTarget + 3;
-const expectedSourceSha = process.env.LL_NAV_EXPECT_SOURCE_SHA?.trim();
-const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const expectedRunnerSha = process.env.LL_NAV_EXPECT_RUNNER_SHA?.trim();
+const runnerSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const sourceSha = process.env.LL_NAV_PROD_SOURCE_SHA?.trim();
 const vercelDeploymentId = process.env.LL_NAV_VERCEL_DEPLOYMENT_ID;
 const githubDeploymentId = process.env.LL_NAV_GITHUB_DEPLOYMENT_ID;
 const productSlug = "https-www-amazon-com-dp-b0h8tttsny";
@@ -21,9 +22,11 @@ if (!outputRoot) throw new Error("Set LL_NAV_OUTPUT to the evidence output direc
 if (!Number.isInteger(acceptedTarget) || acceptedTarget < 3 || acceptedTarget > 10) {
   throw new Error("LL_NAV_SAMPLES must be an integer from 3 through 10.");
 }
-if (expectedSourceSha && sourceSha !== expectedSourceSha) {
-  throw new Error(`Source SHA mismatch: expected ${expectedSourceSha}, got ${sourceSha}.`);
+if (expectedRunnerSha && runnerSha !== expectedRunnerSha) {
+  throw new Error(`Runner SHA mismatch: expected ${expectedRunnerSha}, got ${runnerSha}.`);
 }
+if (!expectedRunnerSha) throw new Error("Set LL_NAV_EXPECT_RUNNER_SHA to pin the exact local benchmark runner revision.");
+if (!sourceSha) throw new Error("Set LL_NAV_PROD_SOURCE_SHA after independently verifying the current Production SHA.");
 if (origin !== "https://www.lamilialomi.com") {
   throw new Error("Production benchmark is restricted to https://www.lamilialomi.com.");
 }
@@ -155,16 +158,6 @@ async function armMarkers(page, target, targetLink) {
       let loadingRecorded = false;
       let urlRecorded = false;
       const mark = (key, value) => { if (!finished) void window.__llNavMark({ [key]: Number((value - start).toFixed(1)) }); };
-      const markPressedFeedback = () => {
-        if (pressedRecorded) return;
-        const changedActiveStyle = feedbackTargets.some((element) =>
-          element.matches(":active") && styleSignature(element) !== baselineStyles.get(element)
-        );
-        if (changedActiveStyle) {
-          pressedRecorded = true;
-          mark("pressedFeedbackMs", performance.now());
-        }
-      };
       const visible = (element) => {
         if (!element) return false;
         const style = getComputedStyle(element);
@@ -174,31 +167,46 @@ async function armMarkers(page, target, targetLink) {
       };
       const loaderSelector = '[aria-busy="true"], [role="status"], [data-testid*="loading"], [data-pending="true"]';
       const priorLoaders = new Set([...document.querySelectorAll(loaderSelector)].filter(visible));
+      let previousFrameCandidates = new Map();
       const frame = () => {
         if (finished) return;
-        markPressedFeedback();
+        const now = performance.now();
+        const frameCandidates = new Map();
+        const activeElement = feedbackTargets.find((element) =>
+          element.matches(":active") && styleSignature(element) !== baselineStyles.get(element)
+        );
+        if (activeElement) frameCandidates.set("pressedFeedbackMs", activeElement);
         const loader = [...document.querySelectorAll(loaderSelector)].find((element) => visible(element) && !priorLoaders.has(element));
-        if (!loadingRecorded && loader) {
-          loadingRecorded = true;
-          mark("loadingUiMs", performance.now());
-        }
+        if (loader) frameCandidates.set("loadingUiMs", loader);
         if (!urlRecorded && location.pathname === targetPath) {
           urlRecorded = true;
-          mark("urlMs", performance.now());
+          mark("urlMs", now);
         }
         const h1 = [...document.querySelectorAll("h1")].find((element) => {
           if (!visible(element)) return false;
           const text = element.innerText.trim();
           return headingIncludes ? text.includes(headingIncludes) : text === heading;
         });
-        if (h1 && location.pathname === targetPath) {
-          finished = true;
-          void window.__llNavMark({ contentMs: Number((performance.now() - start).toFixed(1)), contentText: h1.innerText.trim() });
-          return;
+        if (h1 && location.pathname === targetPath) frameCandidates.set("contentMs", h1);
+
+        for (const [metric, element] of frameCandidates) {
+          const wasVisibleOnPreviousFrame = previousFrameCandidates.get(metric) === element;
+          if (!wasVisibleOnPreviousFrame) continue;
+          if (metric === "pressedFeedbackMs" && !pressedRecorded) {
+            pressedRecorded = true;
+            mark(metric, now);
+          } else if (metric === "loadingUiMs" && !loadingRecorded) {
+            loadingRecorded = true;
+            mark(metric, now);
+          } else if (metric === "contentMs" && location.pathname === targetPath) {
+            finished = true;
+            void window.__llNavMark({ contentMs: Number((now - start).toFixed(1)), contentText: element.innerText.trim() });
+          }
         }
+        previousFrameCandidates = frameCandidates;
+        if (finished) return;
         requestAnimationFrame(frame);
       };
-      markPressedFeedback();
       requestAnimationFrame(frame);
     }, { once: true, capture: true });
   }, { targetPath: target.path, heading: target.heading, headingIncludes: target.headingIncludes });
@@ -313,9 +321,10 @@ const report = {
   checkedAt: new Date().toISOString(),
   origin,
   sourceSha,
+  runnerSha,
   vercelDeploymentId,
   githubDeploymentId,
-  identityVerification: "deployment ID and source SHA must be confirmed externally immediately before/after the run; this runner verifies checkout SHA and public origin only",
+  identityVerification: "sourceSha is the Production application SHA supplied after external verification; runnerSha identifies the local benchmark code; the Production deployment ID and source SHA must be confirmed externally immediately before/after the run",
   productionHealthResponse: healthSnapshot,
   runtime: "read-only anonymous guest navigation against the public Production origin",
   runtimeMetadata: { nodeVersion: process.version, chromiumVersion: browser?.version?.() ?? null, platform: `${os.platform()} ${os.release()}`, memoryAtRunCompletion: { totalBytes: os.totalmem(), freeBytes: os.freemem() } },
@@ -323,7 +332,8 @@ const report = {
     cold: "new isolated BrowserContext with fresh client cache and source loaded before activation; Next/server caches are not cleared and Link prefetch may populate the destination",
     warm: "same context after destination, browser Back to source, then repeated activation; source reload fallback is recorded",
     start: "trusted pointerdown on the actual visible semantic destination anchor",
-    firstVisibleUi: "minimum of a visible CSS :active style change on the route link or nearest card article, new visible loading UI, or destination H1; the press-state style is sampled on animation frames against a pointerenter baseline",
+    firstVisibleUi: "minimum of a changed :active style, new visible loading UI, or destination H1 that is present in two consecutive requestAnimationFrame samples; the second sample is a conservative bound after a browser render opportunity, not a direct compositor timestamp",
+    visibleFrameConfirmation: "Each candidate must remain the same element and satisfy visibility checks across two consecutive animation-frame callbacks. Timing is recorded on the second callback, which confirms the browser had an intervening render opportunity; a one-frame or transient style-state mutation is not counted as visible feedback.",
     loadingUi: "first new viewport-visible [aria-busy=true], [role=status], [data-testid*=loading], or [data-pending=true] whose computed opacity is at least 0.1; excludes screen-reader-only/clipped/pre-existing indicators",
     content: "first viewport-intersecting destination H1 matching the route expectation",
     repetitions: `${acceptedTarget} accepted cold/warm pairs per device and transition; up to ${maxAttempts} attempts; p95 uses nearest-rank empirical quantile`,
@@ -341,7 +351,7 @@ const report = {
   screenshotsDir: "screenshots",
 };
 fs.writeFileSync(path.join(outDir, "measurements.json"), JSON.stringify(report, null, 2));
-console.log(JSON.stringify({ runId, outDir, sourceSha, vercelDeploymentId, githubDeploymentId, productionHealthResponse: healthSnapshot, summary, keyboardChecks, diagnostics: { consoleErrors: diagnostics.consoleErrors.length, pageErrors: diagnostics.pageErrors.length, sameOriginHttpErrors: diagnostics.sameOriginHttpErrors.length, requestFailures: diagnostics.requestFailures, rejectedAttempts: rejectedAttempts.length, screenshots: [...screenshots] }, runError }, null, 2));
+console.log(JSON.stringify({ runId, outDir, sourceSha, runnerSha, vercelDeploymentId, githubDeploymentId, productionHealthResponse: healthSnapshot, summary, keyboardChecks, diagnostics: { consoleErrors: diagnostics.consoleErrors.length, pageErrors: diagnostics.pageErrors.length, sameOriginHttpErrors: diagnostics.sameOriginHttpErrors.length, requestFailures: diagnostics.requestFailures, rejectedAttempts: rejectedAttempts.length, screenshots: [...screenshots] }, runError }, null, 2));
 if (runError) {
   console.error(`Production public measurement incomplete; partial evidence was saved: ${runError}`);
   process.exitCode = 1;
