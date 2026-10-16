@@ -1,6 +1,7 @@
-import { BookOpen, Info, Library, LogIn } from "lucide-react";
-import { Suspense } from "react";
+import { BookOpen, Info, Library, LogIn, UserPlus } from "lucide-react";
+import { Suspense, type ReactNode } from "react";
 
+import { MobileNavigation } from "@/components/mobile-navigation";
 import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 import { getHeaderAccountStateForRequest } from "@/lib/session.server";
@@ -21,17 +22,18 @@ export function SiteHeader({ locale }: {
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]/92 backdrop-blur">
-      <div className="mx-auto flex min-h-16 w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
         <NavigationLink
           href={`/${locale}`}
           pendingLabel="Opening home"
+          aria-label="LamiliaLomi home"
           className="flex items-center gap-3 rounded-sm transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
         >
-          <span className="grid size-10 place-items-center rounded-md bg-[var(--color-sage)] font-serif text-lg font-semibold text-[var(--color-ink)]">
+          <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[var(--color-sage)] font-serif text-lg font-semibold text-[var(--color-ink)] sm:size-10">
             LL
           </span>
-          <span className="min-w-0">
-            <span className="block font-serif text-xl font-semibold text-[var(--color-ink)]">
+          <span className="min-w-0 max-[360px]:hidden">
+            <span className="block font-serif text-lg font-semibold text-[var(--color-ink)] sm:text-xl">
               LamiliaLomi
             </span>
             <span className="hidden text-xs text-[var(--color-muted)] sm:block">
@@ -58,30 +60,16 @@ export function SiteHeader({ locale }: {
             {labels.library}
           </NavigationLink>
         </nav>
-        <div className="flex items-center gap-2">
-          <Suspense fallback={<HeaderAccountFallback />}>
+        <div className="flex shrink-0 items-center gap-2">
+          <Suspense fallback={<HeaderAccountFallback locale={locale} />}>
             <HeaderAccountLink locale={locale} labels={labels} />
           </Suspense>
+          <MobileNavigation locale={locale}>
+            <Suspense fallback={<MobileGuestAccountLinks locale={locale} />}>
+              <MobileAccountLinks locale={locale} />
+            </Suspense>
+          </MobileNavigation>
         </div>
-        <nav aria-label={labels.navigation} className="grid w-full grid-cols-3 gap-1 border-t border-[var(--color-border)] py-2 md:hidden">
-          <NavigationLink className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/products`} pendingLabel="Opening catalog">
-            <BookOpen className="size-4" aria-hidden />
-            {labels.products}
-          </NavigationLink>
-          <NavigationLink
-            className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")}
-            href={`/${locale}/about`}
-            pendingLabel="Opening about page"
-            showPendingBar={false}
-          >
-            <Info className="size-4" aria-hidden />
-            {labels.about}
-          </NavigationLink>
-          <NavigationLink className={headerLinkClassName("min-w-0 gap-1 px-2 text-xs")} href={`/${locale}/library`} pendingLabel="Opening library">
-            <Library className="size-4" aria-hidden />
-            {labels.library}
-          </NavigationLink>
-        </nav>
       </div>
     </header>
   );
@@ -108,7 +96,7 @@ async function HeaderAccountLink({
         variant: isSignedIn ? "outline" : "default",
         size: "sm",
         className:
-          "min-h-10 transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]",
+          "min-h-10 gap-1.5 px-3 transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]",
       })}
       href={
         isSignedIn
@@ -120,17 +108,84 @@ async function HeaderAccountLink({
       pendingLabel={isSignedIn ? "Opening account" : "Opening login"}
     >
       <LogIn className="size-4" aria-hidden />
-      <span className="hidden sm:inline">{label}</span>
+      <span>{label}</span>
     </NavigationLink>
   );
 }
 
-function HeaderAccountFallback() {
+function MobileAccountLink({
+  href,
+  label,
+  icon,
+  pendingLabel,
+}: {
+  href: string;
+  label: string;
+  icon: ReactNode;
+  pendingLabel: string;
+}) {
   return (
-    <span
-      aria-hidden="true"
-      className="h-10 w-10 rounded-md bg-[var(--color-border)] motion-safe:animate-pulse motion-reduce:animate-none sm:w-24"
+    <NavigationLink
+      href={href}
+      pendingLabel={pendingLabel}
+      className="flex min-h-11 items-center gap-3 rounded-lg px-3 font-medium hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+    >
+      {icon}
+      {label}
+    </NavigationLink>
+  );
+}
+
+async function MobileAccountLinks({ locale }: { locale: Locale }) {
+  const accountState = await getHeaderAccountStateForRequest();
+
+  if (!accountState?.isSignedIn) {
+    return <MobileGuestAccountLinks locale={locale} />;
+  }
+
+  return (
+    <MobileAccountLink
+      href={accountState.isAdmin ? "/admin" : `/${locale}/account`}
+      label="Account"
+      icon={<LogIn className="size-4" aria-hidden />}
+      pendingLabel="Opening account"
     />
+  );
+}
+
+function MobileGuestAccountLinks({ locale }: { locale: Locale }) {
+  return (
+    <>
+      <MobileAccountLink
+        href={`/${locale}/login`}
+        label="Log in"
+        icon={<LogIn className="size-4" aria-hidden />}
+        pendingLabel="Opening login"
+      />
+      <MobileAccountLink
+        href={`/${locale}/register`}
+        label="Sign up"
+        icon={<UserPlus className="size-4" aria-hidden />}
+        pendingLabel="Opening sign up"
+      />
+    </>
+  );
+}
+
+function HeaderAccountFallback({ locale }: { locale: Locale }) {
+  return (
+    <NavigationLink
+      href={`/${locale}/login`}
+      pendingLabel="Opening login"
+      aria-label="Log in"
+      className={buttonClassName({
+        size: "sm",
+        className: "min-h-10 gap-1.5 px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]",
+      })}
+    >
+      <LogIn className="size-4" aria-hidden />
+      <span>Log in</span>
+    </NavigationLink>
   );
 }
 

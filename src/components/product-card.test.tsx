@@ -91,7 +91,11 @@ describe("ProductCard", () => {
     render(<ProductCard product={product} locale="en" />);
 
     const heading = screen.getByRole("heading", { name: longTitle });
+    const productLink = screen.getByRole("link");
+    const card = productLink.closest("article");
     expect(heading).toHaveClass("line-clamp-3", "min-h-[3lh]", "[overflow-wrap:anywhere]");
+    expect(card).not.toHaveClass("focus-within:ring-2");
+    expect(productLink).toHaveClass("focus-visible:outline-2");
     expect(heading).toHaveTextContent(longTitle);
     expect(heading).toHaveAttribute("aria-label", longTitle);
 
@@ -100,6 +104,7 @@ describe("ProductCard", () => {
 
     const fullTitleDisclosure = screen.getByText("Read full title");
     expect(fullTitleDisclosure.tagName).toBe("SUMMARY");
+    expect(fullTitleDisclosure).toHaveClass("focus-visible:outline-2");
     fireEvent.click(fullTitleDisclosure);
     expect(screen.getByTestId("full-product-title")).toHaveTextContent(longTitle);
     expect(fullTitleDisclosure.parentElement).toHaveAttribute("open");

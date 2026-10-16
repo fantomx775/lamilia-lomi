@@ -20,7 +20,7 @@ export function ProductCard({
   imageSizes?: string;
 }) {
   return (
-    <article className="group relative flex h-full min-w-0 flex-col rounded-lg border border-[var(--color-border)] bg-white/80 shadow-[0_12px_36px_rgba(62,52,47,0.07)] transition-[transform,box-shadow,border-color] duration-150 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-[0_18px_46px_rgba(62,52,47,0.12)] motion-reduce:hover:translate-y-0 active:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 active:shadow-none focus-within:ring-2 focus-within:ring-inset focus-within:ring-[var(--color-terracotta)]">
+    <article className="group relative flex h-full min-w-0 flex-col rounded-lg border border-[var(--color-border)] bg-white/80 shadow-[0_12px_36px_rgba(62,52,47,0.07)] transition-[transform,box-shadow,border-color] duration-150 motion-reduce:transition-none hover:-translate-y-0.5 hover:shadow-[0_18px_46px_rgba(62,52,47,0.12)] motion-reduce:hover:translate-y-0 active:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 active:shadow-none">
       <Link
         href={`/${locale}/products/${product.slug}`}
         className="flex min-w-0 flex-1 flex-col rounded-t-lg focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-terracotta)]"
