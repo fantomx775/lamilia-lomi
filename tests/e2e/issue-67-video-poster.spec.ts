@@ -182,6 +182,12 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     const posterResponse = await page.request.get(new URL(localPosterPath, String(testInfo.project.use.baseURL)).toString());
     expect(posterResponse.status()).toBe(200);
     expect(posterResponse.headers()["content-type"]).toContain("image/png");
+    await video.evaluate(async (element) => {
+      const posterImage = new Image();
+      posterImage.src = (element as HTMLVideoElement).poster;
+      await posterImage.decode();
+    });
+    expect(await video.evaluate((element) => (element as HTMLVideoElement).paused && (element as HTMLVideoElement).currentTime === 0)).toBe(true);
 
     const playerBounds = await video.boundingBox();
     expect(playerBounds).not.toBeNull();
@@ -220,6 +226,12 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
       await expect(webkitVideo).toHaveAttribute("controls", "");
       await expect(webkitPage.getByText("Flip-through · 8 sec", { exact: true })).toHaveCount(0);
       await expect.poll(() => webkitVideo.evaluate((element) => (element as HTMLVideoElement).poster), { timeout: 15_000 }).toContain("/uploads/issue-67-browser/cover.png");
+      await webkitVideo.evaluate(async (element) => {
+        const posterImage = new Image();
+        posterImage.src = (element as HTMLVideoElement).poster;
+        await posterImage.decode();
+      });
+      expect(await webkitVideo.evaluate((element) => (element as HTMLVideoElement).paused && (element as HTMLVideoElement).currentTime === 0)).toBe(true);
       await webkitVideo.scrollIntoViewIfNeeded();
       await saveScreenshot(webkitPage, "video-poster-webkit-iphone");
       await webkitVideo.evaluate(async (element) => {
