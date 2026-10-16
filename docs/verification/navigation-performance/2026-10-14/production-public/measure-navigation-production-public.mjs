@@ -218,7 +218,7 @@ async function measure(page, device, transition) {
   await link.waitFor({ state: "visible", timeout: 30_000 });
   const marks = await armMarkers(page, transition.target, link);
   const urlWait = page.waitForURL((url) => url.pathname === transition.target.path, { timeout: 45_000 });
-  if (device.isMobile) await link.tap(); else await link.click();
+  if (device.isMobile) await link.tap(); else await link.click({ delay: 50 });
   await urlWait;
   const content = await waitForHeading(page, transition.target);
   const deadline = Date.now() + 300;
@@ -332,6 +332,7 @@ const report = {
     cold: "new isolated BrowserContext with fresh client cache and source loaded before activation; Next/server caches are not cleared and Link prefetch may populate the destination",
     warm: "same context after destination, browser Back to source, then repeated activation; source reload fallback is recorded",
     start: "trusted pointerdown on the actual visible semantic destination anchor",
+    desktopPressDuration: "Playwright holds the desktop mouse button for 50 ms before release to model a brief physical press and allow a render opportunity; the timer still starts at trusted pointerdown. Pixel 7 uses a normal trusted tap.",
     firstVisibleUi: "minimum of a changed :active style, new visible loading UI, or destination H1 that is present in two consecutive requestAnimationFrame samples; the second sample is a conservative bound after a browser render opportunity, not a direct compositor timestamp",
     visibleFrameConfirmation: "Each candidate must remain the same element and satisfy visibility checks across two consecutive animation-frame callbacks. Timing is recorded on the second callback, which confirms the browser had an intervening render opportunity; a one-frame or transient style-state mutation is not counted as visible feedback.",
     loadingUi: "first new viewport-visible [aria-busy=true], [role=status], [data-testid*=loading], or [data-pending=true] whose computed opacity is at least 0.1; excludes screen-reader-only/clipped/pre-existing indicators",
