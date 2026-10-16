@@ -12,6 +12,9 @@ test("Catalog shows its destination fallback while catalog data is pending", asy
     !process.env.LAMILIA_TEST_CATALOG_LOADING_DELAY_MS || !usesLocalNavigationTestServer,
     "Requires the local demo catalog delay for a deterministic pending state",
   );
+  if (testInfo.project.name === "chromium") {
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
 
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
