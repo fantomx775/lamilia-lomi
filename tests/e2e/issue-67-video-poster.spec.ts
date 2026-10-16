@@ -170,6 +170,7 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     const desktopOrPixelDiagnostics = recordDiagnostics(page, testInfo.project.name);
     await page.goto(`/en/products/${product.slug}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { level: 1, name: frog.title })).toBeVisible();
+    await page.evaluate(async () => { await document.fonts.ready; });
 
     const video = page.locator("video");
     await expect(video).toHaveAttribute("controls", "");
@@ -213,6 +214,7 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
       const webkitDiagnostics = recordDiagnostics(webkitPage, "webkit-iphone-13");
       await webkitPage.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
       await webkitPage.goto(new URL(`/en/products/${product.slug}`, String(testInfo.project.use.baseURL)).toString(), { waitUntil: "domcontentloaded" });
+      await webkitPage.evaluate(async () => { await document.fonts.ready; });
       const webkitVideo = webkitPage.locator("video");
       await expect(webkitVideo).toHaveAttribute("poster", localPosterPath);
       await expect(webkitVideo).toHaveAttribute("controls", "");
