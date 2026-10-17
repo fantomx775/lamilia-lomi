@@ -40,6 +40,48 @@ describe("public media delivery", () => {
     mocks.r2PublicMediaUrl.mockReturnValue(null);
   });
 
+  it("rejects a mismatched explicit image version before reading media", async () => {
+    const response = await GET(
+      new Request(`https://lamilialomi.com/api/media/${assetId}?v=${productId}`),
+      { params: Promise.resolve({ assetId }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
+  });
+
+  it("redirects the matching UUID-versioned public R2 image without optimizer caching", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}?v=${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider: "r2_public",
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      locale: null,
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+    mocks.getR2PublicBaseUrl.mockReturnValue("https://media.example.com");
+    mocks.r2PublicMediaUrl.mockReturnValue("https://media.example.com/current-cover.jpg");
+
+    const response = await GET(
+      new Request(`https://lamilialomi.com/api/media/${assetId}?v=${assetId}`),
+      { params: Promise.resolve({ assetId }) },
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://media.example.com/current-cover.jpg");
+    expect(response.headers.get("cache-control")).toBe("private, max-age=30");
+    expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
+  });
+
   it("redirects authorized media to a short-lived Storage URL without downloading through Next", async () => {
     const download = vi.fn();
     const createSignedUrl = vi.fn().mockResolvedValue({

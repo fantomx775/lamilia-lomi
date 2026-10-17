@@ -101,8 +101,13 @@ test("product gallery renders at desktop DPR1, desktop DPR2, and Pixel 7 sizes",
       currentSrc: (image as HTMLImageElement).currentSrc,
       sizes: (image as HTMLImageElement).sizes,
     }));
+    const selectedWidth = new URL(metrics.currentSrc).searchParams.get("w");
+    const deliveredPixelWidth = selectedWidth ? Number(selectedWidth) : metrics.naturalWidth;
+    expect(deliveredPixelWidth).toBeGreaterThanOrEqual(
+      Math.ceil(metrics.cssWidth * metrics.devicePixelRatio),
+    );
     loadedImageUrls.push(scenario.name + ": " + metrics.currentSrc);
-    console.log(JSON.stringify({ scenario: scenario.name, ...metrics }));
+    console.log(JSON.stringify({ scenario: scenario.name, deliveredPixelWidth, ...metrics }));
 
     const pageWidth = await page.evaluate(() => ({
       viewport: window.innerWidth,

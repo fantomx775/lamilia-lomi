@@ -591,7 +591,7 @@ describe("targeted Home and Catalog product reads", () => {
     expect(products[0]).toMatchObject({
       title: "Moon Garden",
       cover: {
-        path: "https://media.example.com/products/product-moon/cover/cover-moon.png",
+        path: "/api/media/cover-moon?v=cover-moon",
       },
       categories: [{ slug: "mindfulness", name: "Mindfulness" }],
       tags: [{ slug: "calm", name: "Calm" }],

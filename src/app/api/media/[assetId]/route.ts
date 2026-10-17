@@ -16,6 +16,11 @@ type Props = { params: Promise<{ assetId: string }> };
 
 export async function GET(request: Request, { params }: Props) {
   const { assetId } = await params;
+  const requestedVersion = new URL(request.url).searchParams.get("v");
+  if (requestedVersion !== null && (!isUuid(requestedVersion) || requestedVersion !== assetId)) {
+    return notFoundMediaResponse();
+  }
+
   let asset: Awaited<ReturnType<typeof getAssetByIdForRequest>>;
   let product: Awaited<ReturnType<typeof getProductByIdForRequest>> | null = null;
   let adminPreviewAuthorized = false;
@@ -182,6 +187,10 @@ export async function GET(request: Request, { params }: Props) {
 
 function safeFilename(value: string) {
   return mediaFilenameForDisplay(value).replace(/["\\]/g, "_").slice(0, 180) || "download";
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function notFoundMediaResponse() {
