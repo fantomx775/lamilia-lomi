@@ -9,6 +9,7 @@ import { defaultLocale } from "@/lib/locale";
 import { isMediaKind, mediaBucketForKind, mediaFilenameForDisplay } from "@/lib/media-upload";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "@/lib/media-r2-config";
 import { createSignedR2ReadUrl } from "@/lib/media-r2";
+import { versionedPublicImageResponse } from "@/lib/versioned-public-image-response";
 import { getAssetByIdForRequest, getProductByIdForRequest } from "@/lib/products-request";
 import { getDemoSession } from "@/lib/session.server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
@@ -18,7 +19,10 @@ type Props = { params: Promise<{ assetId: string }> };
 export async function GET(request: Request, { params }: Props) {
   const { assetId } = await params;
   const requestedVersion = new URL(request.url).searchParams.get("v");
-  if (requestedVersion !== null && (!isUuid(requestedVersion) || requestedVersion !== assetId)) {
+  if (
+    requestedVersion !== null &&
+    (requestedVersion !== assetId || (getBackendMode() !== "local" && !isUuid(requestedVersion)))
+  ) {
     return notFoundMediaResponse();
   }
 
@@ -73,7 +77,7 @@ export async function GET(request: Request, { params }: Props) {
   if (getBackendMode() === "local") {
     const isDownload = new URL(request.url).searchParams.get("download") === "1";
 
-    if (asset.path.startsWith("/assets/") && !isDownload) {
+    if (asset.path.startsWith("/assets/") && !isDownload && requestedVersion === null) {
       return NextResponse.redirect(new URL(asset.path, request.url));
     }
 
@@ -96,7 +100,9 @@ export async function GET(request: Request, { params }: Props) {
     const headers = new Headers({
       "Content-Type": asset.contentType,
       "Content-Length": String(fs.statSync(filePath).size),
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": requestedVersion === null
+        ? "public, max-age=31536000, immutable"
+        : "public, max-age=60, s-maxage=60",
     });
     if (isDownload) {
       headers.set("Content-Disposition", `attachment; filename="${safeFilename(asset.filename)}"`);
@@ -117,6 +123,15 @@ export async function GET(request: Request, { params }: Props) {
   if (asset.storageProvider === "r2_public" && product.status === "published") {
     const publicUrl = r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", storagePath);
     if (publicUrl) {
+      if (requestedVersion !== null && !isDownload) {
+        try {
+          const imageResponse = await versionedPublicImageResponse(request, publicUrl);
+          return imageResponse ?? notFoundMediaResponse();
+        } catch (error) {
+          return unavailableMediaResponse(assetId, asset, error);
+        }
+      }
+
       const response = NextResponse.redirect(publicUrl);
       response.headers.set(
         "Cache-Control",

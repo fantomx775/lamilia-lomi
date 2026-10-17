@@ -80,6 +80,21 @@ test("product gallery renders at desktop DPR1, desktop DPR2, and Pixel 7 sizes",
       baseUrl + "/en/products/moon-garden-coloring-book",
       { waitUntil: "domcontentloaded" },
     );
+    if (scenario.name === "desktop-dpr1") {
+      const versionedSource = "/api/media/asset-moon-gallery-1?v=asset-moon-gallery-1";
+      const optimizerUrl = new URL("/_next/image", baseUrl);
+      optimizerUrl.searchParams.set("url", versionedSource);
+      optimizerUrl.searchParams.set("w", "640");
+      optimizerUrl.searchParams.set("q", "75");
+      const optimizerResponse = await page.request.get(optimizerUrl.toString());
+      expect(optimizerResponse.status()).toBe(200);
+      expect(optimizerResponse.headers()["content-type"]).toMatch(/^image\//);
+      console.log("[ISSUE23-VERSIONED-OPTIMIZER] " + JSON.stringify({
+        status: optimizerResponse.status(),
+        contentType: optimizerResponse.headers()["content-type"],
+        source: versionedSource,
+      }));
+    }
     const responseHtml = await documentResponse?.text();
     console.log("[ISSUE23-HYDRATION] " + scenario.name + " rawHtmlContainsCaretColor=" + Boolean(responseHtml?.includes("caret-color")));
 

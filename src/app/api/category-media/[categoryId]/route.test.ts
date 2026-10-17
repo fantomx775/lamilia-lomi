@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createServiceRoleClient: vi.fn(),
@@ -23,13 +23,13 @@ const currentImageId = "33333333-3333-4333-8333-333333333333";
 const storagePath =
   "categories/" + categoryId + "/image/" + currentImageId + "-books.webp";
 
-function mockCurrentImage(imageId: string | null) {
+function mockCurrentImage(imageId: string | null, provider = "r2_public") {
   const maybeSingle = vi.fn().mockResolvedValue({
     data: imageId
       ? {
           image_asset_id: imageId,
           image_storage_path: storagePath.replace(currentImageId, imageId),
-          image_storage_provider: "r2_public",
+          image_storage_provider: provider,
         }
       : {
           image_asset_id: null,
@@ -56,11 +56,23 @@ async function getImage(requestedImageId: string) {
   );
 }
 
+async function getLegacyImage() {
+  return GET(
+    new Request("https://www.lamilialomi.com/api/category-media/" + categoryId),
+    { params: Promise.resolve({ categoryId }) },
+  );
+}
+
 describe("category media version route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("R2_PUBLIC_BASE_URL", "https://media.example.com");
     mocks.getBackendMode.mockReturnValue("supabase");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("rejects an old image version after category replacement", async () => {
@@ -72,20 +84,78 @@ describe("category media version route", () => {
     expect(response.headers.get("location")).toBeNull();
   });
 
-  it("returns the current R2 image through its versioned route", async () => {
+  it("rejects an empty explicit image version", async () => {
+    const response = await GET(
+      new Request("https://www.lamilialomi.com/api/category-media/" + categoryId + "?v="),
+      { params: Promise.resolve({ categoryId }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
+  });
+
+  it("serves the current R2 image bytes for Next Image", async () => {
+    const bytes = new Uint8Array([0x52, 0x49, 0x46, 0x46]);
+    const fetchImage = vi.fn().mockResolvedValue(new Response(bytes, {
+      headers: { "Content-Type": "image/webp", "Cache-Control": "public, max-age=14400" },
+    }));
+    vi.stubGlobal("fetch", fetchImage);
     mockCurrentImage(currentImageId);
 
     const response = await getImage(currentImageId);
 
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/webp");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(fetchImage).toHaveBeenCalledWith(
+      "https://media.example.com/categories/" + categoryId + "/image/" + currentImageId + "-books.webp",
+      { cache: "no-store", signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it("keeps legacy category media URLs as redirects", async () => {
+    mockCurrentImage(currentImageId);
+
+    const response = await getLegacyImage();
+
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://media.example.com/categories/" +
-        categoryId +
-        "/image/" +
-        currentImageId +
-        "-books.webp",
+      "https://media.example.com/categories/" + categoryId + "/image/" + currentImageId + "-books.webp",
     );
-    expect(response.headers.get("cache-control")).toBe("private, max-age=30");
+  });
+
+  it("serves current Supabase category media bytes without exposing the signed URL", async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const signedUrl = "https://project.storage.supabase.co/object/sign/public-media/image?token=short";
+    const createSignedUrl = vi.fn().mockResolvedValue({ data: { signedUrl }, error: null });
+    const categoryRow = {
+      image_asset_id: currentImageId,
+      image_storage_path: storagePath,
+      image_storage_provider: "supabase",
+    };
+    const maybeSingle = vi.fn().mockResolvedValue({ data: categoryRow, error: null });
+    const eq = vi.fn().mockReturnValue({ maybeSingle });
+    const select = vi.fn().mockReturnValue({ eq });
+    const fetchImage = vi.fn().mockResolvedValue(new Response(bytes, {
+      headers: { "Content-Type": "image/png" },
+    }));
+    vi.stubGlobal("fetch", fetchImage);
+    mocks.createServiceRoleClient.mockReturnValue({
+      from: vi.fn(() => ({ select })),
+      storage: { from: vi.fn(() => ({ createSignedUrl })) },
+    });
+
+    const response = await getImage(currentImageId);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("location")).toBeNull();
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(fetchImage).toHaveBeenCalledWith(signedUrl, {
+      cache: "no-store",
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("returns not found after the category image is removed", async () => {
