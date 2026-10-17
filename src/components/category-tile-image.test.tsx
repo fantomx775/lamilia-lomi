@@ -39,7 +39,11 @@ describe("CategoryTileImage", () => {
   });
 
   it("preserves the unoptimized proxy path for legacy category media", () => {
-    render(<CategoryTileImage src="/api/category-media/category-1?v=image-1" />);
+    render(
+      <CategoryTileImage
+        src="/api/category-media/11111111-1111-4111-8111-111111111111?v=22222222-2222-4222-8222-222222222222"
+      />,
+    );
 
     expect(document.querySelector("img")).toHaveAttribute("data-unoptimized", "true");
   });

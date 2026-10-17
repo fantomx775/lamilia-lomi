@@ -855,9 +855,7 @@ function mapCategory(row: DbRow, translationRows: DbRow[]): Category {
   const storagePath = optionalString(row.image_storage_path);
   const storageProvider = row.image_storage_provider === "r2_public" ? "r2_public" : "supabase";
   const imagePath = imageId && storagePath
-    ? storageProvider === "r2_public"
-      ? r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", storagePath) ?? `/api/category-media/${id}?v=${encodeURIComponent(imageId)}`
-      : `/api/category-media/${id}?v=${encodeURIComponent(imageId)}`
+    ? "/api/category-media/" + id + "?v=" + encodeURIComponent(imageId)
     : null;
 
   return {

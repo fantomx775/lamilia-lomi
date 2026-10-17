@@ -6,8 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/image", () => ({
-  default: ({ src, alt, loading, className }: { src: string; alt: string; loading?: string; className?: string }) =>
-    createElement("img", { src, alt, loading, className }),
+  default: ({ src, alt, loading, className, sizes }: { src: string; alt: string; loading?: string; className?: string; sizes?: string }) =>
+    createElement("img", { src, alt, loading, className, sizes }),
 }));
 
 import { ProductImageGallery } from "@/components/product-image-gallery";
@@ -141,6 +141,14 @@ describe("ProductImageGallery", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("requests thumbnails at the responsive width of the full gallery layout", () => {
+    render(<ProductImageGallery images={images} labels={labels} />);
+
+    expect(screen.getAllByRole("img")[0]).toHaveAttribute(
+      "sizes",
+      "(min-width: 1280px) 600px, (min-width: 1024px) calc(50vw - 40px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)",
+    );
+  });
   it("keeps a single image usable without carousel controls", async () => {
     const user = userEvent.setup();
     render(<ProductImageGallery images={makeImages(1)} labels={makeLabels(1)} />);
