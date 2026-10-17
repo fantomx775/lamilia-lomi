@@ -1,5 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
-import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -34,8 +40,8 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       "Run only against the explicitly configured isolated local Supabase stack.",
     );
     test.skip(
-      testInfo.project.name !== "chromium",
-      "The local Supabase E2E mutates shared fixtures and runs only once in Chromium.",
+      !["chromium", "webkit-mobile"].includes(testInfo.project.name),
+      "The local Supabase E2E mutates shared fixtures and runs once per supported browser project.",
     );
 
     const mailpitUrl = requireLoopbackUrl(
@@ -77,6 +83,14 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
     const completed: Record<string, string | number | boolean> = {};
     const screenshots: string[] = [];
     const contexts: BrowserContext[] = [];
+    const projectBrowserOptions = testInfo.project.use as {
+      deviceScaleFactor?: number;
+      hasTouch?: boolean;
+      isMobile?: boolean;
+      screen?: { width: number; height: number } | null;
+      userAgent?: string;
+      viewport?: { width: number; height: number } | null;
+    };
     let originalAsset:
       | { bucket: string; path: string; filename: string; size_bytes: number | null }
       | undefined;
@@ -94,7 +108,13 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
     const createContext = async () => {
       const context = await browser.newContext({
         baseURL: appUrl.origin,
+        deviceScaleFactor: projectBrowserOptions.deviceScaleFactor,
+        hasTouch: projectBrowserOptions.hasTouch,
         ignoreHTTPSErrors: true,
+        isMobile: projectBrowserOptions.isMobile,
+        screen: projectBrowserOptions.screen ?? undefined,
+        userAgent: projectBrowserOptions.userAgent,
+        viewport: projectBrowserOptions.viewport,
       });
       contexts.push(context);
       return context;
@@ -139,6 +159,15 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       if (updateResult.error) {
         throw new Error("The local protected-download metadata fixture could not be updated.");
       }
+      const publicAssetResponse = await fetch(
+        new URL(
+          `/storage/v1/object/public/premium-files/${fixtureObjectPath}`,
+          supabaseUrl.origin,
+        ),
+        { headers: { apikey: publishableKey } },
+      );
+      expect(publicAssetResponse.ok).toBe(false);
+      completed.premiumAssetUnavailableFromPublicStorageUrl = !publicAssetResponse.ok;
 
       const userOne = createTestCredentials();
       const userTwo = createTestCredentials();
@@ -157,15 +186,78 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       sensitiveValues.add(userFour.email);
       sensitiveValues.add(userFour.password);
 
+      // The home CTA and public QR URL must both resolve to published product pages.
+      await page.goto("/en");
+      const homeQrLink = page.getByRole("link", { name: "Try QR unlock", exact: true });
+      const homeQrHref = await homeQrLink.getAttribute("href");
+      expect(homeQrHref).toMatch(/^\/en\/unlock\/[a-z0-9]+(?:-[a-z0-9]+)*$/);
+      if (!homeQrHref) {
+        throw new Error("The homepage QR link did not have a product destination.");
+      }
+      await page.goto(homeQrHref);
+      await expect(page.getByTestId("product-unlock-section")).toBeVisible();
+      completed.homepageQrCtaResolvesToPublishedProduct = true;
+
+      // A physical QR identifies the book. The premium code is entered on its product page.
+      await page.goto(`/en/unlock/${productSlug}`);
+      await waitForLocation(page, {
+        pathname: `/en/products/${productSlug}`,
+        hash: "#premium",
+      });
+      const qrUrlContainsSensitiveParameter = urlContainsSensitiveParameter(page.url());
+      expect(qrUrlContainsSensitiveParameter).toBe(false);
+      const sensitiveQueryAndFragmentParametersDetected = [
+        urlContainsSensitiveParameter("https://example.test/callback?access_token=test-value"),
+        urlContainsSensitiveParameter("https://example.test/callback?refresh_token=test-value"),
+        urlContainsSensitiveParameter("https://example.test/callback#token_hash=test-value"),
+        urlContainsSensitiveParameter("https://example.test/callback#code=test-value"),
+      ].every(Boolean);
+      expect(sensitiveQueryAndFragmentParametersDetected).toBe(true);
+
       // Scenario A begins in browser context A and requests a real GoTrue confirmation email.
-      await page.goto(`/en/products/${productSlug}#premium`);
       const guestUnlock = page.getByTestId("product-unlock-section");
-      await guestUnlock.getByLabel("Premium code").fill(premiumCode);
+      const premiumCodeInput = guestUnlock.getByLabel("Premium code");
+      await premiumCodeInput.fill(premiumCode);
+      const premiumCodeVisibleBeforeRegistration =
+        (await premiumCodeInput.inputValue()) === premiumCode;
+      expect(premiumCodeVisibleBeforeRegistration).toBe(true);
+      completed.premiumCodeVisibleBeforeRegistration = true;
       await guestUnlock.getByRole("button", { name: "Create account", exact: true }).click();
       await waitForLocation(page, { pathname: "/en/register" });
+      const registrationUrlContainsSensitiveParameter = urlContainsSensitiveParameter(page.url());
+      expect(registrationUrlContainsSensitiveParameter).toBe(false);
+      const guestIntentCookie = (await page.context().cookies(appUrl.origin)).find(
+        ({ name }) => name === "ll_unlock_intent",
+      );
+      const guestIntentPayload = guestIntentCookie
+        ? (JSON.parse(Buffer.from(guestIntentCookie.value, "base64url").toString("utf8")) as {
+            code?: string;
+            codeSource?: string;
+          })
+        : null;
+      completed.guestUnlockIntentCookieExists = Boolean(guestIntentCookie);
+      completed.guestUnlockIntentCookieIsHttpOnly = guestIntentCookie?.httpOnly === true;
+      completed.guestUnlockIntentCookieSourceIsGuest =
+        guestIntentPayload?.codeSource === "guest";
+      completed.guestUnlockIntentCookieMatchesEnteredCode =
+        guestIntentPayload?.code === premiumCode;
+      const guestIntentCookieContainsCode =
+        completed.guestUnlockIntentCookieIsHttpOnly &&
+        completed.guestUnlockIntentCookieSourceIsGuest &&
+        completed.guestUnlockIntentCookieMatchesEnteredCode;
+      completed.guestUnlockCodeStoredInHttpOnlyCookie = guestIntentCookieContainsCode;
+      expect(guestIntentCookie?.httpOnly, "unlock intent cookie is HttpOnly").toBe(true);
+      const guestIntentCookieHasGuestCode = guestIntentPayload?.codeSource === "guest";
+      expect(guestIntentCookieHasGuestCode).toBe(true);
+      const guestIntentCookieMatchesEnteredCode = guestIntentPayload?.code === premiumCode;
+      expect(guestIntentCookieMatchesEnteredCode).toBe(true);
+      if (testInfo.project.name === "chromium") {
+        expect(guestIntentCookie?.sameSite).toBe("Lax");
+      }
       const registrationIntentWasPreserved = await page
         .locator('input[name="code"]')
         .evaluate((input, code) => (input as HTMLInputElement).value === code, premiumCode);
+      completed.registrationHiddenCodePreserved = registrationIntentWasPreserved;
       expect(registrationIntentWasPreserved).toBe(true);
 
       await submitRegistration(page, userOne.email, userOne.password);
@@ -175,6 +267,17 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         hash: "#premium",
       });
       completed.registration = true;
+      const registrationResumeCookie = (await page.context().cookies(appUrl.origin)).find(
+        ({ name }) => name === "ll_auth_resume",
+      );
+      const registrationResumeCookieIsHttpOnly = registrationResumeCookie?.httpOnly === true;
+      const registrationResumeCookieHasRootPath = registrationResumeCookie?.path === "/";
+      expect(registrationResumeCookieIsHttpOnly).toBe(true);
+      expect(registrationResumeCookieHasRootPath).toBe(true);
+      if (testInfo.project.name === "chromium") {
+        expect(registrationResumeCookie?.sameSite).toBe("Lax");
+      }
+      completed.registrationResumeCookieProtected = true;
       await expect(page.getByTestId("unlock-guest-state")).toBeVisible();
       await expect(page.locator('a[href*="error=verification_required"]')).toBeVisible();
       completed.confirmationRequired = true;
@@ -264,6 +367,11 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       }
       completed.realConfirmationCallback = true;
       completed.crossDeviceProductReturn = true;
+      const callbackAuthCookie = (await crossDeviceContext.cookies(appUrl.origin)).find(
+        ({ name }) => /^sb-.+-auth-token(?:\.\d+)?$/.test(name),
+      );
+      expect(callbackAuthCookie).toBeDefined();
+      completed.crossDeviceSessionCookieEstablished = true;
       completed.sessionEstablishedForAccountOne = await isConfirmedUser(admin, userOne.email);
       expect(completed.sessionEstablishedForAccountOne).toBe(true);
       completed.emailOnlyCallbackDidNotRedeemPremiumCode =
@@ -289,6 +397,11 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         premiumCode,
       );
       expect(successfulReturnContainsCode).toBe(false);
+      const successfulReturnContainsAuthToken = urlContainsSensitiveParameter(
+        crossDevicePage.url(),
+      );
+      expect(successfulReturnContainsAuthToken).toBe(false);
+      completed.successfulReturnContainsNoAuthTokens = true;
       await expect(crossDevicePage.getByTestId("unlock-success-state")).toBeVisible();
       screenshots.push(
         await saveSafeScreenshot(
@@ -306,9 +419,50 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       });
       completed.entitlementPersistsAfterReload = await hasUnlock(admin, userOne.email);
       expect(completed.entitlementPersistsAfterReload).toBe(true);
-      const firstProtectedDownload = await requestProtectedDownload(crossDeviceContext);
-      expect(firstProtectedDownload.isPdf).toBe(true);
-      completed.protectedDownloadForEntitledUser = firstProtectedDownload.isPdf;
+
+      await crossDevicePage.getByRole("link", { name: "Go to My Library", exact: true }).click();
+      await waitForLocation(crossDevicePage, { pathname: "/en/library" });
+      const library = crossDevicePage.getByTestId("library-page");
+      await expect(library).toContainText("Moon Garden");
+      completed.unlockedProductAppearsInLibrary = true;
+      await library.getByRole("link", { name: /Moon Garden/i }).first().click();
+      await waitForLocation(crossDevicePage, {
+        pathname: `/en/products/${productSlug}`,
+      });
+      await expect(crossDevicePage.getByTestId("premium-download-links")).toContainText(
+        "Premium printable PDF",
+      );
+      const privateDownloadLink = crossDevicePage
+        .getByTestId("premium-download-links")
+        .getByRole("link", { name: "Premium printable PDF", exact: true });
+      const privateDownloadHref = await privateDownloadLink.getAttribute("href");
+      const privateDownloadTargetsExpectedAsset = Boolean(
+        privateDownloadHref &&
+          new URL(privateDownloadHref, appUrl.origin).pathname ===
+            `/api/downloads/${premiumAssetId}`,
+      );
+      expect(privateDownloadTargetsExpectedAsset).toBe(true);
+      const premiumFileDownloadPromise = crossDevicePage.waitForEvent("download");
+      await privateDownloadLink.click();
+      const premiumFileDownload = await premiumFileDownloadPromise;
+      const downloadedFilePath = await premiumFileDownload.path();
+      const downloadedFileBytes = downloadedFilePath
+        ? await readFile(downloadedFilePath)
+        : Buffer.alloc(0);
+      const privateFileOpenedFromLibraryProduct =
+        premiumFileDownload.suggestedFilename().toLowerCase().endsWith(".pdf") &&
+        downloadedFileBytes.subarray(0, 4).toString("ascii") === "%PDF";
+      expect(privateFileOpenedFromLibraryProduct).toBe(true);
+      completed.privateFileOpenedFromLibraryProduct = privateFileOpenedFromLibraryProduct;
+
+      await crossDevicePage.goto(`/en/unlock/${productSlug}`);
+      await waitForLocation(crossDevicePage, {
+        pathname: `/en/products/${productSlug}`,
+        hash: "#premium",
+      });
+      await expect(crossDevicePage.getByTestId("unlock-success-state")).toBeVisible();
+      completed.ownerQrRescanPreservesAccess = await hasUnlock(admin, userOne.email);
+      expect(completed.ownerQrRescanPreservesAccess).toBe(true);
 
       // A used GoTrue confirmation link cannot establish a second session.
       const reusedContext = await createContext();
@@ -461,6 +615,29 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       });
       completed.usedCodeRejectedForThirdAccount = !(await hasUnlock(admin, userThree.email));
       expect(completed.usedCodeRejectedForThirdAccount).toBe(true);
+
+      const invalidPremiumCode = `INVALID-${randomBytes(12).toString("hex").toUpperCase()}`;
+      sensitiveValues.add(invalidPremiumCode);
+      await secondAccountPage.goto(`/en/unlock/${productSlug}`);
+      await waitForLocation(secondAccountPage, {
+        pathname: `/en/products/${productSlug}`,
+        hash: "#premium",
+      });
+      const invalidUnlock = secondAccountPage.getByTestId("product-unlock-section");
+      await invalidUnlock.getByLabel("Premium code").fill(invalidPremiumCode);
+      await invalidUnlock
+        .getByRole("button", { name: "Unlock premium content", exact: true })
+        .click();
+      await waitForLocation(secondAccountPage, {
+        pathname: `/en/products/${productSlug}`,
+        query: { unlock: "invalid_code" },
+        hash: "#premium",
+      });
+      completed.invalidPremiumCodeRejected = !(await hasUnlock(admin, userThree.email));
+      expect(completed.invalidPremiumCodeRejected).toBe(true);
+      const noEntitlementDownload = await requestProtectedDownload(secondAccountContext);
+      expect(noEntitlementDownload.status).toBe(403);
+      completed.invalidCodeCannotDownload = noEntitlementDownload.status === 403;
 
       // A tampered OTP from a real email is rejected by local GoTrue and cannot log in.
       const invalidLink = mutateConfirmationToken(userOneLink.href);
@@ -710,6 +887,29 @@ function ageLocalSignupConfirmation(userId: string) {
   if (result.trim() !== "1") {
     throw new Error("The local Supabase expiry fixture did not update exactly one pending account.");
   }
+}
+
+function urlContainsSensitiveParameter(value: string) {
+  const url = new URL(value);
+  const sensitiveNames = new Set([
+    "access_token",
+    "code",
+    "id_token",
+    "premiumcode",
+    "refresh_token",
+    "resume",
+    "token",
+    "token_hash",
+  ]);
+  const queryContainsSensitiveParameter = [...url.searchParams.keys()].some((name) =>
+    sensitiveNames.has(name.toLowerCase()),
+  );
+  const hashContainsSensitiveParameter =
+    /(?:^|[?&#])(?:access_token|refresh_token|id_token|token_hash|token|code|premiumcode|resume)=/i.test(
+      url.hash,
+    );
+
+  return queryContainsSensitiveParameter || hashContainsSensitiveParameter;
 }
 
 async function submitRegistration(page: Page, email: string, password: string) {

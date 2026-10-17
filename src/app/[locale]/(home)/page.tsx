@@ -25,6 +25,7 @@ export default async function HomePage({ params }: Props) {
   ]);
   const kids = kidsProducts[0];
   const adults = adultsProducts[0];
+  const qrProduct = featured[0];
 
   return (
     <div>
@@ -46,13 +47,15 @@ export default async function HomePage({ params }: Props) {
               Browse catalog
               <ArrowRight className="size-4" aria-hidden />
             </NavigationLink>
-            <NavigationLink
-              className={buttonClassName({ variant: "outline" })}
-              href={`/${locale}/unlock/moon-garden-coloring-book`}
-              pendingLabel="Opening bonus unlock"
-            >
-              Try QR unlock
-            </NavigationLink>
+            {qrProduct ? (
+              <NavigationLink
+                className={buttonClassName({ variant: "outline" })}
+                href={`/${locale}/unlock/${qrProduct.slug}`}
+                pendingLabel="Opening bonus unlock"
+              >
+                Try QR unlock
+              </NavigationLink>
+            ) : null}
           </div>
         </div>
 
