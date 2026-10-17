@@ -24,14 +24,19 @@ export type ProductImageGalleryLabels = {
   viewAllImages?: string;
 };
 
+const fullWidthGallerySizes =
+  "(min-width: 1280px) 600px, (min-width: 1024px) calc(50vw - 40px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)";
+
 type ProductImageGalleryProps = {
   images: ProductGalleryImage[];
   labels: ProductImageGalleryLabels;
+  sizes?: string;
 };
 
 export function ProductImageGallery({
   images,
   labels,
+  sizes = fullWidthGallerySizes,
 }: ProductImageGalleryProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -143,7 +148,7 @@ export function ProductImageGallery({
                   loading="lazy"
                   unoptimized={image.unoptimized}
                   className="object-contain"
-                  sizes="(min-width: 1024px) 300px, 46vw"
+                  sizes={sizes}
                 />
                 {index === 3 && imageCount > 4 ? (
                   <span
