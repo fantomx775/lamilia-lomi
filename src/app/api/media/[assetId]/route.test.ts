@@ -94,10 +94,11 @@ describe("public media delivery", () => {
     expect(response.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
     expect(response.headers.get("etag")).toBe('"source-etag"');
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
-    expect(fetchImage).toHaveBeenCalledWith("https://media.example.com/current-cover.jpg", {
-      cache: "no-store",
-      signal: expect.any(AbortSignal),
-    });
+    const [sourceUrl, fetchOptions] = fetchImage.mock.calls[0] ?? [];
+    expect(String(sourceUrl)).toBe("https://media.example.com/current-cover.jpg");
+    expect(fetchOptions?.cache).toBe("no-store");
+    expect(fetchOptions?.redirect).toBe("error");
+    expect(fetchOptions?.signal?.aborted).toBe(false);
     expect(mocks.getPublicR2ImageAssetByIdForRequest).toHaveBeenCalledWith(assetId);
     expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
     expect(mocks.getProductByIdForRequest).not.toHaveBeenCalled();

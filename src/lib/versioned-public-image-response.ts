@@ -8,7 +8,16 @@ import { NextResponse } from "next/server";
 export async function versionedPublicImageResponse(request: Request, sourceUrl: string) {
   let upstream: Response;
   try {
-    upstream = await fetch(sourceUrl, { cache: "no-store", signal: request.signal });
+    const parsedSourceUrl = new URL(sourceUrl);
+    if (parsedSourceUrl.protocol !== "https:") {
+      throw new Error("The public image source must use HTTPS.");
+    }
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(10_000)]);
+    upstream = await fetch(parsedSourceUrl, {
+      cache: "no-store",
+      redirect: "error",
+      signal,
+    });
   } catch {
     throw new Error("The public image source request failed.");
   }

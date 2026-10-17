@@ -108,10 +108,13 @@ describe("category media version route", () => {
     expect(response.headers.get("content-type")).toBe("image/webp");
     expect(response.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
-    expect(fetchImage).toHaveBeenCalledWith(
+    const [sourceUrl, fetchOptions] = fetchImage.mock.calls[0] ?? [];
+    expect(String(sourceUrl)).toBe(
       "https://media.example.com/categories/" + categoryId + "/image/" + currentImageId + "-books.webp",
-      { cache: "no-store", signal: expect.any(AbortSignal) },
     );
+    expect(fetchOptions?.cache).toBe("no-store");
+    expect(fetchOptions?.redirect).toBe("error");
+    expect(fetchOptions?.signal?.aborted).toBe(false);
   });
 
   it("keeps legacy category media URLs as redirects", async () => {
@@ -152,10 +155,11 @@ describe("category media version route", () => {
     expect(response.headers.get("content-type")).toBe("image/png");
     expect(response.headers.get("location")).toBeNull();
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
-    expect(fetchImage).toHaveBeenCalledWith(signedUrl, {
-      cache: "no-store",
-      signal: expect.any(AbortSignal),
-    });
+    const [sourceUrl, fetchOptions] = fetchImage.mock.calls[0] ?? [];
+    expect(String(sourceUrl)).toBe(signedUrl);
+    expect(fetchOptions?.cache).toBe("no-store");
+    expect(fetchOptions?.redirect).toBe("error");
+    expect(fetchOptions?.signal?.aborted).toBe(false);
   });
 
   it("returns not found after the category image is removed", async () => {
