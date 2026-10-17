@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { hasAdminAccess } from "@/lib/auth";
 import { getBackendMode } from "@/lib/config";
+import { getPublicR2ImageAssetByIdForRequest } from "@/lib/content-repository";
 import { defaultLocale } from "@/lib/locale";
 import { isMediaKind, mediaBucketForKind, mediaFilenameForDisplay } from "@/lib/media-upload";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "@/lib/media-r2-config";
@@ -22,14 +23,20 @@ export async function GET(request: Request, { params }: Props) {
   }
 
   let asset: Awaited<ReturnType<typeof getAssetByIdForRequest>>;
-  let product: Awaited<ReturnType<typeof getProductByIdForRequest>> | null = null;
+  let product: { id: string; status: string } | null | undefined = null;
   let adminPreviewAuthorized = false;
 
   try {
-    asset = await getAssetByIdForRequest(assetId);
-    product = asset ? await getProductByIdForRequest(asset.productId) : null;
+    if (requestedVersion !== null && getBackendMode() !== "local") {
+      asset = await getPublicR2ImageAssetByIdForRequest(assetId);
+      product = asset ? { id: asset.productId, status: "published" } : null;
+      if (!asset) return notFoundMediaResponse();
+    } else {
+      asset = await getAssetByIdForRequest(assetId);
+      product = asset ? await getProductByIdForRequest(asset.productId) : null;
+    }
 
-    if (!asset || !product || product.status !== "published") {
+    if (requestedVersion === null && (!asset || !product || product.status !== "published")) {
       if (!hasAdminAccess(await getDemoSession())) {
         return notFoundMediaResponse();
       }

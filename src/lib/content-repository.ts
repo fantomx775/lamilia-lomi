@@ -33,6 +33,50 @@ export const getPublicContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: false }),
 );
 
+export async function getPublicR2ImageAssetByIdForRequest(assetId: string): Promise<ProductAsset | undefined> {
+  if (getBackendMode() === "local") return undefined;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("product_assets")
+    .select(`
+      id,
+      product_id,
+      kind,
+      bucket,
+      path,
+      filename,
+      content_type,
+      size_bytes,
+      locale,
+      title,
+      sort_order,
+      is_public,
+      is_active,
+      storage_provider,
+      product:products!product_assets_product_id_fkey ( status )
+    `)
+    .eq("id", assetId)
+    .eq("storage_provider", "r2_public")
+    .eq("is_public", true)
+    .eq("is_active", true)
+    .in("kind", ["cover", "gallery"])
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Supabase public R2 image lookup failed: ${error.message}`);
+  }
+  if (!data) return undefined;
+
+  const row = data as DbRow;
+  const product = row.product && typeof row.product === "object" && !Array.isArray(row.product)
+    ? row.product as DbRow
+    : null;
+  if (product?.status !== "published") return undefined;
+
+  return mapAsset(row, "published");
+}
+
 export const getPublicProductDetailSnapshotForRequest = cache(
   async (slug: string): Promise<ContentSnapshot | null> => {
     if (getBackendMode() === "local") {

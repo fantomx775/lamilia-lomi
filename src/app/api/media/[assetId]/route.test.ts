@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getDemoSession: vi.fn(),
   getBackendMode: vi.fn(),
   getProductByIdForRequest: vi.fn(),
+  getPublicR2ImageAssetByIdForRequest: vi.fn(),
   createServiceRoleClient: vi.fn(),
   createSignedR2ReadUrl: vi.fn(),
   getR2PublicBaseUrl: vi.fn(),
@@ -19,6 +20,9 @@ vi.mock("@/lib/media-r2-config", () => ({
   r2PublicMediaUrl: mocks.r2PublicMediaUrl,
 }));
 vi.mock("@/lib/media-r2", () => ({ createSignedR2ReadUrl: mocks.createSignedR2ReadUrl }));
+vi.mock("@/lib/content-repository", () => ({
+  getPublicR2ImageAssetByIdForRequest: mocks.getPublicR2ImageAssetByIdForRequest,
+}));
 vi.mock("@/lib/products-request", () => ({
   getAssetByIdForRequest: mocks.getAssetByIdForRequest,
   getProductByIdForRequest: mocks.getProductByIdForRequest,
@@ -38,6 +42,7 @@ describe("public media delivery", () => {
     mocks.hasAdminAccess.mockImplementation((session) => session?.role === "admin");
     mocks.getR2PublicBaseUrl.mockReturnValue(null);
     mocks.r2PublicMediaUrl.mockReturnValue(null);
+    mocks.getPublicR2ImageAssetByIdForRequest.mockResolvedValue(null);
   });
 
   it("rejects a mismatched explicit image version before reading media", async () => {
@@ -51,9 +56,9 @@ describe("public media delivery", () => {
     expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
   });
 
-  it("redirects the matching UUID-versioned public R2 image without optimizer caching", async () => {
+  it("redirects a current UUID-versioned public R2 image with a short redirect cache", async () => {
     mocks.getBackendMode.mockReturnValue("supabase");
-    mocks.getAssetByIdForRequest.mockResolvedValue({
+    mocks.getPublicR2ImageAssetByIdForRequest.mockResolvedValue({
       id: assetId,
       productId,
       kind: "cover",
@@ -67,7 +72,6 @@ describe("public media delivery", () => {
       isPublic: true,
       isActive: true,
     });
-    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
     mocks.getR2PublicBaseUrl.mockReturnValue("https://media.example.com");
     mocks.r2PublicMediaUrl.mockReturnValue("https://media.example.com/current-cover.jpg");
 
@@ -79,6 +83,9 @@ describe("public media delivery", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://media.example.com/current-cover.jpg");
     expect(response.headers.get("cache-control")).toBe("private, max-age=30");
+    expect(mocks.getPublicR2ImageAssetByIdForRequest).toHaveBeenCalledWith(assetId);
+    expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
+    expect(mocks.getProductByIdForRequest).not.toHaveBeenCalled();
     expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
   });
 

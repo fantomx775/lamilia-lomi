@@ -17,8 +17,78 @@ vi.mock("@/lib/supabase/server", () => ({
 
 import {
   getContentSnapshotForRequest,
+  getPublicR2ImageAssetByIdForRequest,
   getPublicProductDetailSnapshotForRequest,
 } from "./content-repository";
+
+describe("public R2 image metadata lookup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getBackendMode.mockReturnValue("supabase");
+  });
+
+  it("reads only the current published public R2 image and maps its versioned path", async () => {
+    const assetId = "11111111-1111-4111-8111-111111111199";
+    const productId = "11111111-1111-4111-8111-111111111111";
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: assetId,
+        product_id: productId,
+        kind: "cover",
+        bucket: "public-media",
+        path: `products/${productId}/cover/${assetId}-cover.jpg`,
+        filename: "cover.jpg",
+        content_type: "image/jpeg",
+        size_bytes: 12_345,
+        locale: null,
+        title: null,
+        sort_order: 1,
+        is_public: true,
+        is_active: true,
+        storage_provider: "r2_public",
+        product: { status: "published" },
+      },
+      error: null,
+    });
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      maybeSingle,
+    };
+    const from = vi.fn().mockReturnValue(query);
+    mocks.createClient.mockResolvedValue({ from });
+
+    const asset = await getPublicR2ImageAssetByIdForRequest(assetId);
+
+    expect(from).toHaveBeenCalledWith("product_assets");
+    expect(query.eq).toHaveBeenNthCalledWith(1, "id", assetId);
+    expect(query.eq).toHaveBeenNthCalledWith(2, "storage_provider", "r2_public");
+    expect(query.eq).toHaveBeenNthCalledWith(3, "is_public", true);
+    expect(query.eq).toHaveBeenNthCalledWith(4, "is_active", true);
+    expect(query.in).toHaveBeenCalledWith("kind", ["cover", "gallery"]);
+    expect(asset).toMatchObject({
+      id: assetId,
+      storageProvider: "r2_public",
+      path: `/api/media/${assetId}?v=${assetId}`,
+    });
+  });
+
+  it("does not return metadata for a non-published product", async () => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: { product: { status: "draft" } },
+        error: null,
+      }),
+    };
+    mocks.createClient.mockResolvedValue({ from: vi.fn().mockReturnValue(query) });
+
+    await expect(getPublicR2ImageAssetByIdForRequest("11111111-1111-4111-8111-111111111199")).resolves.toBeUndefined();
+  });
+});
 
 describe("admin content premium code pagination", () => {
   beforeEach(() => {
