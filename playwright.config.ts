@@ -22,6 +22,11 @@ export default defineConfig({
       name: "mobile",
       use: { ...devices["Pixel 7"] },
     },
+    {
+      name: "webkit-mobile",
+      testMatch: "**/issue-30-supabase-auth.spec.ts",
+      use: { ...devices["iPhone 13"], browserName: "webkit" },
+    },
   ],
   webServer: externalBaseUrl
     ? undefined
