@@ -15,6 +15,13 @@ const nextConfig: NextConfig = {
     dangerouslyAllowSVG: true,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     minimumCacheTTL: 60,
+    // Preserve static/local images while limiting dynamic query strings to the validated media APIs.
+    localPatterns: [
+      { pathname: "/assets/**", search: "" },
+      { pathname: "/uploads/**", search: "" },
+      { pathname: "/api/media/**" },
+      { pathname: "/api/category-media/**" },
+    ],
     remotePatterns: r2PublicBaseUrl
       ? [
         { protocol: "https", hostname: new URL(r2PublicBaseUrl).hostname, pathname: "/products/**" },
