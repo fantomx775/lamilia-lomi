@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
@@ -8,6 +8,13 @@ import { isLocalDemoAppTarget } from "./local-target";
 test.setTimeout(600_000);
 
 let releaseContentStoreLock: (() => void) | undefined;
+
+type UploadedAssetFixture = {
+  productId: string;
+  kind: "cover";
+  storagePath: string;
+  storageProvider: string;
+};
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
@@ -29,22 +36,27 @@ test.afterEach(() => {
 });
 
 test("product editor preserves work, saves all statuses, and keeps Save reachable", async ({ page, browser }, testInfo) => {
-  const suffix = `issue-25-${testInfo.project.name}`;
-  const titleText = `UX Product ${suffix}`;
-  const slug = `ux-product-${suffix.toLowerCase()}`;
   const shortDescription = "Temporary local product used to verify the complete editor flow.";
   const simulatedFailures: string[] = [];
   const browserDiagnostics = createBrowserDiagnostics();
   collectBrowserDiagnostics(page, browserDiagnostics);
   let productPath: string | undefined;
   let createdProductId: string | undefined;
-  let productSaved = false;
+  let createdProductSlug: string | undefined;
+  let uploadedAsset: UploadedAssetFixture | undefined;
+  let testFailed = false;
 
   try {
     await withExpectedNavigation(browserDiagnostics, "admin login redirect", () => signInAsAdmin(page));
-    await page.goto("/admin/products/new");
+    await withExpectedNavigation(browserDiagnostics, "open new product editor", () => page.goto("/admin/products/new"));
     await expect(page.getByRole("heading", { name: "Nowy produkt" })).toBeVisible();
-    createdProductId = await page.locator('#product-editor-form input[name="id"]').inputValue();
+    await waitForProductEditorReady(page);
+    const draftProductId = await page.locator('#product-editor-form input[name="id"]').inputValue();
+    createdProductId = draftProductId;
+    const suffix = ["issue-25", testInfo.project.name, draftProductId].join("-");
+    const titleText = "UX Product " + suffix;
+    const slug = "ux-product-" + suffix.toLowerCase();
+    createdProductSlug = slug;
 
     await page.getByLabel("Tytuł").fill(titleText);
     await page.getByLabel("Krótki opis").fill(shortDescription);
@@ -62,8 +74,21 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await page.getByLabel("Tytuł").fill(titleText);
     await page.route("**/*", async (route) => {
       const request = route.request();
-      if (request.method() === "POST" && request.headers()["next-action"] && simulatedFailures.length === 0) {
-        simulatedFailures.push(`${request.method()} ${request.url()}`);
+      if (
+        request.method() === "POST" &&
+        request.headers()["next-action"] &&
+        new URL(request.url()).pathname === "/admin/products/new" &&
+        simulatedFailures.length === 0
+      ) {
+        const requestUrl = sanitizeRequestUrl(request.url());
+        simulatedFailures.push(`${request.method()} ${requestUrl}`);
+        browserDiagnostics.expectedHttpFailures.push({
+          method: request.method(),
+          url: requestUrl,
+          status: 503,
+          serverAction: true,
+          reason: "The test deliberately injects one failed Server Action response to verify the editor retains submitted values.",
+        });
         await new Promise((resolve) => setTimeout(resolve, 400));
         await route.fulfill({ status: 503, contentType: "text/plain", body: "Simulated local save failure" });
         return;
@@ -81,20 +106,24 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
 
     await withExpectedNavigation(browserDiagnostics, "create product and open its editor", async () => {
       await page.getByRole("button", { name: /Zapisz/ }).click();
-      await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
-      productSaved = true;
+      await expect(page.getByText(/^(Zapisano\. Zmiany są aktualne\.|Zapisano zmiany\.)$/)).toBeVisible();
       await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+\?saved=1$/i);
+      productPath = new URL(page.url()).pathname;
+      createdProductId = productPath.split("/").at(-1)!;
     });
-    const verifiedProductPath = new URL(page.url()).pathname;
-    productPath = verifiedProductPath;
+    const verifiedProductPath = productPath!;
+    const persistedProductId = createdProductId!;
+    expect(persistedProductId).toMatch(/^[0-9a-f-]{36}$/i);
+    createdProductId = persistedProductId;
     await expect(page.getByText("Zapisano zmiany.", { exact: true })).toBeVisible();
     await waitForAdminTransition(page);
+    await expect(page.locator('#product-editor-form input[name="id"]')).toHaveValue(persistedProductId);
     await expect(page.getByLabel("Status")).toHaveValue("draft");
     await expect(page.getByLabel("Adres produktu")).toHaveValue(slug);
     await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("37");
     await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
 
-    if (testInfo.project.name === "mobile") {
+    if (testInfo.project.use.isMobile === true) {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     } else {
       await page.evaluate(() => window.scrollTo(0, 0));
@@ -107,7 +136,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     expect(saveBarBox).not.toBeNull();
     expect(viewport).not.toBeNull();
     expect(saveBarBox!.y + saveBarBox!.height).toBeLessThanOrEqual(viewport!.height + 1);
-    await saveScreenshot(page, `product-editor-${testInfo.project.name}.png`);
+    await saveScreenshot(page, testInfo, "product-editor-" + testInfo.project.name + ".png");
 
     await page.getByLabel("Pozycja w katalogu").fill("38");
     await expect(page.getByText("Zapisano zmiany.", { exact: true })).toHaveCount(0);
@@ -121,7 +150,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     });
 
     await withExpectedNavigation(browserDiagnostics, "dismiss beforeunload during reload", async () => {
-      const beforeUnload = page.waitForEvent("dialog");
+      const beforeUnload = page.waitForEvent("dialog", { timeout: 5_000 });
       const reload = page.reload({ waitUntil: "domcontentloaded" }).catch(() => undefined);
       const dialog = await beforeUnload;
       expect(dialog.type()).toBe("beforeunload");
@@ -140,6 +169,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
       await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
       await page.reload();
+      await waitForProductEditorReady(page);
       await expect(page.getByLabel("Adres produktu")).toHaveValue(slug);
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
       await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
@@ -155,7 +185,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
 
     await withExpectedNavigation(browserDiagnostics, "dismiss unsaved Forward navigation", async () => {
-      const cancelForwardPromise = page.waitForEvent("dialog");
+      const cancelForwardPromise = page.waitForEvent("dialog", { timeout: 5_000 });
       void page.goForward().catch(() => null);
       const cancelForwardDialog = await cancelForwardPromise;
       expect(cancelForwardDialog.type()).toBe("confirm");
@@ -165,7 +195,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     });
 
     await withExpectedNavigation(browserDiagnostics, "accept Forward navigation and reopen editor", async () => {
-      const acceptForwardPromise = page.waitForEvent("dialog");
+      const acceptForwardPromise = page.waitForEvent("dialog", { timeout: 5_000 });
       void page.goForward().catch(() => null);
       const acceptForwardDialog = await acceptForwardPromise;
       expect(acceptForwardDialog.type()).toBe("confirm");
@@ -209,26 +239,44 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await page.getByRole("button", { name: /Zapisz/ }).click();
       await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
 
-      await page.locator("#media-upload-cover").setInputFiles({
-        name: "ux-cover.png",
-        mimeType: "image/png",
-        buffer: makePng(),
-      });
+      await uploadCoverFixture(page, testInfo, browserDiagnostics);
       await expect(page.getByText("Przesłano", { exact: true })).toBeVisible();
+      const uploadedPath = await page.locator('#product-editor-form input[name="assetPath"]').last().inputValue();
+      const uploadedProvider = await page.locator('#product-editor-form input[name="assetStorageProvider"]').last().inputValue();
+      uploadedAsset = {
+        productId: persistedProductId,
+        kind: "cover",
+        storagePath: uploadedPath,
+        storageProvider: uploadedProvider,
+      };
+      expect(uploadedPath).toBe("/uploads/" + persistedProductId + "/cover/ux-cover.png");
+      await expect(page.locator('#product-editor-form input[name="assetUploaded"]').last()).toHaveValue("1");
       await page.getByRole("button", { name: "Dodaj rynek" }).click();
-      await page.getByLabel("Link").fill("https://www.amazon.com/dp/B0UXTEST25");
+      await page.locator('#product-editor-form input[name="amazonUrl"]').last().fill("https://www.amazon.com/dp/B0UXTEST25");
       await page.getByLabel("Status").selectOption("published");
       await page.getByRole("button", { name: /Zapisz/ }).click();
       await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+      await expect.poll(() => readLocalProduct(persistedProductId)?.status).toBe("published");
       await expect(page.locator("form header").getByText("Opublikowany", { exact: true })).toBeVisible();
       await expect(page.getByLabel("Status")).toHaveValue("published");
       await page.reload();
+      await expect(page.getByTestId("product-save-bar")).toBeVisible();
+      await expect(page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ })).toBeEnabled();
       await expect(page.getByLabel("Status")).toHaveValue("published");
       await expect(page.locator("form header").getByText("Opublikowany", { exact: true })).toBeVisible();
+      await expect(page.locator('#product-editor-form input[name="assetPath"]').last()).toHaveValue(uploadedPath);
+      expect(readLocalProduct(persistedProductId)?.assets).toContainEqual(
+        expect.objectContaining({ kind: "cover", path: uploadedPath }),
+      );
 
-      await page.getByLabel("Status").selectOption("archived");
-      await page.getByRole("button", { name: /Zapisz/ }).click();
+      const statusSelector = page.locator('#product-editor-form select[name="status"]');
+      await statusSelector.selectOption("archived");
+      await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
+      await expect(page.locator('#product-editor-form select[name="status"]')).toHaveValue("archived");
+      expect(await page.locator("#product-editor-form").evaluate((form) => new FormData(form as HTMLFormElement).get("status"))).toBe("archived");
+      await page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ }).click();
       await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
+      await expect.poll(() => readLocalProduct(persistedProductId)?.status).toBe("archived");
       await expect(page.locator("form header").getByText("Zarchiwizowany", { exact: true })).toBeVisible();
       await expect(page.getByLabel("Status")).toHaveValue("archived");
       await page.reload();
@@ -245,9 +293,9 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         await noJsContext.addCookies(await page.context().cookies());
         const noJsPage = await noJsContext.newPage();
         collectBrowserDiagnostics(noJsPage, browserDiagnostics);
-        await noJsPage.goto(productPath, { waitUntil: "domcontentloaded" });
+        await noJsPage.goto(verifiedProductPath, { waitUntil: "domcontentloaded" });
         const form = noJsPage.locator("#product-editor-form");
-        await form.waitFor({ state: "attached" });
+        await expect(form).toBeVisible();
         await expect(form).toHaveAttribute("method", "POST");
       } finally {
         await noJsContext.close();
@@ -260,13 +308,17 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           Object.defineProperty(window, "navigation", { configurable: true, value: undefined });
         });
         const legacyPage = await legacyContext.newPage();
+        await legacyPage.bringToFront();
         collectBrowserDiagnostics(legacyPage, browserDiagnostics);
-        await legacyPage.goto(productPath);
+        await legacyPage.goto(verifiedProductPath);
+        await waitForProductEditorReady(legacyPage);
         await withExpectedNavigation(browserDiagnostics, "legacy browser Back/Forward and internal navigation", async () => {
           await legacyPage.locator('a[href="/admin/products"]').last().click();
           await expect(legacyPage).toHaveURL(/\/admin\/products$/);
           await legacyPage.goBack();
           await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
+          await waitForProductEditorReady(legacyPage);
+          await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
           await legacyPage.getByLabel("Pozycja w katalogu").fill("41");
 
           const cancelLegacyForwardPromise = legacyPage.waitForEvent("dialog", { timeout: 5_000 });
@@ -285,6 +337,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           await expect(legacyPage).toHaveURL(/\/admin\/products$/);
           await legacyPage.getByRole("link", { name: titleText, exact: false }).click();
           await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
+          await waitForProductEditorReady(legacyPage);
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
 
           await legacyPage.getByLabel("Pozycja w katalogu").fill("43");
@@ -296,6 +349,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           await expect(legacyPage).toHaveURL(/\/admin\/products$/);
           await legacyPage.goBack();
           await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
+          await waitForProductEditorReady(legacyPage);
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
           await legacyPage.getByLabel("Pozycja w katalogu").fill("44");
 
@@ -325,82 +379,149 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         await legacyContext.close();
       }
     }
+  } catch (error) {
+    testFailed = true;
+    throw error;
   } finally {
-    const cleanupPath = productPath ?? (productSaved && createdProductId ? `/admin/products/${createdProductId}` : undefined);
-    if (cleanupPath) {
-      const acceptDialogs = (dialog: import("@playwright/test").Dialog) => void dialog.accept();
-      page.on("dialog", acceptDialogs);
+    const cleanupFailures: unknown[] = [];
+    try {
+      const savedProductId = createdProductSlug
+        ? readLocalProductBySlug(createdProductSlug)?.id
+        : undefined;
+      const cleanupProductId = savedProductId ?? (createdProductId && readLocalProduct(createdProductId)
+        ? createdProductId
+        : undefined);
+      if (cleanupProductId) {
+        createdProductId = cleanupProductId;
+        const cleanupPath = productPath ?? "/admin/products/" + cleanupProductId;
+        try {
+          await withExpectedNavigation(browserDiagnostics, "delete test product and verify cleanup", async () => {
+            await deleteProductFixture(page, cleanupProductId, cleanupPath);
+          });
+        } catch (error) {
+          cleanupFailures.push(error);
+        }
+      }
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+
+    try {
+      if (uploadedAsset) {
+        const cleanupResponse = await page.request.delete(
+          new URL("/api/admin/assets", new URL(page.url()).origin).href,
+          { data: uploadedAsset },
+        );
+        const cleanupBody = await cleanupResponse.text();
+        expect(cleanupResponse.ok(), `Asset cleanup failed: ${cleanupResponse.status()} ${cleanupBody}`).toBe(true);
+        expect(JSON.parse(cleanupBody)).toEqual({ ok: true, cleanupDeferred: false });
+      }
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+
+    const cleanupProductId = uploadedAsset?.productId ?? (createdProductSlug
+      ? readLocalProductBySlug(createdProductSlug)?.id ?? createdProductId
+      : createdProductId);
+    if (cleanupProductId) {
+      let uploadDirectory: string | undefined;
       try {
-        await withExpectedNavigation(browserDiagnostics, "delete test product and verify cleanup", async () => {
-          await page.goto(cleanupPath);
-          const localContentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
-          await page.getByRole("button", { name: "Usuń produkt" }).click();
-          await expect(page).toHaveURL(/\/admin\/products\?deleted=1$/);
-          const productId = cleanupPath.split("/").at(-1)!;
-          if (fs.existsSync(localContentPath)) {
-            const snapshot = JSON.parse(fs.readFileSync(localContentPath, "utf8")) as {
-              products?: Array<{ id?: string }>;
-            };
-            expect(snapshot.products?.some((product) => product.id === productId)).not.toBe(true);
-          }
-          const uploadDirectory = path.resolve(process.cwd(), "public", "uploads", productId);
+        uploadDirectory = productUploadDirectory(cleanupProductId);
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
+      if (uploadDirectory) {
+        try {
           if (fs.existsSync(uploadDirectory)) {
             expect(listFilesRecursively(uploadDirectory)).toEqual([]);
           }
-        });
-      } finally {
-        page.off("dialog", acceptDialogs);
-      }
-    }
-    if (productSaved) {
-      for (const request of browserDiagnostics.failedRequests) {
-        if (
-          request.method === "POST" &&
-          new URL(request.url).pathname === "/admin/products/new" &&
-          request.error === "net::ERR_ABORTED" &&
-          request.disposition === "unresolved"
-        ) {
-          request.disposition = "expected";
-          request.reason = "Next canceled the create Server Action while opening the saved editor; persisted fields were verified after reload and the product was deleted during cleanup.";
+        } catch (error) {
+          cleanupFailures.push(error);
+        }
+        try {
+          fs.rmSync(uploadDirectory, { recursive: true, force: true });
+        } catch (error) {
+          cleanupFailures.push(error);
         }
       }
     }
+
     await testInfo.attach("browser-diagnostics.json", {
       body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
       contentType: "application/json",
     });
     console.log(`BROWSER_DIAGNOSTICS ${testInfo.project.name} ${JSON.stringify(browserDiagnostics)}`);
-    assertBrowserDiagnosticsClean(browserDiagnostics);
+    if (testFailed) {
+      if (cleanupFailures.length > 0) {
+        console.error(`SECONDARY_CLEANUP_FAILURES ${JSON.stringify(cleanupFailures.map(formatError))}`);
+      }
+      try {
+        assertBrowserDiagnosticsClean(browserDiagnostics);
+      } catch (error) {
+        console.error(`SECONDARY_BROWSER_DIAGNOSTICS_FAILURE ${formatError(error)}`);
+      }
+    } else {
+      if (cleanupFailures.length > 0) throw cleanupFailures[0];
+      assertBrowserDiagnosticsClean(browserDiagnostics);
+    }
   }
 });
 
 test("product editor keeps submitted values after a no-JavaScript save error", async ({ page, browser }, testInfo) => {
-  test.skip(testInfo.project.name !== "chromium", "The no-JavaScript form fallback is checked in Chromium.");
   test.setTimeout(60_000);
 
   await signInAsAdmin(page);
-  const context = await browser.newContext({
-    baseURL: new URL(page.url()).origin,
-    javaScriptEnabled: false,
-    storageState: await page.context().storageState(),
-  });
+  await page.goto("/admin/products/new", { waitUntil: "load", timeout: 15_000 });
+  const interactiveForm = page.locator("#product-editor-form");
+  await expect(interactiveForm).toBeVisible({ timeout: 15_000 });
+  const saveButton = page.getByTestId("product-save-bar").getByRole("button", { name: "Zapisz", exact: true });
+  await expect(saveButton).toBeVisible();
+  const saveButtonBox = await saveButton.boundingBox();
+  const viewport = page.viewportSize();
+  expect(saveButtonBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(saveButtonBox!.y + saveButtonBox!.height).toBeLessThanOrEqual(viewport!.height + 1);
+
   const browserDiagnostics = createBrowserDiagnostics();
+  let context: import("@playwright/test").BrowserContext | undefined;
+  let submittedProductId: string | undefined;
+  let submittedSlug: string | undefined;
+  let testFailed = false;
+  const cleanupFailures: unknown[] = [];
 
   try {
+    context = await browser.newContext({
+      baseURL: new URL(page.url()).origin,
+      javaScriptEnabled: false,
+      storageState: await page.context().storageState(),
+      viewport: page.viewportSize(),
+      isMobile: testInfo.project.use.isMobile === true,
+      hasTouch: testInfo.project.use.hasTouch === true,
+      deviceScaleFactor: typeof testInfo.project.use.deviceScaleFactor === "number"
+        ? testInfo.project.use.deviceScaleFactor
+        : 1,
+    });
+    const sessionCookies = await context.cookies();
+    expect(sessionCookies.map(({ name }) => name)).toContain("ll_demo_session");
     const noJsPage = await context.newPage();
     collectBrowserDiagnostics(noJsPage, browserDiagnostics);
-    await noJsPage.goto("/admin/products/new", { waitUntil: "domcontentloaded", timeout: 15_000 });
-    await expect(noJsPage.locator("#product-editor-form")).toBeVisible({ timeout: 15_000 });
-    const titleInput = noJsPage.getByLabel("Tytuł");
-    const title = `No JS retained ${Date.now()}`;
+    await noJsPage.goto("/admin/products/new", { waitUntil: "load", timeout: 15_000 });
+    await expect(noJsPage).toHaveURL(/\/admin\/products\/new$/);
+    const form = noJsPage.locator("#product-editor-form");
+    await expect(form).toBeVisible();
+    await expect(form).toHaveAttribute("method", "POST");
+    submittedProductId = await form.locator('input[name="id"]').inputValue();
+    const title = "No JS retained " + Date.now();
     const description = "Submitted values survive a server validation error without JavaScript.";
-    await titleInput.fill(title, { timeout: 10_000 });
-    await noJsPage.getByLabel("Krótki opis").fill(description, { timeout: 10_000 });
-    await noJsPage.getByLabel("Adres produktu").fill(`no-js-retained-${Date.now()}`, { timeout: 10_000 });
-    await noJsPage.getByLabel("Pozycja w katalogu").fill("73", { timeout: 10_000 });
-    await noJsPage.getByLabel("Status").selectOption("published", { timeout: 10_000 });
+    const slug = "no-js-retained-" + Date.now();
+    submittedSlug = slug;
+    await noJsPage.getByLabel("Tytuł").fill(title);
+    await noJsPage.getByLabel("Krótki opis").fill(description);
+    await noJsPage.getByLabel("Adres produktu").fill(slug);
+    await noJsPage.getByLabel("Pozycja w katalogu").fill("73");
+    await noJsPage.getByLabel("Status").selectOption("published");
 
-    const saveButton = noJsPage.getByRole("button", { name: /Zapisz produkt/ });
+    const saveButton = noJsPage.getByRole("button", { name: "Zapisz produkt", exact: true });
     await expect(saveButton).toBeVisible();
     const saveButtonBox = await saveButton.boundingBox();
     const viewport = noJsPage.viewportSize();
@@ -409,25 +530,62 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
     expect(saveButtonBox!.y + saveButtonBox!.height).toBeLessThanOrEqual(viewport!.height + 1);
 
     const responsePromise = noJsPage.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 20_000 });
-    await saveButton.click({ timeout: 10_000 });
+    await saveButton.click();
     const response = await responsePromise;
     expect(response?.ok()).toBe(true);
-    await expect(noJsPage.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeVisible();
+    expect(response?.request().method()).toBe("POST");
+    const responseHtml = await response!.text();
+    expect(responseHtml).toContain("Nie udało się zapisać. Twoje wpisane wartości są zachowane.");
+    expect(responseHtml).toContain(description);
+    expect(responseHtml).toContain(slug);
     await expect(noJsPage.getByLabel("Tytuł")).toHaveValue(title);
     await expect(noJsPage.getByLabel("Krótki opis")).toHaveValue(description);
-    await expect(titleInput).not.toHaveAttribute("aria-invalid", "true");
+    await expect(noJsPage.getByLabel("Tytuł")).not.toHaveAttribute("aria-invalid", "true");
     await expect(noJsPage.getByLabel("Krótki opis")).not.toHaveAttribute("aria-invalid", "true");
-    await expect(noJsPage.getByLabel("Adres produktu")).toHaveValue(/no-js-retained-/);
+    await expect(noJsPage.getByLabel("Adres produktu")).toHaveValue(slug);
     await expect(noJsPage.getByLabel("Pozycja w katalogu")).toHaveValue("73");
     await expect(noJsPage.getByLabel("Status")).toHaveValue("published");
+    expect(readLocalProduct(submittedProductId)).toBeUndefined();
+  } catch (error) {
+    testFailed = true;
+    throw error;
   } finally {
-    await context.close();
-    await testInfo.attach("browser-diagnostics.json", {
-      body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
-      contentType: "application/json",
-    });
+    try {
+      await context?.close();
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
+    const accidentallySavedProduct = (submittedProductId ? readLocalProduct(submittedProductId) : undefined) ??
+      (submittedSlug ? readLocalProductBySlug(submittedSlug) : undefined);
+    if (accidentallySavedProduct?.id) {
+      try {
+        await deleteProductFixture(page, accidentallySavedProduct.id);
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
+    }
+    try {
+      await testInfo.attach("browser-diagnostics.json", {
+        body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
+        contentType: "application/json",
+      });
+    } catch (error) {
+      cleanupFailures.push(error);
+    }
     console.log(`BROWSER_DIAGNOSTICS no-js ${JSON.stringify(browserDiagnostics)}`);
-    assertBrowserDiagnosticsClean(browserDiagnostics);
+    if (testFailed) {
+      if (cleanupFailures.length > 0) {
+        console.error(`SECONDARY_CLEANUP_FAILURES ${JSON.stringify(cleanupFailures.map(formatError))}`);
+      }
+      try {
+        assertBrowserDiagnosticsClean(browserDiagnostics);
+      } catch (error) {
+        console.error(`SECONDARY_BROWSER_DIAGNOSTICS_FAILURE ${formatError(error)}`);
+      }
+    } else {
+      if (cleanupFailures.length > 0) throw cleanupFailures[0];
+      assertBrowserDiagnosticsClean(browserDiagnostics);
+    }
   }
 });
 
@@ -443,29 +601,70 @@ async function signInAsAdmin(page: Page) {
 
 function createBrowserDiagnostics() {
   return {
-    consoleErrors: [] as Array<{ message: string; disposition: string; reason?: string }>,
+    consoleErrors: [] as Array<{
+      message: string;
+      disposition: string;
+      reason?: string;
+      networkStatus?: number;
+      networkError?: string;
+      networkUrl?: string;
+    }>,
     pageErrors: [] as string[],
-    failedRequests: [] as Array<{ method: string; url: string; error: string | null; disposition: string; reason?: string }>,
+    failedRequests: [] as Array<{
+      method: string;
+      url: string;
+      error: string | null;
+      disposition: string;
+      reason?: string;
+      navigationPhase?: string;
+      sourcePage?: string;
+      resourceType?: string;
+      navigationRequest?: boolean;
+      serverAction?: boolean;
+    }>,
     failedResponses: [] as Array<{ method: string; url: string; status: number; disposition: string; reason?: string }>,
+    expectedHttpFailures: [] as Array<{
+      method: string;
+      url: string;
+      status: number;
+      serverAction?: boolean;
+      contentTypePrefix?: string;
+      reason: string;
+    }>,
     pendingNavigationPhases: [] as string[],
   };
 }
 
 function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof createBrowserDiagnostics>) {
+  const requestContexts = new WeakMap<import("@playwright/test").Request, { navigationPhase?: string; sourcePage: string }>();
+  page.on("request", (request) => {
+    const pendingPhase = diagnostics.pendingNavigationPhases.at(-1);
+    const currentPageUrl = page.url();
+    requestContexts.set(request, {
+      ...(pendingPhase ? { navigationPhase: pendingPhase } : {}),
+      sourcePage: currentPageUrl.startsWith("http") ? sanitizeRequestUrl(currentPageUrl) : currentPageUrl,
+    });
+  });
   page.on("console", (message) => {
     if (message.type() !== "error") return;
     const text = message.text();
-    if (text.includes("status of 503")) {
+    const messageUrl = message.location().url;
+    const networkUrl = messageUrl?.startsWith("http") ? sanitizeRequestUrl(messageUrl) : undefined;
+    const httpStatus = text.match(/^Failed to load resource: the server responded with a status of (\d+)/);
+    const networkError = text.match(/^Failed to load resource:\s*(net::[^\s]+)/);
+    if (httpStatus) {
       diagnostics.consoleErrors.push({
         message: text,
-        disposition: "expected",
-        reason: "The test deliberately returns HTTP 503 once to verify retained form values after a failed save.",
+        disposition: "network",
+        networkStatus: Number(httpStatus[1]),
+        ...(networkUrl ? { networkUrl } : {}),
       });
-    } else if (text.includes("status of 415")) {
+    } else if (networkError) {
       diagnostics.consoleErrors.push({
         message: text,
-        disposition: "expected",
-        reason: "Local upload mode intentionally returns 415 to select the multipart fallback, which the test verifies succeeds.",
+        disposition: "network",
+        networkError: networkError[1],
+        ...(networkUrl ? { networkUrl } : {}),
       });
     } else {
       diagnostics.consoleErrors.push({ message: text, disposition: "unresolved" });
@@ -476,36 +675,52 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
     const error = request.failure()?.errorText ?? null;
     const url = new URL(request.url());
     const sanitizedUrl = sanitizeRequestUrl(request.url());
-    const pendingPhase = diagnostics.pendingNavigationPhases.at(-1);
-    if (error === "net::ERR_ABORTED" && request.resourceType() === "font") {
+    const requestContext = requestContexts.get(request);
+    const requestPhase = requestContext?.navigationPhase;
+    const requestDetails = {
+      method: request.method(),
+      url: sanitizedUrl,
+      error,
+      ...(requestPhase ? { navigationPhase: requestPhase } : {}),
+      ...(requestContext ? { sourcePage: requestContext.sourcePage } : {}),
+      resourceType: request.resourceType(),
+      navigationRequest: request.isNavigationRequest(),
+      serverAction: Boolean(request.headers()["next-action"]),
+    };
+    const isCancelled = error === "net::ERR_ABORTED" || error === "Load request cancelled";
+    if (isCancelled && request.resourceType() === "font" && requestPhase) {
       diagnostics.failedRequests.push({
-        method: request.method(),
-        url: sanitizedUrl,
-        error,
+        ...requestDetails,
         disposition: "expected",
-        reason: "The browser canceled a font fetch while replacing the document during navigation; page content and saved fields are verified after navigation or reload.",
+        reason: `The browser canceled a font fetch during the explicitly asserted ${requestPhase} phase; its destination and page content are verified by that phase.`,
       });
-    } else if (error === "net::ERR_ABORTED" && pendingPhase && isVerifiedEditorNavigationRequest(request, url)) {
+    } else if (
+      isCancelled &&
+      request.resourceType() === "image" &&
+      url.pathname === "/_next/image" &&
+      requestPhase === "save edited product, leave, reopen, and reload" &&
+      requestContext?.sourcePage.endsWith("/admin/products")
+    ) {
       diagnostics.failedRequests.push({
-        method: request.method(),
-        url: sanitizedUrl,
-        error,
+        ...requestDetails,
         disposition: "expected",
-        reason: `The browser canceled a ${describeEditorNavigationRequest(request, url)} during the explicitly asserted ${pendingPhase} phase.`,
+        reason: "The browser canceled a pending optimized product-list image when the test immediately reopened the editor; both route destinations and the saved product state are asserted.",
+      });
+    } else if (isCancelled && requestPhase && isVerifiedEditorNavigationRequest(request, url)) {
+      diagnostics.failedRequests.push({
+        ...requestDetails,
+        disposition: "expected",
+        reason: `The browser canceled a ${describeEditorNavigationRequest(request, url)} during the explicitly asserted ${requestPhase} phase.`,
       });
     } else if (error === "csp" && url.pathname.includes("browser_dev_hmr-client")) {
       diagnostics.failedRequests.push({
-        method: request.method(),
-        url: sanitizedUrl,
-        error,
+        ...requestDetails,
         disposition: "unrelated",
         reason: "The local Next.js development HMR client is blocked by the app CSP; this development-only bundle is not used in Production.",
       });
     } else {
       diagnostics.failedRequests.push({
-        method: request.method(),
-        url: sanitizedUrl,
-        error,
+        ...requestDetails,
         disposition: "unresolved",
       });
     }
@@ -514,23 +729,22 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
     if (response.status() < 400) return;
     const request = response.request();
     const url = sanitizeRequestUrl(request.url());
-    if (response.status() === 503 && request.method() === "POST" && Boolean(request.headers()["next-action"])) {
+    const contentType = request.headers()["content-type"] ?? "";
+    const expectedFailureIndex = diagnostics.expectedHttpFailures.findIndex((expected) =>
+      expected.method === request.method() &&
+      expected.url === url &&
+      expected.status === response.status() &&
+      (expected.serverAction === undefined || expected.serverAction === Boolean(request.headers()["next-action"])) &&
+      (expected.contentTypePrefix === undefined || contentType.startsWith(expected.contentTypePrefix))
+    );
+    if (expectedFailureIndex !== -1) {
+      const [expectedFailure] = diagnostics.expectedHttpFailures.splice(expectedFailureIndex, 1);
       diagnostics.failedResponses.push({
         method: request.method(),
         url,
         status: response.status(),
         disposition: "expected",
-        reason: "The test deliberately injects one failed Server Action response to verify the editor retains submitted values.",
-      });
-      return;
-    }
-    if (response.status() === 415 && request.method() === "POST" && new URL(request.url()).pathname === "/api/admin/assets") {
-      diagnostics.failedResponses.push({
-        method: request.method(),
-        url,
-        status: response.status(),
-        disposition: "expected",
-        reason: "The local upload endpoint selects the multipart fallback; the upload then succeeds and appears in the editor.",
+        reason: expectedFailure.reason,
       });
       return;
     }
@@ -565,10 +779,65 @@ function describeEditorNavigationRequest(request: import("@playwright/test").Req
 }
 
 function assertBrowserDiagnosticsClean(diagnostics: ReturnType<typeof createBrowserDiagnostics>) {
-  expect(diagnostics.consoleErrors.filter(({ disposition }) => disposition === "unresolved")).toEqual([]);
-  expect(diagnostics.pageErrors).toEqual([]);
-  expect(diagnostics.failedRequests.filter(({ disposition }) => disposition === "unresolved")).toEqual([]);
-  expect(diagnostics.failedResponses.filter(({ disposition }) => disposition === "unresolved")).toEqual([]);
+  const unmatchedNetworkConsoleErrors: string[] = [];
+  const consumedResponseIndexes = new Set<number>();
+  const consumedRequestIndexes = new Set<number>();
+  diagnostics.consoleErrors.forEach((consoleError) => {
+    if (consoleError.networkStatus !== undefined) {
+      const matchingResponseIndex = diagnostics.failedResponses.findIndex((response, index) =>
+        !consumedResponseIndexes.has(index) &&
+        response.status === consoleError.networkStatus &&
+        consoleError.networkUrl !== undefined && response.url === consoleError.networkUrl
+      );
+      if (matchingResponseIndex === -1) {
+        unmatchedNetworkConsoleErrors.push(consoleError.message);
+      } else {
+        consumedResponseIndexes.add(matchingResponseIndex);
+      }
+    }
+    if (consoleError.networkError) {
+      const matchingRequestIndex = diagnostics.failedRequests.findIndex((request, index) =>
+        !consumedRequestIndexes.has(index) &&
+        request.error === consoleError.networkError &&
+        consoleError.networkUrl !== undefined && request.url === consoleError.networkUrl
+      );
+      if (matchingRequestIndex === -1) {
+        unmatchedNetworkConsoleErrors.push(consoleError.message);
+      } else {
+        consumedRequestIndexes.add(matchingRequestIndex);
+      }
+    }
+  });
+  const unresolved = {
+    consoleErrors: diagnostics.consoleErrors.filter(({ disposition }) => disposition === "unresolved"),
+    pageErrors: diagnostics.pageErrors,
+    failedRequests: diagnostics.failedRequests.filter(({ disposition }) => disposition === "unresolved"),
+    failedResponses: diagnostics.failedResponses.filter(({ disposition }) => disposition === "unresolved"),
+    unmatchedNetworkConsoleErrors,
+    expectedHttpFailuresNotObserved: diagnostics.expectedHttpFailures,
+  };
+  expect(unresolved, JSON.stringify(unresolved, null, 2)).toEqual({
+    consoleErrors: [],
+    pageErrors: [],
+    failedRequests: [],
+    failedResponses: [],
+    unmatchedNetworkConsoleErrors: [],
+    expectedHttpFailuresNotObserved: [],
+  });
+}
+
+function formatError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${message} within ${timeoutMs}ms.`)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
 }
 
 async function withExpectedNavigation<T>(
@@ -590,9 +859,124 @@ function sanitizeRequestUrl(requestUrl: string) {
   return `${url.origin}${url.pathname}`;
 }
 
-async function saveScreenshot(page: Page, filename: string) {
-  const directory = path.resolve(process.cwd(), "docs", "verification", "issue-25");
-  fs.mkdirSync(directory, { recursive: true });
+function readLocalProduct(productId: string) {
+  const contentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
+  if (!fs.existsSync(contentPath)) return undefined;
+  const snapshot = JSON.parse(fs.readFileSync(contentPath, "utf8")) as {
+    products?: Array<{ id?: string; status?: string; assets?: Array<{ kind?: string; path?: string }> }>;
+  };
+  return snapshot.products?.find((product) => product.id === productId);
+}
+
+function readLocalProductBySlug(slug: string) {
+  const contentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
+  if (!fs.existsSync(contentPath)) return undefined;
+  const snapshot = JSON.parse(fs.readFileSync(contentPath, "utf8")) as {
+    products?: Array<{ id?: string; slug?: string }>;
+  };
+  return snapshot.products?.find((product) => product.slug === slug);
+}
+
+async function uploadCoverFixture(
+  page: Page,
+  testInfo: TestInfo,
+  diagnostics: ReturnType<typeof createBrowserDiagnostics>,
+) {
+  let multipartRequestBodySize: number | undefined;
+  let routeContinuationFailure: unknown;
+  let multipartRouteStarted = false;
+  let signalMultipartRequestStarted!: () => void;
+  let releaseMultipartResponse!: () => void;
+  let finishMultipartRoute!: () => void;
+  const multipartRequestStarted = new Promise<void>((resolve) => {
+    signalMultipartRequestStarted = resolve;
+  });
+  const multipartResponseGate = new Promise<void>((resolve) => {
+    releaseMultipartResponse = resolve;
+  });
+  const multipartRouteCompleted = new Promise<void>((resolve) => {
+    finishMultipartRoute = resolve;
+  });
+  const multipartResponseResult = page.waitForResponse((response) => {
+    const request = response.request();
+    return request.method() === "POST" && request.headers()["content-type"]?.includes("multipart/form-data") === true;
+  }, { timeout: 20_000 }).then(
+    (response) => ({ response } as const),
+    (error: unknown) => ({ error } as const),
+  );
+  const handler = async (route: import("@playwright/test").Route) => {
+    const request = route.request();
+    if (request.method() === "POST" && request.headers()["content-type"]?.includes("multipart/form-data")) {
+      multipartRouteStarted = true;
+      multipartRequestBodySize = request.postDataBuffer()?.length ?? 0;
+      signalMultipartRequestStarted();
+      try {
+        await multipartResponseGate;
+        await route.continue();
+      } catch (error) {
+        routeContinuationFailure = error;
+      } finally {
+        finishMultipartRoute();
+      }
+      return;
+    }
+    await route.continue();
+  };
+  await page.route("**/api/admin/assets", handler);
+  diagnostics.expectedHttpFailures.push({
+    method: "POST",
+    url: sanitizeRequestUrl(new URL("/api/admin/assets", page.url()).toString()),
+    status: 415,
+    serverAction: false,
+    contentTypePrefix: "application/json",
+    reason: "The local upload endpoint rejects JSON metadata with 415 to select the multipart fallback; the multipart upload is then verified successful and visible in the editor.",
+  });
+
+  const fixturePath = testInfo.outputPath("ux-cover.png");
+  fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
+  fs.writeFileSync(fixturePath, makePng());
+  const fileSelection = page.locator("#media-upload-cover").setInputFiles(fixturePath);
+
+  try {
+    await fileSelection;
+    await withTimeout(multipartRequestStarted, 15_000, "Asset upload request did not start");
+    expect(multipartRequestBodySize).toBeGreaterThan(0);
+    await page.getByText("ux-cover.png", { exact: true }).waitFor({ state: "visible" });
+    await expect(page.getByText("Przesyłanie…", { exact: true })).toBeVisible();
+  } finally {
+    releaseMultipartResponse();
+    try {
+      if (multipartRouteStarted) {
+        await withTimeout(multipartRouteCompleted, 15_000, "Asset upload route did not finish");
+      }
+    } finally {
+      await page.unroute("**/api/admin/assets", handler);
+    }
+  }
+
+  const responseResult = await multipartResponseResult;
+  if ("error" in responseResult) throw responseResult.error;
+  const response = responseResult.response;
+  const responseBody = response.ok() ? "" : await response.text();
+  expect(routeContinuationFailure, formatError(routeContinuationFailure)).toBeUndefined();
+  expect(response.status(), `Multipart upload failed: ${response.status()} ${responseBody}`).toBe(200);
+}
+
+function productUploadDirectory(productId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(productId)) {
+    throw new Error("The test product ID is not a UUID; refusing to clean an upload directory.");
+  }
+  const root = path.resolve(process.cwd(), "public", "uploads");
+  const directory = path.resolve(root, productId);
+  if (!directory.startsWith(root + path.sep)) {
+    throw new Error("The test upload directory is outside public/uploads.");
+  }
+  return directory;
+}
+
+async function saveScreenshot(page: Page, testInfo: TestInfo, filename: string) {
+  const screenshotPath = testInfo.outputPath(filename);
+  fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   const productId = page.getByText(/^ID: /);
   const productIdBounds = await productId.boundingBox();
@@ -600,11 +984,12 @@ async function saveScreenshot(page: Page, filename: string) {
   const visibleProductId = productIdBounds && viewport && productIdBounds.y < viewport.height &&
     productIdBounds.y + productIdBounds.height > 0;
   await page.screenshot({
-    path: path.join(directory, filename),
+    path: screenshotPath,
     animations: "disabled",
     mask: visibleProductId ? [productId] : [],
     maskColor: "#e6ddd1",
   });
+  await testInfo.attach(filename, { path: screenshotPath, contentType: "image/png" });
 }
 
 async function waitForAdminTransition(page: Page) {
@@ -612,6 +997,34 @@ async function waitForAdminTransition(page: Page) {
   await transition.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished.catch(() => undefined)));
   });
+}
+
+async function deleteProductFixture(page: Page, productId: string, pathName = "/admin/products/" + productId) {
+  const acceptDialogs = (dialog: import("@playwright/test").Dialog) => void dialog.accept();
+  page.on("dialog", acceptDialogs);
+  try {
+    await page.goto(pathName, { waitUntil: "networkidle", timeout: 15_000 });
+    await waitForProductEditorReady(page);
+    const deleteDestination = page.waitForURL((url) =>
+      url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1",
+    );
+    await Promise.all([
+      deleteDestination,
+      page.getByRole("button", { name: "Usuń produkt" }).click(),
+    ]);
+    await expect(page).toHaveURL(/\/admin\/products\?deleted=1$/);
+    expect(readLocalProduct(productId)).toBeUndefined();
+  } finally {
+    page.off("dialog", acceptDialogs);
+  }
+}
+
+async function waitForProductEditorReady(page: Page) {
+  await expect(page.locator("#product-editor-form")).toBeVisible();
+  await expect(page.locator('#product-editor-form input[type="hidden"][name="longDescription"]')).toBeEnabled({ timeout: 20_000 });
+  const saveBar = page.getByTestId("product-save-bar");
+  await expect(saveBar).toBeVisible();
+  await expect(saveBar.getByRole("button", { name: /Zapisz/ })).toBeEnabled();
 }
 
 function listFilesRecursively(directory: string): string[] {

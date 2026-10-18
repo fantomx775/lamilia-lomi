@@ -242,7 +242,7 @@ export function RichTextEditor({
 
   return (
     <div className="grid min-w-0 gap-2">
-      <input type="hidden" name={name} value={formValue} disabled={!editor} />
+      <input type="hidden" data-rich-text-form-value="true" name={name} value={formValue} disabled={!editor} />
       <input type="hidden" name={`${name}${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`} value="2" />
       <input type="hidden" data-rich-text-draft="true" value={htmlHasUnappliedChanges ? htmlSource : ""} />
       <noscript>

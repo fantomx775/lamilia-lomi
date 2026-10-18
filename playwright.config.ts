@@ -23,6 +23,16 @@ export default defineConfig({
       use: { ...devices["Pixel 7"] },
     },
     {
+      name: "webkit-product-editor",
+      testMatch: "**/product-editor-ux.spec.ts",
+      use: { ...devices["Desktop Safari"], browserName: "webkit" },
+    },
+    {
+      name: "webkit-mobile-product-editor",
+      testMatch: "**/product-editor-ux.spec.ts",
+      use: { ...devices["iPhone 13"], browserName: "webkit" },
+    },
+    {
       name: "webkit-mobile",
       testMatch: "**/issue-30-supabase-auth.spec.ts",
       use: { ...devices["iPhone 13"], browserName: "webkit" },
