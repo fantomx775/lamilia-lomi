@@ -1,6 +1,6 @@
 import { getAdminContentSnapshot } from "@/lib/content-repository";
 
-import { ProductsResourceList, type AdminProductListRow } from "./products-list";
+import { ProductsResourceList, type AdminProductListRow } from "../products-list";
 
 export default async function AdminProductsPage() {
   const { products, collections, categories, tags } = await getAdminContentSnapshot();

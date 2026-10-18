@@ -180,6 +180,7 @@ export function ProductEditor({
   const savedFormSignatureRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
   const navigationApiAvailableRef = useRef(false);
+  const createdProductNeedsDocumentNavigationRef = useRef(false);
   const currentEditorUrlRef = useRef<string | null>(null);
   const knownForwardHrefRef = useRef<string | null>(null);
   const historyRollbackRef = useRef(false);
@@ -210,7 +211,7 @@ export function ProductEditor({
     const form = formRef.current;
     if (!form) return;
 
-    const signature = formSignature(form);
+    const signature = productEditorFormSignature(form);
     if (savedFormSignatureRef.current === null) {
       savedFormSignatureRef.current = signature;
       isDirtyRef.current = false;
@@ -278,7 +279,7 @@ export function ProductEditor({
     knownForwardHrefRef.current = !navigationApi && currentGuard?.owner === window.location.href
       ? currentGuard.forwardHref ?? null
       : null;
-    savedFormSignatureRef.current = formSignature(form);
+    savedFormSignatureRef.current = productEditorFormSignature(form);
     isDirtyRef.current = false;
     setIsDirty(false);
     setSaveBarRoot(document.body);
@@ -312,7 +313,12 @@ export function ProductEditor({
   useEffect(() => {
     if (createdProductHref) {
       currentEditorUrlRef.current = new URL(createdProductHref, window.location.href).href;
-      router.replace(createdProductHref);
+      replaceCreatedProductRoute(
+        createdProductHref,
+        createdProductNeedsDocumentNavigationRef.current,
+        (href) => router.replace(href),
+        (href) => window.location.replace(href),
+      );
     }
   }, [createdProductHref, router]);
 
@@ -881,7 +887,7 @@ export function ProductEditor({
       ]);
       scheduleAfterRender(() => {
         if (!formRef.current) return;
-        savedFormSignatureRef.current = formSignature(formRef.current);
+        savedFormSignatureRef.current = productEditorFormSignature(formRef.current);
         isDirtyRef.current = false;
         setIsDirty(false);
       });
@@ -989,7 +995,7 @@ export function ProductEditor({
         setPremiumErrors({});
         scheduleAfterRender(() => {
           const form = formRef.current;
-          if (form) savedFormSignatureRef.current = formSignature(form);
+          if (form) savedFormSignatureRef.current = productEditorFormSignature(form);
         });
 
         if (!product) {
@@ -998,6 +1004,7 @@ export function ProductEditor({
           const guard = readProductEditorHistoryGuard(window.history.state);
           if (!navigationApiAvailableRef.current && owner && guard?.owner === owner && guard.role === "guard") {
             pendingCreatedProductHrefRef.current = href;
+            createdProductNeedsDocumentNavigationRef.current = true;
             window.history.back();
           } else {
             setCreatedProductHref(href);
@@ -1659,10 +1666,25 @@ function mapProductSaveErrors(
   return { fieldErrors, premiumErrors, focusTarget };
 }
 
-function formSignature(form: HTMLFormElement) {
+export function productEditorFormSignature(form: HTMLFormElement) {
+  const formData = new FormData(form);
+  const richTextFields = Array.from(form.querySelectorAll<HTMLInputElement>("[data-rich-text-form-value]"));
+  const richTextNames = new Set(richTextFields.map((field) => field.name));
+  for (const name of richTextNames) formData.delete(name);
+  for (const field of richTextFields) formData.append(field.name, field.value);
   const editorDrafts = Array.from(form.querySelectorAll<HTMLInputElement>("[data-rich-text-draft]"))
     .map((field) => ["richTextDraft", field.value] as const);
-  return JSON.stringify([formDataSignature(new FormData(form)), editorDrafts]);
+  return JSON.stringify([formDataSignature(formData), editorDrafts]);
+}
+
+export function replaceCreatedProductRoute(
+  href: string,
+  useDocumentNavigation: boolean,
+  replaceClientRoute: (href: string) => void,
+  replaceDocumentRoute: (href: string) => void,
+) {
+  if (useDocumentNavigation) replaceDocumentRoute(href);
+  else replaceClientRoute(href);
 }
 
 function readProductEditorHistoryGuard(state: unknown): ProductEditorHistoryGuard | null {

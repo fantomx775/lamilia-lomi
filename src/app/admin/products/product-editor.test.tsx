@@ -34,7 +34,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: editorMocks.routerReplace }),
 }));
 
-import { ProductEditor } from "./product-editor";
+import { ProductEditor, productEditorFormSignature, replaceCreatedProductRoute } from "./product-editor";
 import { AdminProductEditorHistoryGuard } from "@/app/admin/admin-product-editor-history-guard";
 import { buildProductFromFormData } from "@/lib/admin-content";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
@@ -116,6 +116,38 @@ beforeEach(() => {
 describe("ProductEditor V2", () => {
   const snapshot = getSeedContentSnapshot();
   const product = snapshot.products[0];
+
+  it("keeps the dirty baseline stable while the rich text form value initializes", () => {
+    const form = document.createElement("form");
+    const sortOrder = document.createElement("input");
+    sortOrder.name = "sortOrder";
+    sortOrder.value = "40";
+    const longDescription = document.createElement("input");
+    longDescription.type = "hidden";
+    longDescription.name = "longDescription";
+    longDescription.value = "<p>Existing description</p>";
+    longDescription.dataset.richTextFormValue = "true";
+    longDescription.disabled = true;
+    form.append(sortOrder, longDescription);
+
+    const initialSignature = productEditorFormSignature(form);
+    longDescription.disabled = false;
+    expect(productEditorFormSignature(form)).toBe(initialSignature);
+
+    longDescription.value = "<p>Edited description</p>";
+    expect(productEditorFormSignature(form)).not.toBe(initialSignature);
+  });
+
+  it("uses a document replacement after a legacy history traversal", () => {
+    const replaceClientRoute = vi.fn();
+    const replaceDocumentRoute = vi.fn();
+    const href = `/admin/products/${product.id}?saved=1`;
+
+    replaceCreatedProductRoute(href, true, replaceClientRoute, replaceDocumentRoute);
+
+    expect(replaceDocumentRoute).toHaveBeenCalledWith(href);
+    expect(replaceClientRoute).not.toHaveBeenCalled();
+  });
 
   it("renders the canonical product content without language tabs or media selectors", () => {
     const view = render(
@@ -415,36 +447,40 @@ describe("ProductEditor V2", () => {
   });
 
   it("submits the single product content fields through the provided server action", async () => {
-    const saveAction = vi.fn().mockResolvedValue({ ok: true, id: product.id });
-    vi.spyOn(window.history, "back").mockImplementation(() => {
-      const state = {
-        __lamiliaProductEditorHistoryGuard: { owner: window.location.href, role: "base" },
-      };
-      window.history.replaceState(state, "", window.location.href);
-      window.dispatchEvent(new PopStateEvent("popstate", { state }));
+    const originalNavigation = Object.getOwnPropertyDescriptor(window, "navigation");
+    Object.defineProperty(window, "navigation", {
+      configurable: true,
+      value: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     });
-    const user = userEvent.setup();
-    const view = render(
-      <AdminProductEditorHistoryGuard>
-        <ProductEditor
-          title="Nowy produkt"
-          categories={snapshot.categories}
-          tags={snapshot.tags}
-          saveAction={saveAction}
-        />
-      </AdminProductEditorHistoryGuard>,
-    );
 
-    const title = view.container.querySelector<HTMLInputElement>("#product-title");
-    expect(title).not.toBeNull();
-    await user.type(title!, "Ocean Calm");
-    await user.click(screen.getByRole("button", { name: /Zapisz/ }));
+    try {
+      const saveAction = vi.fn().mockResolvedValue({ ok: true, id: product.id });
+      const user = userEvent.setup();
+      const view = render(
+        <AdminProductEditorHistoryGuard>
+          <ProductEditor
+            title="Nowy produkt"
+            categories={snapshot.categories}
+            tags={snapshot.tags}
+            saveAction={saveAction}
+          />
+        </AdminProductEditorHistoryGuard>,
+      );
 
-    await waitFor(() => expect(saveAction).toHaveBeenCalled());
-    const formData = saveAction.mock.calls[0][0] as FormData;
-    expect(formData.get("title")).toBe("Ocean Calm");
-    expect(formData.has("title_pl")).toBe(false);
-    await waitFor(() => expect(editorMocks.routerReplace).toHaveBeenCalledWith(`/admin/products/${product.id}?saved=1`));
+      const title = view.container.querySelector<HTMLInputElement>("#product-title");
+      expect(title).not.toBeNull();
+      await user.type(title!, "Ocean Calm");
+      await user.click(screen.getByRole("button", { name: /Zapisz/ }));
+
+      await waitFor(() => expect(saveAction).toHaveBeenCalled());
+      const formData = saveAction.mock.calls[0][0] as FormData;
+      expect(formData.get("title")).toBe("Ocean Calm");
+      expect(formData.has("title_pl")).toBe(false);
+      await waitFor(() => expect(editorMocks.routerReplace).toHaveBeenCalledWith(`/admin/products/${product.id}?saved=1`));
+    } finally {
+      if (originalNavigation) Object.defineProperty(window, "navigation", originalNavigation);
+      else Reflect.deleteProperty(window, "navigation");
+    }
   });
 
   it("keeps entered values and points to the title after a server validation error", async () => {
