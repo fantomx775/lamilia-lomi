@@ -579,7 +579,7 @@ describe("targeted Home and Catalog product reads", () => {
       snapshot.categories.find((category) => category.slug === "mindfulness")?.image
         ?.path,
     ).toBe(
-      "https://media.example.com/categories/11111111-1111-4111-8111-111111111111/image/22222222-2222-4222-8222-222222222222-mindfulness.png",
+      "/api/category-media/11111111-1111-4111-8111-111111111111?v=22222222-2222-4222-8222-222222222222",
     );
     expect(snapshot.tags.map((tag) => tag.translations[0]?.name).sort()).toEqual([
       "Calm",
@@ -591,7 +591,7 @@ describe("targeted Home and Catalog product reads", () => {
     expect(products[0]).toMatchObject({
       title: "Moon Garden",
       cover: {
-        path: "https://media.example.com/products/product-moon/cover/cover-moon.png",
+        path: "/api/media/cover-moon?v=cover-moon",
       },
       categories: [{ slug: "mindfulness", name: "Mindfulness" }],
       tags: [{ slug: "calm", name: "Calm" }],

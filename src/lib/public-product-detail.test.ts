@@ -160,7 +160,7 @@ describe("targeted public product detail read", () => {
       title: "Moon Garden",
       cover: {
         id: "cover-1",
-        path: "https://media.example.com/products/product-1/cover/cover-1.png",
+        path: "/api/media/cover-1?v=cover-1",
       },
       categories: [{ id: "category-1", name: "Mindfulness" }],
       tags: [{ id: "tag-1", name: "Quiet time" }],

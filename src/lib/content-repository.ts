@@ -8,7 +8,6 @@ import { createClient } from "@/lib/supabase/server";
 import { normalizeCatalogSettings } from "./catalog-settings";
 import { normalizeAboutPageSettings } from "./about-settings";
 import { sortFeaturedProductCandidates } from "./featured-product-ranking";
-import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
 import type {
   AmazonLink,
   AboutPageSettings,
@@ -33,6 +32,50 @@ const POSTGREST_PAGE_SIZE = 1_000;
 export const getPublicContentSnapshot = cache(async () =>
   getContentSnapshotForRequest({ includePremiumCodes: false }),
 );
+
+export async function getPublicR2ImageAssetByIdForRequest(assetId: string): Promise<ProductAsset | undefined> {
+  if (getBackendMode() === "local") return undefined;
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("product_assets")
+    .select(`
+      id,
+      product_id,
+      kind,
+      bucket,
+      path,
+      filename,
+      content_type,
+      size_bytes,
+      locale,
+      title,
+      sort_order,
+      is_public,
+      is_active,
+      storage_provider,
+      product:products!product_assets_product_id_fkey ( status )
+    `)
+    .eq("id", assetId)
+    .eq("storage_provider", "r2_public")
+    .eq("is_public", true)
+    .eq("is_active", true)
+    .in("kind", ["cover", "gallery"])
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Supabase public R2 image lookup failed: ${error.message}`);
+  }
+  if (!data) return undefined;
+
+  const row = data as DbRow;
+  const product = row.product && typeof row.product === "object" && !Array.isArray(row.product)
+    ? row.product as DbRow
+    : null;
+  if (product?.status !== "published") return undefined;
+
+  return mapAsset(row, "published");
+}
 
 export const getPublicProductDetailSnapshotForRequest = cache(
   async (slug: string): Promise<ContentSnapshot | null> => {
@@ -855,9 +898,7 @@ function mapCategory(row: DbRow, translationRows: DbRow[]): Category {
   const storagePath = optionalString(row.image_storage_path);
   const storageProvider = row.image_storage_provider === "r2_public" ? "r2_public" : "supabase";
   const imagePath = imageId && storagePath
-    ? storageProvider === "r2_public"
-      ? r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", storagePath) ?? `/api/category-media/${id}?v=${encodeURIComponent(imageId)}`
-      : `/api/category-media/${id}?v=${encodeURIComponent(imageId)}`
+    ? "/api/category-media/" + id + "?v=" + encodeURIComponent(imageId)
     : null;
 
   return {
@@ -915,20 +956,25 @@ function mapTaxonomyTranslation(row: DbRow): TaxonomyTranslation {
 }
 
 function mapAsset(row: DbRow, productStatus?: Product["status"]): ProductAsset {
+  const id = stringValue(row.id);
   const kind = row.kind as ProductAsset["kind"];
   const rawPath = stringValue(row.path);
   const isUploadedStorageAsset = rawPath.startsWith("products/");
   const storageProvider = storageProviderValue(row.storage_provider);
-  const r2PublicUrl = storageProvider === "r2_public" && Boolean(row.is_public) && productStatus === "published"
-    ? r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", rawPath)
-    : null;
+  const versionedR2ImagePath =
+    storageProvider === "r2_public" &&
+    Boolean(row.is_public) &&
+    productStatus === "published" &&
+    (kind === "cover" || kind === "gallery")
+      ? `/api/media/${id}?v=${encodeURIComponent(id)}`
+      : null;
 
   return {
-    id: stringValue(row.id),
+    id,
     productId: stringValue(row.product_id),
     kind,
     bucket: stringValue(row.bucket),
-    path: r2PublicUrl ?? (Boolean(row.is_public) && isUploadedStorageAsset
+    path: versionedR2ImagePath ?? (Boolean(row.is_public) && isUploadedStorageAsset
       ? `/api/media/${stringValue(row.id)}`
       : Boolean(row.is_public) && !rawPath.startsWith("/")
         ? `/${rawPath}`

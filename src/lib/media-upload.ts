@@ -140,7 +140,27 @@ export function mediaFilenameForStorage(value: string) {
 }
 
 export function isMediaProxyPath(value: string) {
-  return value.startsWith("/api/media/");
+  if (!value.startsWith("/api/media/")) return false;
+
+  return !isVersionedMediaPath(value, "/api/media/", true);
+}
+
+export function isCategoryMediaProxyPath(value: string) {
+  if (!value.startsWith("/api/category-media/")) return false;
+
+  return !isVersionedMediaPath(value, "/api/category-media/", false);
+}
+
+function isVersionedMediaPath(value: string, prefix: string, versionMustMatchPath: boolean) {
+  const [pathname, search = ""] = value.split("?", 2);
+  const pathId = pathname.slice(prefix.length);
+  const version = new URLSearchParams(search).get("v");
+
+  return isUuid(pathId) && isUuid(version) && (!versionMustMatchPath || version === pathId);
+}
+
+function isUuid(value: string | null): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export function isMediaKind(value: string): value is AssetKind {

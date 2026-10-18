@@ -4,7 +4,7 @@ import Image from "next/image";
 import { ImageOff } from "lucide-react";
 import { useState } from "react";
 
-import { isMediaProxyPath } from "@/lib/media-upload";
+import { isCategoryMediaProxyPath, isMediaProxyPath } from "@/lib/media-upload";
 
 export function ImageWithFallback({
   src,
@@ -37,7 +37,7 @@ export function ImageWithFallback({
       fill
       sizes={sizes ?? "(min-width: 768px) 25vw, 50vw"}
       loading={loading}
-      unoptimized={isMediaProxyPath(src) || src.startsWith("/api/category-media/")}
+      unoptimized={isMediaProxyPath(src) || isCategoryMediaProxyPath(src)}
       onError={() => setFailedSource(src)}
       className={className}
     />

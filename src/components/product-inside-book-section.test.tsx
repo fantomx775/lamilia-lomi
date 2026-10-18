@@ -59,6 +59,7 @@ describe("ProductInsideBookSection media layout", () => {
 
     expect(markup).toContain('data-layout="gallery-video"');
     expect(markup).toMatch(/class="mt-7 grid gap-6 lg:grid-cols-/);
+    expect(markup).toContain('sizes="(min-width: 1280px) 335px, (min-width: 1024px) calc(28.75vw - 33px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)"');
     expect(markup).toContain('aria-label="Open image 1"');
     expect(markup).toContain("<video");
   });
@@ -73,6 +74,7 @@ describe("ProductInsideBookSection media layout", () => {
     expect(markup).toContain('class="mt-7"');
     expect(markup).not.toContain("lg:grid-cols-");
     expect(markup).not.toContain("<video");
+    expect(markup).toContain('sizes="(min-width: 1280px) 600px, (min-width: 1024px) calc(50vw - 40px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)"');
     expect(markup).toContain('aria-label="Open image 1"');
   });
 
