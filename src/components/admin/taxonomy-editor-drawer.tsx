@@ -13,6 +13,7 @@ import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminMutationResult, type
 import { imageRatioRequirement, readImageDimensions, validateImageDimensions } from "@/lib/image-ratios";
 import { validateMediaFile } from "@/lib/media-upload";
 import type { Category, CategoryImage, Tag } from "@/lib/types";
+import { useAdminToast } from "@/components/admin/admin-toast";
 
 type TaxonomyItem = Category | Tag;
 type TaxonomyKind = "category" | "tag";
@@ -85,6 +86,7 @@ function TaxonomyEditorForm({
   const isCategory = kind === "category";
   const itemId = item?.id ?? "";
   const router = useRouter();
+  const publishToast = useAdminToast();
   const [categoryImage, setCategoryImage] = useState<CategoryImage | undefined>(
     isCategory ? (item as Category | undefined)?.image : undefined,
   );
@@ -108,13 +110,23 @@ function TaxonomyEditorForm({
         return;
       }
 
-      const result = await saveAction(formData);
-
-      if (!result.ok) {
-        setErrors(result.errors);
+      let result: AdminMutationResult;
+      try {
+        result = await saveAction(formData);
+      } catch {
+        const errors = [ADMIN_ERROR_CODES.INTERNAL];
+        setErrors(errors);
+        publishToast("error", getAdminErrorMessage(errors[0], "pl"));
         return;
       }
 
+      if (!result.ok) {
+        setErrors(result.errors);
+        publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+        return;
+      }
+
+      publishToast("success", `${isCategory ? "Kategoria" : "Tag"} został${isCategory ? "a" : ""} zapisany${isCategory ? "a" : ""}.`);
       onSaved();
     });
   };
@@ -132,13 +144,23 @@ function TaxonomyEditorForm({
         return;
       }
 
-      const result = await deleteAction(formData);
-
-      if (!result.ok) {
-        setErrors(result.errors);
+      let result: AdminMutationResult;
+      try {
+        result = await deleteAction(formData);
+      } catch {
+        const errors = [ADMIN_ERROR_CODES.INTERNAL];
+        setErrors(errors);
+        publishToast("error", getAdminErrorMessage(errors[0], "pl"));
         return;
       }
 
+      if (!result.ok) {
+        setErrors(result.errors);
+        publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+        return;
+      }
+
+      publishToast("success", `${isCategory ? "Kategoria" : "Tag"} został${isCategory ? "a" : ""} usunięty${isCategory ? "a" : ""}.`);
       if (onDeleted) onDeleted(result);
       else onSaved();
     });
@@ -182,7 +204,9 @@ function TaxonomyEditorForm({
         error?: string;
       } | null;
       if (!response.ok || !result?.image) {
-        setImageError(result?.error ?? "Nie udało się zapisać obrazu kategorii.");
+        const message = result?.error ?? "Nie udało się zapisać obrazu kategorii.";
+        setImageError(message);
+        publishToast("error", message);
         if (result?.cleanupDeferred) {
           const cleanupCategoryId = result.categoryId ?? itemId;
           const cleanupImageId = result.cleanupImageId ?? "nieznane";
@@ -191,10 +215,13 @@ function TaxonomyEditorForm({
         return;
       }
       setCategoryImage(result.image);
+      publishToast("success", result.cleanupDeferred ? "Obraz kategorii zapisano; poprzedni plik wymaga sprzątnięcia." : "Obraz kategorii został zapisany.");
       setImageMessage(result.cleanupDeferred ? "Obraz został podmieniony. Poprzedni plik wymaga sprzątnięcia." : "Obraz kategorii został zapisany.");
       router.refresh();
     } catch {
-      setImageError("Nie udało się zapisać obrazu kategorii. Spróbuj ponownie.");
+      const message = "Nie udało się zapisać obrazu kategorii. Spróbuj ponownie.";
+      setImageError(message);
+      publishToast("error", message);
     } finally {
       setImagePending(false);
     }
@@ -214,14 +241,19 @@ function TaxonomyEditorForm({
       });
       const result = await response.json().catch(() => null) as { cleanupDeferred?: boolean; error?: string } | null;
       if (!response.ok) {
-        setImageError(result?.error ?? "Nie udało się usunąć obrazu kategorii.");
+        const message = result?.error ?? "Nie udało się usunąć obrazu kategorii.";
+        setImageError(message);
+        publishToast("error", message);
         return;
       }
       setCategoryImage(undefined);
+      publishToast("success", result?.cleanupDeferred ? "Obraz odłączono; plik wymaga sprzątnięcia." : "Obraz kategorii został usunięty.");
       setImageMessage(result?.cleanupDeferred ? "Obraz został odłączony. Plik wymaga sprzątnięcia." : "Obraz kategorii został usunięty.");
       router.refresh();
     } catch {
-      setImageError("Nie udało się usunąć obrazu kategorii. Spróbuj ponownie.");
+      const message = "Nie udało się usunąć obrazu kategorii. Spróbuj ponownie.";
+      setImageError(message);
+      publishToast("error", message);
     } finally {
       setImagePending(false);
     }

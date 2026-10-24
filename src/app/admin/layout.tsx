@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/site-header";
 import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { getAdminLayoutAccessForRequest } from "@/lib/session.server";
+import { AdminToastProvider } from "@/components/admin/admin-toast";
 
 const nav: DashboardNavItem[] = [
   { href: "/admin", label: "Dashboard", icon: "dashboard" },
@@ -59,11 +60,13 @@ async function AdminAccessLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <SiteHeader locale="en" />
-      <AdminProductEditorHistoryGuard>
-        <DashboardShell nav={nav} title="LamiliaLomi" subtitle="Panel administracyjny">
-          {children}
-        </DashboardShell>
-      </AdminProductEditorHistoryGuard>
+      <AdminToastProvider>
+        <AdminProductEditorHistoryGuard>
+          <DashboardShell nav={nav} title="LamiliaLomi" subtitle="Panel administracyjny">
+            {children}
+          </DashboardShell>
+        </AdminProductEditorHistoryGuard>
+      </AdminToastProvider>
     </>
   );
 }

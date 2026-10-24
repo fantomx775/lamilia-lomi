@@ -485,7 +485,7 @@ describe("ProductEditor V2", () => {
       const formData = saveAction.mock.calls[0][0] as FormData;
       expect(formData.get("title")).toBe("Ocean Calm");
       expect(formData.has("title_pl")).toBe(false);
-      await waitFor(() => expect(editorMocks.routerReplace).toHaveBeenCalledWith(`/admin/products/${product.id}?saved=1`));
+      await waitFor(() => expect(editorMocks.routerReplace).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^/admin/products/${product.id}\\?toast=[0-9a-f-]{36}$`))));
     } finally {
       if (originalNavigation) Object.defineProperty(window, "navigation", originalNavigation);
       else Reflect.deleteProperty(window, "navigation");

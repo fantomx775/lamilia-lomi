@@ -51,7 +51,7 @@ export async function saveNewProductFormAction(
     return { errors: result.errors, values: captureProductSaveFormValues(formData) };
   }
 
-  redirect(`/admin/products/${result.id}?saved=1`);
+  redirect(`/admin/products/${result.id}?toast=${createAdminToastId()}`);
 }
 
 export async function saveExistingProductFormAction(
@@ -64,7 +64,7 @@ export async function saveExistingProductFormAction(
     return { errors: result.errors, values: captureProductSaveFormValues(formData) };
   }
 
-  redirect(`/admin/products/${result.id}?saved=1`);
+  redirect(`/admin/products/${result.id}?toast=${createAdminToastId()}`);
 }
 
 export async function deleteProductAction(formData: FormData) {
@@ -78,7 +78,7 @@ export async function deleteProductAction(formData: FormData) {
     redirect(withAdminError("/admin/products", result.errors));
   }
 
-  redirect("/admin/products?deleted=1");
+  redirect(`/admin/products?deleted=1&toast=${createAdminToastId()}`);
 }
 
 export async function archiveProductAction(formData: FormData) {
@@ -92,7 +92,7 @@ export async function archiveProductAction(formData: FormData) {
     redirect(withAdminError("/admin/products", result.errors));
   }
 
-  redirect("/admin/products?archived=1");
+  redirect(`/admin/products?archived=1&toast=${createAdminToastId()}`);
 }
 
 export async function saveCategoryAction(formData: FormData) {
@@ -106,7 +106,7 @@ export async function saveCategoryAction(formData: FormData) {
     redirect(withAdminError("/admin/categories", result.errors));
   }
 
-  redirect("/admin/categories?saved=1");
+  redirect(`/admin/categories?toast=${createAdminToastId()}`);
 }
 
 export async function deleteCategoryAction(formData: FormData) {
@@ -124,6 +124,7 @@ export async function deleteCategoryAction(formData: FormData) {
     query.set("cleanupDeferred", "1");
     query.set("categoryId", result.id);
   }
+  query.set("toast", createAdminToastId());
   redirect(`/admin/categories?${query.toString()}`);
 }
 
@@ -169,7 +170,7 @@ export async function saveTagAction(formData: FormData) {
     redirect(withAdminError("/admin/tags", result.errors));
   }
 
-  redirect("/admin/tags?saved=1");
+  redirect(`/admin/tags?toast=${createAdminToastId()}`);
 }
 
 export async function saveCatalogSettingsAction(formData: FormData) {
@@ -180,7 +181,7 @@ export async function saveCatalogSettingsAction(formData: FormData) {
   );
 
   if (desktopColumns === null) {
-    redirect("/admin/settings?error=invalid_catalog_columns");
+    redirect(`/admin/settings?error=invalid_catalog_columns&toast=${createAdminToastId()}`);
   }
 
   const result = await executeAdminMutation("catalog settings", () =>
@@ -190,10 +191,10 @@ export async function saveCatalogSettingsAction(formData: FormData) {
   revalidateContentPaths();
 
   if (!result.ok) {
-    redirect("/admin/settings?error=save_failed");
+    redirect(`/admin/settings?error=save_failed&toast=${createAdminToastId()}`);
   }
 
-  redirect("/admin/settings?saved=1");
+  redirect(`/admin/settings?toast=${createAdminToastId()}`);
 }
 
 export async function deleteTagAction(formData: FormData) {
@@ -206,7 +207,7 @@ export async function deleteTagAction(formData: FormData) {
     redirect(withAdminError("/admin/tags", result.errors));
   }
 
-  redirect("/admin/tags?deleted=1");
+  redirect(`/admin/tags?deleted=1&toast=${createAdminToastId()}`);
 }
 
 export async function saveTagInlineAction(formData: FormData) {
@@ -233,7 +234,7 @@ export async function saveStaticPageAction(formData: FormData) {
     redirect(withAdminError("/admin/pages", result.errors));
   }
 
-  redirect("/admin/pages?saved=1");
+  redirect(`/admin/pages?toast=${createAdminToastId()}`);
 }
 
 export async function saveStaticPagesAction(slug: StaticPageRecord["slug"], formData: FormData) {
@@ -245,7 +246,7 @@ export async function saveStaticPagesAction(slug: StaticPageRecord["slug"], form
     redirect(withAdminError(`/admin/pages/${slug}`, result.errors));
   }
 
-  redirect(`/admin/pages/${result.id}?saved=1`);
+  redirect(`/admin/pages/${result.id}?toast=${createAdminToastId()}`);
 }
 
 export async function saveAboutPageAction(formData: FormData) {
@@ -260,7 +261,7 @@ export async function saveAboutPageAction(formData: FormData) {
     redirect(withAdminError("/admin/pages/about", result.errors));
   }
 
-  redirect("/admin/pages/about?saved=1");
+  redirect(`/admin/pages/about?toast=${createAdminToastId()}`);
 }
 
 async function assertAdmin() {
@@ -287,8 +288,13 @@ function withAdminError(path: string, errors: AdminErrorCode[]) {
   const url = new URL(path, "http://local.test");
 
   url.searchParams.set("error", errors.join(","));
+  url.searchParams.set("toast", createAdminToastId());
 
   return `${url.pathname}${url.search}`;
+}
+
+function createAdminToastId() {
+  return crypto.randomUUID();
 }
 
 async function executeAdminMutation(

@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { getCatalogSettingsForRequest } from "@/lib/content-repository";
 
 import { saveCatalogSettingsAction } from "../actions";
+import { AdminRouteToast } from "@/components/admin/admin-toast";
+import { formatAdminErrors } from "@/lib/admin-errors";
 
 type Props = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -15,8 +17,11 @@ export default async function AdminSettingsPage({ searchParams }: Props) {
     getCatalogSettingsForRequest(),
     searchParams,
   ]);
-  const saved = query.saved === "1";
+  const toastId = typeof query.toast === "string" && /^[0-9a-f-]{36}$/i.test(query.toast) ? query.toast : undefined;
   const hasSaveError = query.error !== undefined;
+  const error = query.error === "invalid_catalog_columns"
+    ? "Wybierz 3, 4 albo 5 kart i spróbuj ponownie."
+    : query.error === "save_failed" ? "Nie udało się zapisać ustawień. Spróbuj ponownie." : hasSaveError ? formatAdminErrors(undefined, "pl") : undefined;
 
   return (
     <div>
@@ -55,11 +60,6 @@ export default async function AdminSettingsPage({ searchParams }: Props) {
               Zapisz ustawienia katalogu
             </Button>
           </form>
-          {saved ? (
-            <p role="status" className="mt-4 text-sm text-[var(--color-sage-foreground)]">
-              Ustawienia katalogu zostały zapisane.
-            </p>
-          ) : null}
           {hasSaveError ? (
             <p role="alert" className="mt-4 text-sm text-[var(--color-terracotta)]">
               Nie udało się zapisać ustawień. Wybierz 3, 4 albo 5 kart i spróbuj ponownie.
@@ -67,6 +67,7 @@ export default async function AdminSettingsPage({ searchParams }: Props) {
           ) : null}
         </CardContent>
       </Card>
+      <AdminRouteToast eventId={toastId} kind={error ? "error" : "success"} message={error ?? "Ustawienia katalogu zostały zapisane."} cleanPath="/admin/settings" />
       <Card className="mt-8">
         <CardHeader>
           <h2 className="font-serif text-2xl font-semibold">Integracje</h2>

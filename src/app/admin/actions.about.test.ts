@@ -55,9 +55,26 @@ describe("saveAboutPageAction", () => {
     });
 
     await expect(saveAboutPageAction(new FormData())).rejects.toMatchObject({
-      location: "/admin/pages/about?error=admin.validation.invalid_input",
+      location: expect.stringMatching(/^\/admin\/pages\/about\?error=admin\.validation\.invalid_input&toast=[0-9a-f-]{36}$/),
     });
     expect(mocks.saveAboutPageSettingsForRequest).toHaveBeenCalledOnce();
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/en", "layout");
+  });
+
+  it("issues a fresh redirect event only after each successful persistence result", async () => {
+    mocks.getDemoSession.mockResolvedValue({ role: "admin" });
+    mocks.hasAdminAccess.mockReturnValue(true);
+    mocks.saveAboutPageSettingsForRequest.mockResolvedValue({ ok: true, id: "about" });
+
+    await expect(saveAboutPageAction(new FormData())).rejects.toMatchObject({
+      location: expect.stringMatching(/^\/admin\/pages\/about\?toast=[0-9a-f-]{36}$/),
+    });
+    await expect(saveAboutPageAction(new FormData())).rejects.toMatchObject({
+      location: expect.stringMatching(/^\/admin\/pages\/about\?toast=[0-9a-f-]{36}$/),
+    });
+    const first = mocks.redirect.mock.calls[0][0] as string;
+    const second = mocks.redirect.mock.calls[1][0] as string;
+    expect(first).not.toBe(second);
+    expect(mocks.saveAboutPageSettingsForRequest).toHaveBeenCalledTimes(2);
   });
 });

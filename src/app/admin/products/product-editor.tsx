@@ -28,6 +28,7 @@ import { MAX_PREMIUM_CODE_BATCH_SIZE, MAX_PREMIUM_CODE_LENGTH, validatePremiumCo
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Collection, Product, ProductAsset, Tag } from "@/lib/types";
 import { ReaderArtworkManager } from "./reader-artwork-manager";
+import { useAdminToast } from "@/components/admin/admin-toast";
 
 type ProductContentDraft = {
   title: string;
@@ -149,12 +150,21 @@ export function ProductEditor({
   deleteAction?: (formData: FormData) => void | Promise<void>;
 }) {
   const router = useRouter();
+  const publishToast = useAdminToast();
   const formPermalink = product ? `/admin/products/${product.id}` : "/admin/products/new";
   const [nativeSaveState, nativeSaveFormAction] = useActionState(
     saveFormAction ?? keepProductSaveFormState,
     emptyProductSaveFormState,
     formPermalink,
   );
+  const lastNativeToast = useRef("");
+  useEffect(() => {
+    const signature = nativeSaveState.errors.join("|");
+    if (!signature) { lastNativeToast.current = ""; return; }
+    if (lastNativeToast.current === signature) return;
+    lastNativeToast.current = signature;
+    publishToast("error", nativeSaveState.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+  }, [nativeSaveState.errors, publishToast]);
   const submittedValues = nativeSaveState.values;
   const [content, setContent] = useState<ProductContentDraft>(() => buildProductContent(product, submittedValues));
   const [assets, setAssets] = useState<AssetDraft[]>(() => buildAssets(product, submittedValues));
@@ -958,6 +968,7 @@ export function ProductEditor({
       try {
         const result = await saveAction(formData);
         if (!result.ok) {
+          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
           const mapped = mapProductSaveErrors(result.errors, formData, amazonLinks, premiumCodes);
           const cleanupFailures = new Map((result.mediaCleanupFailures ?? []).map((failure) => [failure.assetId, failure]));
           setAssets((current) => current.map((asset) => {
@@ -1000,7 +1011,7 @@ export function ProductEditor({
         });
 
         if (!product) {
-          const href = `/admin/products/${result.id}?saved=1`;
+          const href = `/admin/products/${result.id}?toast=${crypto.randomUUID()}`;
           const owner = currentEditorUrlRef.current;
           const guard = readProductEditorHistoryGuard(window.history.state);
           if (!navigationApiAvailableRef.current && owner && guard?.owner === owner && guard.role === "guard") {
@@ -1010,8 +1021,11 @@ export function ProductEditor({
           } else {
             setCreatedProductHref(href);
           }
+        } else {
+          publishToast("success", "Zmiany produktu zostały zapisane.");
         }
       } catch {
+        publishToast("error", "Nie udało się zapisać produktu. Spróbuj ponownie.");
         setSaveStatus("error");
         setSaveErrorCodes([ADMIN_ERROR_CODES.INTERNAL]);
       } finally {

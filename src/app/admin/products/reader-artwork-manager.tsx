@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { AdminEditorSection } from "@/components/admin/admin-editor-foundation";
+import { useAdminToast } from "@/components/admin/admin-toast";
 
 type Artwork = { id: string; displayName: string; description?: string; sortOrder: number; isVisible: boolean; src: string };
 
@@ -18,9 +19,9 @@ function isArtwork(value: unknown): value is Artwork {
 }
 
 export function ReaderArtworkManager({ productId }: { productId?: string }) {
+  const publishToast = useAdminToast();
   const [items, setItems] = useState<Artwork[]>([]);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -34,7 +35,7 @@ export function ReaderArtworkManager({ productId }: { productId?: string }) {
     if (!endpoint) return;
     fetch(endpoint, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("Nie udało się wczytać prac.");
-      const result: unknown = await response.json();
+      const result: unknown = await response.json().catch(() => null);
       if (!result || typeof result !== "object" || !Array.isArray((result as { artworks?: unknown }).artworks)
         || !(result as { artworks: unknown[] }).artworks.every(isArtwork)) {
         throw new Error("Nie udało się wczytać prac. Odpowiedź serwera ma nieprawidłowy format.");
@@ -45,16 +46,28 @@ export function ReaderArtworkManager({ productId }: { productId?: string }) {
 
   async function request(method: string, body?: unknown, form?: FormData) {
     if (!endpoint) return;
-    setBusy(true); setError(""); setMessage("");
+    setBusy(true); setError("");
     try {
       const response = await fetch(endpoint, { method, ...(form ? { body: form } : body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}) });
-      const result = await response.json();
-      if (!response.ok) throw new Error("Nie udało się zapisać zmian.");
-      if (Array.isArray(result.artworks)) setItems(result.artworks);
-      else if (result.artwork) setItems((current) => [...current, result.artwork]);
-      setMessage("Zmiany zapisane.");
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) throw new Error("Nie udało się zapisać zmian. Sprawdź połączenie i spróbuj ponownie.");
+      if (!result || typeof result !== "object") throw new Error("Nie udało się potwierdzić zapisu. Odśwież listę przed kolejną próbą.");
+      const payload = result as { artworks?: unknown; artwork?: unknown };
+      if (Array.isArray(payload.artworks) && payload.artworks.every(isArtwork)) setItems(payload.artworks);
+      else if (isArtwork(payload.artwork)) {
+        const artwork = payload.artwork;
+        setItems((current) => [...current, artwork]);
+      }
+      else throw new Error("Nie udało się potwierdzić zapisu. Odpowiedź serwera ma nieprawidłowy format.");
+      publishToast("success", "Prace czytelniczek zostały zapisane.");
       return true;
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Nie udało się zapisać zmian."); return false; }
+    } catch (reason) {
+      const knownMessages = ["Nie udało się zapisać zmian. Sprawdź połączenie i spróbuj ponownie.", "Nie udało się potwierdzić zapisu. Odśwież listę przed kolejną próbą.", "Nie udało się potwierdzić zapisu. Odpowiedź serwera ma nieprawidłowy format."];
+      const message = reason instanceof Error && knownMessages.includes(reason.message) ? reason.message : "Nie udało się zapisać zmian. Sprawdź połączenie i spróbuj ponownie.";
+      setError(message);
+      publishToast("error", message);
+      return false;
+    }
     finally { setBusy(false); }
   }
 
@@ -87,7 +100,7 @@ export function ReaderArtworkManager({ productId }: { productId?: string }) {
         </div>
       </div>)}
       {!items.length ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze prac.</p> : null}
-      {error ? <p role="alert" className="text-sm text-red-800">{error}</p> : null}{message ? <p role="status" className="text-sm text-green-800">{message}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-800">{error}</p> : null}
     </div>}
   </AdminEditorSection>;
 }
