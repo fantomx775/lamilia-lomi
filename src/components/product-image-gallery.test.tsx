@@ -180,7 +180,7 @@ describe("ProductImageGallery", () => {
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     expect(within(dialog).getByRole("img", { name: "Page 1" })).toBeVisible();
     expect(within(dialog).getByTestId("product-gallery-preview-frame"))
-      .toHaveClass("aspect-[8.5/11]");
+      .toHaveClass("touch-pan-y", "overflow-hidden");
     expect(within(dialog).getByRole("button", { name: "Close image preview" }))
       .toHaveClass("size-11");
     expect(within(dialog).queryByRole("button", { name: "Next image" })).not.toBeInTheDocument();
@@ -233,9 +233,15 @@ describe("ProductImageGallery", () => {
     await user.click(screen.getByRole("button", { name: "Open image 1" }));
 
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
-    expect(dialog).toHaveClass("w-[min(94vw,calc(52.5dvh_+_2.5rem))]");
+    expect(dialog).toHaveClass("h-dvh", "w-screen", "overflow-hidden");
     const closeButton = within(dialog).getByRole("button", { name: "Close image preview" });
+    const frame = within(dialog).getByTestId("product-gallery-preview-frame");
+    const previousButton = within(dialog).getByRole("button", { name: "Previous image" });
     const nextButton = within(dialog).getByRole("button", { name: "Next image" });
+    expect(frame).not.toContainElement(previousButton);
+    expect(frame).not.toContainElement(nextButton);
+    expect(previousButton).toHaveAttribute("data-gallery-previous");
+    expect(nextButton).toHaveAttribute("data-gallery-next");
 
     await user.click(nextButton);
     expect(nextButton).toHaveFocus();
