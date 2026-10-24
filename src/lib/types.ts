@@ -91,6 +91,26 @@ export type ProductAsset = {
   demoPrivatePath?: string;
 };
 
+export type ReaderArtwork = {
+  id: string;
+  productId: string;
+  storagePath: string;
+  storageProvider: CollectionImageStorageProvider;
+  filename: string;
+  contentType: "image/png" | "image/jpeg" | "image/webp";
+  sizeBytes: number;
+  displayName: string;
+  description?: string;
+  sortOrder: number;
+  isVisible: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PublicReaderArtwork = Pick<ReaderArtwork, "id" | "displayName" | "description" | "sortOrder"> & {
+  src: string;
+};
+
 export type AmazonLink = {
   id: string;
   productId: string;
@@ -156,6 +176,7 @@ export type Product = {
   categoryIds: string[];
   tagIds: string[];
   assets: ProductAsset[];
+  readerArtworks?: ReaderArtwork[];
   amazonLinks: AmazonLink[];
   premiumCodes: PremiumCode[];
 };
@@ -174,6 +195,7 @@ export type LocalizedProductView = {
   seoDescription: string;
   cover: ProductAsset;
   gallery: ProductAsset[];
+  readerArtworks: PublicReaderArtwork[];
   video?: ProductAsset;
   publicDownloads: ProductAsset[];
   premiumAssets: ProductAsset[];

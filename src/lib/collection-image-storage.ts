@@ -23,9 +23,10 @@ export async function storeCollectionImage(input: {
   contentType: string;
   bytes: Uint8Array;
   authorizationToken?: string | null;
+  namespace?: "collections" | "reader-artworks";
 }): Promise<{ path: string; provider: CollectionImageProvider; filename: string }> {
   const filename = mediaFilenameForDisplay(input.filename);
-  const storagePath = createCollectionImagePath(input.collectionId, input.imageId, filename, input.contentType);
+  const storagePath = createCollectionImagePath(input.collectionId, input.imageId, filename, input.contentType, input.namespace);
   if (input.bytes.byteLength <= 0 || input.bytes.byteLength > MAX_COLLECTION_IMAGE_BYTES) {
     throw new Error("Invalid collection image size.");
   }
@@ -124,6 +125,27 @@ export async function readLocalCollectionImage(storagePath: string, collectionId
   return fs.readFile(localImagePath(storagePath));
 }
 
+export async function readCollectionImage(input: {
+  collectionId: string;
+  storagePath: string;
+  provider: CollectionImageProvider;
+  authorizationToken?: string | null;
+}): Promise<Uint8Array> {
+  assertPath(input.storagePath, input.collectionId);
+  if (input.provider === "local") return readLocalCollectionImage(input.storagePath, input.collectionId);
+  if (input.provider === "r2") {
+    const { privateBucket } = getR2StorageConfig();
+    const result = await getR2Client().send(new GetObjectCommand({ Bucket: privateBucket, Key: input.storagePath }));
+    if (!result.Body) throw new Error("Collection image is unavailable.");
+    return result.Body.transformToByteArray();
+  }
+  const { data, error } = await createServiceRoleClient({
+    storageAuthorizationToken: input.authorizationToken ?? undefined,
+  }).storage.from(COLLECTION_IMAGE_BUCKET).download(input.storagePath);
+  if (error || !data) throw new Error("Collection image is unavailable.");
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 export async function removeCollectionImage(input: {
   collectionId: string;
   storagePath: string;
@@ -154,7 +176,8 @@ function localImagePath(storagePath: string) {
 }
 
 function assertPath(storagePath: string, collectionId?: string) {
-  if (!isSafeCollectionImagePath(storagePath, collectionId)) {
+  if (!isSafeCollectionImagePath(storagePath, collectionId, "collections") &&
+      !isSafeCollectionImagePath(storagePath, collectionId, "reader-artworks")) {
     throw new Error("Invalid collection image path.");
   }
 }

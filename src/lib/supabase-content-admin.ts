@@ -30,6 +30,7 @@ import {
 import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
 import { assertCollectionImageExists, removeCollectionImage } from "./collection-image-storage";
+import { listReaderArtworks } from "./reader-artworks";
 import {
   hasDuplicateAboutProductIds,
   normalizeAboutPageSettings,
@@ -286,6 +287,9 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
   return runAdminMutation("product deletion", async () => {
     if (getBackendMode() === "local") {
       const previous = getContentSnapshot().products.find((product) => product.id === productId);
+      for (const artwork of previous?.readerArtworks ?? []) {
+        await removeCollectionImage({ collectionId: productId, storagePath: artwork.storagePath, provider: artwork.storageProvider });
+      }
       const result = deleteProduct(productId);
       if (result.ok) {
         await cleanupPersistedMedia({ previous: previous?.assets ?? [], next: [] });
@@ -297,6 +301,11 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
     const previous = snapshot.products.find((product) => product.id === productId);
     if (!previous) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
+    }
+
+    const previousReaderArtworks = await listReaderArtworks(productId, true);
+    for (const artwork of previousReaderArtworks) {
+      await removeCollectionImage({ collectionId: productId, storagePath: artwork.storagePath, provider: artwork.storageProvider });
     }
 
     const supabase = await createClient();

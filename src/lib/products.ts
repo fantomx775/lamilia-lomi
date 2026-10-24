@@ -131,6 +131,16 @@ export function getLocalizedProductViewFromSnapshot(
     seoDescription: translation.seoDescription ?? translation.shortDescription,
     cover,
     gallery: sortAssets(activeAssets.filter((asset) => asset.kind === "gallery")),
+    readerArtworks: (product.readerArtworks ?? [])
+      .filter((artwork) => artwork.isVisible)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map(({ id, displayName, description, sortOrder }) => ({
+        id,
+        displayName,
+        description,
+        sortOrder,
+        src: `/api/reader-artworks/${encodeURIComponent(id)}`,
+      })),
     video: activeAssets.find((asset) => asset.kind === "video"),
     publicDownloads: sortAssets(
       activeAssets.filter((asset) => asset.kind === "public_download"),

@@ -18,4 +18,11 @@ describe("collection image paths", () => {
       "Invalid collection image content type.",
     );
   });
+
+  it("keeps reader artwork keys out of the collection-image namespace", () => {
+    const path = createCollectionImagePath(collectionId, imageId, "colored.png", "image/png", "reader-artworks");
+    expect(path).toBe(`reader-artworks/${collectionId}/image/${imageId}-colored.png`);
+    expect(isSafeCollectionImagePath(path, collectionId)).toBe(false);
+    expect(isSafeCollectionImagePath(path, collectionId, "reader-artworks")).toBe(true);
+  });
 });

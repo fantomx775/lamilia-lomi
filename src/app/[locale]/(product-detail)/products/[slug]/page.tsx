@@ -9,6 +9,7 @@ import { ImageWithFallback } from "@/components/image-with-fallback";
 import { NavigationLink } from "@/components/navigation-link";
 import { ProductDescription } from "@/components/product-description";
 import { ProductInsideBookSection } from "@/components/product-inside-book-section";
+import { ReaderArtworkGallery } from "@/components/reader-artwork-gallery";
 import { getRichTextTextContent } from "@/lib/rich-text";
 import { ScrollToFragment } from "@/components/scroll-to-fragment";
 import { UnlockForm } from "@/components/unlock-form";
@@ -376,6 +377,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
         video={product.video}
         poster={product.cover.path}
       />
+      <ReaderArtworkGallery artworks={product.readerArtworks} />
 
       {product.publicDownloads.length ? (
         <section aria-labelledby="public-downloads-title" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">

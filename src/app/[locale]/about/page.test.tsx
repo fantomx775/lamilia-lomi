@@ -176,6 +176,7 @@ function makeProduct(
       isPublic: true,
     },
     gallery: [],
+    readerArtworks: [],
     publicDownloads: [],
     premiumAssets: [],
     categories: [],

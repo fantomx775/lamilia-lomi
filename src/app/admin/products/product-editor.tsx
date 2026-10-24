@@ -27,6 +27,7 @@ import {
 import { MAX_PREMIUM_CODE_BATCH_SIZE, MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Collection, Product, ProductAsset, Tag } from "@/lib/types";
+import { ReaderArtworkManager } from "./reader-artwork-manager";
 
 type ProductContentDraft = {
   title: string;
@@ -1094,6 +1095,7 @@ export function ProductEditor({
             </AdminEditorSection>
 
             <MediaSections assets={assets} errors={mediaErrors} fieldErrors={fieldErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
+            <ReaderArtworkManager productId={product?.id} />
 
             <AdminEditorSection title="Sprzedaż na Amazon" description="Dodaj maksymalnie jeden link dla każdego rynku i wybierz jeden domyślny.">
               <div id="product-amazon-links" className="grid gap-3">
