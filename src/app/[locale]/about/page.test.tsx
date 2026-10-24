@@ -55,7 +55,7 @@ describe("About page", () => {
 
     expect(pageMocks.getAboutPageSettingsForRequest).toHaveBeenCalledOnce();
     expect(pageMocks.getPublishedProductViewsForRequest).toHaveBeenCalledWith("en");
-    expect(screen.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Loved by Our Readers" })).toBeInTheDocument();
     expect(screen.getByText("Thoughtful books for creative little moments.")).toBeInTheDocument();
 
     const coloringSection = screen.getByRole("region", { name: "Favorite Coloring Books" });
@@ -64,24 +64,28 @@ describe("About page", () => {
       "Moon Garden Coloring Book",
       "Garden Patterns",
     ]);
-    expect(within(coloringSection).getByText("A calm coloring escape.")).toBeInTheDocument();
-    expect(within(coloringSection).getByText("Flowers and tiny creatures to color.")).toBeInTheDocument();
     expect(within(coloringSection).getAllByText((_, element) =>
       element?.tagName === "P" &&
-      element.textContent?.replace(/\s+/g, " ").includes("Kids · Coloring Book") === true,
+      element.textContent?.replace(/\s+/g, " ").includes("Coloring Book · Kids") === true,
     )).toHaveLength(2);
     expect(within(coloringSection).getByRole("img", { name: "Cover for Moon Garden Coloring Book" })).toBeInTheDocument();
     expect(within(coloringSection).getAllByRole("link", { name: "View on Amazon" })[0]).toHaveAttribute(
       "href",
       "https://www.amazon.com/dp/coloring-2",
     );
+    expect(within(coloringSection).getByRole("link", { name: "Moon Garden Coloring Book" })).toHaveAttribute(
+      "href",
+      "/en/products/coloring-2",
+    );
+    expect(coloringSection.querySelector(".lg\\:grid-cols-3")).toBeInTheDocument();
+    expect(coloringSection.querySelector(".grid-cols-2")).toBeInTheDocument();
 
     const pictureSection = screen.getByRole("region", { name: "Favorite Picture Books" });
     expect(within(pictureSection).getByRole("heading", { level: 3, name: "The Moonlit Forest" })).toBeInTheDocument();
     expect(within(pictureSection).queryByRole("heading", { level: 3, name: "Moon Garden Coloring Book" })).not.toBeInTheDocument();
     expect(within(pictureSection).queryByRole("heading", { level: 3, name: "A Coloring Book" })).not.toBeInTheDocument();
     expect(within(pictureSection).queryByText("unavailable-coloring")).not.toBeInTheDocument();
-    expect(screen.getByText("A little wonder on every page.")).toBeInTheDocument();
+    expect(screen.queryByText("A little wonder on every page.")).not.toBeInTheDocument();
   });
 
   it("uses updated product records and provides an empty state when no configured product is public", async () => {
@@ -107,12 +111,27 @@ describe("About page", () => {
     view.rerender(await AboutPage({ params: Promise.resolve({ locale: "en" }) }));
 
     expect(screen.getByRole("heading", { level: 3, name: "Moon Garden, Reimagined" })).toBeInTheDocument();
-    expect(screen.getByText("A refreshed description from the latest product record.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View on Amazon" })).toHaveAttribute(
       "href",
       "https://www.amazon.com/dp/coloring-2-updated",
     );
     expect(screen.getByText("New favorites are on the way.")).toBeInTheDocument();
+  });
+
+  it("hides a configured favorite that is no longer published", async () => {
+    pageMocks.getAboutPageSettingsForRequest.mockResolvedValue({
+      ...settings,
+      favoriteColoringBookIds: ["unpublished-coloring", "", ""],
+    });
+    pageMocks.getPublishedProductViewsForRequest.mockResolvedValue([
+      makeProduct("unpublished-coloring", "Retired Coloring Book", "", "coloring-book", undefined, "draft"),
+    ]);
+
+    render(await AboutPage({ params: Promise.resolve({ locale: "en" }) }));
+
+    const section = screen.getByRole("region", { name: "Favorite Coloring Books" });
+    expect(within(section).queryByRole("heading", { name: "Retired Coloring Book" })).not.toBeInTheDocument();
+    expect(within(section).getByText("New favorites are on the way.")).toBeInTheDocument();
   });
 });
 
@@ -122,6 +141,7 @@ function makeProduct(
   shortDescription: string,
   productType: string,
   amazonUrl = `https://www.amazon.com/dp/${id}`,
+  status: LocalizedProductView["status"] = "published",
 ): LocalizedProductView {
   const primaryAmazonLink = {
     id: `${id}-amazon`,
@@ -134,7 +154,7 @@ function makeProduct(
   return {
     id,
     slug: id,
-    status: "published",
+    status,
     audience: "kids",
     audienceLabel: "Kids",
     productType,
