@@ -1049,8 +1049,7 @@ export function ProductEditor({
         {feedback && showRouteFeedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
         {saveErrorCodes.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"><p className="font-medium">Nie udało się zapisać. Twoje wpisane wartości są zachowane.</p><ul className="mt-2 list-disc space-y-1 pl-5">{Array.from(new Set(saveErrorCodes)).map((code) => <li key={code}>{getAdminErrorMessage(code, "pl")}</li>)}</ul></div> : null}
 
-        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
-          <main className="grid min-w-0 gap-6">
+        <main className="mx-auto grid w-full max-w-4xl min-w-0 gap-6">
       <AdminEditorSection title="Podstawowe informacje" description="Treść produktu jest edytowana po angielsku.">
               <div className="grid min-w-0 gap-5">
                 <div className="grid min-w-0 gap-4">
@@ -1170,10 +1169,7 @@ export function ProductEditor({
                 )}
               </div>
             </AdminEditorSection>
-          </main>
-
-          <aside className="grid h-fit min-w-0 gap-6 xl:sticky xl:top-6">
-            <AdminEditorSection title="Publikacja i katalog">
+            <AdminEditorSection title="Publikacja i organizacja">
               <div className="grid gap-4">
               <Field label="Status" htmlFor="product-status" error={fieldErrors["product-status"]?.[0]}>
                 <select id="product-status" name="status" value={productStatus} onChange={(event) => setProductStatus(event.target.value as Product["status"])} aria-invalid={Boolean(fieldErrors["product-status"]?.length)} aria-describedby={fieldErrors["product-status"]?.length ? "product-status-error" : undefined} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm outline-none focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]">
@@ -1194,9 +1190,6 @@ export function ProductEditor({
                 <p className="text-xs leading-5 text-[var(--color-muted)]">Liczba dni od odblokowania produktu do przypomnienia.</p>
               </Field>
               </div>
-            </AdminEditorSection>
-
-            <AdminEditorSection title="Organizacja">
               <div className="grid gap-4">
                 <Field label="Segment" htmlFor="product-audience"><select id="product-audience" name="audience" defaultValue={submittedValue(submittedValues, "audience", product?.audience ?? "kids")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="kids">Dzieci</option><option value="adults">Dorośli</option></select></Field>
                 <Field label="Typ produktu" htmlFor="product-type"><select id="product-type" name="productType" defaultValue={submittedValue(submittedValues, "productType", product?.productType ?? "coloring-book")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{product?.productType && !productTypes.includes(product.productType) ? <option value={product.productType}>{formatProductType(product.productType)}</option> : null}{productTypes.map((type) => <option key={type} value={type}>{formatProductType(type)}</option>)}</select></Field>
@@ -1205,8 +1198,7 @@ export function ProductEditor({
                 <CheckboxGroup label="Tagi" name="tagIds" values={tags.map((tag) => ({ id: tag.id, label: taxonomyLabel(tag.translations, tag.slug) }))} selected={submittedValuesFor(submittedValues, "tagIds", product?.tagIds ?? [])} />
               </div>
             </AdminEditorSection>
-          </aside>
-        </div>
+        </main>
         </fieldset>
       </form>
 

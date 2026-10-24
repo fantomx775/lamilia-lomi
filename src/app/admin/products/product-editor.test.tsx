@@ -193,7 +193,11 @@ describe("ProductEditor V2", () => {
       />,
     );
 
-    expect(view.getByRole("heading", { name: "Organizacja" })).toBeInTheDocument();
+    expect(view.getByRole("heading", { name: "Publikacja i organizacja" })).toBeInTheDocument();
+    expect(view.queryByRole("heading", { name: "Organizacja" })).not.toBeInTheDocument();
+    expect(view.container.querySelector("aside")).not.toBeInTheDocument();
+    expect(view.container.querySelector("main")).toHaveClass("max-w-4xl");
+    expect(view.getByRole("heading", { name: "Pokolorowane prace czytelniczek" })).toBeInTheDocument();
     expect(view.queryByRole("heading", { name: "Zaawansowane" })).not.toBeInTheDocument();
     expect(view.getByLabelText("Adres produktu")).toHaveValue("");
     expect(view.getByLabelText("Pozycja w katalogu")).toHaveValue(100);
