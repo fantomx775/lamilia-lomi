@@ -5,7 +5,8 @@ import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { createServiceRoleClient } from "./supabase/admin";
 import type { ReaderArtwork } from "./types";
 
-const SELECT = "id,product_id,storage_path,storage_provider,filename,content_type,size_bytes,display_name,description,sort_order,is_visible,created_at,updated_at";
+const SELECT: string = "id,product_id,storage_path,storage_provider,filename,content_type,size_bytes,display_name,description,sort_order,is_visible,created_at,updated_at";
+const PUBLIC_SELECT: string = `${SELECT},products!product_reader_artworks_product_id_fkey!inner(status)`;
 
 export async function listReaderArtworks(productId: string, admin = false): Promise<ReaderArtwork[]> {
   if (getBackendMode() === "local") {
@@ -14,11 +15,11 @@ export async function listReaderArtworks(productId: string, admin = false): Prom
       .filter((item) => admin || item.isVisible).sort((a, b) => a.sortOrder - b.sortOrder);
   }
   const client = createServiceRoleClient();
-  let query = client.from("product_reader_artworks").select(SELECT).eq("product_id", productId);
-  if (!admin) query = query.eq("is_visible", true);
+  let query = client.from("product_reader_artworks").select(admin ? SELECT : PUBLIC_SELECT).eq("product_id", productId);
+  if (!admin) query = query.eq("is_visible", true).eq("products.status", "published");
   const { data, error } = await query.order("sort_order").order("id");
   if (error) throw new Error(`Reader artwork read failed: ${error.message}`);
-  return (data ?? []).map(mapRow);
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map(mapRow);
 }
 
 export async function getReaderArtwork(id: string, admin = false): Promise<ReaderArtwork | null> {
@@ -28,11 +29,11 @@ export async function getReaderArtwork(id: string, admin = false): Promise<Reade
     return product.readerArtworks?.find((item) => item.id === id && (admin || item.isVisible)) ?? null;
   }
   const client = createServiceRoleClient();
-  let query = client.from("product_reader_artworks").select(`${SELECT},products!inner(status)`).eq("id", id);
+  let query = client.from("product_reader_artworks").select(PUBLIC_SELECT).eq("id", id);
   if (!admin) query = query.eq("is_visible", true).eq("products.status", "published");
   const { data, error } = await query.maybeSingle();
   if (error) throw new Error(`Reader artwork lookup failed: ${error.message}`);
-  return data ? mapRow(data) : null;
+  return data ? mapRow(data as unknown as Record<string, unknown>) : null;
 }
 
 export async function createReaderArtwork(artwork: ReaderArtwork) {
@@ -82,7 +83,7 @@ export async function deleteReaderArtwork(productId: string, id: string) {
   const { data, error } = await createServiceRoleClient().from("product_reader_artworks").delete()
     .eq("product_id", productId).eq("id", id).select(SELECT);
   if (error) throw new Error(`Reader artwork delete failed: ${error.message}`);
-  return data?.[0] ? mapRow(data[0]) : null;
+  return data?.[0] ? mapRow(data[0] as unknown as Record<string, unknown>) : null;
 }
 
 export async function reorderReaderArtworks(productId: string, orderedIds: string[]) {

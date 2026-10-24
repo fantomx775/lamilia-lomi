@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ backend: "local" as string, snapshot: { products: [] as Record<string, unknown>[] }, saved: vi.fn() }));
+const mocks = vi.hoisted(() => ({ backend: "local" as string, snapshot: { products: [] as Record<string, unknown>[] }, saved: vi.fn(), calls: [] as Array<{ method: string; args: unknown[] }> }));
 vi.mock("server-only", () => ({}));
 vi.mock("./config", () => ({ getBackendMode: () => mocks.backend }));
 vi.mock("./content-store", () => ({ getContentSnapshot: () => structuredClone(mocks.snapshot), saveContentSnapshot: (value: unknown) => { mocks.snapshot = structuredClone(value) as typeof mocks.snapshot; mocks.saved(); } }));
+vi.mock("./supabase/admin", () => ({ createServiceRoleClient: () => ({ from: (table: string) => { mocks.calls.push({ method: "from", args: [table] }); const chain = new Proxy({} as object, { get(_target, property) { if (property === "then") return (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve); return (...args: unknown[]) => { mocks.calls.push({ method: String(property), args }); return chain; }; } }); return chain; } }) }));
 
 import { createReaderArtwork, deleteReaderArtwork, getReaderArtwork, listReaderArtworks, reorderReaderArtworks, updateReaderArtwork } from "./reader-artworks";
 
@@ -13,7 +14,7 @@ const entry = (id: string, owner: string, sortOrder: number) => ({ id, productId
 
 describe("reader artwork repository", () => {
   beforeEach(() => {
-    mocks.backend = "local"; mocks.saved.mockClear();
+    mocks.backend = "local"; mocks.saved.mockClear(); mocks.calls.length = 0;
     mocks.snapshot = { products: [
       { id: productId, status: "published", readerArtworks: [entry("art-1", productId, 0), entry("art-2", productId, 1), { ...entry("art-hidden", productId, 2), isVisible: false }] },
       { id: otherId, status: "draft", readerArtworks: [entry("other-art", otherId, 0)] },
@@ -40,5 +41,13 @@ describe("reader artwork repository", () => {
     expect(await deleteReaderArtwork(productId, "other-art")).toBe(false);
     expect((await listReaderArtworks(otherId, true))[0].id).toBe("other-art");
     expect(await deleteReaderArtwork(productId, "art-3")).toBe(true);
+  });
+
+  it("filters Supabase public reads by both visible artwork and published product", async () => {
+    mocks.backend = "supabase";
+    await expect(listReaderArtworks(productId)).resolves.toEqual([]);
+    expect(mocks.calls).toContainEqual({ method: "select", args: [expect.stringContaining("products!product_reader_artworks_product_id_fkey!inner(status)")] });
+    expect(mocks.calls).toContainEqual({ method: "eq", args: ["is_visible", true] });
+    expect(mocks.calls).toContainEqual({ method: "eq", args: ["products.status", "published"] });
   });
 });

@@ -27,11 +27,15 @@ export type ProductImageGalleryLabels = {
 type ProductImageGalleryProps = {
   images: ProductGalleryImage[];
   labels: ProductImageGalleryLabels;
+  layout?: "default" | "reader-artworks";
+  visibleLimit?: number;
 };
 
 export function ProductImageGallery({
   images,
   labels,
+  layout = "default",
+  visibleLimit = 4,
 }: ProductImageGalleryProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -115,17 +119,21 @@ export function ProductImageGallery({
 
   if (imageCount === 0) return null;
 
-  const visibleImages = images.slice(0, 4);
+  const thumbnailLimit = Math.max(1, Math.min(visibleLimit, images.length));
+  const visibleImages = images.slice(0, thumbnailLimit);
+  const thumbnailGridClassName = layout === "reader-artworks"
+    ? "grid grid-cols-2 gap-5 sm:grid-cols-2 lg:grid-cols-4"
+    : "grid grid-cols-2 gap-3 sm:gap-4";
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+      <div className={thumbnailGridClassName} data-testid={layout === "reader-artworks" ? "reader-artwork-grid" : undefined}>
         {visibleImages.map((image, index) => (
           <figure key={image.id} className="group">
             <button
               type="button"
               aria-label={
-                index === 3 && imageCount > 4
+                index === thumbnailLimit - 1 && imageCount > thumbnailLimit
                   ? `${labels.openImages[index] ?? labels.previewTitle}, ${(labels.viewAllImages ?? labels.previewTitle).replace("{count}", String(imageCount))}`
                   : labels.openImages[index] ?? labels.previewTitle
               }
@@ -145,12 +153,12 @@ export function ProductImageGallery({
                   className="object-contain"
                   sizes="(min-width: 1024px) 300px, 46vw"
                 />
-                {index === 3 && imageCount > 4 ? (
+                {index === thumbnailLimit - 1 && imageCount > thumbnailLimit ? (
                   <span
                     aria-hidden="true"
                     className="absolute inset-0 grid place-items-center bg-[rgba(44,36,32,0.55)] text-3xl font-medium tabular-nums text-white"
                   >
-                    +{imageCount - 4} {labels.moreImages ?? "more"}
+                    +{imageCount - thumbnailLimit} {labels.moreImages ?? "more"}
                   </span>
                 ) : null}
                 <span

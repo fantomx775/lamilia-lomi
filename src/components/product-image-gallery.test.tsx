@@ -11,6 +11,7 @@ vi.mock("next/image", () => ({
 }));
 
 import { ProductImageGallery } from "@/components/product-image-gallery";
+import { ReaderArtworkGallery } from "@/components/reader-artwork-gallery";
 
 const images = [
   {
@@ -139,6 +140,32 @@ describe("ProductImageGallery", () => {
   it("renders no gallery for an empty image list", () => {
     const { container } = render(<ProductImageGallery images={[]} labels={makeLabels(0)} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows each reader credit once in a full-width collection layout and keeps all images in the viewer", async () => {
+    const user = userEvent.setup();
+    const artworks = ["Mira", "Jo", "Lee"].map((displayName, index) => ({
+      id: `work-${index + 1}`,
+      displayName,
+      description: `Colorful page ${index + 1}`,
+      sortOrder: index,
+      src: `/api/reader-artworks/public-${index + 1}`,
+    }));
+    const { container } = render(<ReaderArtworkGallery artworks={artworks} />);
+
+    expect(screen.getByRole("heading", { name: "Colored by Our Readers" })).toBeVisible();
+    expect(screen.getByText("Colored by Mira")).toBeVisible();
+    expect(screen.getAllByText("Colored by Mira")).toHaveLength(1);
+    const grid = screen.getByTestId("reader-artwork-grid");
+    expect(grid).toHaveClass("grid-cols-2", "lg:grid-cols-4");
+    expect(container.textContent).not.toContain("storagePath");
+
+    await user.click(screen.getByRole("button", { name: "Open artwork 1 by Mira" }));
+    const dialog = screen.getByRole("dialog", { name: "Reader artwork preview" });
+    expect(within(dialog).getByText("Colored by Mira")).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Next artwork" }));
+    expect(within(dialog).getByRole("img", { name: "Colorful page 2" })).toBeVisible();
+    expect(within(dialog).getByText("2 of 3")).toBeVisible();
   });
 
   it("keeps a single image usable without carousel controls", async () => {
