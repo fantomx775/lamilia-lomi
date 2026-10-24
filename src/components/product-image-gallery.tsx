@@ -27,8 +27,9 @@ export type ProductImageGalleryLabels = {
 type ProductImageGalleryProps = {
   images: ProductGalleryImage[];
   labels: ProductImageGalleryLabels;
-  layout?: "default" | "reader-artworks";
+  layout?: "default" | "reader-artworks" | "inside-book";
   visibleLimit?: number;
+  sizes?: string;
 };
 
 export function ProductImageGallery({
@@ -36,6 +37,7 @@ export function ProductImageGallery({
   labels,
   layout = "default",
   visibleLimit = 4,
+  sizes = "(min-width: 1280px) 600px, (min-width: 1024px) calc(50vw - 40px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)",
 }: ProductImageGalleryProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -123,7 +125,9 @@ export function ProductImageGallery({
   const visibleImages = images.slice(0, thumbnailLimit);
   const thumbnailGridClassName = layout === "reader-artworks"
     ? "grid grid-cols-2 gap-5 sm:grid-cols-2 lg:grid-cols-4"
-    : "grid grid-cols-2 gap-3 sm:gap-4";
+    : layout === "inside-book"
+      ? "grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4"
+      : "grid grid-cols-2 gap-3 sm:gap-4";
 
   return (
     <>
@@ -151,7 +155,7 @@ export function ProductImageGallery({
                   loading="lazy"
                   unoptimized={image.unoptimized}
                   className="object-contain"
-                  sizes="(min-width: 1024px) 300px, 46vw"
+                  sizes={sizes}
                 />
                 {index === thumbnailLimit - 1 && imageCount > thumbnailLimit ? (
                   <span

@@ -12,6 +12,11 @@ import {
 
 type ProductVideoAsset = Pick<ProductAsset, "contentType" | "path" | "title">;
 
+const productGalleryWithVideoSizes =
+  "(min-width: 1280px) 335px, (min-width: 1024px) calc(28.75vw - 33px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)";
+const productGalleryWithoutVideoSizes =
+  "(min-width: 1280px) 300px, (min-width: 1024px) calc(25vw - 28px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)";
+
 type ProductInsideBookSectionProps = {
   title: string;
   description: string;
@@ -65,7 +70,14 @@ export function ProductInsideBookSection({
               : "mt-7"
           }
         >
-          {hasGallery ? <ProductImageGallery images={images} labels={labels} /> : null}
+          {hasGallery ? (
+            <ProductImageGallery
+              images={images}
+              labels={labels}
+              layout={hasGalleryAndVideo ? "default" : "inside-book"}
+              sizes={hasGalleryAndVideo ? productGalleryWithVideoSizes : productGalleryWithoutVideoSizes}
+            />
+          ) : null}
           {playableVideo ? (
             <ProductVideoPreview video={playableVideo} poster={poster} />
           ) : null}
