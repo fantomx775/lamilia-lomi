@@ -6,6 +6,17 @@ import { AdminEditorSection } from "@/components/admin/admin-editor-foundation";
 
 type Artwork = { id: string; displayName: string; description?: string; sortOrder: number; isVisible: boolean; src: string };
 
+function isArtwork(value: unknown): value is Artwork {
+  if (!value || typeof value !== "object") return false;
+  const artwork = value as Partial<Artwork>;
+  return typeof artwork.id === "string"
+    && typeof artwork.displayName === "string"
+    && typeof artwork.sortOrder === "number"
+    && typeof artwork.isVisible === "boolean"
+    && typeof artwork.src === "string"
+    && (artwork.description === undefined || typeof artwork.description === "string");
+}
+
 export function ReaderArtworkManager({ productId }: { productId?: string }) {
   const [items, setItems] = useState<Artwork[]>([]);
   const [busy, setBusy] = useState(false);
@@ -23,7 +34,12 @@ export function ReaderArtworkManager({ productId }: { productId?: string }) {
     if (!endpoint) return;
     fetch(endpoint, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("Nie udało się wczytać prac.");
-      setItems((await response.json()).artworks);
+      const result: unknown = await response.json();
+      if (!result || typeof result !== "object" || !Array.isArray((result as { artworks?: unknown }).artworks)
+        || !(result as { artworks: unknown[] }).artworks.every(isArtwork)) {
+        throw new Error("Nie udało się wczytać prac. Odpowiedź serwera ma nieprawidłowy format.");
+      }
+      setItems((result as { artworks: Artwork[] }).artworks);
     }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Nie udało się wczytać prac."));
   }, [endpoint]);
 
