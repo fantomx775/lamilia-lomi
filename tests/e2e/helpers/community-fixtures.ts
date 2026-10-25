@@ -149,13 +149,15 @@ export async function communityScreenshots(page: Page, folderName: string, view:
     await page.setViewportSize({ width, height: 1000 });
     await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
     const dialog = page.getByRole("dialog", { name: "Share your art", exact: true });
-    if (!await dialog.isVisible()) await essentials(page);
+    const dialogOpen = await dialog.isVisible();
+    if (dialogOpen) await dialog.locator(".overflow-y-auto").evaluate((element) => { element.scrollTop = 0; });
+    else await essentials(page);
     await page.evaluate(() => document.fonts.ready);
     await page.addStyleTag({ content: "nextjs-portal { display:none !important; }" });
     await page.evaluate(() => scrollTo(0, 0));
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     const filename = `${view}-${width}.png`;
-    await page.screenshot({ path: path.join(folder, filename), fullPage: true, caret: "initial" });
+    await page.screenshot({ path: path.join(folder, filename), fullPage: !dialogOpen, caret: "initial" });
     screenshots.push({ path: `docs/verification/issue-77/${folderName}/${filename}`, testedSha, runId });
   }
   return screenshots;

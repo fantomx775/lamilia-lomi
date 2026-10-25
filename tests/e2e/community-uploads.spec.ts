@@ -381,3 +381,64 @@ test("authorized maintenance drains a real queued deletion without another owner
     await fixtures.cleanup();
   }
 });
+
+test("keyboard drawer state and a dropped successful response recover without a duplicate artwork", async ({ page }, testInfo) => {
+  test.skip(process.env.RUN_COMMUNITY_UPLOADS_E2E !== "1" || testInfo.project.name !== "chromium",
+    "Requires the isolated real Supabase upload application.");
+  test.setTimeout(120_000);
+  page.setDefaultTimeout(12_000);
+  const fixtures = await communityFixtures(testInfo);
+  let intercepted = false;
+  try {
+    const owner = await fixtures.actor("retry-owner", { username: "cc_retry_artist" });
+    const book = await fixtures.product("Retry Fixture Book");
+    await fixtures.unlock(owner.id, book.id);
+    await fixtures.login(page, owner);
+    const trigger = page.getByTestId("community-upload-open");
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Share your art", exact: true });
+    await expect(dialog).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+    await page.getByTestId("community-product-select").selectOption(book.id);
+    await page.getByTestId("community-upload-file-input").setInputFiles([
+      path.resolve("docs/design/coloring-club/assets/rose-fox.webp"),
+      path.resolve("docs/design/coloring-club/assets/cottage.webp"),
+    ]);
+    await page.getByTestId("community-selected-artwork").first().getByRole("textbox").fill("Preserved across a lost response");
+    await page.keyboard.press("Escape");
+    await expect(page.locator('[data-slot="admin-drawer"]')).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await trigger.press("Enter");
+    await expect(page.getByTestId("community-selected-artwork")).toHaveCount(2);
+    await expect(page.getByTestId("community-selected-artwork").first().getByRole("textbox")).toHaveValue("Preserved across a lost response");
+    await page.getByTestId("community-upload-rules").check();
+    // The real server commits. Only the first response to the browser is lost,
+    // exercising the advertised stable-key recovery rather than a fake backend.
+    await page.route("**/api/community/artworks", async (route) => {
+      const response = await route.fetch();
+      if (!intercepted) {
+        intercepted = true;
+        expect([200, 201]).toContain(response.status());
+        await route.abort("failed");
+      } else await route.fulfill({ response });
+    });
+    await page.getByTestId("community-upload-submit").click();
+    await expect(page.getByTestId("community-artwork-retry")).toBeVisible();
+    await expect(dialog).toBeVisible();
+    expect((await fixtures.service.from("community_artworks").select("id", { count: "exact" }).eq("author_id", owner.id)).count).toBe(2);
+    await expect(page.getByTestId("community-selected-artwork")).toHaveCount(1);
+    await expect(page.getByTestId("community-selected-artwork").getByRole("textbox")).toBeDisabled();
+    await page.getByTestId("community-artwork-retry").click();
+    await expect(page.getByTestId("community-selected-artwork")).toHaveCount(0);
+    expect((await fixtures.service.from("community_artworks").select("id", { count: "exact" }).eq("author_id", owner.id)).count).toBe(2);
+    if (await dialog.isVisible()) await page.keyboard.press("Escape");
+    await expect(page.locator('[data-slot="admin-drawer"]')).toHaveCount(0);
+    await expect(page.getByTestId("community-artwork-card")).toHaveCount(2);
+    await page.reload();
+    await expect(page.getByTestId("community-artwork-card")).toHaveCount(2);
+  } finally {
+    await page.unroute("**/api/community/artworks");
+    await fixtures.cleanup();
+  }
+});
