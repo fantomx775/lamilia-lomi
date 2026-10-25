@@ -102,7 +102,7 @@ function FavoriteBookSection({
   return (
     <section
       aria-labelledby={`${id}-heading`}
-      className="grid min-w-0 gap-3 rounded-2xl border border-[var(--color-border)] bg-[#fcfaf6] p-3 sm:gap-4 sm:p-4 md:grid-cols-[minmax(190px,0.78fr)_minmax(0,2.22fr)] md:items-stretch"
+      className="grid min-w-0 gap-3 rounded-2xl border border-[var(--color-border)] bg-[#fcfaf6] p-3 sm:gap-4 sm:p-4 lg:grid-cols-[minmax(190px,0.78fr)_minmax(0,2.22fr)] lg:items-stretch"
     >
       <div className="relative flex min-w-0 items-center gap-3 rounded-xl bg-white/65 p-3 sm:p-4 md:gap-4">
         <Leaf
