@@ -30,7 +30,7 @@ export default async function LocaleLayout({ children, params }: Props) {
       <SiteHeader locale={locale as Locale} />
       <main className="flex-1">{children}</main>
       <SiteFooter locale={locale as Locale} />
-      <CookieConsentBanner ga4Id={process.env.NEXT_PUBLIC_GA4_ID} />
+      <CookieConsentBanner />
     </NextIntlClientProvider>
   );
 }

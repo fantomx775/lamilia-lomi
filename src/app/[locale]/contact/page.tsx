@@ -29,7 +29,7 @@ export default async function ContactPage({ params }: Props) {
           <h2 className="font-serif text-2xl font-semibold">Message</h2>
         </CardHeader>
         <CardContent>
-          <form action="/api/contact" method="post" className="grid gap-4">
+          <form data-analytics-form="contact" action="/api/contact" method="post" className="grid gap-4">
             <input type="hidden" name="locale" value={locale} />
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>

@@ -1,5 +1,7 @@
 "use client";
 
+import { trackEvent } from "@/lib/analytics-client";
+
 import { ExternalLink } from "lucide-react";
 import type { ComponentProps } from "react";
 
@@ -17,16 +19,7 @@ export function AmazonLink({ productId, market, className, ...props }: AmazonLin
       target="_blank"
       rel="noreferrer"
       onClick={() => {
-        const body = JSON.stringify({ productId, market });
-        if (navigator.sendBeacon) {
-          navigator.sendBeacon("/api/analytics/amazon-click", body);
-        } else {
-          void fetch("/api/analytics/amazon-click", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body,
-          });
-        }
+        trackEvent("amazon_link_click", { product_id: productId, market });
       }}
       {...props}
     >

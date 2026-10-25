@@ -30,6 +30,7 @@ export function ProductVideoPreview({
     <figure className="group">
       <div className="relative aspect-video overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
         <video
+          data-flipthrough
           src={playableVideo.path}
           poster={poster}
           controls

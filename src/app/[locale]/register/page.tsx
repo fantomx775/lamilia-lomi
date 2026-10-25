@@ -58,7 +58,7 @@ export default async function RegisterPage({ params, searchParams }: Props) {
           ) : null}
         </CardHeader>
         <CardContent>
-          <form action={registerDemoAction} className="grid gap-4">
+          <form data-analytics-form="register" action={registerDemoAction} className="grid gap-4">
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="returnTo" value={redirectTo} />
             <input type="hidden" name="code" value={code} />

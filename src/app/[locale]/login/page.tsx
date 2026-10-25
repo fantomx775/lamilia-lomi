@@ -64,7 +64,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
           ) : null}
         </CardHeader>
         <CardContent>
-          <form action={loginDemoAction} className="grid gap-4">
+          <form data-analytics-form="login" action={loginDemoAction} className="grid gap-4">
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="returnTo" value={redirectTo} />
             <input type="hidden" name="code" value={code} />

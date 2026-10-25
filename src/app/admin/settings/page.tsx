@@ -79,7 +79,7 @@ export default async function AdminSettingsPage({ searchParams }: Props) {
           </div>
           <div className="grid gap-2">
             <Label>GA4</Label>
-            <Input readOnly value={process.env.NEXT_PUBLIC_GA4_ID ? "configured" : "not configured"} />
+            <Input readOnly value={"G-NG67S3HPQZ (consent required)"} />
           </div>
           <div className="grid gap-2">
             <Label>Supabase</Label>

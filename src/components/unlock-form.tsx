@@ -160,7 +160,7 @@ export function UnlockForm({
   }
 
   return (
-    <form action={unlockPremiumAction} className="grid gap-4" data-testid="unlock-code-state">
+    <form data-analytics-form="unlock" action={unlockPremiumAction} className="grid gap-4" data-testid="unlock-code-state">
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="productSlug" value={productSlug} />
       <div className="grid gap-2">
