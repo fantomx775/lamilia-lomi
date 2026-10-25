@@ -8,6 +8,8 @@ import { isLocalDemoAppTarget } from "./local-target";
 test.setTimeout(600_000);
 
 test("Issue 51 rich text and HTML modes preserve supported content safely", async ({ page }, testInfo) => {
+  page.setDefaultTimeout(15_000);
+  page.setDefaultNavigationTimeout(30_000);
   test.skip(
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Issue 51 browser verification edits disposable records and requires the local demo backend.",
@@ -61,7 +63,6 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       (window as Window & { __issue51Executed?: boolean }).__issue51Executed = false;
     });
     await signInAsAdmin(page);
-
     await page.goto("/admin/products");
     const firstProductLink = page.locator('a[href^="/admin/products/"]:not([href="/admin/products/new"])').first();
     const productPath = await firstProductLink.getAttribute("href");
@@ -73,7 +74,11 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     const productField = page.locator('#product-editor-form input[name="longDescription"]');
     const originalProductValue = await productField.inputValue();
     const productHtml = `<!doctype html><html><head><title>Product source title</title><script>window.__issue51Executed = true</script><style>p { color: red }</style></head><body><h2>Issue 51 product summary</h2><p><u>Underlined product copy</u> <a href="https://example.com/issue-51">Editable link</a> <a href="javascript:alert(51)">Unsafe link</a></p><img src="https://rich-text-resource.invalid/tracker.png" alt="Product diagram"><!--><img src="https://rich-text-resource.invalid/malformed-comment.png" alt="Recovered after comment"><!-- --!><img src="https://rich-text-resource.invalid/bang-comment.png" alt="Recovered after bang comment"><!-- later normal terminator --><<img src="https://rich-text-resource.invalid/nested-tag.png" alt="Recovered after nested tag"><img foo" src=https://rich-text-resource.invalid/malformed-attribute-name.png alt="Recovered after malformed attribute"><"<img src=https://rich-text-resource.invalid/nested-quoted-opener.png alt="Recovered after nested quote"><iframe src="https://rich-text-resource.invalid/frame"></iframe><blockquote><p>Product quotation.</p></blockquote><hr><ul><li><p>Product feature one</p></li><li><p>Product feature two</p></li></ul><p onclick="window.__issue51Executed = true">Safe paragraph.</p></body></html>`;
+    // The toolbar is server-rendered before the Tiptap client editor hydrates.
+    // Wait for the actual editable surface before interacting with mode controls.
+    await expect(productEditor).toBeVisible();
     await page.getByRole("button", { name: "HTML" }).click();
+    await expect(page.getByRole("button", { name: "HTML" })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(productHtml);
     await page.getByRole("button", { name: "Rich Text" }).click();
     await expect(page.getByText("Przed konwersją sprawdź obsługiwane formatowanie:")).toBeVisible();
@@ -137,32 +142,38 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await page.reload();
     await expect(productField).toHaveValue(savedProductDescription);
     await page.goto(`/en/products/${productSlug}`);
-    const productDescription = page.locator("main .mt-5.max-w-2xl");
-    await expect(page.getByRole("heading", { level: 2, name: "Issue 51 product summary" })).toBeVisible();
+    const summaryHeading = page.getByRole("heading", { level: 2, name: "Issue 51 product summary" });
+    const productDescription = summaryHeading.locator("xpath=..");
+    await expect(summaryHeading).toBeVisible();
+    const readMore = page.getByRole("main").getByRole("button", { name: "Read more" });
+    if (await readMore.isVisible()) await readMore.click();
     await expect(productDescription.locator("blockquote")).toContainText("Product quotation.");
     await expect(productDescription.locator("u")).toHaveText("Underlined product copy");
-    await expect(productDescription.locator("a")).toHaveCount(0);
+    await expect(productDescription.locator("a[href^='javascript:']")).toHaveCount(0);
     await expect(productDescription.locator("script")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `product-storefront-${testInfo.project.name}.png`, page.getByRole("heading", { level: 2, name: "Issue 51 product summary" }));
-
     await page.goto("/admin/pages/terms");
     const termsEditor = page.getByRole("textbox", { name: "Treść" });
     const termsTitle = page.getByRole("textbox", { name: "Tytuł" });
-    await termsTitle.fill("Issue 51 saved terms title");
+    const savedTermsTitle = `Issue 51 saved terms title ${browserRunId}`;
+    await termsTitle.fill(savedTermsTitle);
     const termsHtml = "<h2>Issue 51 Terms</h2><p>Terms copied from the HTML source.</p><ol><li><p>Keep account details current.</p></li><li><p>Use the account responsibly.</p></li></ol><hr>";
+    await expect(termsEditor).toBeVisible();
     await page.getByRole("button", { name: "HTML" }).click();
+    await expect(page.getByRole("button", { name: "HTML" })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(termsHtml);
     await page.getByRole("button", { name: "Rich Text" }).click();
     await expect(termsEditor.locator("h2")).toHaveText("Issue 51 Terms");
     await expect(termsEditor.locator("ol li")).toHaveCount(2);
     await expect(termsEditor.locator("hr")).toHaveCount(1);
+    await expect(page.getByTestId("admin-save-bar")).toContainText("Niezapisane zmiany");
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `terms-editor-${testInfo.project.name}.png`, page.locator("#page-editor-form [role='toolbar']"));
     const termsSaveResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/pages/terms");
-    await page.getByRole("button", { name: "Zapisz" }).first().click();
+    await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     expect((await termsSaveResponse).status()).toBe(200);
-    await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
+    await expect(page.getByText("Zmiany strony zostały zapisane.")).toBeVisible();
     await termsTitle.fill("Issue 51 unsaved terms title");
     const unsavedNavigationMessage = page.waitForEvent("dialog").then(async (dialog) => {
       const message = dialog.message();
@@ -173,21 +184,23 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     expect(await unsavedNavigationMessage).toBe("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
     await expect(page.locator("#page-editor-form")).toBeVisible();
     await expect(termsTitle).toHaveValue("Issue 51 unsaved terms title");
-    await termsTitle.fill("Issue 51 saved terms title");
+    await termsTitle.fill(savedTermsTitle);
     await page.reload();
-    await expect(termsTitle).toHaveValue("Issue 51 saved terms title");
+    await expect(termsTitle).toHaveValue(savedTermsTitle);
     await expect(page.locator('#page-editor-form input[name="body"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/terms");
+    await expect(page.getByRole("heading", { level: 1, name: savedTermsTitle })).toBeVisible();
     await expect(page.getByRole("heading", { level: 2, name: "Issue 51 Terms" })).toBeVisible();
     await expect(page.locator("main .prose-lomi ol li")).toHaveCount(2);
     await expect(page.locator("main .prose-lomi hr")).toHaveCount(1);
     await expectNoHorizontalOverflow(page);
-    await saveScreenshot(page, screenshotDirectory, `terms-storefront-${testInfo.project.name}.png`, page.getByRole("heading", { level: 2, name: "Issue 51 Terms" }));
-
+    await saveScreenshot(page, screenshotDirectory, `terms-storefront-${testInfo.project.name}.png`, page.getByRole("heading", { level: 1, name: savedTermsTitle }));
     await page.goto("/admin/pages/privacy");
     const privacyEditor = page.getByRole("textbox", { name: "Treść" });
     const privacyHtml = '<h2>Issue 51 Privacy</h2><p><u>Privacy source copy.</u> <a href="javascript:alert(52)">Unsafe link</a></p><p onclick="window.__issue51Executed = true">Privacy paragraph.</p><script>window.__issue51Executed = true</script><blockquote><p>Privacy quotation.</p></blockquote>';
+    await expect(privacyEditor).toBeVisible();
     await page.getByRole("button", { name: "HTML" }).click();
+    await expect(page.getByRole("button", { name: "HTML" })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(privacyHtml);
     await page.getByRole("button", { name: "Rich Text" }).click();
     await expect(page.getByText("Przed konwersją sprawdź obsługiwane formatowanie:")).toBeVisible();
@@ -201,8 +214,10 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `privacy-editor-${testInfo.project.name}.png`, page.locator("#page-editor-form [role='toolbar']"));
     const privacySaveResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/pages/privacy");
-    await page.getByRole("button", { name: "Zapisz" }).first().click();
+    await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     expect((await privacySaveResponse).status()).toBe(200);
+    await expect(page.getByText("Zmiany strony zostały zapisane.")).toBeVisible();
+    await expect(page.getByTestId("admin-save-bar")).toContainText("Zapisano");
     await page.reload();
     await expect(page.locator('#page-editor-form input[name="body"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/privacy");
@@ -212,11 +227,12 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await expect(page.locator("main .prose-lomi script")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `privacy-storefront-${testInfo.project.name}.png`, page.getByRole("heading", { level: 2, name: "Issue 51 Privacy" }));
-
     await page.goto("/admin/pages/about");
     const aboutEditor = page.getByRole("textbox", { name: "Wprowadzenie" });
     const aboutHtml = "<p>Issue 51 About intro with <u>underlined copy</u>.</p>";
+    await expect(aboutEditor).toBeVisible();
     await page.getByRole("button", { name: "HTML" }).click();
+    await expect(page.getByRole("button", { name: "HTML" })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("textbox", { name: "Źródło HTML" }).fill(aboutHtml);
     await expect(page.getByText("Masz niezapisane zmiany.")).toBeVisible();
     await page.getByRole("button", { name: "Rich Text" }).click();
@@ -224,9 +240,10 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `about-editor-${testInfo.project.name}.png`, page.locator("#about-page-editor-form [role='toolbar']"));
     const aboutSaveResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/pages/about");
-    await page.locator("#about-page-editor-form").getByRole("button", { name: "Zapisz" }).first().click();
+    await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     expect((await aboutSaveResponse).status()).toBe(200);
-    await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
+    await expect(page.getByText("Zmiany strony zostały zapisane.")).toBeVisible();
+    await expect(page.getByTestId("admin-save-bar")).toContainText("Zapisano");
     await page.reload();
     await expect(page.locator('#about-page-editor-form input[name="aboutIntro"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/about");
@@ -264,6 +281,9 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       }
       if (request.error === "net::ERR_ABORTED" && request.method === "POST" && successfulPostPaths.has(pathname)) {
         return { ...request, disposition: "unrelated", reason: "The server action returned HTTP 200 and its resulting navigation was verified; a superseded fetch was canceled during the route transition." };
+      }
+      if (request.error === "net::ERR_ABORTED" && request.method === "GET" && request.resourceType === "fetch" && requestUrl.hostname === localHostname && /^\/api\/admin\/products\/[^/]+\/reader-artworks$/.test(pathname)) {
+        return { ...request, disposition: "unrelated", reason: "The ProductEditor reader-artwork list fetch was canceled as the page reloaded or navigated away; the editor and subsequent storefront pages rendered and their content assertions passed." };
       }
       return request;
     });

@@ -44,7 +44,9 @@ export default async function EditPage({ params, searchParams }: Props) {
         config={snapshot.aboutPageSettings}
         products={products}
         feedback={error}
+        feedbackEventId={error ? toastId : undefined}
         saved={Boolean(toastId && !error)}
+        savedEventId={toastId && !error ? toastId : undefined}
         saveAction={saveAboutPageAction}
       />
       <AdminRouteToast eventId={toastId} kind={error ? "error" : "success"} message={error ?? "Zmiany strony zostały zapisane."} cleanPath={`/admin/pages/${slug}`} />
@@ -58,5 +60,5 @@ export default async function EditPage({ params, searchParams }: Props) {
 
   const saveAction = saveStaticPagesAction.bind(null, slug);
 
-  return <><PageEditor slug={slug} title={records.find((record) => record.locale === "en")?.title ?? slug} records={records} feedback={error} saved={Boolean(toastId && !error)} saveAction={saveAction} /><AdminRouteToast eventId={toastId} kind={error ? "error" : "success"} message={error ?? "Zmiany strony zostały zapisane."} cleanPath={`/admin/pages/${slug}`} /></>;
+  return <><PageEditor slug={slug} title={records.find((record) => record.locale === "en")?.title ?? slug} records={records} feedback={error} feedbackEventId={error ? toastId : undefined} saved={Boolean(toastId && !error)} savedEventId={toastId && !error ? toastId : undefined} saveAction={saveAction} /><AdminRouteToast eventId={toastId} kind={error ? "error" : "success"} message={error ?? "Zmiany strony zostały zapisane."} cleanPath={`/admin/pages/${slug}`} /></>;
 }

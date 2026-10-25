@@ -140,7 +140,7 @@ test("About settings save six unique books and render responsively from current 
     const actionRequestPromise = page.waitForRequest((request) =>
       request.method() === "POST" && Boolean(request.headers()["next-action"]),
     );
-    await page.getByRole("button", { name: "Zapisz" }).first().click();
+    await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     await page.waitForURL(/\/admin\/pages\/about\?saved=1$/);
     const actionRequest = await actionRequestPromise;
 

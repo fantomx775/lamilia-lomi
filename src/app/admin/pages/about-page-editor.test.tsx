@@ -63,7 +63,7 @@ describe("AboutPageEditor", () => {
     expect(Array.from(coloringInputs, (input) => input.value)).toEqual(["color-garden", "color-ocean", ""]);
     expect(view.container.querySelectorAll('input[name="favoritePictureBookIds"]')).toHaveLength(3);
 
-    await user.click(view.getAllByRole("button", { name: "Zapisz" })[0]);
+    await user.click(view.getByTestId("admin-save-bar").querySelector("button")!);
     await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
 
     const formData = saveAction.mock.calls[0][0] as FormData;
@@ -204,11 +204,30 @@ describe("AboutPageEditor", () => {
       target: { value: "<p>Unapplied About intro</p>" },
     });
 
-    expect(view.getByRole("status")).toHaveTextContent("Masz niezapisane zmiany.");
+    expect(view.getByText("Masz niezapisane zmiany.")).toHaveAttribute("role", "status");
     await user.click(view.getByRole("link", { name: "Strony" }));
 
     expect(confirm).toHaveBeenCalledWith("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
     expect(view.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue("<p>Unapplied About intro</p>");
     confirm.mockRestore();
+  });
+
+  it("uses the fixed shared bar, blocks an unapplied source draft, and preserves it after failure", async () => {
+    const saveAction = vi.fn();
+    const user = userEvent.setup();
+    const view = render(<AboutPageEditor config={emptyConfig} products={products} saveAction={saveAction} />);
+    const bar = await view.findByTestId("admin-save-bar");
+
+    await user.click(view.getByRole("button", { name: "HTML" }));
+    const source = view.getByRole("textbox", { name: "Źródło HTML" });
+    fireEvent.change(source, { target: { value: "<p>Keep this draft</p>" } });
+    expect(bar).toHaveTextContent("Niezapisane zmiany");
+    expect(bar.querySelector("button")).toBeDisabled();
+    expect(view.container.querySelector("form")?.className).toContain("pb-28");
+    expect(saveAction).not.toHaveBeenCalled();
+
+    view.rerender(<AboutPageEditor config={emptyConfig} products={products} feedback="Zapis nie powiódł się." saveAction={saveAction} />);
+    expect(view.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue("<p>Keep this draft</p>");
+    expect(view.getByTestId("admin-save-bar")).toHaveTextContent("Błąd zapisu");
   });
 });

@@ -115,7 +115,7 @@ test("single-language admin content saves and reloads on the English public URL"
     await page.getByLabel("Tytuł").fill("Issue 28 terms content");
     await page.getByRole("textbox", { name: "Treść" }).fill("Updated English terms saved through the single-language editor.");
     await saveScreenshot(page, screenshotDirectory, "terms-editor", testInfo.project.name);
-    await page.getByRole("button", { name: "Zapisz" }).first().click();
+    await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     await expect(page).toHaveURL(/\/admin\/pages\/terms\?saved=1$/);
     await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
     await page.reload();

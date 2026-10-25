@@ -165,7 +165,7 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     const termsSaveResponse = page.waitForResponse((response) =>
       response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/pages/terms",
     );
-    await page.getByRole("button", { name: "Zapisz" }).first().click();
+    await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     expect((await termsSaveResponse).status()).toBe(200);
     await expect(page).toHaveURL(/\/admin\/pages\/terms\?saved=1$/);
     await page.reload();
@@ -200,7 +200,7 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     const privacySaveResponse = page.waitForResponse((response) =>
       response.request().method() === "POST" && new URL(response.url()).pathname === "/admin/pages/privacy",
     );
-    await page.getByRole("button", { name: "Zapisz" }).first().click();
+    await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     expect((await privacySaveResponse).status()).toBe(200);
     await expect(page).toHaveURL(/\/admin\/pages\/privacy\?saved=1$/);
     await page.reload();

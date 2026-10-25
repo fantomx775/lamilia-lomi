@@ -1,9 +1,8 @@
 "use client";
 
-import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RotateCcw, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
+import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RotateCcw, Star, Trash2, Undo2, Video, X } from "lucide-react";
 import { startTransition, useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createPortal } from "react-dom";
 
 import { registerProductEditorPopStateGuard } from "@/app/admin/admin-product-editor-history-guard";
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
@@ -29,6 +28,7 @@ import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/prod
 import type { AmazonLink, Category, Collection, Product, ProductAsset, Tag } from "@/lib/types";
 import { ReaderArtworkManager } from "./reader-artwork-manager";
 import { useAdminToast } from "@/components/admin/admin-toast";
+import { AdminSaveBar } from "@/components/admin/admin-save-bar";
 
 type ProductContentDraft = {
   title: string;
@@ -176,7 +176,6 @@ export function ProductEditor({
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
-  const [saveBarRoot, setSaveBarRoot] = useState<HTMLElement | null>(null);
   const [saveErrorCodes, setSaveErrorCodes] = useState<AdminErrorCode[]>(() => nativeSaveState.errors);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
@@ -293,7 +292,6 @@ export function ProductEditor({
     savedFormSignatureRef.current = productEditorFormSignature(form);
     isDirtyRef.current = false;
     setIsDirty(false);
-    setSaveBarRoot(document.body);
   }, [refreshDirtyState]);
 
   useEffect(() => {
@@ -1051,14 +1049,6 @@ export function ProductEditor({
           status={<Badge className={statusClass(productStatus)}>{statusLabels[productStatus]}</Badge>}
         />
 
-        <noscript>
-          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-white/95 px-4 pt-3 shadow-[0_-8px_30px_rgba(47,35,29,0.08)] sm:px-6 lg:left-64 lg:px-8" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
-            <div className="mx-auto flex max-w-6xl justify-end">
-              <button type="submit" className={buttonClassName({ className: "w-fit" })}>Zapisz produkt</button>
-            </div>
-          </div>
-        </noscript>
-
         {hasActiveMediaUpload ? <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Zapis produktu będzie dostępny po zakończeniu przesyłania plików.</p> : null}
         {feedback && showRouteFeedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
         {saveErrorCodes.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"><p className="font-medium">Nie udało się zapisać. Twoje wpisane wartości są zachowane.</p><ul className="mt-2 list-disc space-y-1 pl-5">{Array.from(new Set(saveErrorCodes)).map((code) => <li key={code}>{getAdminErrorMessage(code, "pl")}</li>)}</ul></div> : null}
@@ -1220,23 +1210,9 @@ export function ProductEditor({
         <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving || isGeneratingPremiumBatch} />
       ) : null}
 
-      {saveBarRoot ? createPortal(
-        <div data-testid="product-save-bar" className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-white/95 px-4 pt-3 shadow-[0_-8px_30px_rgba(47,35,29,0.08)] backdrop-blur sm:px-6 lg:left-64 lg:px-8" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
-            <p role={saveStatus === "error" ? "alert" : "status"} aria-live="polite" className={`min-w-0 text-sm ${saveStatus === "error" ? "text-red-800" : "text-[var(--color-muted)]"}`}>
-              {isSaving ? "Zapisywanie…" : saveStatus === "saved" ? "Zapisano. Zmiany są aktualne." : saveStatus === "error" ? "Zapis nie powiódł się. Sprawdź wskazane błędy." : isDirty ? "Niezapisane zmiany" : product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"}
-            </p>
-            <ProductSubmitButton pending={isSaving} dirty={isDirty} disabled={isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction} />
-          </div>
-        </div>,
-        saveBarRoot,
-      ) : null}
+      <AdminSaveBar formId="product-editor-form" dirty={isDirty} pending={isSaving} status={saveStatus} disabled={isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction} testId="product-save-bar" nativeSubmitLabel="Zapisz produkt" idleMessage={product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"} savedMessage="Zapisano. Zmiany są aktualne." errorMessage="Zapis nie powiódł się. Sprawdź wskazane błędy." allowCleanSubmit />
     </div>
   );
-}
-
-function ProductSubmitButton({ pending, dirty, disabled = false }: { pending: boolean; dirty: boolean; disabled?: boolean }) {
-  return <Button type="submit" form="product-editor-form" disabled={pending || disabled} className="shrink-0"><Save className="size-4" aria-hidden />{pending ? "Zapisywanie…" : dirty ? "Zapisz zmiany" : "Zapisz"}</Button>;
 }
 
 function MediaSections({
