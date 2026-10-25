@@ -4,6 +4,8 @@ import { NavigationLink } from "@/components/navigation-link";
 import { ProductCard } from "@/components/product-card";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
+import { getCommunityFlags } from "@/lib/community-flags";
+import { getMyCommunityProfile } from "@/lib/community/repository";
 import {
   getLocalizedProductViewForRequest,
   getProductByIdForRequest,
@@ -18,6 +20,13 @@ export default async function LibraryPage({ params }: Props) {
   const { locale } = await params;
   const session = await getDemoSession();
   const t = await getTranslations("Library");
+  const communityFlags = getCommunityFlags();
+  const hasPrivateCommunityProfile = Boolean(
+    session?.emailVerified
+      && !communityFlags.uploadsEnabled
+      && await getMyCommunityProfile(),
+  );
+  const showMyCreationsLink = communityFlags.uploadsEnabled || hasPrivateCommunityProfile;
 
   if (!session) {
     return (
@@ -56,6 +65,23 @@ export default async function LibraryPage({ params }: Props) {
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8" data-testid="library-page">
       <h1 className="font-serif text-4xl font-semibold">{t("title")}</h1>
       <p className="mt-3 text-[var(--color-muted)]">{t("description")}</p>
+      {showMyCreationsLink ? (
+        <Card className="mt-6" data-testid="library-community-link">
+          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-5">
+            <div>
+              <h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">My Creations</h2>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">Manage your private community submissions and review status.</p>
+            </div>
+            <NavigationLink
+              className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+              href={`/${locale}/library/creations`}
+              pendingLabel="Opening My Creations"
+            >
+              Open My Creations
+            </NavigationLink>
+          </CardContent>
+        </Card>
+      ) : null}
       {unlockedProducts.length ? (
         <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {unlockedProducts.map((product, index) => (

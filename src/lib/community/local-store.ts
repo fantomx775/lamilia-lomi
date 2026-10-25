@@ -22,6 +22,7 @@ import {
   CommunityRateLimitError,
   CommunityValidationError,
 } from "./errors";
+import { COMMUNITY_RULES_VERSION } from "./rules";
 
 export {
   CommunityAuthorizationError,
@@ -30,7 +31,6 @@ export {
   CommunityValidationError,
 } from "./errors";
 
-const CURRENT_RULES_VERSION = "2026-10-25-v1";
 const RESERVED_USERNAMES = new Set([
   "admin", "administrator", "support", "help", "official", "lamilialomi",
   "api", "club", "creators", "community", "login", "register", "account",
@@ -144,7 +144,7 @@ export class CommunityLocalStore {
         adultAttestedAt: existing?.adultAttestedAt ?? now,
         optedInAt: now,
         participationRevokedAt: null,
-        rulesVersion: CURRENT_RULES_VERSION,
+        rulesVersion: COMMUNITY_RULES_VERSION,
         acceptedAt: now,
         suspendedAt: existing?.suspendedAt ?? null,
         createdAt: existing?.createdAt ?? now,
@@ -162,7 +162,7 @@ export class CommunityLocalStore {
     return this.transact((snapshot) => {
       const profile = snapshot.profiles.find((candidateProfile) => candidateProfile.userId === actor.userId);
       if (!profile || !profile.isAdult || !profile.adultAttestedAt || !profile.optedInAt
-        || profile.participationRevokedAt || profile.suspendedAt || profile.rulesVersion !== CURRENT_RULES_VERSION) {
+        || profile.participationRevokedAt || profile.suspendedAt || profile.rulesVersion !== COMMUNITY_RULES_VERSION) {
         throw new CommunityAuthorizationError("Community membership is unavailable.");
       }
       const rateLimitKey = hashCommunityRateLimitKey("username-change", actor.userId);
@@ -196,7 +196,7 @@ export class CommunityLocalStore {
     validateArtworkInput(input);
     return this.transact((snapshot) => {
       const profile = getActiveProfile(snapshot, actor.userId);
-      if (profile.rulesVersion !== CURRENT_RULES_VERSION) {
+      if (profile.rulesVersion !== COMMUNITY_RULES_VERSION) {
         throw new CommunityAuthorizationError("Current community rules acceptance is required.");
       }
       const product = products.find((candidate) => candidate.id === input.productId);
@@ -563,7 +563,7 @@ function getActiveProfile(snapshot: LocalSnapshot, userId: string) {
 function isActiveProfile(snapshot: LocalSnapshot, userId: string) {
   const profile = snapshot.profiles.find((candidate) => candidate.userId === userId);
   return Boolean(profile && profile.isAdult && profile.adultAttestedAt && profile.optedInAt
-    && !profile.participationRevokedAt && !profile.suspendedAt && profile.rulesVersion === CURRENT_RULES_VERSION);
+    && !profile.participationRevokedAt && !profile.suspendedAt && profile.rulesVersion === COMMUNITY_RULES_VERSION);
 }
 
 function takeRateLimit(snapshot: LocalSnapshot, keyHash: string, maxHits: number, windowMs: number, now: number) {

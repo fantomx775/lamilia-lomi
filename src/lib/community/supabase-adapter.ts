@@ -3,6 +3,7 @@ import "server-only";
 import { createServiceRoleClient } from "../supabase/admin";
 import { buildCommunityStoragePath, hashCommunityRateLimitKey } from "./local-store";
 import { mapCommunityDatabaseError } from "./errors";
+import { COMMUNITY_RULES_VERSION } from "./rules";
 import type { CommunityActor } from "./session";
 import type {
   CommunityAdminArtwork,
@@ -14,7 +15,6 @@ import type {
   CommunityPublicCreator,
 } from "./types";
 
-const CURRENT_RULES_VERSION = "2026-10-25-v1";
 const PUBLIC_ARTWORK_SELECT = "id,product_id,content_type,description,published_at,community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username,avatar_seed,is_adult,opted_in_at,participation_revoked_at,suspended_at,rules_version),products!inner(id,slug,audience,status,product_translations!inner(locale,title))";
 const OWNER_ARTWORK_SELECT = "id,product_id,content_type,description,status,revision,moderation_reason,created_at,updated_at,products(id,slug,audience,status,product_translations(locale,title))";
 const ADMIN_ARTWORK_SELECT = `${OWNER_ARTWORK_SELECT},community_profiles(username)`;
@@ -40,7 +40,7 @@ export async function listPublicArtworks(input: {
     .not("community_profiles.opted_in_at", "is", null)
     .is("community_profiles.participation_revoked_at", null)
     .is("community_profiles.suspended_at", null)
-    .eq("community_profiles.rules_version", CURRENT_RULES_VERSION);
+    .eq("community_profiles.rules_version", COMMUNITY_RULES_VERSION);
   if (input.productId) query = query.eq("product_id", input.productId);
   if (input.audience) query = query.eq("products.audience", input.audience);
   const { data, error } = await query
@@ -69,7 +69,7 @@ export async function getPublicArtwork(id: string): Promise<CommunityPublicArtwo
     .not("community_profiles.opted_in_at", "is", null)
     .is("community_profiles.participation_revoked_at", null)
     .is("community_profiles.suspended_at", null)
-    .eq("community_profiles.rules_version", CURRENT_RULES_VERSION)
+    .eq("community_profiles.rules_version", COMMUNITY_RULES_VERSION)
     .maybeSingle();
   if (error) throw new Error("Community artwork read failed.");
   return data ? mapPublicArtwork(data as unknown as Row) : null;
@@ -87,7 +87,7 @@ export async function getPublicCreator(username: string, limit: number): Promise
     .not("opted_in_at", "is", null)
     .is("participation_revoked_at", null)
     .is("suspended_at", null)
-    .eq("rules_version", CURRENT_RULES_VERSION)
+    .eq("rules_version", COMMUNITY_RULES_VERSION)
     .maybeSingle();
   if (profileError) throw new Error("Community creator read failed.");
   if (!profile) return null;
@@ -103,7 +103,7 @@ export async function getPublicCreator(username: string, limit: number): Promise
     .not("community_profiles.opted_in_at", "is", null)
     .is("community_profiles.participation_revoked_at", null)
     .is("community_profiles.suspended_at", null)
-    .eq("community_profiles.rules_version", CURRENT_RULES_VERSION)
+    .eq("community_profiles.rules_version", COMMUNITY_RULES_VERSION)
     .order("published_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(limit);
@@ -164,7 +164,7 @@ export async function joinCommunity(actor: CommunityActor, input: { username: st
     p_actor_user_id: actor.userId,
     p_username: input.username,
     p_adult_attested: input.adultAttested,
-    p_rules_version: CURRENT_RULES_VERSION,
+    p_rules_version: COMMUNITY_RULES_VERSION,
   });
 }
 
