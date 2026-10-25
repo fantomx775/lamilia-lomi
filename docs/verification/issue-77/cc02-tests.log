@@ -1,0 +1,16 @@
+
+> lamilialomi@0.1.0 test
+> vitest run src/lib/community src/components/community src/app/api/community src/app/[locale]/club/creators/[username]/page.test.tsx src/lib/community-flags.test.ts --maxWorkers=1
+
+(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:
+  - ESM syntax in a file loaded as CommonJS (vitest.config.ts:1:1). Use a `.mjs` extension or set `"type": "module"` in the closest package.json
+Set `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.
+
+ RUN  v4.1.12 /home/mateusz/Dokumenty/Lamilia Lomi/lamilia-lomi-coloring-club-p0
+
+
+ Test Files  10 passed (10)
+      Tests  47 passed (47)
+   Start at  00:07:54
+   Duration  6.24s (transform 403ms, setup 803ms, import 1.09s, tests 1.65s, environment 846ms)
+

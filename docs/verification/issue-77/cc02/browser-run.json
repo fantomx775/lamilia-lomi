@@ -1,0 +1,148 @@
+{
+  "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+  "runId": "cc02-local-supabase-4",
+  "screenshots": [
+    {
+      "path": "docs/verification/issue-77/cc02/account-join-390.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/account-join-768.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/account-join-1440.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/account-settings-390.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/account-settings-768.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/account-settings-1440.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/creator-empty-390.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/creator-empty-768.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/creator-empty-1440.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/creator-approved-390.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/creator-approved-768.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/creator-approved-1440.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/my-creations-390.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/my-creations-768.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/my-creations-1440.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/guidelines-390.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/guidelines-768.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    },
+    {
+      "path": "docs/verification/issue-77/cc02/guidelines-1440.png",
+      "testedSha": "7c89ba94f06044ae681247c62f95b78e8cfe4c50",
+      "runId": "cc02-local-supabase-4"
+    }
+  ],
+  "viewports": [
+    390,
+    768,
+    1440
+  ],
+  "backend": "isolated real Supabase/Auth/PostgREST",
+  "runtimeErrors": [],
+  "networkFailures": [],
+  "navigationAborts": [
+    {
+      "path": "/en/login",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/__nextjs_font/geist-latin.woff2",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/en/login",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/__nextjs_font/geist-latin.woff2",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/en/login",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/__nextjs_font/geist-latin.woff2",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/en/login",
+      "error": "net::ERR_ABORTED"
+    },
+    {
+      "path": "/__nextjs_font/geist-latin.woff2",
+      "error": "net::ERR_ABORTED"
+    }
+  ],
+  "consoleDiagnostics": [
+    "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+    "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+    "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+    "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+    "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "fixtureCleanup": true,
+  "note": "Checkpoint run. Metadata-only artwork fixtures; real image-byte flow belongs to #81. Development badge hidden for captures. Intentional HTTP denials are tested separately from JavaScript runtime errors. Visual screenshot review recorded separately by actual reviewers."
+}

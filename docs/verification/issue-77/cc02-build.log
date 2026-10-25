@@ -1,0 +1,77 @@
+
+> lamilialomi@0.1.0 build
+> next build
+
+▲ Next.js 16.4.3 (Turbopack)
+✓ Running next.config.ts took 55ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 4.2s
+  Running TypeScript ...
+  Finished TypeScript in 15.7s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/36) ...
+  Generating static pages using 7 workers (9/36) 
+  Generating static pages using 7 workers (18/36) 
+  Generating static pages using 7 workers (27/36) 
+✓ Generating static pages using 7 workers (36/36) in 685ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /[locale]
+├ ƒ /[locale]/about
+├ ƒ /[locale]/account
+├ ƒ /[locale]/author
+├ ƒ /[locale]/club/creators/[username]
+├ ƒ /[locale]/community-guidelines
+├ ƒ /[locale]/contact
+├ ƒ /[locale]/library
+├ ƒ /[locale]/library/creations
+├ ƒ /[locale]/login
+├ ƒ /[locale]/privacy
+├ ƒ /[locale]/products
+├ ƒ /[locale]/products/[slug]
+├ ƒ /[locale]/register
+├ ƒ /[locale]/reset-password
+├ ƒ /[locale]/terms
+├ ƒ /[locale]/unlock/[slug]
+├ ƒ /admin
+├ ƒ /admin/categories
+├ ƒ /admin/collections
+├ ƒ /admin/pages
+├ ƒ /admin/pages/[slug]
+├ ƒ /admin/products
+├ ƒ /admin/products/[id]
+├ ƒ /admin/products/new
+├ ƒ /admin/settings
+├ ƒ /admin/tags
+├ ƒ /admin/users
+├ ƒ /admin/users/export
+├ ƒ /api/admin/assets
+├ ƒ /api/admin/category-image
+├ ƒ /api/admin/collection-image
+├ ƒ /api/admin/products/[productId]/premium-codes
+├ ƒ /api/admin/products/[productId]/reader-artworks
+├ ƒ /api/analytics/amazon-click
+├ ƒ /api/category-media/[categoryId]
+├ ƒ /api/community/join
+├ ƒ /api/community/profile
+├ ƒ /api/contact
+├ ƒ /api/cron/review-reminders
+├ ƒ /api/downloads/[assetId]
+├ ƒ /api/media/[assetId]
+├ ƒ /api/product-description/[slug]
+├ ƒ /api/reader-artworks/[artworkId]
+├ ƒ /api/unlock/[locale]/[slug]
+├ ƒ /auth/callback
+├ ○ /robots.txt
+└ ○ /sitemap.xml
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
