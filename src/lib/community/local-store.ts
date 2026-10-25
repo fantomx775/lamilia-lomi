@@ -76,6 +76,26 @@ type LocalArtwork = {
   unlockVerifiedAt: string | null;
   deletedAt: string | null;
   idempotencyKey: string;
+  uploadFingerprint?: string;
+};
+
+type LocalUploadReservation = {
+  authorId: string;
+  idempotencyKey: string;
+  productId: string;
+  storagePath: string;
+  storageProvider: CommunityStorageProvider;
+  contentType: CommunityImageContentType;
+  originalSizeBytes: number;
+  sizeBytes: number;
+  description: string;
+  uploadFingerprint: string;
+  state: "reserved" | "stored" | "finalized" | "cleanup_pending" | "cleaned";
+  leaseToken: string;
+  leaseExpiresAt: string;
+  cleanupToken: string | null;
+  artworkId: string | null;
+  updatedAt: string;
 };
 
 type LocalModerationEvent = {
@@ -97,6 +117,32 @@ type LocalSnapshot = {
   artworks: LocalArtwork[];
   moderationEvents: LocalModerationEvent[];
   rateLimitBuckets: Record<string, LocalRateBucket>;
+  uploadReservations: LocalUploadReservation[];
+};
+
+export type CommunityUploadReservationInput = {
+  reservationToken: string;
+  productId: string;
+  idempotencyKey: string;
+  storageProvider: CommunityStorageProvider;
+  contentType: CommunityImageContentType;
+  originalSizeBytes: number;
+  sizeBytes: number;
+  description: string;
+  uploadFingerprint: string;
+};
+
+export type CommunityUploadReservationResult =
+  | { state: "reserved"; leaseToken: string; storagePath: string; storageProvider: CommunityStorageProvider }
+  | { state: "stored"; leaseToken: string; storagePath: string; storageProvider: CommunityStorageProvider }
+  | { state: "finalized"; artworkId: string };
+
+export type CommunityUploadCleanupCandidate = {
+  authorId: string;
+  idempotencyKey: string;
+  leaseToken: string;
+  storagePath: string;
+  storageProvider: CommunityStorageProvider;
 };
 
 export type LocalCommunityActor = {
@@ -242,6 +288,192 @@ export class CommunityLocalStore {
     });
   }
 
+  async reserveArtworkUpload(actor: LocalCommunityActor, input: CommunityUploadReservationInput, products: Product[]): Promise<CommunityUploadReservationResult> {
+    assertEligibleForSubmission(actor);
+    validateUploadReservationInput(input);
+    return this.transact((snapshot) => {
+      getActiveProfile(snapshot, actor.userId);
+      const product = products.find((candidate) => candidate.id === input.productId);
+      if (!product || product.status !== "published" || !actor.unlockedProductIds.includes(product.id)) {
+        throw new CommunityAuthorizationError("A published, unlocked product is required.");
+      }
+      const existing = snapshot.uploadReservations.find((item) => item.authorId === actor.userId && item.idempotencyKey === input.idempotencyKey);
+      if (existing) {
+        if (!sameUploadReservation(existing, input)) throw new CommunityConflictError("This upload key was already used for different artwork.");
+        if (existing.state === "finalized" && existing.artworkId) return { state: "finalized", artworkId: existing.artworkId };
+        if (existing.state === "cleanup_pending") throw new CommunityConflictError("This upload is being cleaned up. Try again shortly.");
+        if (existing.state === "stored") {
+          return { state: "stored", leaseToken: existing.leaseToken, storagePath: existing.storagePath, storageProvider: existing.storageProvider };
+        }
+        if (existing.state === "cleaned") {
+          if (snapshot.artworks.some((artwork) => artwork.authorId === actor.userId && artwork.idempotencyKey === input.idempotencyKey)) {
+            throw new CommunityConflictError("A deleted artwork cannot reuse its upload key.");
+          }
+          existing.state = "reserved";
+          existing.leaseToken = input.reservationToken;
+          existing.leaseExpiresAt = new Date(this.now().getTime() + 10 * 60 * 1_000).toISOString();
+          existing.cleanupToken = null;
+          existing.updatedAt = this.now().toISOString();
+        } else if (existing.leaseToken !== input.reservationToken && Date.parse(existing.leaseExpiresAt) >= this.now().getTime()) {
+          throw new CommunityConflictError("This upload is already processing. Retry after it finishes.");
+        } else if (existing.leaseToken !== input.reservationToken) {
+          existing.leaseToken = input.reservationToken;
+          existing.leaseExpiresAt = new Date(this.now().getTime() + 10 * 60 * 1_000).toISOString();
+          existing.updatedAt = this.now().toISOString();
+        }
+        return { state: "reserved", leaseToken: existing.leaseToken, storagePath: existing.storagePath, storageProvider: existing.storageProvider };
+      }
+      const now = this.now();
+      const reservation: LocalUploadReservation = {
+        ...input,
+        authorId: actor.userId,
+        storagePath: buildCommunityStoragePath(actor.userId, input.idempotencyKey),
+        state: "reserved",
+        leaseToken: input.reservationToken,
+        leaseExpiresAt: new Date(now.getTime() + 10 * 60 * 1_000).toISOString(),
+        cleanupToken: null,
+        artworkId: null,
+        updatedAt: now.toISOString(),
+      };
+      snapshot.uploadReservations.push(reservation);
+      return { state: "reserved", leaseToken: reservation.leaseToken, storagePath: reservation.storagePath, storageProvider: reservation.storageProvider };
+    });
+  }
+
+  async assertUploadEligibility(actor: LocalCommunityActor, productId: string, products: Product[]) {
+    assertEligibleForSubmission(actor);
+    return this.read((snapshot) => {
+      getActiveProfile(snapshot, actor.userId);
+      const product = products.find((candidate) => candidate.id === productId && candidate.status === "published");
+      if (!product || !actor.unlockedProductIds.includes(product.id)) {
+        throw new CommunityAuthorizationError("A published, unlocked product is required.");
+      }
+    });
+  }
+
+  async finalizeArtworkUpload(actor: LocalCommunityActor, idempotencyKey: string, leaseToken: string, products: Product[]) {
+    assertEligibleForSubmission(actor);
+    return this.transact((snapshot) => {
+      const reservation = snapshot.uploadReservations.find((item) => item.authorId === actor.userId && item.idempotencyKey === idempotencyKey);
+      if (!reservation) throw new CommunityConflictError("Upload reservation is no longer available.");
+      if (reservation.state === "finalized" && reservation.artworkId) return reservation.artworkId;
+      if (reservation.state !== "stored" || reservation.leaseToken !== leaseToken) {
+        throw new CommunityConflictError("Upload reservation has changed. Retry the upload.");
+      }
+      getActiveProfile(snapshot, actor.userId);
+      const product = products.find((candidate) => candidate.id === reservation.productId);
+      if (!product || product.status !== "published" || !actor.unlockedProductIds.includes(product.id)) {
+        throw new CommunityAuthorizationError("A published, unlocked product is required.");
+      }
+      const now = this.now().toISOString();
+      const artwork: LocalArtwork = {
+        id: this.uuid(), authorId: actor.userId, productId: reservation.productId,
+        storagePath: reservation.storagePath, storageProvider: reservation.storageProvider,
+        contentType: reservation.contentType, sizeBytes: reservation.sizeBytes,
+        description: reservation.description, status: "pending", revision: 1,
+        moderationReason: null, createdAt: now, updatedAt: now, publishedAt: null,
+        unlockVerifiedAt: now, deletedAt: null, idempotencyKey,
+        uploadFingerprint: reservation.uploadFingerprint,
+      };
+      snapshot.artworks.push(artwork);
+      reservation.state = "finalized";
+      reservation.artworkId = artwork.id;
+      reservation.updatedAt = now;
+      return artwork.id;
+    });
+  }
+
+  async markArtworkUploadStored(actor: LocalCommunityActor, idempotencyKey: string, leaseToken: string) {
+    assertEligibleForSubmission(actor);
+    return this.transact((snapshot) => {
+      getActiveProfile(snapshot, actor.userId);
+      const reservation = snapshot.uploadReservations.find((item) => item.authorId === actor.userId && item.idempotencyKey === idempotencyKey);
+      if (!reservation) throw new CommunityConflictError("Upload reservation is no longer available.");
+      if (["stored", "finalized"].includes(reservation.state) && reservation.leaseToken === leaseToken) return true;
+      if (reservation.state !== "reserved" || reservation.leaseToken !== leaseToken
+        || Date.parse(reservation.leaseExpiresAt) < this.now().getTime()) {
+        throw new CommunityConflictError("Upload reservation has changed. Retry the upload.");
+      }
+      reservation.state = "stored";
+      reservation.updatedAt = this.now().toISOString();
+      return true;
+    });
+  }
+
+  async scheduleArtworkCleanup(actor: LocalCommunityActor, artworkId: string) {
+    assertVerified(actor);
+    return this.transact((snapshot) => {
+      const reservation = snapshot.uploadReservations.find((item) => item.authorId === actor.userId && item.artworkId === artworkId);
+      if (!reservation || reservation.state !== "finalized") return false;
+      reservation.state = "cleanup_pending";
+      reservation.cleanupToken = this.uuid();
+      reservation.updatedAt = this.now().toISOString();
+      return true;
+    });
+  }
+
+  async scheduleUploadCleanup(actor: LocalCommunityActor, idempotencyKey: string, leaseToken: string) {
+    assertVerified(actor);
+    return this.transact((snapshot) => {
+      const reservation = snapshot.uploadReservations.find((item) => item.authorId === actor.userId
+        && item.idempotencyKey === idempotencyKey && item.leaseToken === leaseToken && ["reserved", "stored"].includes(item.state));
+      if (!reservation) return false;
+      reservation.state = "cleanup_pending";
+      reservation.cleanupToken = this.uuid();
+      reservation.updatedAt = this.now().toISOString();
+      return true;
+    });
+  }
+
+  async claimUploadCleanup(actor?: LocalCommunityActor, limit = 10): Promise<CommunityUploadCleanupCandidate[]> {
+    if (actor) assertVerified(actor);
+    return this.transact((snapshot) => {
+      const now = this.now().getTime();
+      const candidates = snapshot.uploadReservations.filter((item) =>
+        (!actor || item.authorId === actor.userId)
+        && (item.state === "cleanup_pending" || ((item.state === "reserved" || item.state === "stored") && Date.parse(item.leaseExpiresAt) < now - 24 * 60 * 60 * 1_000)),
+      ).slice(0, boundedLimit(limit));
+      return candidates.map((item) => {
+        item.state = "cleanup_pending";
+        item.cleanupToken = this.uuid();
+        item.updatedAt = this.now().toISOString();
+        return {
+          authorId: item.authorId, idempotencyKey: item.idempotencyKey,
+          leaseToken: item.cleanupToken, storagePath: item.storagePath, storageProvider: item.storageProvider,
+        };
+      });
+    });
+  }
+
+  async finishUploadCleanup(candidate: CommunityUploadCleanupCandidate) {
+    return this.transact((snapshot) => {
+      const reservation = snapshot.uploadReservations.find((item) => item.authorId === candidate.authorId
+        && item.idempotencyKey === candidate.idempotencyKey && item.state === "cleanup_pending"
+        && item.cleanupToken === candidate.leaseToken);
+      if (!reservation) return false;
+      reservation.state = "cleaned";
+      reservation.cleanupToken = null;
+      reservation.updatedAt = this.now().toISOString();
+      return true;
+    });
+  }
+
+  async getArtworkMedia(artworkId: string, products: Product[], actor?: LocalCommunityActor, allowPublic = true) {
+    if (actor && !actor.emailVerified) actor = undefined;
+    return this.read((snapshot) => {
+      const artwork = snapshot.artworks.find((candidate) => candidate.id === artworkId && !candidate.deletedAt);
+      if (!artwork?.authorId) return null;
+      const isOwnerOrAdmin = Boolean(actor && (actor.userId === artwork.authorId || actor.role === "admin"));
+      if (!isOwnerOrAdmin) {
+        if (!allowPublic) return null;
+        const product = products.find((candidate) => candidate.id === artwork.productId && candidate.status === "published");
+        const profile = snapshot.profiles.find((candidate) => candidate.userId === artwork.authorId);
+        if (!product || !profile || artwork.status !== "approved" || !artwork.publishedAt || !isActiveProfile(snapshot, profile.userId)) return null;
+      }
+      return { authorId: artwork.authorId, storagePath: artwork.storagePath, storageProvider: artwork.storageProvider, contentType: artwork.contentType };
+    });
+  }
+
   async editDescription(actor: LocalCommunityActor, artworkId: string, expectedRevision: number, description: string) {
     assertVerified(actor);
     validateDescription(description);
@@ -275,6 +507,12 @@ export class CommunityLocalStore {
       artwork.moderationReason = null;
       artwork.revision += 1;
       artwork.updatedAt = artwork.deletedAt;
+      const reservation = snapshot.uploadReservations.find((item) => item.authorId === actor.userId && item.artworkId === artwork.id);
+      if (reservation) {
+        reservation.state = "cleanup_pending";
+        reservation.cleanupToken = this.uuid();
+        reservation.updatedAt = artwork.deletedAt;
+      }
       return true;
     });
   }
@@ -392,6 +630,27 @@ export class CommunityLocalStore {
       }));
   }
 
+  async getMyArtwork(actor: LocalCommunityActor, artworkId: string, products: Product[]) {
+    assertVerified(actor);
+    const items = await this.listMyArtworks(actor, products, 100);
+    return items.find((item) => item.id === artworkId) ?? null;
+  }
+
+  async getUploadReservation(actor: LocalCommunityActor, idempotencyKey: string) {
+    assertVerified(actor);
+    return this.read((snapshot) => {
+      const reservation = snapshot.uploadReservations.find((item) => item.authorId === actor.userId && item.idempotencyKey === idempotencyKey);
+      return reservation ? {
+        state: reservation.state,
+        artworkId: reservation.artworkId,
+        leaseToken: reservation.leaseToken,
+        storagePath: reservation.storagePath,
+        storageProvider: reservation.storageProvider,
+        uploadFingerprint: reservation.uploadFingerprint,
+      } : null;
+    });
+  }
+
   async listAdminQueue(actor: LocalCommunityActor, products: Product[], limit = 50): Promise<CommunityAdminArtwork[]> {
     assertAdmin(actor);
     return this.read((snapshot) => snapshot.artworks
@@ -455,7 +714,7 @@ export function buildCommunityStoragePath(actorId: string, idempotencyKey: strin
 }
 
 function initialSnapshot(): LocalSnapshot {
-  return { version: 1, profiles: [], artworks: [], moderationEvents: [], rateLimitBuckets: {} };
+  return { version: 1, profiles: [], artworks: [], moderationEvents: [], rateLimitBuckets: {}, uploadReservations: [] };
 }
 
 function readSnapshot(filePath: string): LocalSnapshot {
@@ -463,10 +722,11 @@ function readSnapshot(filePath: string): LocalSnapshot {
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Partial<LocalSnapshot>;
     if (parsed.version !== 1 || !Array.isArray(parsed.profiles) || !Array.isArray(parsed.artworks)
-      || !Array.isArray(parsed.moderationEvents) || typeof parsed.rateLimitBuckets !== "object" || !parsed.rateLimitBuckets) {
+      || !Array.isArray(parsed.moderationEvents) || typeof parsed.rateLimitBuckets !== "object" || !parsed.rateLimitBuckets
+      || (parsed.uploadReservations !== undefined && !Array.isArray(parsed.uploadReservations))) {
       throw new Error("Unexpected community local-store structure.");
     }
-    return parsed as LocalSnapshot;
+    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [] } as LocalSnapshot;
   } catch (error) {
     throw new Error(`Community local store is unreadable: ${error instanceof Error ? error.message : "invalid JSON"}`);
   }
@@ -595,6 +855,32 @@ function validateArtworkInput(input: CommunityCreateArtworkInput) {
     throw new CommunityValidationError("Invalid artwork metadata.");
   }
   validateDescription(input.description ?? "");
+}
+
+function validateUploadReservationInput(input: CommunityUploadReservationInput) {
+  validateArtworkInput({
+    productId: input.productId,
+    idempotencyKey: input.idempotencyKey,
+    storageProvider: input.storageProvider,
+    contentType: input.contentType,
+    sizeBytes: input.sizeBytes,
+    description: input.description,
+  });
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.reservationToken)
+    || !Number.isSafeInteger(input.originalSizeBytes) || input.originalSizeBytes <= 0 || input.originalSizeBytes > MAX_UPLOAD_SIZE_BYTES
+    || !/^[a-f0-9]{64}$/.test(input.uploadFingerprint)) {
+    throw new CommunityValidationError("Invalid image upload details.");
+  }
+}
+
+function sameUploadReservation(reservation: LocalUploadReservation, input: CommunityUploadReservationInput) {
+  return reservation.productId === input.productId
+    && reservation.uploadFingerprint === input.uploadFingerprint
+    && reservation.originalSizeBytes === input.originalSizeBytes
+    && reservation.sizeBytes === input.sizeBytes
+    && reservation.contentType === input.contentType
+    && reservation.storageProvider === input.storageProvider
+    && reservation.description === input.description.trim();
 }
 
 function publicProduct(product: Product): CommunityPublicProduct {

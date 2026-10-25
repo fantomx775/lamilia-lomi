@@ -6,7 +6,7 @@ import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectComm
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { getBackendMode } from "./config";
-import { createCollectionImagePath, isSafeCollectionImagePath } from "./collection-image-path";
+import { createCollectionImagePath, isSafeCollectionImagePath, type CollectionImageNamespace } from "./collection-image-path";
 import { getMediaUploadProvider, getR2StorageConfig } from "./media-r2-config";
 import { mediaFilenameForDisplay, MAX_READER_ARTWORK_BYTES } from "./media-upload";
 import { createServiceRoleClient } from "./supabase/admin";
@@ -23,11 +23,12 @@ export async function storeCollectionImage(input: {
   contentType: string;
   bytes: Uint8Array;
   authorizationToken?: string | null;
-  namespace?: "collections" | "reader-artworks";
+  namespace?: CollectionImageNamespace;
 }): Promise<{ path: string; provider: CollectionImageProvider; filename: string }> {
   const filename = mediaFilenameForDisplay(input.filename);
   const storagePath = createCollectionImagePath(input.collectionId, input.imageId, filename, input.contentType, input.namespace);
-  const maxBytes = input.namespace === "reader-artworks" ? MAX_READER_ARTWORK_BYTES : MAX_COLLECTION_IMAGE_BYTES;
+  const maxBytes = input.namespace === "community" ? 4 * 1024 * 1024
+    : input.namespace === "reader-artworks" ? MAX_READER_ARTWORK_BYTES : MAX_COLLECTION_IMAGE_BYTES;
   if (input.bytes.byteLength <= 0 || input.bytes.byteLength > maxBytes) {
     throw new Error("Invalid collection image size.");
   }
@@ -48,12 +49,14 @@ export async function storeCollectionImage(input: {
       ContentLength: input.bytes.byteLength,
       ContentType: input.contentType,
       CacheControl: "private, no-store",
-    }));
+      ...(input.namespace === "community" ? { IfNoneMatch: "*" } : {}),
+    }), input.namespace === "community" ? { abortSignal: AbortSignal.timeout(60_000) } : undefined);
     return { path: storagePath, provider: "r2", filename };
   }
 
   const { error } = await createServiceRoleClient({
     storageAuthorizationToken: input.authorizationToken ?? undefined,
+    ...(input.namespace === "community" ? { storageRequestTimeoutMs: 60_000 } : {}),
   }).storage.from(COLLECTION_IMAGE_BUCKET).upload(storagePath, input.bytes, {
     cacheControl: "private, no-store",
     contentType: input.contentType,
@@ -72,7 +75,8 @@ export async function assertCollectionImageExists(input: {
   authorizationToken?: string | null;
 }) {
   assertPath(input.storagePath, input.collectionId);
-  const maxBytes = input.storagePath.startsWith("reader-artworks/") ? MAX_READER_ARTWORK_BYTES : MAX_COLLECTION_IMAGE_BYTES;
+  const maxBytes = input.storagePath.startsWith("community/") ? 4 * 1024 * 1024
+    : input.storagePath.startsWith("reader-artworks/") ? MAX_READER_ARTWORK_BYTES : MAX_COLLECTION_IMAGE_BYTES;
   if (input.sizeBytes <= 0 || input.sizeBytes > maxBytes) {
     throw new Error("Invalid collection image size.");
   }
@@ -137,12 +141,15 @@ export async function readCollectionImage(input: {
   if (input.provider === "local") return readLocalCollectionImage(input.storagePath, input.collectionId);
   if (input.provider === "r2") {
     const { privateBucket } = getR2StorageConfig();
-    const result = await getR2Client().send(new GetObjectCommand({ Bucket: privateBucket, Key: input.storagePath }));
+    const result = await getR2Client().send(new GetObjectCommand({ Bucket: privateBucket, Key: input.storagePath }), {
+      ...(input.storagePath.startsWith("community/") ? { abortSignal: AbortSignal.timeout(60_000) } : {}),
+    });
     if (!result.Body) throw new Error("Collection image is unavailable.");
     return result.Body.transformToByteArray();
   }
   const { data, error } = await createServiceRoleClient({
     storageAuthorizationToken: input.authorizationToken ?? undefined,
+    ...(input.storagePath.startsWith("community/") ? { storageRequestTimeoutMs: 60_000 } : {}),
   }).storage.from(COLLECTION_IMAGE_BUCKET).download(input.storagePath);
   if (error || !data) throw new Error("Collection image is unavailable.");
   return new Uint8Array(await data.arrayBuffer());
@@ -162,12 +169,15 @@ export async function removeCollectionImage(input: {
   }
   if (input.provider === "r2") {
     const { privateBucket } = getR2StorageConfig();
-    await getR2Client().send(new DeleteObjectCommand({ Bucket: privateBucket, Key: input.storagePath }));
+    await getR2Client().send(new DeleteObjectCommand({ Bucket: privateBucket, Key: input.storagePath }), {
+      ...(input.storagePath.startsWith("community/") ? { abortSignal: AbortSignal.timeout(60_000) } : {}),
+    });
     return;
   }
 
   const { error } = await createServiceRoleClient({
     storageAuthorizationToken: input.authorizationToken ?? undefined,
+    ...(input.storagePath.startsWith("community/") ? { storageRequestTimeoutMs: 60_000 } : {}),
   }).storage.from(COLLECTION_IMAGE_BUCKET).remove([input.storagePath]);
   if (error) throw new Error(`Collection image cleanup failed: ${error.message}`);
 }
@@ -178,8 +188,9 @@ function localImagePath(storagePath: string) {
 }
 
 function assertPath(storagePath: string, collectionId?: string) {
-  if (!isSafeCollectionImagePath(storagePath, collectionId, "collections") &&
-      !isSafeCollectionImagePath(storagePath, collectionId, "reader-artworks")) {
+  const namespace = storagePath.startsWith("community/") ? "community"
+    : storagePath.startsWith("reader-artworks/") ? "reader-artworks" : "collections";
+  if (!isSafeCollectionImagePath(storagePath, collectionId, namespace)) {
     throw new Error("Invalid collection image path.");
   }
 }

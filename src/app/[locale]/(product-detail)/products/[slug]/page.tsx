@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
+import Link from "next/link";
 
 import { AmazonLink } from "@/components/amazon-link";
 import { ImageWithFallback } from "@/components/image-with-fallback";
@@ -33,6 +34,8 @@ import {
 } from "@/lib/products";
 import { getLocalizedProductDetailViewForRequest } from "@/lib/products-request";
 import type { LocalizedProductView } from "@/lib/types";
+import { getCommunityFlags } from "@/lib/community-flags";
+import { getDemoSession } from "@/lib/session.server";
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>;
@@ -254,6 +257,10 @@ export default async function ProductPage({ params, searchParams }: Props) {
     notFound();
   }
 
+  const communityFlags = getCommunityFlags();
+  const communitySession = communityFlags.uploadsEnabled ? await getDemoSession() : null;
+  const canShareArtwork = Boolean(communitySession?.emailVerified && communitySession.unlockedProductIds.includes(product.id));
+
   if (code?.trim()) {
     const unlockParams = new URLSearchParams({ code });
     const step = stringParam(query.step);
@@ -377,6 +384,13 @@ export default async function ProductPage({ params, searchParams }: Props) {
         video={product.video}
         poster={product.cover.path}
       />
+      {canShareArtwork ? (
+        <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8" data-testid="product-share-art-cta">
+          <Link className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" href={`/${locale}/library/creations?productId=${encodeURIComponent(product.id)}`}>
+            Share your art
+          </Link>
+        </div>
+      ) : null}
       <ReaderArtworkGallery artworks={product.readerArtworks} />
 
       {product.publicDownloads.length ? (

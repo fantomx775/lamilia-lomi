@@ -62,6 +62,45 @@ export async function readBoundedBody(request: Request): Promise<BoundedBodyResu
   }
 }
 
+export async function readBoundedBinaryBody(request: Request, maxBytes: number): Promise<
+  | { ok: true; bytes: Uint8Array }
+  | { ok: false; reason: "too_large" | "invalid_body" }
+> {
+  const declaredLength = request.headers.get("content-length");
+  if (declaredLength !== null) {
+    if (!/^\d+$/.test(declaredLength)) return { ok: false, reason: "invalid_body" };
+    if (Number(declaredLength) > maxBytes) return { ok: false, reason: "too_large" };
+  }
+  if (!request.body) return { ok: false, reason: "invalid_body" };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      totalBytes += chunk.value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        return { ok: false, reason: "too_large" };
+      }
+      chunks.push(chunk.value);
+    }
+  } catch {
+    return { ok: false, reason: "invalid_body" };
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, bytes };
+}
+
 export async function readBoundedJson(request: Request): Promise<
   | { ok: true; value: unknown }
   | { ok: false; reason: "too_large" | "invalid_body" }
@@ -84,9 +123,9 @@ export function communityJson(body: Record<string, unknown>, status = 200) {
   });
 }
 
-export function communityErrorResponse(error: unknown) {
+export function communityErrorResponse(error: unknown, conflictMessage = "That username is unavailable. Try another.") {
   if (error instanceof CommunityConflictError) {
-    return communityJson({ ok: false, error: "conflict", message: "That username is unavailable. Try another." }, 409);
+    return communityJson({ ok: false, error: "conflict", message: conflictMessage }, 409);
   }
   if (error instanceof CommunityRateLimitError) {
     return NextResponse.json({ ok: false, error: "rate_limited", message: error.message }, {

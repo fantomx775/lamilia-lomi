@@ -25,4 +25,12 @@ describe("collection image paths", () => {
     expect(isSafeCollectionImagePath(path, collectionId)).toBe(false);
     expect(isSafeCollectionImagePath(path, collectionId, "reader-artworks")).toBe(true);
   });
+
+  it("supports opaque community keys without extensions or an admin-gallery namespace", () => {
+    const path = createCollectionImagePath(collectionId, imageId, "ignored.webp", "image/webp", "community");
+    expect(path).toBe(`community/${collectionId}/${imageId}`);
+    expect(isSafeCollectionImagePath(path, collectionId, "community")).toBe(true);
+    expect(isSafeCollectionImagePath(`${path}/image.webp`, collectionId, "community")).toBe(false);
+    expect(isSafeCollectionImagePath(path, collectionId, "reader-artworks")).toBe(false);
+  });
 });

@@ -4,12 +4,14 @@ import { getBackendMode } from "../config";
 import { getCommunityFlags } from "../community-flags";
 import { getContentSnapshot } from "../content-store";
 import { assertCommunityActor, getCommunityActorForRequest } from "./session";
+import type { CommunityActor } from "./session";
 import {
   CommunityLocalStore,
   hashCommunityRateLimitKey,
 } from "./local-store";
+import type { CommunityUploadCleanupCandidate, CommunityUploadReservationInput } from "./local-store";
 import * as supabase from "./supabase-adapter";
-import { CommunityValidationError } from "./errors";
+import { CommunityAuthorizationError, CommunityValidationError } from "./errors";
 import type {
   CommunityAudience,
   CommunityCreateArtworkInput,
@@ -17,6 +19,7 @@ import type {
   CommunityProfileInput,
   CommunityPublicArtwork,
 } from "./types";
+import { removeCommunityArtworkImage } from "./storage";
 
 const localStore = new CommunityLocalStore();
 const MAX_PAGE_SIZE = 100;
@@ -101,7 +104,71 @@ export async function createPendingCommunityArtwork(input: CommunityCreateArtwor
   return supabase.createPendingArtwork(actor, input);
 }
 
+export async function reserveCommunityArtworkUpload(input: CommunityUploadReservationInput) {
+  if (!getCommunityFlags().uploadsEnabled) throw new CommunityAuthorizationError("Coloring Club uploads are unavailable.");
+  const actor = await assertCommunityActor();
+  if (actor.backend === "local") return localStore.reserveArtworkUpload(actor, input, getContentSnapshot().products);
+  return supabase.reserveArtworkUpload(actor, input);
+}
+
+export async function assertCommunityArtworkUploadEligibility(actor: CommunityActor, productId: string) {
+  if (!getCommunityFlags().uploadsEnabled) throw new CommunityAuthorizationError("Coloring Club uploads are unavailable.");
+  if (!actor.emailVerified) throw new CommunityAuthorizationError("Verified account required.");
+  if (actor.backend === "local") return localStore.assertUploadEligibility(actor, productId, getContentSnapshot().products);
+  return supabase.assertUploadEligibility(actor, productId);
+}
+
+export async function finalizeCommunityArtworkUpload(idempotencyKey: string, leaseToken: string) {
+  const actor = await assertCommunityActor();
+  if (actor.backend === "local") return localStore.finalizeArtworkUpload(actor, idempotencyKey, leaseToken, getContentSnapshot().products);
+  return supabase.finalizeArtworkUpload(actor, idempotencyKey, leaseToken);
+}
+
+export async function markCommunityArtworkUploadStored(idempotencyKey: string, leaseToken: string) {
+  const actor = await assertCommunityActor();
+  if (actor.backend === "local") return localStore.markArtworkUploadStored(actor, idempotencyKey, leaseToken);
+  return supabase.markArtworkUploadStored(actor, idempotencyKey, leaseToken);
+}
+
+export async function getCommunityUploadReservation(idempotencyKey: string) {
+  const actor = await assertCommunityActor();
+  if (actor.backend === "local") return localStore.getUploadReservation(actor, idempotencyKey);
+  return supabase.getArtworkUploadReservation(actor, idempotencyKey);
+}
+
+export async function scheduleCommunityArtworkUploadCleanup(idempotencyKey: string, leaseToken: string) {
+  const actor = await assertCommunityActor();
+  if (actor.backend === "local") return localStore.scheduleUploadCleanup(actor, idempotencyKey, leaseToken);
+  return supabase.scheduleArtworkUploadCleanup(actor, idempotencyKey, leaseToken);
+}
+
+export async function getMyCommunityArtwork(id: string) {
+  const actor = await assertCommunityActor();
+  if (actor.backend === "local") return localStore.getMyArtwork(actor, id, getContentSnapshot().products);
+  return supabase.getOwnerArtwork(actor, id);
+}
+
+export async function getCommunityArtworkMedia(id: string) {
+  const flags = getCommunityFlags();
+  const actor = await getCommunityActorForRequest();
+  const trustedActor = actor?.emailVerified ? actor : undefined;
+  if (getBackendMode() === "local") {
+    const products = getContentSnapshot().products;
+    const privateMedia = trustedActor
+      ? await localStore.getArtworkMedia(id, products, trustedActor, false)
+      : null;
+    if (privateMedia) return privateMedia;
+    return flags.publicEnabled ? localStore.getArtworkMedia(id, products) : null;
+  }
+  if (trustedActor) {
+    const privateMedia = await supabase.getArtworkMediaForRequest(id, trustedActor);
+    if (privateMedia) return privateMedia;
+  }
+  return flags.publicEnabled ? supabase.getArtworkMediaForRequest(id) : null;
+}
+
 export async function editMyCommunityArtworkDescription(id: string, revision: number, description: string) {
+  if (!getCommunityFlags().uploadsEnabled) throw new CommunityAuthorizationError("Coloring Club edits are unavailable.");
   const actor = await assertCommunityActor();
   if (!isUuid(id)) throw new Error("Invalid artwork ID.");
   if (actor.backend === "local") return localStore.editDescription(actor, id, revision, description);
@@ -111,12 +178,19 @@ export async function editMyCommunityArtworkDescription(id: string, revision: nu
 export async function deleteMyCommunityArtwork(id: string, revision: number) {
   const actor = await assertCommunityActor();
   if (!isUuid(id)) throw new Error("Invalid artwork ID.");
-  if (actor.backend === "local") return localStore.deleteArtwork(actor, id, revision);
-  return supabase.deleteArtwork(actor, id, revision);
+  if (actor.backend === "local") {
+    const deleted = await localStore.deleteArtwork(actor, id, revision);
+    await processCommunityArtworkCleanup(actor);
+    return deleted;
+  }
+  const deleted = await supabase.deleteArtwork(actor, id, revision);
+  await processCommunityArtworkCleanup(actor);
+  return deleted;
 }
 
 export async function listMyCommunityArtworks(limit = 50) {
   const actor = await assertCommunityActor();
+  await processCommunityArtworkCleanup(actor);
   const safeLimit = boundedLimit(limit);
   if (actor.backend === "local") return localStore.listMyArtworks(actor, getContentSnapshot().products, safeLimit);
   return supabase.listOwnerArtworks(actor, safeLimit);
@@ -153,6 +227,31 @@ export async function consumeCommunityRateLimit(
     return localStore.consumeRateLimit(key, maxHits, windowSeconds * 1_000);
   }
   return supabase.consumeRateLimit(scope, identifier, maxHits, windowSeconds);
+}
+
+export async function processCommunityArtworkCleanup(actor?: CommunityActor) {
+  const candidates: CommunityUploadCleanupCandidate[] = getBackendMode() === "local"
+    ? await localStore.claimUploadCleanup(actor?.backend === "local" ? actor : undefined, 10)
+    : await supabase.claimArtworkUploadCleanup(10);
+  for (const candidate of candidates) await removeAndFinishArtworkCleanup(candidate);
+}
+
+export async function cleanupCommunityUploadCandidate(candidate: CommunityUploadCleanupCandidate) {
+  await removeAndFinishArtworkCleanup(candidate);
+}
+
+async function removeAndFinishArtworkCleanup(candidate: CommunityUploadCleanupCandidate) {
+  try {
+    await removeCommunityArtworkImage({
+      authorId: candidate.authorId,
+      storagePath: candidate.storagePath,
+      storageProvider: candidate.storageProvider,
+    });
+    if (getBackendMode() === "local") await localStore.finishUploadCleanup(candidate);
+    else await supabase.finishArtworkUploadCleanup(candidate);
+  } catch {
+    console.error("[community-media] Private artwork cleanup will retry.");
+  }
 }
 
 function boundedLimit(value: number | undefined) {

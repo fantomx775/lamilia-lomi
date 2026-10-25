@@ -2,7 +2,7 @@ import "server-only";
 
 import { createServiceRoleClient } from "../supabase/admin";
 import { buildCommunityStoragePath, hashCommunityRateLimitKey } from "./local-store";
-import { mapCommunityDatabaseError } from "./errors";
+import { CommunityAuthorizationError, mapCommunityDatabaseError } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
 import type { CommunityActor } from "./session";
 import type {
@@ -13,7 +13,9 @@ import type {
   CommunityPage,
   CommunityPublicArtwork,
   CommunityPublicCreator,
+  CommunityStorageProvider,
 } from "./types";
+import type { CommunityUploadReservationInput } from "./local-store";
 
 const PUBLIC_ARTWORK_SELECT = "id,product_id,content_type,description,published_at,community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username,avatar_seed,is_adult,opted_in_at,participation_revoked_at,suspended_at,rules_version),products!inner(id,slug,audience,status,product_translations!inner(locale,title))";
 const OWNER_ARTWORK_SELECT = "id,product_id,content_type,description,status,revision,moderation_reason,created_at,updated_at,products(id,slug,audience,status,product_translations(locale,title))";
@@ -125,6 +127,17 @@ export async function listOwnerArtworks(actor: CommunityActor, limit: number): P
   return ((data ?? []) as unknown as Row[]).map(mapOwnerArtwork);
 }
 
+export async function getOwnerArtwork(actor: CommunityActor, id: string): Promise<CommunityOwnerArtwork | null> {
+  const { data, error } = await createServiceRoleClient().from("community_artworks")
+    .select(OWNER_ARTWORK_SELECT)
+    .eq("author_id", actor.userId)
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw new Error("Your community artwork could not be loaded.");
+  return data ? mapOwnerArtwork(data as unknown as Row) : null;
+}
+
 export async function listAdminQueue(actor: CommunityActor, limit: number): Promise<CommunityAdminArtwork[]> {
   if (actor.role !== "admin") throw new Error("Administrator access required.");
   const client = createServiceRoleClient();
@@ -187,6 +200,152 @@ export async function createPendingArtwork(actor: CommunityActor, input: Communi
     p_description: input.description ?? "",
     p_idempotency_key: input.idempotencyKey,
   });
+}
+
+export async function reserveArtworkUpload(actor: CommunityActor, input: CommunityUploadReservationInput) {
+  const data = await rpc("community_reserve_upload", {
+    p_actor_user_id: actor.userId,
+    p_lease_token: input.reservationToken,
+    p_product_id: input.productId,
+    p_idempotency_key: input.idempotencyKey,
+    p_upload_fingerprint: input.uploadFingerprint,
+    p_storage_provider: input.storageProvider,
+    p_original_size_bytes: input.originalSizeBytes,
+    p_size_bytes: input.sizeBytes,
+    p_content_type: input.contentType,
+    p_description: input.description,
+  }) as Record<string, unknown>;
+  if (data.state === "finalized" && typeof data.artworkId === "string") {
+    return { state: "finalized" as const, artworkId: data.artworkId };
+  }
+  if ((data.state === "reserved" || data.state === "stored") && typeof data.leaseToken === "string"
+    && typeof data.storagePath === "string"
+    && (data.storageProvider === "local" || data.storageProvider === "supabase" || data.storageProvider === "r2")) {
+    return {
+      state: data.state as "reserved" | "stored",
+      leaseToken: data.leaseToken,
+      storagePath: data.storagePath,
+      storageProvider: data.storageProvider as CommunityStorageProvider,
+    };
+  }
+  throw new Error("Community upload reservation is unavailable.");
+}
+
+export async function assertUploadEligibility(actor: CommunityActor, productId: string) {
+  const client = createServiceRoleClient();
+  const [profileResult, productResult, unlockResult] = await Promise.all([
+    client.from("community_profiles")
+      .select("is_adult,adult_attested_at,opted_in_at,participation_revoked_at,suspended_at,rules_version")
+      .eq("user_id", actor.userId)
+      .maybeSingle(),
+    client.from("products").select("id,status").eq("id", productId).maybeSingle(),
+    client.from("user_product_unlocks").select("product_id").eq("user_id", actor.userId).eq("product_id", productId).maybeSingle(),
+  ]);
+  if (profileResult.error || productResult.error || unlockResult.error) {
+    throw new Error("Community upload eligibility could not be checked.");
+  }
+  const profile = profileResult.data;
+  if (!profile || profile.is_adult !== true || !profile.adult_attested_at || !profile.opted_in_at
+    || profile.participation_revoked_at || profile.suspended_at || profile.rules_version !== COMMUNITY_RULES_VERSION) {
+    throw new CommunityAuthorizationError("Active community membership required.");
+  }
+  if (productResult.data?.status !== "published" || !unlockResult.data) {
+    throw new CommunityAuthorizationError("A published, unlocked product is required.");
+  }
+}
+
+export async function finalizeArtworkUpload(actor: CommunityActor, idempotencyKey: string, leaseToken: string) {
+  return rpc("community_finalize_upload", {
+    p_actor_user_id: actor.userId,
+    p_idempotency_key: idempotencyKey,
+    p_lease_token: leaseToken,
+  }) as Promise<string>;
+}
+
+export async function markArtworkUploadStored(actor: CommunityActor, idempotencyKey: string, leaseToken: string) {
+  return rpc("community_mark_upload_stored", {
+    p_actor_user_id: actor.userId,
+    p_idempotency_key: idempotencyKey,
+    p_lease_token: leaseToken,
+  });
+}
+
+export async function getArtworkUploadReservation(actor: CommunityActor, idempotencyKey: string) {
+  const { data, error } = await createServiceRoleClient().from("community_upload_reservations")
+    .select("state,artwork_id,lease_token,storage_path,storage_provider,upload_fingerprint")
+    .eq("author_id", actor.userId)
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle();
+  if (error) throw new Error("Community upload status could not be checked.");
+  return data ? {
+    state: String(data.state),
+    artworkId: nullableString(data.artwork_id),
+    leaseToken: String(data.lease_token),
+    storagePath: String(data.storage_path),
+    storageProvider: String(data.storage_provider) as CommunityStorageProvider,
+    uploadFingerprint: String(data.upload_fingerprint),
+  } : null;
+}
+
+export async function scheduleArtworkUploadCleanup(actor: CommunityActor, idempotencyKey: string, leaseToken: string) {
+  return rpc("community_schedule_upload_cleanup", {
+    p_actor_user_id: actor.userId,
+    p_idempotency_key: idempotencyKey,
+    p_lease_token: leaseToken,
+  });
+}
+
+export async function claimArtworkUploadCleanup(limit = 10) {
+  const data = await rpc("community_claim_upload_cleanup", { p_limit: limit });
+  return (Array.isArray(data) ? data : []).map((row) => {
+    const value = row as Row;
+    return {
+      authorId: String(value.author_id),
+      idempotencyKey: String(value.idempotency_key),
+      storagePath: String(value.storage_path),
+      storageProvider: String(value.storage_provider) as CommunityStorageProvider,
+      leaseToken: String(value.cleanup_token),
+    };
+  });
+}
+
+export async function finishArtworkUploadCleanup(candidate: { authorId: string; idempotencyKey: string; leaseToken: string }) {
+  return rpc("community_finish_upload_cleanup", {
+    p_actor_user_id: candidate.authorId,
+    p_idempotency_key: candidate.idempotencyKey,
+    p_cleanup_token: candidate.leaseToken,
+  });
+}
+
+export async function getArtworkMediaForRequest(id: string, actor?: CommunityActor) {
+  const client = createServiceRoleClient();
+  let query = client.from("community_artworks")
+    .select("author_id,storage_path,storage_provider,content_type,status,deleted_at,published_at,community_profiles!community_artworks_author_profile_fkey!inner(is_adult,opted_in_at,participation_revoked_at,suspended_at,rules_version),products!inner(status)")
+    .eq("id", id)
+    .is("deleted_at", null);
+  if (actor?.role === "admin") {
+    // Admin media access is needed for private moderation preview; actor role came from current profiles.role.
+  } else if (actor) {
+    query = query.eq("author_id", actor.userId);
+  } else {
+    query = query.eq("status", "approved")
+      .not("published_at", "is", null)
+      .eq("products.status", "published")
+      .eq("community_profiles.is_adult", true)
+      .not("community_profiles.opted_in_at", "is", null)
+      .is("community_profiles.participation_revoked_at", null)
+      .is("community_profiles.suspended_at", null)
+      .eq("community_profiles.rules_version", COMMUNITY_RULES_VERSION);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) throw new Error("Community image is unavailable.");
+  if (!data || (actor?.role !== "admin" && actor && data.author_id !== actor.userId)) return null;
+  return {
+    authorId: String(data.author_id),
+    storagePath: String(data.storage_path),
+    storageProvider: String(data.storage_provider) as CommunityStorageProvider,
+    contentType: String(data.content_type) as CommunityPublicArtwork["contentType"],
+  };
 }
 
 export async function editArtworkDescription(actor: CommunityActor, id: string, revision: number, description: string) {
