@@ -61,7 +61,6 @@ The first iteration should attempt to deliver the full small product, not a redu
 
 - Product import from CSV/XLSX.
 - Advanced admin analytics.
-- Multiple codes per product beyond the initial shared-code model.
 - Additional frontend languages beyond English, Polish, German, and Spanish.
 - Automatic Amazon geotargeting.
 
@@ -699,9 +698,11 @@ The exact migration can evolve, but the implementation should start from this mo
 - `product_id` UUID.
 - `code` text unique.
 - `active` boolean default true.
+- `redeemed_by` UUID nullable; cleared on account deletion without making the code reusable.
+- `redeemed_at` timestamptz nullable; permanently records consumption.
 - `created_at` timestamptz.
 
-There should be one shared code per product in the first version, but this table allows expansion later.
+Current implementation supports single-use codes and batches per product. Each code can be redeemed by at most one account; redemption is atomic, and existing user/product entitlements remain permanent. The historical shared-code model is superseded by the applied issue #31 migrations.
 
 ## `user_product_unlocks`
 
@@ -839,8 +840,9 @@ QR URL format:
 
 Code behavior:
 
-- One shared code per product.
-- Many users can use the same code.
+- Single-use codes and code batches belong to a product.
+- One account may redeem each code; concurrent redemptions are serialized.
+- Reusing an already unlocked product does not consume another code or revoke existing access.
 - Code unlock is permanent for that user/product.
 - Code has an `active` field for emergency deactivation, even though printed codes are intended to remain valid.
 

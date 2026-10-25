@@ -50,12 +50,13 @@ pending --owner edits description--> pending (new revision)
 approved --owner edits description--> pending (publicly hidden immediately; new revision)
 approved --admin removes + reason--> removed
 rejected --owner edits/resubmits--> pending (new revision)
+removed --owner edits description--> removed (new revision; removal reason retained)
 removed --admin restores explicitly--> pending
 pending/rejected/removed --owner deletes--> deleted_at set (terminal tombstone)
 approved --owner deletes--> deleted_at set (publicly hidden immediately; terminal tombstone)
 ```
 
-Only an admin can approve, reject, remove, or restore. Every moderation decision is an atomic status/revision compare-and-set with actor and timestamp audit event; stale concurrent actions fail and reload current state. Owners may edit/resubmit descriptions only while pending, approved, or rejected; edits to approved or rejected work create a new revision and return it to pending. Removed work stays removed unless an admin explicitly restores it; the author cannot edit it back into review. Admin decisions apply to the revision reviewed. Rejection/removal reasons are visible to the author and admins, but never public. Removal and deletion immediately revoke public reads and media delivery; deletion sets a terminal `deleted_at` tombstone, schedules storage cleanup, and retains only the minimum audit metadata required by policy. Owner receives status notification best-effort; notification failure never rolls back a valid decision.
+Only an admin can approve, reject, remove, or restore. Every moderation decision is an atomic status/revision compare-and-set with actor and timestamp audit event; stale concurrent actions fail and reload current state. Owners may edit descriptions on their non-deleted work. Edits to pending, approved, or rejected work create a new revision in pending review. Editing removed work preserves its removed status and removal reason while incrementing revision; only an admin can explicitly restore it to pending. Admin decisions apply to the revision reviewed. Rejection/removal reasons are visible to the author and admins, but never public. Removal and deletion immediately revoke public reads and media delivery; deletion sets a terminal `deleted_at` tombstone, schedules storage cleanup, and retains only the minimum audit metadata required by policy. Owner receives status notification best-effort; notification failure never rolls back a valid decision.
 
 ## Data and API sketch
 

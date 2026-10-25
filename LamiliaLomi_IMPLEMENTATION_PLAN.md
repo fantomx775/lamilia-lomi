@@ -517,7 +517,7 @@ Verified logged-in user can unlock a product by entering a valid code.
 
 - Valid code creates `user_product_unlocks`.
 - Invalid code does not create unlock.
-- Reusing code by second user works.
+- Historical shared-code expectation superseded by issue #31: a second account cannot consume an already redeemed single-use code; existing entitlements remain permanent.
 - Duplicate unlock does not create duplicate row.
 
 ### E2E/manual verification
