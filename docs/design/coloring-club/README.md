@@ -1,9 +1,9 @@
 # Lamilia Lomi — Coloring Club P0 / UX mockup pack
 
-**Design reference v1 · 25 October 2026**  
-**Target repo:** `fantomx775/lamilia-lomi`  
-**Epic:** [#77](https://github.com/fantomx775/lamilia-lomi/issues/77)  
-**P0 scope:** #78–#85  
+**Design reference v1 · 25 October 2026**
+**Target repo:** `fantomx775/lamilia-lomi`
+**Epic:** [#77](https://github.com/fantomx775/lamilia-lomi/issues/77)
+**P0 scope:** #78–#85
 **Target implementation:** Next.js App Router + Supabase + existing project components
 
 ## What is in this package?

@@ -1,6 +1,6 @@
 # Coloring Club — implementation contract
 
-Status: accepted P0 specification, 2026-10-25  
+Status: accepted P0 specification, 2026-10-25
 Canonical product source: `LamiliaLomi_SOURCE_OF_TRUTH.md` §32
 
 This contract supersedes older “no community” and PL/DE/ES public-routing statements. Public storefront routing is EN-only; admin is Polish. Existing product translations and data remain preserved. Community work must leave premium unlocks, product media, the admin-curated `product_reader_artworks` table, and the product “Look Inside” experience intact.
@@ -120,3 +120,5 @@ Public launch readiness is not established by this spec. Keep public feature OFF
 ## PR #70 overlap and release notes
 
 PR #70 overlaps `next.config.ts`, the media route, content repository, and product image gallery. CC-00 does not edit those files. Later community integration must be reconciled against the actual merged/base version of PR #70 before touching those seams; do not merge PR #70 as part of CC-00. Community database changes must be additive, tested on local/Stage PostgreSQL, and keep existing application reads compatible. Public and upload flags remain OFF until the corresponding gated runtime is verified. The linked Supabase project verified for this run is `ebyhoawczbexwtioywuk` (22 applied migrations, 20 public tables); check current migration history again before any schema deployment.
+
+Precise shared PR #70 paths reviewed: `next.config.ts`, `src/app/api/media/[assetId]/route.ts`, `src/app/api/category-media/[categoryId]/route.ts`, `src/lib/content-repository.ts`, `src/lib/media-upload.ts`, `src/lib/versioned-public-image-response.ts`, `src/components/product-image-gallery.tsx`, `src/components/product-inside-book-section.tsx`, `src/components/image-with-fallback.tsx`, `src/components/category-tile-image.tsx`. The category paths concern existing taxonomy imagery; fallback/gallery helpers are shared integration seams. Tests and verification artifacts are also part of that PR. No PR #70 code was merged.

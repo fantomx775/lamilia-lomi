@@ -554,7 +554,7 @@ Auth:
 - `/en/login`
 - `/en/register`
 - `/en/reset-password`
-- `/en/auth/callback`
+- `/auth/callback`
 
 User:
 
