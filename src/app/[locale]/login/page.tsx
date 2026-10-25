@@ -58,7 +58,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
             {t("loginDescription")}
           </p>
           {verificationMessage ? (
-            <p id="login-error" className="rounded-md bg-[var(--color-blush)] p-3 text-sm" role="alert">
+            <p id="login-error" className="rounded-md bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error)]" role="alert">
               {verificationMessage}
             </p>
           ) : null}

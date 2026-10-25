@@ -251,11 +251,11 @@ export function AboutPageEditor({
       />
 
       {feedback && !feedbackDismissed ? (
-        <div role="alert" aria-live="assertive" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">
+        <div role="alert" aria-live="assertive" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-error)]">
           {feedback}
         </div>
       ) : null}
-      {hasUnappliedHtmlDraft ? <p role="alert" className="text-sm text-[var(--color-terracotta)]">Najpierw zastosuj lub odrzuć roboczy kod HTML przed zapisaniem.</p> : null}
+      {hasUnappliedHtmlDraft ? <p role="alert" className="text-sm text-[var(--color-error)]">Najpierw zastosuj lub odrzuć roboczy kod HTML przed zapisaniem.</p> : null}
 
       {showDuplicateError && duplicateIds.length > 0 ? (
         <div role="alert" className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">

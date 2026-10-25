@@ -52,7 +52,7 @@ export default async function RegisterPage({ params, searchParams }: Props) {
             {t("registerDescription")}
           </p>
           {errorMessage ? (
-            <p className="rounded-md bg-[var(--color-blush)] p-3 text-sm" role="alert">
+            <p className="rounded-md bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error)]" role="alert">
               {errorMessage}
             </p>
           ) : null}

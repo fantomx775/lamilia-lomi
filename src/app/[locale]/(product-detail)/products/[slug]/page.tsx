@@ -206,7 +206,7 @@ async function ProductUnlockSection({
               ) : null}
             </>
           ) : (
-            <p className="rounded-lg bg-[var(--color-blush)]/70 p-4 text-sm leading-6 text-[var(--color-muted)]" role="alert">
+            <p className="rounded-lg bg-[var(--color-error-bg)] p-4 text-sm leading-6 text-[var(--color-error)]" role="alert">
               {copy("unexpected")}
             </p>
           )}

@@ -61,7 +61,7 @@ export default async function AdminSettingsPage({ searchParams }: Props) {
             </Button>
           </form>
           {hasSaveError ? (
-            <p role="alert" className="mt-4 text-sm text-[var(--color-terracotta)]">
+            <p role="alert" className="mt-4 text-sm text-[var(--color-error)]">
               Nie udało się zapisać ustawień. Wybierz 3, 4 albo 5 kart i spróbuj ponownie.
             </p>
           ) : null}

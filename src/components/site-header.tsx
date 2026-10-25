@@ -1,4 +1,5 @@
 import { BookOpen, Info, Library, LogIn, UserPlus } from "lucide-react";
+import Image from "next/image";
 import { Suspense, type ReactNode } from "react";
 
 import { MobileNavigation } from "@/components/mobile-navigation";
@@ -21,7 +22,7 @@ export function SiteHeader({ locale }: {
   };
 
   return (
-    <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]/92 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
       <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
         <NavigationLink
           href={`/${locale}`}
@@ -29,9 +30,17 @@ export function SiteHeader({ locale }: {
           aria-label="LamiliaLomi home"
           className="flex items-center gap-3 rounded-sm transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
         >
-          <span className="grid size-9 shrink-0 place-items-center rounded-md bg-[var(--color-sage)] font-serif text-lg font-semibold text-[var(--color-ink)] sm:size-10">
-            LL
-          </span>
+          <Image
+            src="/assets/home/lamilia-lomi-logo.webp"
+            alt=""
+            aria-hidden
+            width={1024}
+            height={1024}
+            sizes="(max-width: 640px) 56px, 64px"
+            unoptimized
+            loading="eager"
+            className="size-14 shrink-0 object-contain sm:size-16"
+          />
           <span className="min-w-0 max-[360px]:hidden">
             <span className="block font-serif text-lg font-semibold text-[var(--color-ink)] sm:text-xl">
               LamiliaLomi
