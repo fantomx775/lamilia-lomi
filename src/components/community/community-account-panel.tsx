@@ -133,17 +133,19 @@ export function CommunityAccountPanel({
         {notice ? <p className="rounded-md bg-[var(--color-sage)] p-3 text-sm text-[var(--color-ink)]" role="status" aria-live="polite">{notice}</p> : null}
 
         {profile ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-3 rounded-md border border-[var(--color-border)] bg-white p-4">
-            <CommunityAvatar username={profile.username} seed={profile.avatarSeed} />
-            <div className="min-w-0 flex-1">
-              <p className="break-all font-semibold text-[var(--color-ink)]">@{profile.username}</p>
-              <p className="text-sm text-[var(--color-muted)]">
-                {profile.suspendedAt ? "Participation is paused." : active ? "Community member" : "You are not currently participating."}
-              </p>
+          <div className="flex min-w-0 flex-col gap-3 rounded-md border border-[var(--color-border)] bg-white p-4 sm:flex-row sm:items-center">
+            <div className="flex min-w-0 items-center gap-3 sm:flex-1">
+              <CommunityAvatar username={profile.username} seed={profile.avatarSeed} />
+              <div className="min-w-0 flex-1">
+                <p className="break-all font-semibold text-[var(--color-ink)]">@{profile.username}</p>
+                <p className="text-sm text-[var(--color-muted)]">
+                  {profile.suspendedAt ? "Participation is paused." : active ? "Community member" : "You are not currently participating."}
+                </p>
+              </div>
             </div>
             {publicEnabled && active ? (
               <Link
-                className="ml-auto max-w-full shrink-0 rounded-sm text-sm font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+                className="max-w-full self-start rounded-sm text-sm font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] sm:ml-auto sm:shrink-0"
                 href={`${creatorProfileBaseHref}/${encodeURIComponent(profile.username)}`}
               >
                 View profile

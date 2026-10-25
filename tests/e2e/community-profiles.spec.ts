@@ -65,6 +65,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
   }
   async function essentials(target: Page) {
     const button = target.getByRole("button", { name: "Essential only", exact: true });
+    await expect(button.or(target.getByRole("button", { name: "Cookie settings", exact: true }))).toBeVisible();
     if (await button.isVisible()) await button.click();
   }
   async function login(target: Page, email: string) {

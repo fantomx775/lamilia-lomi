@@ -113,6 +113,22 @@ describe("CommunityAccountPanel", () => {
       .toEqual({ username: "taken_name" });
   });
 
+  it("places long profile usernames and their link on separate mobile rows", () => {
+    const longProfile = { ...activeProfile, username: "p0_artist_abcdefghijklmnopqrstuvwxyz".slice(0, 24) };
+    render(<CommunityAccountPanel
+      profile={longProfile}
+      enabled
+      publicEnabled
+      emailVerified
+      guidelinesHref="/en/community-guidelines"
+      creatorProfileBaseHref="/en/club/creators"
+      contactHref="/en/contact"
+    />);
+    const link = screen.getByRole("link", { name: "View profile" });
+    expect(link.parentElement).toHaveClass("flex-col", "sm:flex-row");
+    expect(link.previousElementSibling).toHaveClass("sm:flex-1");
+  });
+
   it("explains that unverified accounts must verify email before joining", () => {
     render(<CommunityAccountPanel
       profile={null}
