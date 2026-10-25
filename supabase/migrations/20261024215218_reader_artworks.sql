@@ -1,11 +1,11 @@
 create table if not exists public.product_reader_artworks (
   id uuid primary key default gen_random_uuid(),
-  product_id uuid not null references public.products(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete restrict,
   storage_path text not null unique,
   storage_provider text not null check (storage_provider in ('local', 'supabase', 'r2')),
   filename text not null,
   content_type text not null check (content_type in ('image/png', 'image/jpeg', 'image/webp')),
-  size_bytes bigint not null check (size_bytes > 0 and size_bytes <= 20971520),
+  size_bytes bigint not null check (size_bytes > 0 and size_bytes <= 4194304),
   display_name text not null check (char_length(btrim(display_name)) between 1 and 80),
   description text check (description is null or char_length(description) <= 240),
   sort_order integer not null default 0,

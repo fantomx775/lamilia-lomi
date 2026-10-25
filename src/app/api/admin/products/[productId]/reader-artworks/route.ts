@@ -5,7 +5,7 @@ import { getBackendMode } from "@/lib/config";
 import { hasValidCollectionImageContent } from "@/lib/collection-image-validation";
 import { removeCollectionImage, storeCollectionImage } from "@/lib/collection-image-storage";
 import { getProductStatus, listReaderArtworks, createReaderArtwork, updateReaderArtwork, reorderReaderArtworks, deleteReaderArtwork } from "@/lib/reader-artworks";
-import { validateMediaFile } from "@/lib/media-upload";
+import { validateReaderArtworkFile } from "@/lib/media-upload";
 import { getDemoSession } from "@/lib/session.server";
 import { getCurrentAccessToken } from "@/lib/supabase/server";
 import type { ReaderArtwork } from "@/lib/types";
@@ -35,8 +35,8 @@ export async function POST(request: Request, context: Context) {
   const displayName = field(form.get("displayName"), 80);
   const description = field(form.get("description"), 240);
   if (!(file instanceof File) || !displayName) return error(400);
-  const validation = validateMediaFile("gallery", file);
-  if (!validation.ok || !TYPES.has(validation.contentType)) return error(400);
+  const validation = validateReaderArtworkFile(file);
+  if (!validation.ok || !TYPES.has(validation.contentType)) return error(400, validation.ok ? undefined : validation.error);
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (!await hasValidCollectionImageContent(bytes, validation.contentType)) return error(400);
   const id = randomUUID();
@@ -119,7 +119,7 @@ async function requireAdmin() {
 }
 function field(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
 function isProductStatus(value: string | null): value is "draft" | "published" | "archived" { return value === "draft" || value === "published" || value === "archived"; }
-function error(status: number) { return NextResponse.json({ error: "reader_artwork_request_failed" }, { status, headers: { "Cache-Control": "private, no-store" } }); }
+function error(status: number, message?: string) { return NextResponse.json({ error: message ?? "reader_artwork_request_failed" }, { status, headers: { "Cache-Control": "private, no-store" } }); }
 function publicAdminRecord(item: ReaderArtwork) {
   return { id: item.id, displayName: item.displayName, description: item.description, sortOrder: item.sortOrder, isVisible: item.isVisible,
     src: `/api/reader-artworks/${encodeURIComponent(item.id)}`, adminSrc: `/api/admin/reader-artwork-media/${encodeURIComponent(item.id)}` };

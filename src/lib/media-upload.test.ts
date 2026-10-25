@@ -9,6 +9,8 @@ import {
   mediaFilenameForDisplay,
   mediaFilenameForStorage,
   validateMediaFile,
+  MAX_READER_ARTWORK_BYTES,
+  validateReaderArtworkFile,
 } from "./media-upload";
 
 describe("media upload rules", () => {
@@ -32,6 +34,12 @@ describe("media upload rules", () => {
     expect(isMediaKind("cover")).toBe(true);
     expect(isMediaKind("constructor")).toBe(false);
     expect(isMediaKind("toString")).toBe(false);
+  });
+
+  it("limits reader artwork to 4 MiB while preserving the generic 20 MiB gallery spec", () => {
+    expect(validateReaderArtworkFile({ name: "reader.png", size: MAX_READER_ARTWORK_BYTES, type: "image/png" }).ok).toBe(true);
+    expect(validateReaderArtworkFile({ name: "reader.png", size: MAX_READER_ARTWORK_BYTES + 1, type: "image/png" })).toMatchObject({ ok: false, error: expect.stringContaining("4 MB") });
+    expect(MEDIA_UPLOAD_SPECS.gallery.maxBytes).toBe(20 * 1024 * 1024);
   });
 
   it("adds deterministic suffixes without losing the extension", () => {

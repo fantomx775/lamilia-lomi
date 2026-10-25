@@ -30,7 +30,7 @@ import {
 import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
 import { assertCollectionImageExists, removeCollectionImage } from "./collection-image-storage";
-import { listReaderArtworks } from "./reader-artworks";
+import { deleteReaderArtwork, listReaderArtworks } from "./reader-artworks";
 import {
   hasDuplicateAboutProductIds,
   normalizeAboutPageSettings,
@@ -306,6 +306,9 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
     const previousReaderArtworks = await listReaderArtworks(productId, true);
     for (const artwork of previousReaderArtworks) {
       await removeCollectionImage({ collectionId: productId, storagePath: artwork.storagePath, provider: artwork.storageProvider });
+      if (!await deleteReaderArtwork(productId, artwork.id)) {
+        throw new Error(`Reader artwork metadata cleanup failed for ${artwork.id}.`);
+      }
     }
 
     const supabase = await createClient();

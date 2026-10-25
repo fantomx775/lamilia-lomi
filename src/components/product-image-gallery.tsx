@@ -174,7 +174,7 @@ export function ProductImageGallery({
               </span>
             </button>
             {image.caption ? (
-              <figcaption className="mt-3 px-1 text-sm leading-6 text-[var(--color-muted)]">
+              <figcaption className={`mt-3 min-w-0 px-1 text-sm leading-6 text-[var(--color-muted)] ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
                 {image.caption}
               </figcaption>
             ) : null}
@@ -294,7 +294,7 @@ export function ProductImageGallery({
             </div>
 
             {activeImage.caption ? (
-              <p className="mt-2 shrink-0 px-1 text-center text-sm leading-6 text-[var(--color-muted)] sm:mt-3">
+              <p className={`mt-2 min-w-0 shrink-0 px-1 text-center text-sm leading-6 text-[var(--color-muted)] sm:mt-3 ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
                 {activeImage.caption}
               </p>
             ) : null}

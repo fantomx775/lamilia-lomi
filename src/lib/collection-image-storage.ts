@@ -8,7 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getBackendMode } from "./config";
 import { createCollectionImagePath, isSafeCollectionImagePath } from "./collection-image-path";
 import { getMediaUploadProvider, getR2StorageConfig } from "./media-r2-config";
-import { mediaFilenameForDisplay } from "./media-upload";
+import { mediaFilenameForDisplay, MAX_READER_ARTWORK_BYTES } from "./media-upload";
 import { createServiceRoleClient } from "./supabase/admin";
 
 const COLLECTION_IMAGE_BUCKET = "collection-media";
@@ -27,7 +27,8 @@ export async function storeCollectionImage(input: {
 }): Promise<{ path: string; provider: CollectionImageProvider; filename: string }> {
   const filename = mediaFilenameForDisplay(input.filename);
   const storagePath = createCollectionImagePath(input.collectionId, input.imageId, filename, input.contentType, input.namespace);
-  if (input.bytes.byteLength <= 0 || input.bytes.byteLength > MAX_COLLECTION_IMAGE_BYTES) {
+  const maxBytes = input.namespace === "reader-artworks" ? MAX_READER_ARTWORK_BYTES : MAX_COLLECTION_IMAGE_BYTES;
+  if (input.bytes.byteLength <= 0 || input.bytes.byteLength > maxBytes) {
     throw new Error("Invalid collection image size.");
   }
 
@@ -71,7 +72,8 @@ export async function assertCollectionImageExists(input: {
   authorizationToken?: string | null;
 }) {
   assertPath(input.storagePath, input.collectionId);
-  if (input.sizeBytes <= 0 || input.sizeBytes > MAX_COLLECTION_IMAGE_BYTES) {
+  const maxBytes = input.storagePath.startsWith("reader-artworks/") ? MAX_READER_ARTWORK_BYTES : MAX_COLLECTION_IMAGE_BYTES;
+  if (input.sizeBytes <= 0 || input.sizeBytes > maxBytes) {
     throw new Error("Invalid collection image size.");
   }
 

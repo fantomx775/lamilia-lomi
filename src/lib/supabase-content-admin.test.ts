@@ -31,6 +31,9 @@ const mocks = vi.hoisted(() => ({
   updateFilters: [] as Array<{ table: string; column: string; value: unknown }>,
   deleteFilters: [] as Array<{ table: string; column: string; value: unknown }>,
   storageCreateSignedUrl: vi.fn(),
+  readerArtworks: [] as Array<{ id: string; storagePath: string; storageProvider: "local" }>,
+  deleteReaderArtwork: vi.fn(),
+  readerArtworkEvents: [] as string[],
 }));
 
 vi.mock("server-only", () => ({}));
@@ -64,6 +67,10 @@ vi.mock("./collection-image-storage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./collection-image-storage")>();
   return { ...actual, removeCollectionImage: mocks.removeCollectionImage };
 });
+vi.mock("./reader-artworks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./reader-artworks")>();
+  return { ...actual, listReaderArtworks: async () => mocks.readerArtworks, deleteReaderArtwork: mocks.deleteReaderArtwork };
+});
 vi.mock("./media-storage", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./media-storage")>();
   return { ...actual, finalizeR2MediaUploads: mocks.finalizeR2MediaUploads };
@@ -74,6 +81,7 @@ import {
   assertSupabaseUploadsExist,
   deleteCategoryForRequest,
   deleteCollectionForRequest,
+  deleteProductForRequest,
   removeCategoryImageForRequest,
   saveProductForRequest,
   saveCategoryForRequest,
@@ -291,6 +299,25 @@ describe("Supabase content admin mutations", () => {
     });
     mocks.removeCategoryImageStorage.mockResolvedValue(true);
     mocks.removeCollectionImage.mockResolvedValue(undefined);
+    mocks.readerArtworks = [];
+    mocks.readerArtworkEvents = [];
+    mocks.deleteReaderArtwork.mockImplementation(async (_productId: string, id: string) => { mocks.readerArtworkEvents.push(`metadata:${id}`); return true; });
+  });
+
+  it("deletes reader metadata only after storage cleanup succeeds", async () => {
+    mocks.getAdminContentSnapshot.mockResolvedValue({ products: [{ id: productId, status: "draft", assets: [] }], collections: [], categories: [], tags: [], staticPages: [], catalogSettings: { desktopColumns: 4 } });
+    mocks.readerArtworks = [{ id: "art-1", storagePath: `reader-artworks/${productId}/image/art-1-work.png`, storageProvider: "local" }];
+    mocks.removeCollectionImage.mockImplementation(async () => { mocks.readerArtworkEvents.push("storage:art-1"); });
+    mocks.rpc.mockImplementation(async (name: string) => { mocks.readerArtworkEvents.push(`parent:${name}`); return { data: true, error: null }; });
+
+    await expect(deleteProductForRequest(productId)).resolves.toMatchObject({ ok: true });
+    expect(mocks.readerArtworkEvents).toEqual(["storage:art-1", "metadata:art-1", "parent:delete_product"]);
+
+    mocks.readerArtworkEvents = [];
+    mocks.removeCollectionImage.mockRejectedValueOnce(new Error("storage unavailable"));
+    await expect(deleteProductForRequest(productId)).resolves.toMatchObject({ ok: false });
+    expect(mocks.deleteReaderArtwork).toHaveBeenCalledTimes(1);
+    expect(mocks.readerArtworkEvents).toEqual([]);
   });
 
   it("persists category image metadata and replaces the previous unique object", async () => {

@@ -29,6 +29,15 @@ describe("reader artwork admin API", () => {
     expect(mocks.store).not.toHaveBeenCalled();
   });
 
+  it("rejects reader artwork over 4 MiB before storage", async () => {
+    mocks.admin = true;
+    const form = new FormData(); form.set("file", new File([new Uint8Array(4 * 1024 * 1024 + 1)], "large.png", { type: "image/png" })); form.set("displayName", "Sunny");
+    const response = await POST(new Request("http://local", { method: "POST", body: form }), context);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining("4 MB") });
+    expect(mocks.store).not.toHaveBeenCalled();
+  });
+
   it("rejects uploads when the product no longer exists", async () => {
     mocks.admin = true; mocks.status = "missing";
     const form = new FormData(); form.set("file", new File([new Uint8Array([1])], "work.png", { type: "image/png" })); form.set("displayName", "Sunny");

@@ -196,7 +196,7 @@ function FavoriteBookCard({
           href={product.primaryAmazonLink.url}
           productId={product.id}
           market={product.primaryAmazonLink.market}
-          className="mt-2 min-h-8 w-full justify-center bg-[var(--color-terracotta)] px-2 py-1.5 text-[11px] text-white hover:bg-[var(--color-ink-soft)] focus-visible:outline-[var(--color-terracotta)] sm:text-xs"
+          className="mt-2 min-h-8 w-full justify-center bg-[var(--color-action)] px-2 py-1.5 text-[11px] text-white hover:bg-[var(--color-action-hover)] focus-visible:outline-[var(--color-terracotta)] sm:text-xs"
         >
           View on Amazon
         </AmazonLink>

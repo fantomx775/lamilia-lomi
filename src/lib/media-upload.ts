@@ -1,6 +1,17 @@
 import type { AssetKind, ProductAsset } from "./types";
 
 export const MAX_GALLERY_ASSETS = 20;
+export const MAX_READER_ARTWORK_BYTES = 4 * 1024 * 1024;
+
+export function validateReaderArtworkFile(file: Pick<File, "name" | "size" | "type">) {
+  const contentType = file.type || inferContentType(file.name);
+  if (!["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
+    return { ok: false as const, error: `Plik „${file.name}” ma niedozwolony format dla prac czytelniczek.` };
+  }
+  if (file.size <= 0) return { ok: false as const, error: `Plik „${file.name}” jest pusty.` };
+  if (file.size > MAX_READER_ARTWORK_BYTES) return { ok: false as const, error: `Plik „${file.name}” jest za duży. Maksymalny rozmiar to 4 MB.` };
+  return { ok: true as const, contentType };
+}
 
 export const MEDIA_UPLOAD_SPECS: Record<
   ProductAsset["kind"],
