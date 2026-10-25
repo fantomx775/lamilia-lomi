@@ -44,6 +44,7 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
     cell: (row) => (
       <Link
         href={`/admin/products/${row.id}`}
+        aria-label={`Edytuj produkt ${row.title}`}
         className="group block min-w-0 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
       >
         <span className="flex min-w-0 items-center gap-3">
@@ -51,27 +52,31 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
             <ImageWithFallback src={row.coverPath} alt={row.title} className="object-contain p-0.5" sizes="48px" />
           </span>
           <span className="min-w-0">
-            <span className="block truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</span>
+            <span title={row.title} className="line-clamp-2 [overflow-wrap:anywhere] font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</span>
             <span className="mt-1 block truncate text-xs text-[var(--color-muted)]">{row.slug}</span>
           </span>
         </span>
       </Link>
     ),
+    headerClassName: "w-[22%]",
   },
   {
     id: "status",
     header: "Status",
-    cell: (row) => <Badge className={statusClasses[row.status]}>{statusLabels[row.status]}</Badge>,
+    cell: (row) => <Badge className={`${statusClasses[row.status]} shrink-0 whitespace-nowrap`}>{statusLabels[row.status]}</Badge>,
+    headerClassName: "w-[18%] whitespace-nowrap",
   },
   {
     id: "audience",
     header: "Segment",
     cell: (row) => (row.audience === "kids" ? "Dzieci" : "Dorośli"),
+    headerClassName: "w-[8%]",
   },
   {
     id: "product-type",
     header: "Typ produktu",
     cell: (row) => formatProductType(row.productType),
+    headerClassName: "w-[12%]",
   },
   {
     id: "collection",
@@ -79,21 +84,22 @@ const columns: DataTableColumn<AdminProductListRow>[] = [
     cell: (row) => row.collectionName
       ? <Badge className="max-w-36 truncate" title={row.collectionName}>{row.collectionName}</Badge>
       : <span aria-label="Bez kolekcji">—</span>,
+    headerClassName: "w-[12%]",
     cellClassName: "max-w-40",
   },
   {
     id: "categories",
     header: "Kategorie",
     cell: (row) => <CompactBadgeList rowId={row.id} kind="category" labels={row.categoryNames ?? []} />,
-    headerClassName: "min-w-40",
-    cellClassName: "min-w-40 max-w-48",
+    headerClassName: "w-[14%]",
+    cellClassName: "max-w-48",
   },
   {
     id: "tags",
     header: "Tagi",
     cell: (row) => <CompactBadgeList rowId={row.id} kind="tag" labels={row.tagNames ?? []} />,
-    headerClassName: "min-w-40",
-    cellClassName: "min-w-40 max-w-48",
+    headerClassName: "w-[14%]",
+    cellClassName: "max-w-48",
   },
 ];
 
@@ -107,6 +113,8 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
       searchPlaceholder="Szukaj produktów…"
       searchAriaLabel="Szukaj produktów"
       caption="Lista produktów"
+      desktopBreakpoint="xl"
+      tableLayout="fixed"
       rows={rows}
       columns={columns}
       getRowId={(row) => row.id}
@@ -141,10 +149,10 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
                 <ImageWithFallback src={row.coverPath} alt={row.title} className="object-contain p-0.5" sizes="56px" />
               </span>
               <div className="min-w-0">
-                <p className="truncate font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
+                <p title={row.title} className="line-clamp-2 [overflow-wrap:anywhere] font-medium text-[var(--color-ink)] group-hover:text-[var(--color-terracotta)]">{row.title}</p>
                 <p className="mt-1 truncate text-xs text-[var(--color-muted)]">{row.slug}</p>
               </div>
-              <Badge className={statusClasses[row.status]}>{statusLabels[row.status]}</Badge>
+              <Badge className={`${statusClasses[row.status]} shrink-0 whitespace-nowrap`}>{statusLabels[row.status]}</Badge>
             </div>
             <p className="mt-3 text-sm text-[var(--color-muted)]">
               {row.audience === "kids" ? "Dzieci" : "Dorośli"} · {formatProductType(row.productType)}

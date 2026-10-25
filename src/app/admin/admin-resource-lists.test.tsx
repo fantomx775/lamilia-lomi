@@ -147,6 +147,42 @@ describe("admin resource list adapters", () => {
     expect(routerPush).not.toHaveBeenCalled();
   });
 
+  it("keeps long product titles readable and the archived status visible on desktop and mobile", async () => {
+    const longTitle = `${"A very long illustrated story title ".repeat(4)}ending in the moonlit garden`;
+    const longSlug = "moonlit-garden-" + "a-very-long-unbroken-slug-".repeat(8);
+    const product = render(<ProductsResourceList rows={[{
+      id: "long-title-product",
+      title: longTitle,
+      slug: longSlug,
+      status: "archived",
+      audience: "adults",
+      productType: "coloring-book",
+      categoryNames: ["Nature", "Stories", "Long category name " + "forest-".repeat(12)],
+      tagNames: ["Moon", "Night", "Long tag " + "moon-".repeat(12)],
+    }]} />);
+
+    const desktopLink = product.container.querySelector<HTMLAnchorElement>('tbody a[href="/admin/products/long-title-product"]');
+    expect(desktopLink).toHaveAttribute("aria-label", `Edytuj produkt ${longTitle}`);
+    expect(desktopLink?.querySelector("span[title]")).toHaveAttribute("title", longTitle);
+    expect(desktopLink).toHaveAttribute("href", "/admin/products/long-title-product");
+    expect(product.container.querySelector("tbody tr[role='button']")).not.toBeInTheDocument();
+    const desktopStatus = product.container.querySelector("tbody td:nth-child(2) span");
+    expect(desktopStatus).toHaveTextContent("Zarchiwizowany");
+    expect(desktopStatus).toHaveClass("shrink-0", "whitespace-nowrap");
+
+    const user = userEvent.setup();
+    await user.click(product.getByRole("textbox", { name: "Szukaj produktów" }));
+    await user.keyboard("moonlit garden");
+    expect(product.getAllByRole("link", { name: `Edytuj produkt ${longTitle}` })).toHaveLength(2);
+
+    const mobileLink = product.container.querySelector<HTMLAnchorElement>(".xl\\:hidden a[href='/admin/products/long-title-product']");
+    expect(mobileLink?.querySelector("p[title]")).toHaveAttribute("title", longTitle);
+    expect(mobileLink).toHaveAttribute("aria-label", `Edytuj produkt ${longTitle}`);
+    const mobileStatus = mobileLink?.querySelector("span.whitespace-nowrap");
+    expect(mobileStatus).toHaveTextContent("Zarchiwizowany");
+    expect(mobileStatus).toHaveClass("shrink-0", "whitespace-nowrap");
+  });
+
   it("shows collection, category and tag columns with an accessible 2 plus N expansion", async () => {
     const user = userEvent.setup();
     const view = render(

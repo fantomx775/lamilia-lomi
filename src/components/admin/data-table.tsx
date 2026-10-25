@@ -26,6 +26,8 @@ type DataTableProps<T> = {
   getRowHref?: (row: T) => string;
   onRowActivate?: (row: T, triggerElement: HTMLElement | null) => void;
   className?: string;
+  desktopBreakpoint?: "lg" | "xl";
+  tableLayout?: "auto" | "fixed";
 };
 
 const INTERACTIVE_SELECTOR =
@@ -43,6 +45,8 @@ export function DataTable<T>({
   getRowHref,
   onRowActivate,
   className,
+  desktopBreakpoint = "lg",
+  tableLayout = "auto",
 }: DataTableProps<T>) {
   const router = useRouter();
   const hasRowActivation = Boolean(getRowHref || onRowActivate);
@@ -61,14 +65,20 @@ export function DataTable<T>({
 
   return (
     <div data-slot="data-table" className={cn("min-w-0", className)}>
-      <div className="hidden overflow-hidden rounded-lg border border-[var(--color-border)] lg:block">
+      <div className={cn(
+        "hidden overflow-hidden rounded-lg border border-[var(--color-border)]",
+        desktopBreakpoint === "xl" ? "xl:block" : "lg:block",
+      )}>
         {isLoading ? (
           loadingState
         ) : data.length === 0 ? (
           emptyState
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[42rem] border-collapse text-left text-sm">
+            <table className={cn(
+              "w-full min-w-[42rem] border-collapse text-left text-sm",
+              tableLayout === "fixed" && "table-fixed",
+            )}>
               <caption className="sr-only">{caption}</caption>
               <thead className="bg-white/80 text-xs uppercase tracking-wide text-[var(--color-muted)]">
                 <tr className="border-b border-[var(--color-border)]">
@@ -125,7 +135,7 @@ export function DataTable<T>({
         )}
       </div>
 
-      <div className="grid gap-3 lg:hidden">
+      <div className={desktopBreakpoint === "xl" ? "grid gap-3 xl:hidden" : "grid gap-3 lg:hidden"}>
         {isLoading ? (
           <div className="rounded-lg border border-[var(--color-border)] bg-white/70">
             {loadingState}
