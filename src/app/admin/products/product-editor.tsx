@@ -1050,10 +1050,10 @@ export function ProductEditor({
         />
 
         {hasActiveMediaUpload ? <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Zapis produktu będzie dostępny po zakończeniu przesyłania plików.</p> : null}
-        {feedback && showRouteFeedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
+        {feedback && showRouteFeedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-error)]">{feedback}</div> : null}
         {saveErrorCodes.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"><p className="font-medium">Nie udało się zapisać. Twoje wpisane wartości są zachowane.</p><ul className="mt-2 list-disc space-y-1 pl-5">{Array.from(new Set(saveErrorCodes)).map((code) => <li key={code}>{getAdminErrorMessage(code, "pl")}</li>)}</ul></div> : null}
 
-        <main className="mx-auto grid w-full max-w-4xl min-w-0 gap-6">
+        <main className="mx-auto grid w-full max-w-6xl min-w-0 gap-6">
       <AdminEditorSection title="Podstawowe informacje" description="Treść produktu jest edytowana po angielsku.">
               <div className="grid min-w-0 gap-5">
                 <div className="grid min-w-0 gap-4">
@@ -1206,7 +1206,9 @@ export function ProductEditor({
       </form>
 
       {product && archiveAction && deleteAction ? (
-        <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving || isGeneratingPremiumBatch} />
+        <div className="mx-auto mt-8 w-full max-w-6xl">
+          <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving || isGeneratingPremiumBatch} />
+        </div>
       ) : null}
 
       <AdminSaveBar formId="product-editor-form" dirty={isDirty} pending={isSaving} status={saveStatus} disabled={isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction} testId="product-save-bar" nativeSubmitLabel="Zapisz produkt" idleMessage={product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"} savedMessage="Zapisano. Zmiany są aktualne." errorMessage="Zapis nie powiódł się. Sprawdź wskazane błędy." allowCleanSubmit />
@@ -1236,12 +1238,12 @@ function MediaSections({
   onMove: (clientId: string, direction: -1 | 1) => void;
 }) {
   return <div className="grid min-w-0 gap-6">
-    <MediaSection kind="cover" title="OKŁADKA" description={`Jedna grafika reprezentująca produkt. ${imageRatioRequirement("cover")} Możesz ją później zastąpić lub usunąć.`} assets={assets} error={errors.cover} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
-    <MediaSection kind="gallery" title="GALERIA" description={`Dodaj do 20 obrazów i ustaw ich kolejność przyciskami góra/dół. ${imageRatioRequirement("gallery")}`} assets={assets} error={errors.gallery} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="cover" title="Okładka" description={`Jedna grafika reprezentująca produkt. ${imageRatioRequirement("cover")} Możesz ją później zastąpić lub usunąć.`} assets={assets} error={errors.cover} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="gallery" title="Galeria" description={`Dodaj do 20 obrazów i ustaw ich kolejność przyciskami góra/dół. ${imageRatioRequirement("gallery")}`} assets={assets} error={errors.gallery} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
     <ReaderArtworkManager key={productId ?? "new"} productId={productId} />
-    <MediaSection kind="video" title="WIDEO FLIPTHROUGH" description="Jedno publiczne wideo pokazujące zawartość produktu." assets={assets} error={errors.video} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
-    <MediaSection kind="public_download" title="PUBLICZNE PLIKI DO POBRANIA" description="Pliki dostępne dla każdego odwiedzającego — bez logowania i bez odblokowania." assets={assets} error={errors.public_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
-    <MediaSection kind="premium_download" title="MATERIAŁY PREMIUM" description="Prywatne materiały dostępne dopiero po weryfikacji e-maila i odblokowaniu produktu." assets={assets} error={errors.premium_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="video" title="Wideo flipthrough" description="Jedno publiczne wideo pokazujące zawartość produktu." assets={assets} error={errors.video} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="public_download" title="Publiczne pliki do pobrania" description="Pliki dostępne dla każdego odwiedzającego — bez logowania i bez odblokowania." assets={assets} error={errors.public_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <MediaSection kind="premium_download" title="Materiały premium" description="Prywatne materiały dostępne dopiero po weryfikacji e-maila i odblokowaniu produktu." assets={assets} error={errors.premium_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
   </div>;
 }
 
@@ -1480,7 +1482,13 @@ function PremiumEditor({
 }
 
 function CheckboxGroup({ label, name, values, selected }: { label: string; name: string; values: Array<{ id: string; label: string }>; selected: string[] }) {
-  return <fieldset className="grid gap-2"><legend className="text-sm font-medium">{label}</legend>{values.length ? values.map((value) => <label key={value.id} className="flex min-w-0 items-start gap-2 text-sm"><input type="checkbox" name={name} value={value.id} defaultChecked={selected.includes(value.id)} className="mt-0.5 shrink-0" /><span className="break-words">{value.label}</span></label>) : <p className="text-sm text-[var(--color-muted)]">Brak dostępnych elementów.</p>}</fieldset>;
+  return <fieldset data-testid={`taxonomy-group-${name}`} className="grid min-w-0 gap-2">
+    <legend className="mb-1 text-sm font-medium">{label}</legend>
+    {values.length ? <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">{values.map((value) => <label key={value.id} className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-[var(--color-border)] bg-white px-3 py-2 text-sm transition-colors hover:bg-[var(--color-blush)] has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--color-terracotta)]">
+      <input type="checkbox" name={name} value={value.id} defaultChecked={selected.includes(value.id)} className="size-4 shrink-0 accent-[var(--color-terracotta)]" />
+      <span className="min-w-0 break-words">{value.label}</span>
+    </label>)}</div> : <p className="text-sm text-[var(--color-muted)]">Brak dostępnych elementów.</p>}
+  </fieldset>;
 }
 
 function Field({ label, htmlFor, children, error }: { label: string; htmlFor?: string; children: React.ReactNode; error?: string }) {

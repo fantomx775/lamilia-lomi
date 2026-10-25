@@ -175,7 +175,7 @@ export function UnlockForm({
           aria-invalid={Boolean(errorMessage)}
         />
         {errorMessage ? (
-          <p id="premium-code-error" className="text-sm text-[var(--color-terracotta)]" role="alert" aria-live="polite">
+          <p id="premium-code-error" className="text-sm text-[var(--color-error)]" role="alert" aria-live="polite">
             {errorMessage}
           </p>
         ) : null}

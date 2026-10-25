@@ -56,7 +56,7 @@ export function MobileNavigation({ locale, children }: MobileNavigationProps) {
         aria-expanded={isOpen}
         aria-controls={menuId}
         onClick={() => setOpenOnPathname(isOpen ? null : pathname)}
-        className="inline-flex size-11 min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--color-border)] bg-white/70 text-[var(--color-ink)] transition-colors hover:bg-[var(--color-blush)] focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100"
+        className="inline-flex size-11 min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-ink)] transition-colors hover:bg-[var(--color-blush)] focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100"
       >
         {isOpen ? <X className="size-5" aria-hidden /> : <Menu className="size-5" aria-hidden />}
       </button>
@@ -65,7 +65,7 @@ export function MobileNavigation({ locale, children }: MobileNavigationProps) {
         id={menuId}
         aria-label="Mobile primary navigation"
         hidden={!isOpen}
-        className="absolute right-0 top-[calc(100%+0.75rem)] z-50 grid w-[min(18rem,calc(100vw-2rem))] gap-1 rounded-xl border border-[var(--color-border)] bg-white p-2 text-sm text-[var(--color-ink)] shadow-[0_18px_48px_rgba(62,52,47,0.18)]"
+        className="absolute right-0 top-[calc(100%+0.75rem)] z-50 grid w-[min(18rem,calc(100vw-2rem))] gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm text-[var(--color-ink)] shadow-[0_18px_48px_rgba(46,68,58,0.18)]"
       >
         <NavigationLink
           href={`/${locale}/products`}

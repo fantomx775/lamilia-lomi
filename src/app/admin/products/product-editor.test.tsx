@@ -200,19 +200,23 @@ describe("ProductEditor V2", () => {
     expect(view.getByRole("heading", { name: "Publikacja i organizacja" })).toBeInTheDocument();
     expect(view.queryByRole("heading", { name: "Organizacja" })).not.toBeInTheDocument();
     expect(view.container.querySelector("aside")).not.toBeInTheDocument();
-    expect(view.container.querySelector("main")).toHaveClass("max-w-4xl");
+    expect(view.container.querySelector("main")).toHaveClass("max-w-6xl");
     expect(view.getByRole("heading", { name: "Pokolorowane prace czytelniczek" })).toBeInTheDocument();
     const headings = view.getAllByRole("heading").map((heading) => heading.textContent);
-    expect(headings.slice(headings.indexOf("GALERIA"), headings.indexOf("GALERIA") + 3))
-      .toEqual(["GALERIA", "Pokolorowane prace czytelniczek", "WIDEO FLIPTHROUGH"]);
+    expect(headings.slice(headings.indexOf("Galeria"), headings.indexOf("Galeria") + 3))
+      .toEqual(["Galeria", "Pokolorowane prace czytelniczek", "Wideo flipthrough"]);
     expect(view.queryByRole("heading", { name: "Zaawansowane" })).not.toBeInTheDocument();
     expect(view.getByLabelText("Adres produktu")).toHaveValue("");
     expect(view.getByLabelText("Pozycja w katalogu")).toHaveValue(100);
     expect(view.getByLabelText("Przypomnienie o opinii po (dniach)")).toHaveValue(14);
     expect(view.getByLabelText("Segment")).toHaveValue("kids");
-    for (const title of ["OKŁADKA", "GALERIA", "WIDEO FLIPTHROUGH", "PUBLICZNE PLIKI DO POBRANIA", "MATERIAŁY PREMIUM"]) {
+    for (const title of ["Okładka", "Galeria", "Wideo flipthrough", "Publiczne pliki do pobrania", "Materiały premium"]) {
       expect(view.getByRole("heading", { name: title })).toBeInTheDocument();
     }
+    expect(view.getByTestId("taxonomy-group-categoryIds").querySelector("div"))
+      .toHaveClass("sm:grid-cols-2", "lg:grid-cols-3");
+    expect(view.getByTestId("taxonomy-group-tagIds").querySelector("div"))
+      .toHaveClass("sm:grid-cols-2", "lg:grid-cols-3");
     expect(view.getByRole("heading", { name: "Sprzedaż na Amazon" })).toBeInTheDocument();
     expect(view.getByRole("heading", { name: "Dostęp premium" })).toBeInTheDocument();
     expect(view.getByLabelText("Status")).toHaveValue("draft");
@@ -229,9 +233,13 @@ describe("ProductEditor V2", () => {
         product={product}
         categories={snapshot.categories}
         tags={snapshot.tags}
+        archiveAction={async () => {}}
+        deleteAction={async () => {}}
       />,
     );
 
+    expect(view.container.querySelector(".max-w-6xl.mt-8"))
+      .toContainElement(view.getByRole("heading", { name: "Strefa niebezpieczna" }));
     expect(view.getByLabelText("Coloring books")).toBeChecked();
     expect(view.getByLabelText("Printable bonus")).toBeChecked();
     expect(view.getAllByRole("radio", { name: "Domyślny" })[0]).toBeChecked();

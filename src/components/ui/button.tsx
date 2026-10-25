@@ -9,11 +9,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-[var(--color-ink)] text-white hover:bg-[var(--color-ink-soft)] focus-visible:outline-[var(--color-terracotta)]",
+          "bg-[var(--color-ink)] text-white hover:bg-[var(--color-action-hover)] focus-visible:outline-[var(--color-terracotta)]",
         secondary:
           "bg-[var(--color-sage)] text-[var(--color-ink)] hover:bg-[var(--color-sage-deep)]",
         outline:
-          "border border-[var(--color-border)] bg-white/70 text-[var(--color-ink)] hover:bg-[var(--color-blush)]",
+          "border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-ink)] hover:bg-[var(--color-blush)]",
         ghost:
           "text-[var(--color-ink)] hover:bg-[var(--color-blush)]",
       },

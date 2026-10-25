@@ -1,13 +1,16 @@
+import { HomeCampaignBanner } from "@/components/home-campaign-banner";
+
 export default function LocaleLoading() {
   return (
     <div data-testid="localized-page-loading" aria-busy="true">
       <p className="sr-only" role="status" aria-live="polite">
         Loading page
       </p>
-      <section className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-7xl items-center gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:px-8">
+      <HomeCampaignBanner />
+      <section className="mx-auto grid max-w-7xl items-center gap-8 px-4 py-10 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:gap-10 lg:px-8 lg:py-14">
         <div className="max-w-2xl">
           <div className="h-9 w-64 animate-pulse rounded-md bg-white/70 motion-reduce:animate-none" />
-          <div className="mt-6 h-16 w-4/5 animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none sm:h-20" />
+          <div className="mt-5 h-12 w-4/5 animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none sm:h-16" />
           <div className="mt-6 space-y-3">
             <div className="h-5 w-full animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none" />
             <div className="h-5 w-5/6 animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none" />

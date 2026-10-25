@@ -47,7 +47,7 @@ test("reader upload previews, per-image credits, placement and management persis
     await expect(picker).toBeEnabled({ timeout: 20_000 });
     await expect(manager.getByTestId("reader-artwork-item")).toHaveCount(0);
     const headings = await page.locator("h2").allTextContents();
-    expect(headings.slice(headings.indexOf("GALERIA"), headings.indexOf("GALERIA") + 3)).toEqual(["GALERIA", "Pokolorowane prace czytelniczek", "WIDEO FLIPTHROUGH"]);
+    expect(headings.slice(headings.indexOf("Galeria"), headings.indexOf("Galeria") + 3)).toEqual(["Galeria", "Pokolorowane prace czytelniczek", "Wideo flipthrough"]);
     const before = getContentSnapshot();
     const originalAssets = before.products.find(p => p.id === productId)?.assets;
     expect(originalAssets).toBeDefined();

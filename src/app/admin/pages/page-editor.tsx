@@ -190,8 +190,8 @@ export function PageEditor({
         subtitle={`Klucz strony: ${slug}`}
       />
 
-      {feedback && !feedbackDismissed ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
-      {hasUnappliedHtmlDraft ? <p role="alert" className="text-sm text-[var(--color-terracotta)]">Najpierw zastosuj lub odrzuć roboczy kod HTML przed zapisaniem.</p> : null}
+      {feedback && !feedbackDismissed ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-error)]">{feedback}</div> : null}
+      {hasUnappliedHtmlDraft ? <p role="alert" className="text-sm text-[var(--color-error)]">Najpierw zastosuj lub odrzuć roboczy kod HTML przed zapisaniem.</p> : null}
 
       <AdminEditorSection title="Ustawienia strony" description="Klucz strony jest stały i wspólny dla wszystkich adresów.">
         <div className="grid gap-2">
