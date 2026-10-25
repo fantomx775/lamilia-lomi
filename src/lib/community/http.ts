@@ -13,7 +13,15 @@ export function isSameOriginCommunityRequest(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin) return false;
   try {
-    return new URL(origin).origin === new URL(request.url).origin;
+    const target = new URL(request.url);
+    // Next's development HTTPS proxy can normalize the internal URL to localhost.
+    // The browser's Host remains the target authority; never trust forwarded-host.
+    const host = request.headers.get("host");
+    if (host) {
+      target.host = host;
+      if (target.host.toLowerCase() !== host.toLowerCase()) return false;
+    }
+    return origin === new URL(origin).origin && origin === target.origin;
   } catch {
     return false;
   }

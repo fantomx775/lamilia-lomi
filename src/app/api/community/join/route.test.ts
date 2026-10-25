@@ -85,6 +85,19 @@ describe("POST /api/community/join", () => {
     expect(joinColoringClub).not.toHaveBeenCalled();
   });
 
+  it("uses the browser Host when Next normalizes its internal HTTPS hostname", async () => {
+    const local = new Request("https://localhost:3443/api/community/join", {
+      method: "POST", headers: { host: "127.0.0.1:3443", origin: "https://127.0.0.1:3443", "content-type": "application/json" },
+      body: JSON.stringify(validJoin),
+    });
+    expect((await POST(local)).status).toBe(201);
+    const forged = new Request(`${ORIGIN}/api/community/join`, {
+      method: "POST", headers: { host: "attacker.test", origin: ORIGIN, "x-forwarded-host": "lamilialomi.test", "content-type": "application/json" },
+      body: JSON.stringify(validJoin),
+    });
+    expect((await POST(forged)).status).toBe(403);
+  });
+
   it("requires a signed-in verified actor and enabled feature flags", async () => {
     state.actor = null;
     expect((await POST(request(validJoin))).status).toBe(401);
