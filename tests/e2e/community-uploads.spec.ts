@@ -224,6 +224,7 @@ test("three previews become independent private creations with persistent status
   test.skip(process.env.RUN_COMMUNITY_UPLOADS_E2E !== "1" || testInfo.project.name !== "chromium",
     "Requires the isolated real Supabase upload application.");
   test.setTimeout(240_000);
+  page.setDefaultTimeout(12_000);
   const fixtures = await communityFixtures(testInfo);
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc03-local-supabase-1";
   const screenshots: Array<{ path: string; testedSha: string; runId: string }> = [];
@@ -275,7 +276,7 @@ test("three previews become independent private creations with persistent status
     await page.getByTestId("community-upload-rules").check();
     screenshots.push(...await communityScreenshots(page, "cc03", "upload-previews", runId));
     await page.getByTestId("community-upload-submit").click();
-    await expect(page.getByRole("status")).toContainText("3 artworks were sent for review");
+    await expect(page.getByRole("status").filter({ hasText: "artworks were sent" })).toContainText("3 artworks were sent for review");
     await expect(previews).toHaveCount(0);
     const cards = page.getByTestId("community-artwork-card");
     await expect(cards).toHaveCount(3);
@@ -306,9 +307,10 @@ test("three previews become independent private creations with persistent status
     await readyArtworkPreviews(page);
     screenshots.push(...await communityScreenshots(page, "cc03", "my-creations-reviewed", runId));
     const published = cards.filter({ hasText: "Published" });
+    await published.getByTestId("community-artwork-edit-description").click();
     await published.getByTestId("community-artwork-description").fill("A revised rose garden afternoon");
     await published.getByTestId("community-artwork-save-description").click();
-    await expect(page.getByRole("status")).toContainText("pending review again");
+    await expect(page.getByRole("status").filter({ hasText: "pending review again" })).toContainText("pending review again");
     expect((await fixtures.service.from("community_artworks").select("status,revision").eq("id", rose.id).single()).data).toMatchObject({ status: "pending", revision: 3 });
     const removed = cards.filter({ hasText: "Removed" });
     await removed.getByTestId("community-artwork-delete").click();

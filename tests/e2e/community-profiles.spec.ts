@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { COMMUNITY_RULES_VERSION } from "../../src/lib/community/rules";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
@@ -162,26 +163,27 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     const oldProfile = await visitor.request.get(`${appOrigin}/en/club/creators/p0_artist_fixture`);
     expect(oldProfile.status()).toBe(404);
 
-    // Fixture metadata uses actual authorization/moderation RPCs; #81 separately
-    // verifies real image bytes. No images or titles are fabricated by this UI.
+    // Use the actual validated upload pipeline and private provider, not metadata-only rows.
     const productId = "11111111-1111-4111-8111-111111111111";
     expect((await service.from("user_product_unlocks").insert({ user_id: owner.id, product_id: productId })).error).toBeNull();
+    const fixtureImage = await sharp({ create: { width: 160, height: 120, channels: 3, background: "#9aa58e" } }).png().toBuffer();
     async function art(description: string, state: "pending" | "approved" | "rejected" | "removed") {
-      const key = randomUUID();
-      const result = await service.rpc("community_create_pending_artwork", {
-        p_actor_user_id: owner.id, p_product_id: productId, p_storage_path: `community/${owner.id}/${key}`,
-        p_storage_provider: "supabase", p_content_type: "image/png", p_size_bytes: 120,
-        p_description: description, p_idempotency_key: key,
+      const result = await page.request.post(`${appOrigin}/api/community/artworks`, {
+        headers: { Origin: appOrigin }, multipart: {
+          file: { name: "garden.png", mimeType: "image/png", buffer: fixtureImage }, productId,
+          description, idempotencyKey: randomUUID(), rulesAccepted: "true",
+        },
       });
-      if (result.error) throw new Error("Could not create isolated profile artwork metadata.");
+      expect([200, 201]).toContain(result.status());
+      const artwork = (await result.json()).artwork;
       if (state !== "pending") {
         const decision = await service.rpc("community_moderate_artwork", { p_actor_user_id: moderator.id,
-          p_artwork_id: result.data, p_expected_revision: 1, p_action: state === "rejected" ? "reject" : "approve",
+          p_artwork_id: artwork.id, p_expected_revision: 1, p_action: state === "rejected" ? "reject" : "approve",
           p_reason: state === "rejected" ? "private_reason_cc02" : null });
         if (decision.error) throw new Error("Could not moderate isolated profile fixture.");
         if (state === "removed") {
           const removal = await service.rpc("community_moderate_artwork", { p_actor_user_id: moderator.id,
-            p_artwork_id: result.data, p_expected_revision: 2, p_action: "remove", p_reason: "private_reason_cc02" });
+            p_artwork_id: artwork.id, p_expected_revision: 2, p_action: "remove", p_reason: "private_reason_cc02" });
           if (removal.error) throw new Error("Could not remove isolated profile fixture.");
         }
       }
@@ -200,7 +202,11 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await capture(visitor, "creator-approved");
     await page.goto(`${appOrigin}/en/library/creations`);
     await expect(page.getByRole("heading", { name: "My Creations", exact: true })).toBeVisible();
-    await expect(page.getByTestId("my-creation-item")).toHaveCount(4);
+    await expect(page.getByTestId("community-artwork-card")).toHaveCount(4);
+    for (const image of await page.getByTestId("community-artwork-preview").all()) {
+      await image.scrollIntoViewIfNeeded();
+      await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    }
     await capture(page, "my-creations");
     await visitor.goto(`${appOrigin}/en/community-guidelines`);
     await expect(visitor.getByRole("heading", { name: /Community guidelines/i }).first()).toBeVisible();
@@ -244,9 +250,17 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     try {
       if (ids.length) {
         if (ids.some((id) => !/^[0-9a-f-]{36}$/.test(id))) throw new Error("Unsafe local cleanup identity.");
+        for (const id of ids) {
+          const prefix = `community/${id}`;
+          const listed = await service.storage.from("collection-media").list(prefix);
+          if (listed.error) throw new Error("Isolated profile fixture object listing failed.");
+          const objects = (listed.data ?? []).filter((item) => item.id).map((item) => `${prefix}/${item.name}`);
+          if (objects.length && (await service.storage.from("collection-media").remove(objects)).error) throw new Error("Isolated profile fixture object cleanup failed.");
+        }
         const literals = ids.map((id) => `'${id}'::uuid`).join(",");
         execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
-          input: `BEGIN; DELETE FROM public.community_moderation_events WHERE artwork_id IN
+          input: `BEGIN; DELETE FROM public.community_upload_reservations WHERE author_id IN (${literals});
+            DELETE FROM public.community_moderation_events WHERE artwork_id IN
             (SELECT id FROM public.community_artworks WHERE author_id IN (${literals}));
             DELETE FROM public.community_artworks WHERE author_id IN (${literals}); COMMIT;`, stdio: ["pipe", "pipe", "pipe"],
         });
@@ -261,7 +275,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
       await writeFile(path.join(folder, "browser-run.json"), `${JSON.stringify({ testedSha, runId, screenshots,
         viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/PostgREST", runtimeErrors,
         networkFailures, navigationAborts, consoleDiagnostics, fixtureCleanup,
-        note: "Checkpoint run. Metadata-only artwork fixtures; real image-byte flow belongs to #81. Development badge hidden for captures. Intentional HTTP denials are tested separately from JavaScript runtime errors. Visual screenshot review recorded separately by actual reviewers." }, null, 2)}\n`);
+        note: "Checkpoint run with real validated uploads and private image-byte fixtures. Development badge hidden for captures. Intentional HTTP denials are tested separately from JavaScript runtime errors. Visual screenshot review recorded separately by actual reviewers." }, null, 2)}\n`);
     }
   }
 });

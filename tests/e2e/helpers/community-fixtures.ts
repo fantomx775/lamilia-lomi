@@ -22,6 +22,20 @@ export async function communityFixtures(testInfo: TestInfo) {
   const products: string[] = [];
   const contexts: BrowserContext[] = [];
   const password = `Cc-${randomUUID()}-9!`;
+  const trackedPages = new Set<Page>();
+  const activeMutations = new Map<object, Promise<void>>();
+  function observeMutations(page: Page) {
+    if (trackedPages.has(page)) return;
+    trackedPages.add(page);
+    const completions = new Map<object, () => void>();
+    page.on("request", (request) => {
+      if (!new URL(request.url()).pathname.startsWith("/api/community/artworks") || request.method() === "GET") return;
+      activeMutations.set(request, new Promise<void>((resolve) => completions.set(request, resolve)));
+    });
+    const finish = (request: object) => { completions.get(request)?.(); completions.delete(request); activeMutations.delete(request); };
+    page.on("requestfinished", finish);
+    page.on("requestfailed", finish);
+  }
   const runToken = randomUUID().slice(0, 8);
 
   async function actor(label: string, options: { admin?: boolean; username?: string; verified?: boolean } = {}) {
@@ -70,6 +84,7 @@ export async function communityFixtures(testInfo: TestInfo) {
   }
 
   async function login(page: Page, account: { email: string; password: string }, returnTo = "/en/library/creations") {
+    observeMutations(page);
     await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/login?returnTo=${encodeURIComponent(returnTo)}`);
     await page.getByLabel("Email", { exact: true }).fill(account.email);
     await page.getByLabel("Password", { exact: true }).fill(account.password);
@@ -81,6 +96,12 @@ export async function communityFixtures(testInfo: TestInfo) {
 
   async function cleanup() {
     try {
+      // A failed UI assertion must not delete its account while its own upload
+      // loop is still in flight. Requests finish before fixture data is removed.
+      for (const page of trackedPages) {
+        if (!page.isClosed()) await page.getByTestId("community-upload-submit").filter({ hasText: "Sending artwork" }).waitFor({ state: "hidden", timeout: 90_000 });
+      }
+      await Promise.all([...activeMutations.values()]);
       // Each object prefix belongs exclusively to an account created by this fixture.
       // Remove stored bytes even if an interrupted upload did not finalize an art row.
       for (const id of users) {
@@ -127,7 +148,8 @@ export async function communityScreenshots(page: Page, folderName: string, view:
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
-    await essentials(page);
+    const dialog = page.getByRole("dialog", { name: "Share your art", exact: true });
+    if (!await dialog.isVisible()) await essentials(page);
     await page.evaluate(() => document.fonts.ready);
     await page.addStyleTag({ content: "nextjs-portal { display:none !important; }" });
     await page.evaluate(() => scrollTo(0, 0));

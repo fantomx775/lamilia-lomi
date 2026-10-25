@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { CommunityCreationManager } from "./community-creation-manager";
@@ -11,9 +11,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderManager() {
+function renderManager(initialArtworks: Array<{
+  id: string;
+  product: { id: string; slug: string; title: string; audience: "kids" | "adults" };
+  contentType: "image/webp";
+  description: string;
+  status: "pending" | "approved" | "rejected" | "removed";
+  revision: number;
+  rejectionReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}> = []) {
   return render(<CommunityCreationManager
-    initialArtworks={[]}
+    initialArtworks={initialArtworks}
     products={[{ id: "11111111-1111-4111-8111-111111111111", slug: "moon-garden", title: "Moon Garden" }]}
     uploadsEnabled
     canSubmit
@@ -37,6 +47,67 @@ function uploadResponse(artworkId: string) {
 }
 
 describe("CommunityCreationManager", () => {
+  it("keeps selected previews and descriptions when the upload drawer closes and reopens", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") });
+    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:preview"), revokeObjectURL: vi.fn() });
+    renderManager();
+
+    const trigger = screen.getByTestId("community-upload-open");
+    await user.click(trigger);
+    await user.selectOptions(screen.getByLabelText("Book"), "11111111-1111-4111-8111-111111111111");
+    await user.upload(screen.getByTestId("community-upload-file-input"), new File(["image"], "garden.png", { type: "image/png" }));
+    await user.type(screen.getByLabelText(/Description Optional/), "A little garden");
+    expect(document.body.style.overflow).toBe("hidden");
+
+    const dialog = screen.getByRole("dialog", { name: "Share your art" });
+    await user.click(within(dialog).getByRole("button", { name: "Close upload" }));
+    const backdrop = document.body.querySelector('[data-slot="admin-drawer"]');
+    fireEvent(backdrop!, new Event("animationend", { bubbles: true }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(document.body.style.overflow).toBe("");
+    expect(trigger).toHaveFocus();
+
+    await user.click(trigger);
+    expect(screen.getByTestId("community-selected-artworks")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Description Optional/)).toHaveValue("A little garden");
+  });
+
+  it("edits and saves an existing artwork description without losing the input event value", async () => {
+    const user = userEvent.setup();
+    const artwork = {
+      id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      product: { id: "11111111-1111-4111-8111-111111111111", slug: "moon-garden", title: "Moon Garden", audience: "kids" as const },
+      contentType: "image/webp" as const,
+      description: "Original description",
+      status: "approved" as const,
+      revision: 2,
+      rejectionReason: null,
+      createdAt: "2026-10-25T00:00:00Z",
+      updatedAt: "2026-10-25T00:00:00Z",
+    };
+    const updatedArtwork = { ...artwork, description: "A new description", status: "pending" as const, revision: 3 };
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.method).toBe("PATCH");
+      expect(JSON.parse(String(init?.body))).toEqual({ revision: 2, description: "A new description" });
+      return new Response(JSON.stringify({ ok: true, artwork: updatedArtwork }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderManager([artwork]);
+
+    await user.click(screen.getByTestId("community-artwork-edit-description"));
+    const description = screen.getByTestId("community-artwork-description");
+    await user.clear(description);
+    await user.type(description, "A new description");
+    await user.click(screen.getByTestId("community-artwork-save-description"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Pending review · private")).toBeInTheDocument();
+    expect(screen.getByText("A new description")).toBeInTheDocument();
+    expect(screen.queryByTestId("community-artwork-description")).toBeNull();
+    expect(screen.queryByTestId("community-artwork-save-description")).toBeNull();
+  });
+
   it("sends three files sequentially and retries a failed item with its stable key and frozen payload", async () => {
     const user = userEvent.setup({ applyAccept: false });
     vi.stubGlobal("crypto", { randomUUID: vi.fn()
@@ -57,6 +128,7 @@ describe("CommunityCreationManager", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderManager();
 
+    await user.click(screen.getByTestId("community-upload-open"));
     await user.selectOptions(screen.getByLabelText("Book"), "11111111-1111-4111-8111-111111111111");
     const files = ["first.png", "second.png", "third.png"].map((name) => new File([name], name, { type: "image/png" }));
     await user.upload(screen.getByTestId("community-upload-file-input"), files);
@@ -86,6 +158,7 @@ describe("CommunityCreationManager", () => {
     const fetchMock = vi.fn(async () => uploadResponse("dddddddd-dddd-4ddd-8ddd-000000000001"));
     vi.stubGlobal("fetch", fetchMock);
     renderManager();
+    await user.click(screen.getByTestId("community-upload-open"));
     await user.selectOptions(screen.getByLabelText("Book"), "11111111-1111-4111-8111-111111111111");
     await user.upload(screen.getByTestId("community-upload-file-input"), [
       new File(["valid"], "valid.png", { type: "image/png" }),

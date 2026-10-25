@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { AdminDrawer } from "@/components/admin/admin-drawer";
 import type { CommunityOwnerArtwork } from "@/lib/community/types";
 
 type CommunityBook = { id: string; slug: string; title: string };
@@ -55,6 +57,8 @@ export function CommunityCreationManager({
   const [descriptionDrafts, setDescriptionDrafts] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [uploadDrawerOpen, setUploadDrawerOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const previewUrls = useRef(new Set<string>());
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -98,6 +102,11 @@ export function CommunityCreationManager({
     });
   }
 
+  function closeUploadDrawer() {
+    if (busy) return;
+    setUploadDrawerOpen(false);
+  }
+
   async function uploadOne(item: PendingImage, payload: { productId: string; description: string }) {
     const form = new FormData();
     form.set("file", item.file);
@@ -128,12 +137,18 @@ export function CommunityCreationManager({
     setPageError("");
     setNotice("");
     let uploadedCount = 0;
+    let remainingCount = 0;
     for (const item of pendingImages) {
-      if (item.validationError) continue;
+      if (item.validationError) {
+        remainingCount += 1;
+        continue;
+      }
       const payload = item.retryPayload ?? { productId, description: item.description.trim() };
       if (await uploadOne(item, payload)) uploadedCount += 1;
+      else remainingCount += 1;
     }
     if (uploadedCount) setNotice(`${uploadedCount === 1 ? "Artwork was" : `${uploadedCount} artworks were`} sent for review. They stay private until approved.`);
+    if (uploadedCount && remainingCount === 0) setUploadDrawerOpen(false);
     setBusy(false);
   }
 
@@ -141,7 +156,10 @@ export function CommunityCreationManager({
     if (!item.retryPayload || busy) return;
     setBusy(true);
     setPageError("");
-    if (await uploadOne(item, item.retryPayload)) setNotice("Artwork was sent for review. It stays private until approved.");
+    if (await uploadOne(item, item.retryPayload)) {
+      setNotice("Artwork was sent for review. It stays private until approved.");
+      if (pendingImages.length === 1) setUploadDrawerOpen(false);
+    }
     setBusy(false);
   }
 
@@ -160,6 +178,7 @@ export function CommunityCreationManager({
       if (!response.ok || !payload.ok || !payload.artwork) throw new Error(payload.message ?? "Your description could not be saved.");
       setArtworks((current) => current.map((item) => item.id === artwork.id ? payload.artwork! : item));
       setDescriptionDrafts((current) => ({ ...current, [artwork.id]: payload.artwork!.description }));
+      setEditingId(null);
       setNotice("Your description was saved. This artwork is pending review again.");
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "Your description could not be saved.");
@@ -192,10 +211,43 @@ export function CommunityCreationManager({
       {notice ? <p className="rounded-md bg-[var(--color-sage)] p-3 text-sm text-[var(--color-ink)]" role="status" aria-live="polite">{notice}</p> : null}
 
       {canSubmit ? (
-        <form className="grid gap-5 rounded-xl border border-[var(--color-border)] bg-white p-5 sm:p-6" onSubmit={submit} data-testid="community-upload-form">
+        <button
+          type="button"
+          onClick={() => setUploadDrawerOpen(true)}
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[var(--color-ink)] px-5 text-sm font-semibold text-white hover:bg-[var(--color-ink-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+          aria-haspopup="dialog"
+          data-testid="community-upload-open"
+        >
+          <Plus className="size-4" aria-hidden />
+          Share your art
+        </button>
+      ) : uploadsEnabled ? (
+        <div className="grid gap-2 rounded-xl border border-[var(--color-border)] bg-white p-5" data-testid="community-upload-unavailable">
+          <h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">Share your art</h2>
+          <p className="text-sm leading-6 text-[var(--color-muted)]">{communityMember ? "Join again in Community settings before sharing artwork." : "Join the Coloring Club before sharing artwork."}</p>
+          <Link className="justify-self-start text-sm font-medium underline underline-offset-4" href={accountHref}>Open Community settings</Link>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-[var(--color-border)] bg-white p-5" data-testid="community-uploads-paused">
+          <h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">New submissions are paused</h2>
+          <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">You can still view and delete your existing creations.</p>
+        </div>
+      )}
+
+      <AdminDrawer
+        open={canSubmit && uploadDrawerOpen}
+        onClose={closeUploadDrawer}
+        closeLabel="Close upload"
+        title="Share your art"
+        description="Your submission stays private until approved."
+        bodyClassName="px-4 py-5 sm:px-8 sm:py-7"
+      >
+        {canSubmit ? (
+        <form className="grid gap-5" onSubmit={submit} data-testid="community-upload-form">
           <div>
-            <h2 className="font-serif text-2xl font-semibold text-[var(--color-ink)]">Share your art</h2>
-            <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Choose an unlocked book and share up to three images. Your artwork stays private while it is reviewed.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-terracotta)]">Share your colors</p>
+            <h2 className="mt-2 font-serif text-3xl font-semibold text-[var(--color-ink)]">New creation</h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Upload your colored page and let it brighten someone’s day.</p>
           </div>
           <div className="grid gap-2 sm:max-w-xl">
             <label className="text-sm font-medium text-[var(--color-ink)]" htmlFor="community-product">Book</label>
@@ -274,68 +326,70 @@ export function CommunityCreationManager({
             {busy ? "Sending artwork…" : "Send for review"}
           </button>
         </form>
-      ) : uploadsEnabled ? (
-        <div className="grid gap-2 rounded-xl border border-[var(--color-border)] bg-white p-5" data-testid="community-upload-unavailable">
-          <h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">Share your art</h2>
-          <p className="text-sm leading-6 text-[var(--color-muted)]">{communityMember ? "Join again in Community settings before sharing artwork." : "Join the Coloring Club before sharing artwork."}</p>
-          <Link className="justify-self-start text-sm font-medium underline underline-offset-4" href={accountHref}>Open Community settings</Link>
-        </div>
-      ) : (
-        <div className="rounded-xl border border-[var(--color-border)] bg-white p-5" data-testid="community-uploads-paused">
-          <h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">New submissions are paused</h2>
-          <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">You can still view and delete your existing creations.</p>
-        </div>
-      )}
+        ) : null}
+      </AdminDrawer>
 
       {artworks.length ? (
         <section aria-labelledby="my-creations-list-title" data-testid="community-my-artworks">
           <h2 id="my-creations-list-title" className="mb-4 font-serif text-2xl font-semibold text-[var(--color-ink)]">Your artwork</h2>
-          <ul className="grid gap-4 md:grid-cols-2">
+          <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {artworks.map((artwork) => {
               const description = descriptionDrafts[artwork.id] ?? artwork.description;
               return (
                 <li key={artwork.id}>
-                  <article className="grid h-full content-start gap-4 rounded-xl border border-[var(--color-border)] bg-white p-5" data-testid="community-artwork-card">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-terracotta)]">{statusLabel(artwork.status)}</p>
-                        <h3 className="mt-1 break-words font-serif text-xl font-semibold text-[var(--color-ink)]">{artwork.product.title}</h3>
-                      </div>
-                      <span className="rounded-full border border-[var(--color-border)] bg-[var(--color-bg-alt)] px-3 py-1 text-xs text-[var(--color-ink)]">Revision {artwork.revision}</span>
+                  <article className="grid min-w-0 grid-cols-[minmax(6.25rem,36%)_minmax(0,1fr)] overflow-hidden rounded-xl border border-[var(--color-border)] bg-white sm:grid-cols-1" data-testid="community-artwork-card">
+                    <div className="relative row-span-4 aspect-[3/4] min-h-36 bg-[var(--color-bg-alt)] sm:row-span-1 sm:aspect-[4/3]">
+                      {/* The app media route rechecks current visibility on every byte request. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={`/api/community/artworks/${encodeURIComponent(artwork.id)}/media`} alt={`Your artwork for ${artwork.product.title}`} loading="lazy" className="absolute inset-0 size-full object-cover sm:object-contain" data-testid="community-artwork-preview" />
+                      <span className="absolute left-2 top-2 max-w-[calc(100%-1rem)] rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-[var(--color-ink)] shadow-sm">{statusLabel(artwork.status)}</span>
                     </div>
-                    {/* The app media route rechecks current visibility on every byte request. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={`/api/community/artworks/${encodeURIComponent(artwork.id)}/media`} alt={`Your artwork for ${artwork.product.title}`} loading="lazy" className="aspect-[4/3] w-full rounded-md bg-[var(--color-bg-alt)] object-contain" data-testid="community-artwork-preview" />
-                    {artwork.rejectionReason ? (
-                      <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-3">
-                        <h4 className="text-sm font-semibold text-[var(--color-ink)]">Private review reason</h4>
-                        <p className="mt-1 break-words text-sm leading-6 text-[var(--color-muted)]">{artwork.rejectionReason}</p>
+                    <div className="grid min-w-0 content-start gap-2 p-3 sm:p-4">
+                      <div className="min-w-0">
+                        <h3 className="break-words font-serif text-lg font-semibold leading-tight text-[var(--color-ink)]">{artwork.product.title}</h3>
+                        <p className="mt-1 text-xs text-[var(--color-muted)]">Updated {formatDate(artwork.updatedAt)} · Revision {artwork.revision}</p>
                       </div>
-                    ) : null}
-                    {canEdit ? (
-                      <label className="grid gap-2 text-sm font-medium text-[var(--color-ink)]">
-                        Description <span className="text-xs font-normal text-[var(--color-muted)]">Editing approved artwork sends it for review again.</span>
-                        <textarea
-                          rows={3}
-                          maxLength={240}
-                          value={description}
-                          onChange={(event) => setDescriptionDrafts((current) => ({ ...current, [artwork.id]: event.currentTarget.value }))}
-                          className="rounded-md border border-[var(--color-border)] px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
-                          data-testid="community-artwork-description"
-                        />
-                      </label>
-                    ) : <p className="break-words text-sm leading-6 text-[var(--color-muted)]">{artwork.description || "No description added."}</p>}
-                    <p className="text-xs text-[var(--color-muted)]">Updated {formatDate(artwork.updatedAt)}</p>
-                    <div className="flex flex-wrap gap-3">
-                      {canEdit && description.trim() !== artwork.description ? (
-                        <button type="button" disabled={savingId === artwork.id} onClick={() => void saveDescription(artwork)} className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] px-4 text-sm font-medium text-[var(--color-ink)] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-save-description">
-                          {savingId === artwork.id ? "Saving…" : "Save description"}
-                        </button>
+                      {editingId === artwork.id && canEdit ? (
+                        <label className="grid min-w-0 gap-2 text-sm font-medium text-[var(--color-ink)]">
+                          Description <span className="text-xs font-normal text-[var(--color-muted)]">Editing approved artwork sends it for review again.</span>
+                          <textarea
+                            rows={3}
+                            maxLength={240}
+                            value={description}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setDescriptionDrafts((current) => ({ ...current, [artwork.id]: value }));
+                            }}
+                            className="min-w-0 rounded-md border border-[var(--color-border)] px-3 py-2 font-normal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+                            data-testid="community-artwork-description"
+                          />
+                        </label>
+                      ) : (
+                        <p className="break-words text-sm leading-5 text-[var(--color-muted)]">{artwork.description || "No description added."}</p>
+                      )}
+                      {artwork.rejectionReason ? (
+                        <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-2.5">
+                          <h4 className="text-xs font-semibold text-[var(--color-ink)]">Private review reason</h4>
+                          <p className="mt-1 break-words text-xs leading-5 text-[var(--color-muted)]">{artwork.rejectionReason}</p>
+                        </div>
                       ) : null}
-                      {canDelete && deleteId !== artwork.id ? (
-                        <button type="button" onClick={() => setDeleteId(artwork.id)} className="inline-flex min-h-10 items-center rounded-md px-3 text-sm font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-delete">Delete artwork</button>
-                      ) : null}
-                    </div>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        {editingId === artwork.id && canEdit ? (
+                          <>
+                            {description.trim() !== artwork.description ? (
+                              <button type="button" disabled={savingId === artwork.id} onClick={() => void saveDescription(artwork)} className="inline-flex min-h-9 items-center rounded-md bg-[var(--color-ink)] px-3 text-xs font-medium text-white disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-save-description">
+                                {savingId === artwork.id ? "Saving…" : "Save description"}
+                              </button>
+                            ) : null}
+                            <button type="button" disabled={savingId === artwork.id} onClick={() => { setEditingId(null); setDescriptionDrafts((current) => { const next = { ...current }; delete next[artwork.id]; return next; }); }} className="min-h-9 rounded-md px-2 text-xs font-medium text-[var(--color-ink)] underline underline-offset-4 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">Cancel</button>
+                          </>
+                        ) : canEdit ? (
+                          <button type="button" onClick={() => setEditingId(artwork.id)} className="inline-flex min-h-9 items-center rounded-md border border-[var(--color-border)] px-3 text-xs font-medium text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-edit-description">Edit description</button>
+                        ) : null}
+                        {canDelete && deleteId !== artwork.id ? (
+                          <button type="button" onClick={() => setDeleteId(artwork.id)} className="inline-flex min-h-9 items-center rounded-md px-2 text-xs font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-delete">Delete artwork</button>
+                        ) : null}
+                      </div>
                     {deleteId === artwork.id ? (
                       <div className="grid gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-3" role="group" aria-label="Confirm artwork deletion">
                         <p className="text-sm leading-6">Delete this artwork? It will no longer be visible.</p>
@@ -345,6 +399,7 @@ export function CommunityCreationManager({
                         </div>
                       </div>
                     ) : null}
+                    </div>
                   </article>
                 </li>
               );
