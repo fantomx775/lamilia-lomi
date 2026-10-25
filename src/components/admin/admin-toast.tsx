@@ -28,7 +28,7 @@ export function AdminToastProvider({ children }: { children: ReactNode }) {
       {children}
       {toast ? (
         <div className="pointer-events-none fixed inset-x-0 top-4 z-[100] flex justify-center px-4 sm:top-6">
-          <div className={`pointer-events-auto flex w-full max-w-xl items-start gap-3 rounded-xl border px-4 py-3 shadow-xl ${toast.kind === "success" ? "border-[var(--color-sage-deep)] bg-[var(--color-sage)]/70 text-[var(--color-ink)]" : "border-red-200 bg-red-50 text-red-950"}`} role={toast.kind === "error" ? "alert" : "status"} aria-live={toast.kind === "error" ? "assertive" : "polite"}>
+          <div className={`pointer-events-auto flex w-full max-w-xl items-start gap-3 rounded-xl border px-4 py-3 shadow-xl ${toast.kind === "success" ? "border-[var(--color-sage-deep)] bg-[var(--color-sage)] text-[var(--color-ink)]" : "border-red-200 bg-red-50 text-red-950"}`} role={toast.kind === "error" ? "alert" : "status"} aria-live={toast.kind === "error" ? "assertive" : "polite"}>
             {toast.kind === "success" ? <Check className="mt-0.5 size-5 shrink-0 text-[var(--color-ink)]" aria-hidden="true" /> : <span className="mt-0.5 size-5 shrink-0 text-center font-bold text-red-700" aria-hidden="true">!</span>}
             <p className="min-w-0 flex-1 text-sm font-medium leading-6">{toast.message}</p>
             <button type="button" onClick={() => setToast(null)} className="rounded p-1 text-current opacity-70 hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" aria-label="Zamknij powiadomienie"><X className="size-4" aria-hidden="true" /></button>
