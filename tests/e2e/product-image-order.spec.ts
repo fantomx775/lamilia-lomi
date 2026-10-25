@@ -5,7 +5,7 @@ import { deflateSync } from "node:zlib";
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
-test.setTimeout(600_000);
+test.setTimeout(180_000);
 
 const imageFixtures = [
   { name: "01-red.png", rgb: [230, 42, 52] },
@@ -37,6 +37,8 @@ test.afterEach(() => {
 });
 
 test("admin reorders gallery previews through upload, save, reload, and edit", async ({ page }, testInfo) => {
+  page.setDefaultTimeout(15_000);
+  page.setDefaultNavigationTimeout(30_000);
   page.setDefaultNavigationTimeout(180_000);
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
@@ -261,14 +263,16 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     createSaveNavigationPending = true;
     try {
       await Promise.all([
-        page.waitForURL((url) => /^\/admin\/products\/[0-9a-f-]+\?saved=1$/i.test(url.pathname + url.search)),
         page.getByRole("button", { name: /Zapisz/ }).click(),
       ]);
     } finally {
       createSaveNavigationPending = false;
     }
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
     productPath = new URL(page.url()).pathname;
-    await expect(page.getByText("Zapisano zmiany.", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("product-save-bar").getByRole("status"))
+      .toHaveText("Wszystkie zmiany są zapisane");
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     await assertSubmittedGalleryOrder(page, expectedOrder.map((fixture) => fixture.name));
     await capture(page, testInfo, "05-saved-product");
@@ -349,9 +353,10 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
           productDeletePending = true;
           try {
             await Promise.all([
-              page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
               deleteProduct.click(),
             ]);
+            await expect(page.getByRole("status").filter({ hasText: "Produkt został usunięty." })).toBeVisible();
+            await expect(page).toHaveURL("/admin/products");
           } finally {
             productDeletePending = false;
           }

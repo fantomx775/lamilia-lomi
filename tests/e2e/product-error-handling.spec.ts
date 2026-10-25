@@ -88,7 +88,7 @@ test("admin blocks duplicate normalized premium codes before the save action", a
   await page.getByRole("button", { name: "Dodaj kod" }).click();
   await page.getByRole("button", { name: "Dodaj kod" }).click();
 
-  const codeInputs = page.getByLabel("Kod");
+  const codeInputs = page.getByRole("textbox", { name: "Kod" });
   await codeInputs.nth(0).fill("lomi-book");
   await codeInputs.nth(1).fill("LOMI – BOOK");
   await page.getByRole("button", { name: /Zapisz/ }).click();
@@ -107,6 +107,8 @@ test("admin blocks duplicate normalized premium codes before the save action", a
 });
 
 test("admin saves a product with an uploaded asset and a unique premium code", async ({ page }, testInfo) => {
+  page.setDefaultTimeout(15_000);
+  page.setDefaultNavigationTimeout(30_000);
   test.skip(
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Admin product-write E2E uses fixed demo credentials and requires a loopback app running the local demo backend.",
@@ -154,15 +156,17 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
     );
     await expect(page.getByText("Przesłano", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Dodaj kod" }).click();
-    await page.getByLabel("Kod").fill(uniqueCode);
+    await page.getByRole("textbox", { name: "Kod" }).fill(uniqueCode);
 
     await Promise.all([
-      page.waitForURL((url) => /\/admin\/products\/[0-9a-f-]+\?saved=1$/i.test(url.pathname + url.search)),
       page.getByRole("button", { name: /Zapisz/ }).click(),
     ]);
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
 
     productPath = new URL(page.url()).pathname;
-    await expect(page.getByText("Zapisano zmiany.", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("product-save-bar").getByRole("status"))
+      .toHaveText("Wszystkie zmiany są zapisane");
     expect(serverErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
     expect(expectedUploadFallbackErrors.length).toBeLessThanOrEqual(1);
@@ -176,14 +180,15 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
     await page.goto("/admin/products/new");
     await page.getByLabel("Tytuł").fill(`E2E Duplicate Product ${uniqueSuffix}`);
     await page.getByRole("button", { name: "Dodaj kod" }).click();
-    await page.getByLabel("Kod").fill(` ${uniqueCode.toLowerCase()} `);
+    await page.getByRole("textbox", { name: "Kod" }).fill(` ${uniqueCode.toLowerCase()} `);
     await page.getByRole("button", { name: /Zapisz/ }).click();
     await expect(page.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeVisible();
-    await expect(page.getByText("Ten kod premium jest już przypisany do innego produktu.", { exact: true })).toHaveCount(2);
-    await expect(page.getByText("Ten kod premium jest już przypisany do innego produktu.", { exact: true }).first()).toBeVisible();
+    const duplicateCodeMessage = "Ten kod premium jest już przypisany do innego produktu.";
+    await expect(page.locator("#product-editor-form").getByText(duplicateCodeMessage, { exact: true })).toHaveCount(2);
+    await expect(page.locator('[role="alert"][aria-live="assertive"]').getByText(duplicateCodeMessage, { exact: true })).toBeVisible();
     await expect(page.getByLabel("Tytuł")).toHaveValue(`E2E Duplicate Product ${uniqueSuffix}`);
-    await expect(page.getByLabel("Kod")).toHaveValue(` ${uniqueCode} `);
-    await expect(page.getByLabel("Kod")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByRole("textbox", { name: "Kod" })).toHaveValue(` ${uniqueCode} `);
+    await expect(page.getByRole("textbox", { name: "Kod" })).toHaveAttribute("aria-invalid", "true");
     await expect(page).toHaveURL(/\/admin\/products\/new$/);
     expect(serverErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
@@ -191,12 +196,32 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
   } finally {
     try {
       if (productPath) {
-        await page.goto(productPath);
-        page.once("dialog", (dialog) => void dialog.accept());
-        await Promise.all([
-          page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1"),
-          page.getByRole("button", { name: "Usuń produkt" }).click(),
-        ]);
+        const dialogs: string[] = [];
+        const acceptTestDialogs = async (dialog: import("@playwright/test").Dialog) => {
+          dialogs.push(dialog.type());
+          await dialog.accept();
+        };
+        page.on("dialog", acceptTestDialogs);
+        try {
+          await page.goto(productPath);
+          await expect(page.getByRole("textbox", { name: "Długi opis" })).toBeVisible();
+          await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
+          const deleteActionResponse = page.waitForResponse((response) =>
+            response.request().method() === "POST" &&
+            Boolean(response.request().headers()["next-action"]) &&
+            new URL(response.url()).pathname === productPath,
+          );
+          await Promise.all([
+            page.waitForURL((url) => url.pathname === "/admin/products"),
+            page.getByRole("button", { name: "Usuń produkt", exact: true }).click(),
+          ]);
+          expect((await deleteActionResponse).status()).toBe(200);
+          expect(dialogs).toContain("confirm");
+          await expect(page.getByRole("status").filter({ hasText: "Produkt został usunięty." })).toBeVisible();
+          await expect(page).toHaveURL("/admin/products");
+        } finally {
+          page.off("dialog", acceptTestDialogs);
+        }
       }
     } finally {
       releaseContentStoreLock();

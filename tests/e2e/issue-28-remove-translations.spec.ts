@@ -6,9 +6,11 @@ import path from "node:path";
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
-test.setTimeout(600_000);
+test.setTimeout(180_000);
 
 test("single-language admin content saves and reloads on the English public URL", async ({ page }, testInfo) => {
+  page.setDefaultTimeout(15_000);
+  page.setDefaultNavigationTimeout(30_000);
   test.skip(
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Uses the local demo admin session and restores its disposable content store after verification.",
@@ -84,10 +86,13 @@ test("single-language admin content saves and reloads on the English public URL"
     await page.getByLabel("Adres produktu").fill("issue-28-single-language-product");
     await saveScreenshot(page, screenshotDirectory, "product-editor", testInfo.project.name);
     await page.getByRole("button", { name: /Zapisz/ }).click();
-    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+\?saved=1$/i);
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("heading", { name: "Edycja: Issue 28 single language product" })).toBeVisible();
     await expect(page.getByLabel("Tytuł")).toHaveValue("Issue 28 single language product");
     await page.reload();
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("heading", { name: "Edycja: Issue 28 single language product" })).toBeVisible();
     await expect(page.getByLabel("Tytuł")).toHaveValue("Issue 28 single language product");
     await expect(page.getByLabel("Krótki opis")).toHaveValue("Saved in the single English content language.");
@@ -116,8 +121,8 @@ test("single-language admin content saves and reloads on the English public URL"
     await page.getByRole("textbox", { name: "Treść" }).fill("Updated English terms saved through the single-language editor.");
     await saveScreenshot(page, screenshotDirectory, "terms-editor", testInfo.project.name);
     await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
-    await expect(page).toHaveURL(/\/admin\/pages\/terms\?saved=1$/);
-    await expect(page.getByText("Zapisano zmiany.")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany strony zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL("/admin/pages/terms");
     await page.reload();
     await expect(page.getByLabel("Tytuł")).toHaveValue("Issue 28 terms content");
     await expect(page.getByRole("textbox", { name: "Treść" })).toContainText("Updated English terms saved through the single-language editor.");

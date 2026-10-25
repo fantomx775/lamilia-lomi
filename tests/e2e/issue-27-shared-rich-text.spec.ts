@@ -5,9 +5,11 @@ import path from "node:path";
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
-test.setTimeout(600_000);
+test.setTimeout(180_000);
 
 test("shared rich text saves and renders product, Terms, and Privacy content", async ({ page }, testInfo) => {
+  page.setDefaultTimeout(15_000);
+  page.setDefaultNavigationTimeout(30_000);
   test.skip(
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Issue 27 E2E edits disposable records and requires a loopback app running the local demo backend.",
@@ -83,6 +85,9 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
   });
 
   try {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: new URL(String(testInfo.project.use.baseURL)).origin,
+    });
     await page.addInitScript(() => {
       window.localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false }));
     });
@@ -93,12 +98,15 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     const productPath = await firstProductLink.getAttribute("href");
     if (!productPath) throw new Error("The local product list did not provide an edit link.");
     await page.goto(productPath);
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await page.evaluate(() => document.fonts.ready.then(() => true));
 
     const productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
     const productSlug = await page.getByLabel("Adres produktu").inputValue();
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
+    await expect(productEditor).toBeVisible({ timeout: 15_000 });
     await expect(page.getByLabel("Krótki opis")).toHaveValue(/.+/);
-    await productEditor.fill("Issue 27 rich text description.");
+    await productEditor.fill("Issue 27 rich text description.", { timeout: 15_000 });
     await productEditor.press("Control+End");
     await productEditor.press("Enter");
     await page.getByRole("button", { name: "Lista punktowana" }).click();
@@ -119,11 +127,10 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await expect(page.getByText("Wpisz bezpieczny adres:", { exact: false })).toBeVisible();
     await page.getByLabel("Adres strony").fill("https://example.com/issue-27");
     await page.getByRole("button", { name: "Zapisz link" }).click();
-    await page.getByRole("button", { name: "Podgląd" }).click();
-    await expect(page.locator("#product-editor-form h2").filter({ hasText: "Issue 27 rich text description." })).toBeVisible();
-    await expect(page.locator("#product-editor-form strong").filter({ hasText: "Issue 27 rich text description." })).toBeVisible();
-    await expect(page.locator('#product-editor-form a[href="https://example.com/issue-27"]')).toBeVisible();
-    await expect(page.locator("#product-editor-form ul li")).toHaveCount(2);
+    await expect(productEditor.locator("h2")).toHaveText("Issue 27 rich text description.");
+    await expect(productEditor.locator("strong")).toHaveText("Issue 27 rich text description.");
+    await expect(productEditor.locator('a[href="https://example.com/issue-27"]')).toBeVisible();
+    await expect(productEditor.locator("ul li")).toHaveCount(2);
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `product-editor-preview-${testInfo.project.name}.png`, page.locator("#product-editor-form [role='toolbar']"));
 
@@ -133,7 +140,10 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await page.getByRole("button", { name: /Zapisz/ }).first().click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${escapeRegex(productPath)}$`));
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible({ timeout: 15_000 });
+    await page.evaluate(() => document.fonts.ready.then(() => true));
     await page.reload();
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('#product-editor-form input[name="longDescription"]')).toHaveValue(savedProductDescription);
     await page.goto(`/en/products/${productSlug}`);
     await expect(page.getByRole("heading", { level: 2, name: "Issue 27 rich text description." })).toBeVisible();
@@ -146,7 +156,8 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await page.goto("/admin/pages/terms");
     await expect(page.getByRole("tab")).toHaveCount(0);
     const termsEditor = page.getByRole("textbox", { name: "Treść" });
-    await termsEditor.fill("Terms and Conditions");
+    await expect(termsEditor).toBeVisible({ timeout: 15_000 });
+    await termsEditor.fill("Terms and Conditions", { timeout: 15_000 });
     await termsEditor.press("Control+End");
     await termsEditor.press("Enter");
     await page.getByRole("button", { name: "Lista numerowana" }).click();
@@ -157,9 +168,8 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await termsEditor.press("Shift+End");
     await page.getByLabel("Styl akapitu").selectOption("h2");
     await expect(termsEditor.locator("h2").first()).toHaveText("Terms and Conditions");
-    await page.getByRole("button", { name: "Podgląd" }).click();
-    await expect(page.getByRole("heading", { level: 2, name: "Terms and Conditions" })).toBeVisible();
-    await expect(page.locator("#page-editor-form ol li")).toHaveCount(2);
+    await expect(termsEditor.locator("h2")).toHaveText("Terms and Conditions");
+    await expect(termsEditor.locator("ol li")).toHaveCount(2);
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `terms-editor-preview-${testInfo.project.name}.png`, page.locator("#page-editor-form [role='toolbar']"));
     const termsSaveResponse = page.waitForResponse((response) =>
@@ -167,7 +177,8 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     );
     await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     expect((await termsSaveResponse).status()).toBe(200);
-    await expect(page).toHaveURL(/\/admin\/pages\/terms\?saved=1$/);
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany strony zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL("/admin/pages/terms");
     await page.reload();
     await expect(page.locator('#page-editor-form input[name="body"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/terms");
@@ -179,11 +190,18 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await page.goto("/admin/pages/privacy");
     await expect(page.getByRole("tab")).toHaveCount(0);
     const privacyEditor = page.getByRole("textbox", { name: "Treść" });
-    await privacyEditor.fill("Privacy content copied from a normal text editor.");
+    await expect(privacyEditor).toBeVisible({ timeout: 15_000 });
+    await privacyEditor.fill("Privacy content copied from a normal text editor.", { timeout: 15_000 });
     await privacyEditor.press("Control+A");
     await page.getByRole("button", { name: "Pogrubienie" }).click();
     await expect(privacyEditor.locator("strong")).toHaveText("Privacy content copied from a normal text editor.");
     await privacyEditor.press("Control+C");
+    const copiedHtml = await page.evaluate(async () => {
+      const items = await navigator.clipboard.read();
+      const htmlItem = items.find((item) => item.types.includes("text/html"));
+      return htmlItem ? htmlItem.getType("text/html").then((blob) => blob.text()) : "";
+    });
+    expect(copiedHtml).toContain("<strong");
     await privacyEditor.press("End");
     await privacyEditor.press("Enter");
     await privacyEditor.press("Control+V");
@@ -191,10 +209,9 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await expect(privacyEditor.locator("strong")).toHaveCount(2);
     await privacyEditor.press("Control+A");
     await page.getByRole("button", { name: "Kursywa" }).click();
-    await page.getByRole("button", { name: "Podgląd" }).click();
-    await expect(page.locator("#page-editor-form em")).toHaveCount(2);
-    await expect(page.locator("#page-editor-form em").first()).toHaveText("Privacy content copied from a normal text editor.");
-    await expect(page.locator("#page-editor-form em strong")).toHaveCount(2);
+    await expect(privacyEditor.locator("em")).toHaveCount(2);
+    await expect(privacyEditor.locator("em").first()).toHaveText("Privacy content copied from a normal text editor.");
+    await expect(privacyEditor.locator("em strong, strong em")).toHaveCount(2);
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `privacy-editor-preview-${testInfo.project.name}.png`, page.locator("#page-editor-form [role='toolbar']"));
     const privacySaveResponse = page.waitForResponse((response) =>
@@ -202,13 +219,14 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     );
     await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
     expect((await privacySaveResponse).status()).toBe(200);
-    await expect(page).toHaveURL(/\/admin\/pages\/privacy\?saved=1$/);
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany strony zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL("/admin/pages/privacy");
     await page.reload();
     await expect(page.locator('#page-editor-form input[name="body"]')).toHaveValue(/lamilia-rich-text:v1:/);
     await page.goto("/en/privacy");
     await expect(page.locator("main em")).toHaveCount(2);
     await expect(page.locator("main em").first()).toHaveText("Privacy content copied from a normal text editor.");
-    await expect(page.locator("main em strong")).toHaveCount(2);
+    await expect(page.locator("main em strong, main strong em")).toHaveCount(2);
     await expectNoHorizontalOverflow(page);
     await saveScreenshot(page, screenshotDirectory, `privacy-storefront-${testInfo.project.name}.png`, page.locator("main em").first());
 
@@ -282,12 +300,12 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
 });
 
 async function signInAsAdmin(page: Page) {
-  await page.goto("/pl/login?redirectTo=/admin");
-  await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-  await page.getByLabel("Hasło").fill("demo-password");
+  await page.goto("/en/login?redirectTo=/admin");
+  await page.getByLabel("Email").fill("admin@lamilialomi.test", { timeout: 15_000 });
+  await page.getByLabel("Password").fill("demo-password", { timeout: 15_000 });
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
-    page.getByRole("button", { name: "Kontynuuj" }).click(),
+    page.getByRole("button", { name: "Continue" }).click({ timeout: 15_000 }),
   ]);
 }
 

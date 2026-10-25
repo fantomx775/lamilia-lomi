@@ -5,7 +5,7 @@ import { deflateSync } from "node:zlib";
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
 
-test.setTimeout(600_000);
+test.setTimeout(180_000);
 
 let releaseContentStoreLock: (() => void) | undefined;
 
@@ -107,7 +107,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await withExpectedNavigation(browserDiagnostics, "create product and open its editor", async () => {
       await page.getByRole("button", { name: /Zapisz/ }).click();
       await expect(page.getByText(/^(Zapisano\. Zmiany są aktualne\.|Zapisano zmiany\.)$/)).toBeVisible();
-      await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+\?saved=1$/i);
+      await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
       productPath = new URL(page.url()).pathname;
       createdProductId = productPath.split("/").at(-1)!;
     });
@@ -115,7 +115,8 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     const persistedProductId = createdProductId!;
     expect(persistedProductId).toMatch(/^[0-9a-f-]{36}$/i);
     createdProductId = persistedProductId;
-    await expect(page.getByText("Zapisano zmiany.", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("product-save-bar").getByRole("status"))
+      .toHaveText("Wszystkie zmiany są zapisane");
     await waitForAdminTransition(page);
     await expect(page.locator('#product-editor-form input[name="id"]')).toHaveValue(persistedProductId);
     await expect(page.getByLabel("Status")).toHaveValue("draft");
@@ -139,7 +140,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     await saveScreenshot(page, testInfo, "product-editor-" + testInfo.project.name + ".png");
 
     await page.getByLabel("Pozycja w katalogu").fill("38");
-    await expect(page.getByText("Zapisano zmiany.", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toHaveCount(0);
     await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
     const productsBackLink = page.locator('a[href="/admin/products"]').last();
     await withExpectedNavigation(browserDiagnostics, "dismiss unsaved internal navigation", async () => {
@@ -1005,14 +1006,11 @@ async function deleteProductFixture(page: Page, productId: string, pathName = "/
   try {
     await page.goto(pathName, { waitUntil: "networkidle", timeout: 15_000 });
     await waitForProductEditorReady(page);
-    const deleteDestination = page.waitForURL((url) =>
-      url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1",
-    );
     await Promise.all([
-      deleteDestination,
       page.getByRole("button", { name: "Usuń produkt" }).click(),
     ]);
-    await expect(page).toHaveURL(/\/admin\/products\?deleted=1$/);
+    await expect(page.getByRole("status").filter({ hasText: "Produkt został usunięty." })).toBeVisible();
+    await expect(page).toHaveURL("/admin/products");
     expect(readLocalProduct(productId)).toBeUndefined();
   } finally {
     page.off("dialog", acceptDialogs);

@@ -4,7 +4,7 @@ import { isLocalDemoAppTarget } from "./local-target";
 
 test("admin catalog preference persists and stays responsive", async ({ page }, testInfo) => {
   test.skip(
-    !process.env.PLAYWRIGHT_LOCAL_DEMO || !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    process.env.PLAYWRIGHT_LOCAL_DEMO !== "true" || !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
     "Uses the local demo admin session and requires a loopback app running the local demo backend.",
   );
   test.skip(testInfo.project.name !== "chromium", "Checks all viewport sizes in one Chromium session");
@@ -27,7 +27,7 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
     ).toHaveValue("4");
     await saveCatalogColumns(page, "5");
     await expect(
-      page.getByRole("status"),
+      page.getByRole("status").filter({ hasText: "Ustawienia katalogu zostały zapisane." }),
     ).toContainText("Ustawienia katalogu zostały zapisane.");
     await page.reload();
     await expect(
@@ -101,13 +101,10 @@ async function saveCatalogColumns(page: Page, columns: "3" | "4" | "5") {
     .getByRole("combobox", { name: "Karty w wierszu na dużych ekranach" })
     .selectOption(columns);
   await Promise.all([
-    page.waitForURL(
-      (url) =>
-        url.pathname === "/admin/settings" &&
-        url.searchParams.get("saved") === "1",
-    ),
     page.getByRole("button", { name: "Zapisz ustawienia katalogu" }).click(),
   ]);
+  await expect(page.getByRole("status").filter({ hasText: "Ustawienia katalogu zostały zapisane." })).toBeVisible();
+  await expect(page).toHaveURL(/\/admin\/settings$/);
 }
 
 async function dismissCookieConsent(page: Page) {

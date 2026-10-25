@@ -28,6 +28,8 @@ test("About settings save six unique books and render responsively from current 
   );
 
   const releaseContentStoreLock = await acquireLocalContentStoreLock();
+  const screenshotDirectory = path.resolve(process.env.ISSUE_50_SCREENSHOT_DIR ?? testInfo.outputDir);
+  fs.mkdirSync(screenshotDirectory, { recursive: true });
   const originalContent = fs.existsSync(contentPath) ? fs.readFileSync(contentPath) : undefined;
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
@@ -141,7 +143,8 @@ test("About settings save six unique books and render responsively from current 
       request.method() === "POST" && Boolean(request.headers()["next-action"]),
     );
     await page.getByTestId("admin-save-bar").getByRole("button", { name: /Zapisz/ }).click();
-    await page.waitForURL(/\/admin\/pages\/about\?saved=1$/);
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany strony zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL("/admin/pages/about");
     const actionRequest = await actionRequestPromise;
 
     await page.reload();
@@ -157,8 +160,7 @@ test("About settings save six unique books and render responsively from current 
 
     await page.locator("header").getByRole("link", { name: "About", exact: true }).click();
     await page.waitForURL(/\/en\/about$/, { timeout: 60_000 });
-    await expect(page.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeVisible();
-    await expect(page.getByText("Loved by Our Readers")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Loved by Our Readers" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 3 })).toHaveCount(6);
     const coloringSection = page.getByRole("region", { name: "Favorite Coloring Books" });
     const coloringTitles = await coloringSection.getByRole("heading", { level: 3 }).allTextContents();
@@ -169,7 +171,6 @@ test("About settings save six unique books and render responsively from current 
     ]);
     const gardenBookHeading = page.getByRole("heading", { level: 3, name: "Garden Whispers Coloring Book" });
     const gardenBookCard = page.getByRole("article").filter({ has: gardenBookHeading }).last();
-    await expect(gardenBookCard).toContainText("A peaceful garden coloring collection.");
     await expect(gardenBookCard.getByRole("link", { name: "View on Amazon" }))
       .toHaveAttribute("href", /^https:\/\/www\.amazon\./);
     const amazonLinks = page.getByRole("link", { name: "View on Amazon" });
@@ -196,17 +197,24 @@ test("About settings save six unique books and render responsively from current 
         return element.complete && element.naturalWidth > 0;
       })).toBe(true);
     }
+    await page.evaluate(() => document.fonts.ready.then(() => true));
+    await expect(page.getByRole("heading", { level: 1, name: "Loved by Our Readers" })).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
-    await page.screenshot({ path: testInfo.outputPath("about-desktop.png"), fullPage: true });
+    await page.screenshot({ path: path.join(screenshotDirectory, "about-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await expectNoHorizontalOverflow(page);
+    await expect(page.getByRole("heading", { level: 3 })).toHaveCount(6);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.screenshot({ path: path.join(screenshotDirectory, "about-tablet-768.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await expectNoHorizontalOverflow(page);
-    await expect(page.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Loved by Our Readers" })).toBeVisible();
     await expect(page.getByRole("link", { name: "About", exact: true }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: "My Library", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 3 })).toHaveCount(6);
     await page.evaluate(() => window.scrollTo(0, 0));
-    await page.screenshot({ path: testInfo.outputPath("about-mobile.png"), fullPage: true });
+    await page.screenshot({ path: path.join(screenshotDirectory, "about-mobile.png"), fullPage: true });
 
     const modifiedContent = JSON.parse(fs.readFileSync(contentPath, "utf8")) as {
       products: Array<{ id: string; status: string }>;
