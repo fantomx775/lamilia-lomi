@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   from: vi.fn(),
   getBackendMode: vi.fn(),
+  listReaderArtworks: vi.fn(),
   selectedColumns: "",
   filters: [] as Array<[string, unknown]>,
   requestCaches: [] as Array<Map<string, unknown>>,
@@ -44,6 +45,7 @@ vi.mock("react", () => ({
 }));
 vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: mocks.createClient }));
+vi.mock("@/lib/reader-artworks", () => ({ listReaderArtworks: mocks.listReaderArtworks }));
 
 import { getLocalizedProductDetailViewForRequest } from "./products-request";
 
@@ -56,6 +58,7 @@ describe("targeted public product detail read", () => {
     vi.clearAllMocks();
     vi.stubEnv("R2_PUBLIC_BASE_URL", "https://media.example.com");
     mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.listReaderArtworks.mockResolvedValue([]);
     mocks.selectedColumns = "";
     mocks.filters = [];
     for (const requestCache of mocks.requestCaches) {
