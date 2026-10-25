@@ -202,6 +202,9 @@ describe("ProductEditor V2", () => {
     expect(view.container.querySelector("aside")).not.toBeInTheDocument();
     expect(view.container.querySelector("main")).toHaveClass("max-w-4xl");
     expect(view.getByRole("heading", { name: "Pokolorowane prace czytelniczek" })).toBeInTheDocument();
+    const headings = view.getAllByRole("heading").map((heading) => heading.textContent);
+    expect(headings.slice(headings.indexOf("GALERIA"), headings.indexOf("GALERIA") + 3))
+      .toEqual(["GALERIA", "Pokolorowane prace czytelniczek", "WIDEO FLIPTHROUGH"]);
     expect(view.queryByRole("heading", { name: "Zaawansowane" })).not.toBeInTheDocument();
     expect(view.getByLabelText("Adres produktu")).toHaveValue("");
     expect(view.getByLabelText("Pozycja w katalogu")).toHaveValue(100);
