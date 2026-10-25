@@ -3489,6 +3489,67 @@ test("Production smoke checks stay on HTTPS and fail on unsuccessful or empty re
   assert.equal((await runProductionSmoke("https://production.example.test", { paths: ["//elsewhere.test"] })).status, "BLOCKED");
 });
 
+test("Production smoke mints scoped Vercel cookies without forwarding the bypass token", async () => {
+  const host = "https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app";
+  const calls = [];
+  const result = await runProductionSmoke(host, {
+    paths: ["/"],
+    vercelProtectionBypass: "synthetic-bypass-secret",
+    productionSmokeCookie: "app_session=synthetic-app-cookie",
+    fetchImpl: async (url, options) => {
+      calls.push({ url: url.href, options });
+      if (options.redirect === "manual") return {
+        ok: false, status: 307, url: url.href,
+        headers: { getSetCookie: () => ["_vercel_jwt=synthetic-protection-cookie; Path=/; Secure"] },
+      };
+      return { ok: true, status: 200, url: url.href, headers: { get: () => "text/plain" }, text: async () => "ok" };
+    },
+  });
+  assert.equal(result.status, "PASS");
+  assert.match(calls[0].url, /x-vercel-set-bypass-cookie=true/);
+  assert.equal(calls[0].options.redirect, "manual");
+  assert.equal(calls[0].options.headers["x-vercel-protection-bypass"], "synthetic-bypass-secret");
+  assert.equal(calls[1].options.headers.Cookie, "_vercel_jwt=synthetic-protection-cookie; app_session=synthetic-app-cookie");
+  assert.equal(JSON.stringify(result).includes("synthetic"), false);
+  assert.equal(JSON.stringify(calls[1].options).includes("synthetic-bypass-secret"), false);
+});
+
+test("Production smoke authentication fails closed before requests for unsafe hosts or cookies", async () => {
+  let requests = 0;
+  const fetchImpl = async () => { requests++; throw new Error("must not request"); };
+  for (const url of [
+    "https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app.evil.test",
+    "https://user@lamilia-lomi-abc123def-fantomxs-projects.vercel.app",
+    "https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app:444",
+    "https://lamilia-lomi.vercel.app",
+  ]) {
+    const result = await runProductionSmoke(url, { vercelProtectionBypass: "synthetic-secret", fetchImpl });
+    assert.equal(result.status, "BLOCKED");
+  }
+  const badHeader = await runProductionSmoke("https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app", {
+    productionSmokeCookie: "x=ok\r\nInjected: yes", fetchImpl,
+  });
+  assert.equal(badHeader.status, "BLOCKED");
+  assert.equal(requests, 0);
+});
+
+test("Production smoke authentication blocks when the bypass cookie is absent or invalid", async () => {
+  for (const setCookies of [[], ["_vercel_jwt=; Path=/"], ["other_cookie=not-the-token; Path=/"]]) {
+    const calls = [];
+    const result = await runProductionSmoke("https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app", {
+      paths: ["/"], vercelProtectionBypass: "synthetic-secret",
+      fetchImpl: async (url, options) => {
+        calls.push({ url: url.href, options });
+        return { ok: false, status: 307, headers: { getSetCookie: () => setCookies } };
+      },
+    });
+    assert.equal(result.status, "BLOCKED");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.redirect, "manual");
+    assert.equal(JSON.stringify(result).includes("synthetic-secret"), false);
+  }
+});
+
 test("Production smoke keeps query parameters for execution and redacts them from every result path", async () => {
   const path = '/api/downloads/known-asset?token="secret-token"';
   const expectations = [{ path, expectedText: "guest", expectedStatus: 401 }];

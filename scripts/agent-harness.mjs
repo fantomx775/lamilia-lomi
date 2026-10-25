@@ -2829,6 +2829,8 @@ async function runProductionSmokeInternal(environmentUrl, {
   expectations = [],
   fetchImpl = fetch,
   timeoutMs = 15_000,
+  vercelProtectionBypass = process.env.AGENT_HARNESS_VERCEL_PROTECTION_BYPASS,
+  productionSmokeCookie = process.env.AGENT_HARNESS_PRODUCTION_SMOKE_COOKIE,
 } = {}) {
   let baseUrl;
   try {
@@ -2838,6 +2840,18 @@ async function runProductionSmokeInternal(environmentUrl, {
   }
   if (baseUrl.protocol !== "https:") {
     return { status: "BLOCKED", checks: [], details: "Production smoke requires an HTTPS environment URL." };
+  }
+  const hasProtectionBypass = vercelProtectionBypass !== undefined && vercelProtectionBypass !== "";
+  const hasSmokeCookie = productionSmokeCookie !== undefined && productionSmokeCookie !== "";
+  const hasAuth = hasProtectionBypass || hasSmokeCookie;
+  const validHeaderValue = (value) => typeof value === "string" && value.length > 0 && value.length <= 4096 && /^[\x20-\x7e]+$/.test(value);
+  if ((hasProtectionBypass && !validHeaderValue(vercelProtectionBypass)) ||
+      (hasSmokeCookie && !validHeaderValue(productionSmokeCookie))) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke authentication input is invalid." };
+  }
+  const deploymentHost = /^lamilia-lomi-[a-z0-9]{9}-fantomxs-projects\.vercel\.app$/i;
+  if (hasAuth && (baseUrl.username || baseUrl.password || baseUrl.port || !deploymentHost.test(baseUrl.hostname))) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke authentication is limited to the exact immutable project deployment host." };
   }
   if (!paths.length || paths.some((path) => !isValidProductionSmokePath(path))) {
     return { status: "BLOCKED", checks: [], details: "Production smoke paths must be non-empty same-origin absolute paths." };
@@ -2880,6 +2894,26 @@ async function runProductionSmokeInternal(environmentUrl, {
     return { status: "BLOCKED", checks: [], details: "Production smoke expectations cannot require conflicting HTTP statuses for one path." };
   }
   const checks = [];
+  let protectionCookie = "";
+  if (hasProtectionBypass) {
+    try {
+      const mintUrl = new URL("/?x-vercel-set-bypass-cookie=true", baseUrl);
+      const response = await fetchImpl(mintUrl, {
+        method: "GET", cache: "no-store", redirect: "manual",
+        headers: { "x-vercel-protection-bypass": vercelProtectionBypass },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      const setCookies = response.headers?.getSetCookie?.() || [];
+      const match = setCookies.map((value) => value.match(/(?:^|[,;\s])(_vercel_jwt=[^;,\s]+)/)).find(Boolean);
+      if (!(response.ok || response.status === 307) || !match) {
+        return { status: "BLOCKED", checks: [], details: "Production smoke authentication could not be established." };
+      }
+      protectionCookie = match[1];
+    } catch {
+      return { status: "BLOCKED", checks: [], details: "Production smoke authentication could not be established." };
+    }
+  }
+  const smokeCookieHeader = [protectionCookie, hasSmokeCookie ? productionSmokeCookie : ""].filter(Boolean).join("; ");
   for (const path of paths) {
     const url = new URL(path, baseUrl);
     if (url.origin !== baseUrl.origin) {
@@ -2891,6 +2925,7 @@ async function runProductionSmokeInternal(environmentUrl, {
         cache: "no-store",
         redirect: "follow",
         signal: AbortSignal.timeout(timeoutMs),
+        ...(smokeCookieHeader ? { headers: { Cookie: smokeCookieHeader } } : {}),
       });
       const finalUrl = new URL(response.url || url.href);
       const expectedForPath = expectations.filter((expectation) => expectation.path === path);

@@ -385,6 +385,14 @@ and does not report delivery complete.
 
 Smoke requests use HTTPS and must return a non-empty successful response on
 the Production deployment origin. The default `/` path is a health check.
+For protected Vercel Production deployments, the smoke runner optionally reads
+`AGENT_HARNESS_VERCEL_PROTECTION_BYPASS` and
+`AGENT_HARNESS_PRODUCTION_SMOKE_COOKIE`. The bypass is used only to mint a fresh
+deployment-bound `_vercel_jwt` cookie on the exact immutable
+`lamilia-lomi-<9-character-sha>-fantomxs-projects.vercel.app` host; token-bearing
+requests do not follow redirects. Smoke requests then carry the temporary
+protection cookie and, when supplied, the app session cookie. Inputs are kept
+in memory, are never saved in results, and do not disable deployment protection.
 Expected responses must be HTTP 2xx unless an API path explicitly sets
 `expectedStatus` to 401 or 403 and also checks response text, or sets it to 404
 and checks for the expected error text. This supports guest authorization checks
