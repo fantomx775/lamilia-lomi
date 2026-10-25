@@ -2,7 +2,7 @@ BEGIN
 SET
  plan
 -------
- 1..55
+ 1..56
 (1 row)
 
                      ok
@@ -204,102 +204,109 @@ INSERT 0 1
  ok 37 - admin can approve the expected pending revision
 (1 row)
 
+UPDATE 1
+                           throws_ok
+----------------------------------------------------------------
+ ok 38 - stale rules acceptance cannot edit or resubmit artwork
+(1 row)
+
+UPDATE 1
                                  is
 --------------------------------------------------------------------
- ok 38 - owner edit returns approved work to a new pending revision
+ ok 39 - owner edit returns approved work to a new pending revision
 (1 row)
 
                                  is
 --------------------------------------------------------------------
- ok 39 - approved revision disappears from public state during edit
+ ok 40 - approved revision disappears from public state during edit
 (1 row)
 
                       is
 -----------------------------------------------
- ok 40 - admin can approve the edited revision
+ ok 41 - admin can approve the edited revision
 (1 row)
 
                           is
 ------------------------------------------------------
- ok 41 - admin can remove approved work with a reason
+ ok 42 - admin can remove approved work with a reason
 (1 row)
 
                           is
 ------------------------------------------------------
- ok 42 - author edit does not restore removed content
+ ok 43 - author edit does not restore removed content
 (1 row)
 
                         is
 --------------------------------------------------
- ok 43 - removed state persists after author edit
+ ok 44 - removed state persists after author edit
 (1 row)
 
                      is
 --------------------------------------------
- ok 44 - owner can soft delete their record
+ ok 45 - owner can soft delete their record
 (1 row)
 
                          ok
 -----------------------------------------------------
- ok 45 - soft-deleted artwork has terminal timestamp
+ ok 46 - soft-deleted artwork has terminal timestamp
 (1 row)
 
                     throws_ok
 -------------------------------------------------
- ok 46 - soft-deleted artwork cannot be restored
+ ok 47 - soft-deleted artwork cannot be restored
 (1 row)
 
    community_create_pending_artwork
 --------------------------------------
- 8bedf078-3d38-4c3b-a632-703c38327d41
+ 31398388-b20b-431c-968c-26a5b980807d
 (1 row)
 
 UPDATE 1
                          throws_ok
 ------------------------------------------------------------
- ok 47 - admin cannot approve artwork from suspended author
+ ok 48 - admin cannot approve artwork from suspended author
 (1 row)
 
 UPDATE 1
    community_create_pending_artwork
 --------------------------------------
- b53765fd-5f5d-479d-974f-b70bd58867a0
+ 19b1d754-0409-4afd-a14a-f17874b7a268
 (1 row)
 
 UPDATE 1
                          throws_ok
 -----------------------------------------------------------
- ok 48 - admin cannot approve artwork for archived product
+ ok 49 - admin cannot approve artwork for archived product
 (1 row)
 
 UPDATE 1
    community_create_pending_artwork
 --------------------------------------
- dd9ec45a-3bbc-47a4-84fe-62fec7953178
+ 135fb0c2-5e76-4ac4-a706-b65d669eca29
 (1 row)
 
 UPDATE 1
                               throws_ok
 ---------------------------------------------------------------------
- ok 49 - admin cannot approve artwork after participation revocation
+ ok 50 - admin cannot approve artwork after participation revocation
 (1 row)
 
 DELETE 1
                      throws_ok
 ----------------------------------------------------
- ok 50 - revoked participant cannot rename username
+ ok 51 - revoked participant cannot rename username
 (1 row)
 
 UPDATE 1
                              throws_ok
 -------------------------------------------------------------------
- ok 51 - admin cannot approve artwork under stale rules acceptance
+ ok 52 - admin cannot approve artwork under stale rules acceptance
 (1 row)
 
 UPDATE 1
    community_create_pending_artwork
 --------------------------------------
- 64cc4055-e90a-4507-bf65-76739eb4ac2a
+ fe0d8e5e-eb56-4e21-8bdf-92d273a9f190
 (1 row)
 
 RESET
@@ -307,7 +314,7 @@ DELETE 1
 SET
                           throws_ok
 --------------------------------------------------------------
- ok 52 - admin cannot approve after product unlock is revoked
+ ok 53 - admin cannot approve after product unlock is revoked
 (1 row)
 
 RESET
@@ -315,7 +322,7 @@ INSERT 0 1
 SET
    community_create_pending_artwork
 --------------------------------------
- a9cc8de0-c735-4615-b119-e36b1ccbf932
+ ecd40b66-76c0-42e8-b8c1-92ae8e166c62
 (1 row)
 
 RESET
@@ -323,18 +330,18 @@ DELETE 1
 SET
                          throws_ok
 ------------------------------------------------------------
- ok 53 - admin cannot approve artwork after author deletion
+ ok 54 - admin cannot approve artwork after author deletion
 (1 row)
 
 RESET
                               ok
 ---------------------------------------------------------------
- ok 54 - admin moderation decisions are append-only audit rows
+ ok 55 - admin moderation decisions are append-only audit rows
 (1 row)
 
                                  ok
 --------------------------------------------------------------------
- ok 55 - service role cannot update or delete moderation audit rows
+ ok 56 - service role cannot update or delete moderation audit rows
 (1 row)
 
  finish

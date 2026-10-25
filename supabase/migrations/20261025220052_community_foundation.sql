@@ -358,6 +358,7 @@ begin
       select 1 from public.community_profiles cp
       where cp.user_id = p_actor_user_id and cp.is_adult and cp.adult_attested_at is not null
         and cp.opted_in_at is not null and cp.participation_revoked_at is null and cp.suspended_at is null
+        and cp.rules_version = '2026-10-25-v1'
     )
   returning revision into v_new_revision;
   if not found then

@@ -4,7 +4,7 @@
 -- Everything, including Auth/product fixtures, rolls back.
 BEGIN;
 SET LOCAL search_path = public, extensions;
-SELECT plan(55);
+SELECT plan(56);
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.community_profiles'::regclass), 'community profiles have RLS enabled');
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.community_artworks'::regclass), 'community artworks have RLS enabled');
@@ -91,6 +91,9 @@ SELECT throws_ok($$SELECT public.community_create_pending_artwork(
   'supabase','image/png',12345,'Wrong product','cccccccc-cccc-4ccc-8ccc-cccccccccccc')$$, '42501', 'published unlocked product required', 'unlock for another product does not authorize submission');
 SELECT throws_ok($$SELECT public.community_moderate_artwork('10000000-0000-4000-8000-000000000001',(SELECT id FROM community_artwork_result),1,'approve',null)$$, '42501', 'active administrator required', 'member cannot spoof admin role for moderation');
 SELECT is(public.community_moderate_artwork('10000000-0000-4000-8000-000000000004',(SELECT id FROM community_artwork_result),1,'approve',null), 2, 'admin can approve the expected pending revision');
+UPDATE public.community_profiles SET rules_version='obsolete-rules' WHERE user_id='10000000-0000-4000-8000-000000000001';
+SELECT throws_ok($$SELECT public.community_edit_artwork_description('10000000-0000-4000-8000-000000000001',(SELECT id FROM community_artwork_result),2,'Stale rules edit')$$, '40001', 'artwork is unavailable or revision changed', 'stale rules acceptance cannot edit or resubmit artwork');
+UPDATE public.community_profiles SET rules_version='2026-10-25-v1' WHERE user_id='10000000-0000-4000-8000-000000000001';
 SELECT is(public.community_edit_artwork_description('10000000-0000-4000-8000-000000000001',(SELECT id FROM community_artwork_result),2,'Edited caption'), 3, 'owner edit returns approved work to a new pending revision');
 SELECT is((SELECT status FROM public.community_artworks WHERE id=(SELECT id FROM community_artwork_result)), 'pending', 'approved revision disappears from public state during edit');
 SELECT is(public.community_moderate_artwork('10000000-0000-4000-8000-000000000004',(SELECT id FROM community_artwork_result),3,'approve',null), 4, 'admin can approve the edited revision');
