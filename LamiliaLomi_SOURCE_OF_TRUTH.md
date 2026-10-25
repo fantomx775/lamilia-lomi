@@ -2,7 +2,7 @@
 
 Status: accepted for implementation
 Date: 2026-05-31
-Last updated: 2026-05-31 after `lamilialomi_tech_spec_ver1_1 (2).md`, `poziomy użytkowników.docx`, and audit against `Pelny_Zapis_Projektu_LamiliaLomi.md`
+Last updated: 2026-10-25 after CC-00 reconciliation against the current application, migrations, and approved Coloring Club P0 scope
 
 This document is the canonical implementation source of truth for the first full-product iteration of LamiliaLomi. It supersedes the previous working notes and question checklist. Earlier documents remain useful as historical context, but product and technical decisions should be implemented according to this file.
 
@@ -42,7 +42,8 @@ The first iteration should attempt to deliver the full small product, not a redu
 - Private premium files served through signed URLs.
 - Polish admin panel under `/admin`.
 - Admin management for products, translations, categories, tags, media, premium files, premium codes, users, and email export.
-- Frontend in English, Polish, German, and Spanish.
+- Public storefront in English; admin interface in Polish. Existing EN/PL/DE/ES product and translation data is retained, but public locale routing is English-only.
+- Adult opt-in Coloring Club for reader-colored artwork, gated by server-side public and upload flags and the readiness conditions in §32.
 - SEO basics: metadata, Open Graph, sitemap, robots.txt, structured data where useful.
 - Privacy, Terms, and cookie consent.
 - Resend for system emails.
@@ -70,7 +71,7 @@ The first iteration should attempt to deliver the full small product, not a redu
 - Subscriptions.
 - Marketplace functionality.
 - User reviews hosted on the site.
-- Comments/community features.
+- Comments, forums, messaging, and community features beyond the scoped Coloring Club artwork P0; see §32 and `docs/spec/coloring-club.md`.
 - AI content generation.
 - Complex CMS/page builder.
 - Advanced coupon system beyond premium unlock codes.
@@ -132,7 +133,7 @@ A customer can:
 - Download unlocked premium files.
 - See their unlocked products in "My Library".
 
-The public site does not promote sign-up as a primary acquisition CTA. A user who reaches `/[locale]/login` can always follow a normal create-account link, and `/[locale]/register` is valid without a product or unlock context. Registration started from a QR or product unlock flow preserves its product and unlock intent through verification. Returning customers can still log in directly.
+The public site does not promote sign-up as a primary acquisition CTA. A user who reaches `/en/login` can always follow a normal create-account link, and `/en/register` is valid without a product or unlock context. Registration started from a QR or product unlock flow preserves its product and unlock intent through verification. Returning customers can still log in directly.
 
 ## Premium Access
 
@@ -231,7 +232,7 @@ Translatable fields:
 - SEO title.
 - SEO description.
 
-English is the primary language. Polish, German, and Spanish are supported frontend locales. Missing non-English product content can fall back to English.
+The public storefront currently routes English only (`/en/...`, with `/` resolving to the English experience). Admin remains Polish. Existing Polish, German, and Spanish product translations and other translation data are retained for future use; do not restore public locale routing as part of Coloring Club.
 
 ## Product statuses
 
@@ -320,27 +321,13 @@ No complex page builder is needed.
 
 # 10. Internationalization
 
-Frontend locales:
+Public locale routing: `en` only, default `en`. Existing localized content is preserved. Do not add PL/DE/ES routes or language selection without a separate approved scope.
 
-- `en` as default.
-- `pl` as secondary.
-- `de` as third.
-- `es` as fourth.
-
-Routing:
-
-- `/en/...`
-- `/pl/...`
-- `/de/...`
-- `/es/...`
+Routing: `/en/...`; root `/` resolves to English. Admin routes are unlocalized and Polish-language.
 
 Language behavior:
 
-- Detect browser language on first visit.
-- Store preferred language in a cookie.
-- Provide a manual language selector in the header.
-- Fall back to English when a non-English translation is missing.
-- Product content is translated manually by the admin per language.
+Existing translation rows and translated product content remain intact, but public language detection, locale cookies, and locale selection are not active requirements while public routing is English-only.
 
 Admin:
 
@@ -550,29 +537,30 @@ Public:
 
 - `/`
 - `/en`
-- `/pl`
-- `/de`
-- `/es`
-- `/[locale]/products`
-- `/[locale]/products/[slug]`
-- `/[locale]/categories/[slug]`
-- `/[locale]/tags/[slug]`
-- `/[locale]/author`
-- `/[locale]/privacy`
-- `/[locale]/terms`
-- `/[locale]/contact`
+- `/en/products`
+- `/en/products/[slug]`
+- `/en/categories/[slug]`
+- `/en/tags/[slug]`
+- `/en/author`
+- `/en/privacy`
+- `/en/terms`
+- `/en/contact`
+- `/en/club`
+- `/en/club/artworks/[id]`
+- `/en/club/creators/[username]`
 
 Auth:
 
-- `/[locale]/login`
-- `/[locale]/register`
-- `/[locale]/reset-password`
-- `/[locale]/auth/callback`
+- `/en/login`
+- `/en/register`
+- `/en/reset-password`
+- `/en/auth/callback`
 
 User:
 
-- `/[locale]/library`
-- `/[locale]/account`
+- `/en/library`
+- `/en/library/creations`
+- `/en/account`
 
 Admin:
 
@@ -585,6 +573,7 @@ Admin:
 - `/admin/users`
 - `/admin/pages`
 - `/admin/settings`
+- `/admin/community`
 
 API/Route handlers:
 
@@ -1106,11 +1095,11 @@ Implementation can begin with placeholder/sample data, then swap in final assets
 
 ---
 
-# 31. Current CRUD Implementation Status - 2026-05-31
+# 31. Historical CRUD Implementation Snapshot - 2026-05-31
 
 The admin CRUD gap audit is documented in `docs/admin-crud-gap-audit.md`.
 
-Implemented in the current local/demo slice:
+The following records implementation status as of 2026-05-31 only; it is not a statement of current adapter or feature gaps:
 
 - Product create/edit/archive/delete via Server Actions.
 - Product translations for EN/PL/DE/ES, including SEO title and description.
@@ -1130,5 +1119,17 @@ Implemented in the current local/demo slice:
 Important implementation boundary:
 
 - CRUD persistence currently works in local demo/content-store mode through `data/lamilialomi-content.local.json`, which is intentionally git-ignored.
-- The connected remote Supabase project currently has no public tables. Apply the existing foundation migration to the intended Supabase project before treating Supabase as the production content source.
-- The next production-hardening slice should replace or extend the local content-store repository with Supabase-backed reads/writes under real Supabase Auth sessions, then wire binary uploads to Supabase Storage.
+- Historical note superseded on 2026-10-25: the verified linked Supabase project `ebyhoawczbexwtioywuk` has 22 applied migrations and 20 public tables. Use migration history and live schema checks for current status; do not rely on the old “no public tables” statement.
+- Current implementation uses server-side dual adapters: `LAMILIA_BACKEND=local` reads/writes the local content store for demo/local flows, while `LAMILIA_BACKEND=supabase` uses the Supabase-backed content repository and Supabase Auth. Binary media storage is selected through the configured storage adapter. Treat this as current architecture; verify any feature-specific gaps rather than repeating the old repository-build plan.
+
+# 32. Coloring Club P0 Contract (CC-00, 2026-10-25)
+
+This section and `docs/spec/coloring-club.md` supersede the earlier statement that community features are out of scope. The approved P0 is an adult opt-in community for sharing reader-colored artwork. It does not change the existing premium unlock model, product media, admin-curated `product_reader_artworks`, or the product-page “Look Inside” gallery. Integrate approved community artwork into one “Colored by Our Readers” section; never create a second section with the same heading.
+
+Public routes are `/en/club`, `/en/club/artworks/[id]`, and `/en/club/creators/[username]`. The signed-in member route is `/en/library/creations`; admin moderation is `/admin/community` in Polish. Public reads include approved content only. Private/pending/rejected/removed artwork has no public URL. Projection rules, authorization, states, media handling, UX, and APIs are defined in `docs/spec/coloring-club.md` and are binding for issues #79–#85.
+
+Participation requires an authenticated, email-verified adult who explicitly opts in and accepts the current community rules version; record acceptance version and timestamp. Submission additionally requires an unlock for that specific published product. Username is unique `@username`, 3–24 lowercase ASCII letters, digits, or underscores, with reserved names rejected; no email address is allowed. Use a generated avatar only; user avatar uploads are out of scope.
+
+`COLORING_CLUB_PUBLIC_ENABLED` and `COLORING_CLUB_UPLOADS_ENABLED` are server-only kill switches. Only exact value `true` enables a switch; missing, malformed, or any other value is OFF. Both default OFF. Apply these checks to pages/data, mutation APIs, and media reads. Public enablement requires owner launch readiness, completed moderation/security paths, and legal review; readiness is not established by CC-00. Keep the public feature OFF until those conditions are confirmed.
+
+The verified Supabase project ref is `ebyhoawczbexwtioywuk`; applied migration and table counts above reflect the 2026-10-25 preflight. Community schema must be additive and separate from `product_reader_artworks`; no existing reader photos or premium/media records are migrated or modified by CC-00.

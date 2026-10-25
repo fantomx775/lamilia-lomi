@@ -1,11 +1,12 @@
 # LamiliaLomi - Implementation Plan
 
-Status: proposed execution plan
+Status: historical vertical-slice plan; current baseline and accepted Coloring Club scope are documented below and in `LamiliaLomi_SOURCE_OF_TRUTH.md`
 Source of truth: `LamiliaLomi_SOURCE_OF_TRUTH.md`
 Method: vertical slices + TDD + E2E closure
-Date: 2026-05-31
+Original plan date: 2026-05-31
+Current reconciliation: 2026-10-25
 
-This document defines how the LamiliaLomi product should be implemented. The plan uses vertical slices: each slice delivers a small, testable product capability from UI through server logic and data, rather than building horizontal layers in isolation.
+This historical plan records the original vertical-slice approach. Its uncompleted/future statements are not evidence of current gaps. Current routing is public EN-only (admin PL); translation data in EN/PL/DE/ES remains preserved. Current backend has explicit local and Supabase adapters selected by `LAMILIA_BACKEND`; consult implementation and the canonical source before treating a slice below as outstanding. The Coloring Club work order is in §10 and its detailed contract is `docs/spec/coloring-club.md`.
 
 Each slice is closed only when:
 
@@ -171,7 +172,7 @@ Developer can run the app locally and see the LamiliaLomi shell page.
 ### TDD/unit tests
 
 - Test that app config helpers read required public environment values safely.
-- Test locale config helper returns supported locales and default locale.
+- Test locale config helper returns `en` as the sole public locale and the default locale.
 
 ### Integration tests
 
@@ -218,8 +219,8 @@ The app can load one seeded published product from the database.
   - draft products are not public,
   - archived products are not in catalog.
 - Test translation fallback:
-  - requested locale is used if present,
-  - missing PL/DE/ES falls back to EN.
+  - current public requests use `en`,
+  - existing non-English translation rows remain preserved for future routing scope.
 
 ### Integration tests
 
@@ -299,7 +300,7 @@ Guest can browse catalog, search, filter by audience/type/category/tag, and sort
 
 ### Implementation
 
-- Build `/[locale]/products`.
+- Build `/en/products`.
 - Add server-side catalog query.
 - Add filters.
 - Add sorting: newest, A-Z, manual order.
@@ -350,7 +351,7 @@ Guest can view product details, gallery, video, tags/categories, and click Amazo
 
 ### Implementation
 
-- Build `/[locale]/products/[slug]`.
+- Build `/en/products/[slug]`.
 - Render product translation with EN fallback.
 - Render the full public gallery and video placeholder for guests.
 - Render Amazon links.
@@ -654,7 +655,7 @@ Logged-in user can see all unlocked products and return to downloads.
 
 ### Implementation
 
-- Build `/[locale]/library`.
+- Build `/en/library`.
 - Query user's unlocks.
 - Render product cards.
 - Link to product pages.
@@ -1246,12 +1247,16 @@ This order intentionally reaches the public customer journey before expanding ad
  
 ---
 
-# 9. Admin CRUD Slice Update - 2026-05-31
+# 9. Historical Admin CRUD Snapshot - 2026-05-31
 
-The audit and implementation described in `docs/admin-crud-gap-audit.md` closed the major local admin CRUD gaps earlier than the original milestone order:
+The audit and implementation described in `docs/admin-crud-gap-audit.md` recorded the following local admin CRUD state on 2026-05-31. These bullets are historical, not current work estimates:
 
 - Slice 12 product CRUD is implemented for local demo/content-store mode.
 - Slice 13 taxonomy and Amazon link management is implemented for local demo/content-store mode.
 - The metadata side of Slice 14 is implemented: admin can define cover/gallery/video/public download/premium download asset rows and the app enforces the public vs premium visibility classification.
-- Binary upload to Supabase Storage remains the next storage-specific slice.
-- Production Supabase activation remains a separate hardening slice because the connected remote project currently has no public tables and the app still uses demo-cookie auth for local flows.
+- Binary upload to Supabase Storage was identified as the next storage-specific slice at that time.
+- Historical note superseded on 2026-10-25: the verified linked Supabase project `ebyhoawczbexwtioywuk` has 22 applied migrations and 20 public tables. Confirm live state through migration/schema inspection rather than this old note.
+
+# 10. Coloring Club implementation order - 2026-10-25
+
+The accepted specification is `docs/spec/coloring-club.md`; the canonical current product decisions are in `LamiliaLomi_SOURCE_OF_TRUTH.md` §32. Implement P0 issues in dependency order: #78 specification/flags; #79 additive schema, RLS, repository; #80 profiles/participation; #81 uploads and My Creations; #82 admin moderation; #83 public gallery and product integration; #84 hearts; #85 reports, notifications, deletion, rate limits, and release verification. Issues #86–#90 are out of scope. Do not implement community functionality in CC-00 beyond server-side flags.
