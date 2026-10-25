@@ -84,6 +84,10 @@ function galleryActionOrder(view: RenderResult) {
   )).map((button) => button.getAttribute("aria-label")!.slice("Przenieś ".length, -" wyżej".length));
 }
 
+function readerArtworkGetResponse(artworks: unknown[] = []) {
+  return { ok: true, json: async () => ({ artworks }) };
+}
+
 function galleryRow(view: RenderResult, filename: string) {
   const row = view.getByRole("img", { name: `Podgląd ${filename}` }).closest<HTMLDivElement>("div.rounded-xl");
   if (!row) throw new Error(`Missing gallery row for ${filename}.`);
@@ -193,7 +197,11 @@ describe("ProductEditor V2", () => {
       />,
     );
 
-    expect(view.getByRole("heading", { name: "Organizacja" })).toBeInTheDocument();
+    expect(view.getByRole("heading", { name: "Publikacja i organizacja" })).toBeInTheDocument();
+    expect(view.queryByRole("heading", { name: "Organizacja" })).not.toBeInTheDocument();
+    expect(view.container.querySelector("aside")).not.toBeInTheDocument();
+    expect(view.container.querySelector("main")).toHaveClass("max-w-4xl");
+    expect(view.getByRole("heading", { name: "Pokolorowane prace czytelniczek" })).toBeInTheDocument();
     expect(view.queryByRole("heading", { name: "Zaawansowane" })).not.toBeInTheDocument();
     expect(view.getByLabelText("Adres produktu")).toHaveValue("");
     expect(view.getByLabelText("Pozycja w katalogu")).toHaveValue(100);
@@ -261,9 +269,9 @@ describe("ProductEditor V2", () => {
       status: number;
       json: () => Promise<unknown>;
     }) => void;
-    const fetchMock = vi.fn().mockReturnValue(new Promise((resolve) => {
-      finishBatch = resolve;
-    }));
+    const fetchMock = vi.fn().mockImplementation((url: string) => url.endsWith("/reader-artworks")
+      ? Promise.resolve(readerArtworkGetResponse())
+      : new Promise((resolve) => { finishBatch = resolve; }));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     const view = render(
@@ -323,6 +331,7 @@ describe("ProductEditor V2", () => {
   });
 
   it("points the publish requirement at Amazon after removing the last link", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(readerArtworkGetResponse()));
     const saveAction = vi.fn().mockResolvedValue({
       ok: false,
       errors: [ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS],
@@ -476,7 +485,7 @@ describe("ProductEditor V2", () => {
       const formData = saveAction.mock.calls[0][0] as FormData;
       expect(formData.get("title")).toBe("Ocean Calm");
       expect(formData.has("title_pl")).toBe(false);
-      await waitFor(() => expect(editorMocks.routerReplace).toHaveBeenCalledWith(`/admin/products/${product.id}?saved=1`));
+      await waitFor(() => expect(editorMocks.routerReplace).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^/admin/products/${product.id}\\?toast=[0-9a-f-]{36}$`))));
     } finally {
       if (originalNavigation) Object.defineProperty(window, "navigation", originalNavigation);
       else Reflect.deleteProperty(window, "navigation");
@@ -640,6 +649,7 @@ describe("ProductEditor V2", () => {
   it("moves the selected gallery thumbnail exactly one position and enforces both boundaries", async () => {
     const names = ["image-a.png", "image-b.png", "image-c.png", "image-d.png"];
     const editorProduct = productWithGalleryAssets(product, names);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(readerArtworkGetResponse()));
     const user = userEvent.setup();
     const view = render(
       <ProductEditor title="Edycja produktu" product={editorProduct} categories={snapshot.categories} tags={snapshot.tags} />,
@@ -679,6 +689,7 @@ describe("ProductEditor V2", () => {
   it("loads existing images by sort order and preserves reordered IDs and metadata through save and reload", async () => {
     const names = ["image-a.png", "image-b.png", "image-c.png", "image-d.png"];
     const editorProduct = productWithGalleryAssets(product, names, true);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(readerArtworkGetResponse()));
     const saveAction = vi.fn().mockResolvedValue({ ok: true, id: editorProduct.id });
     const user = userEvent.setup();
     const view = render(
@@ -733,13 +744,13 @@ describe("ProductEditor V2", () => {
   it("keeps order after adding an image and moving images after a removal", async () => {
     const names = ["image-a.png", "image-b.png"];
     const editorProduct = productWithGalleryAssets(product, names);
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
+    const uploadResponses = [
+      {
         status: 415,
         ok: false,
         json: async () => ({ error: "Lokalny upload wymaga przesłania pliku." }),
-      })
-      .mockResolvedValueOnce({
+      },
+      {
         status: 200,
         ok: true,
         json: async () => ({ asset: {
@@ -757,7 +768,11 @@ describe("ProductEditor V2", () => {
           isActive: true,
           uploaded: true,
         } }),
-      });
+      },
+    ];
+    const fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve(
+      url.endsWith("/reader-artworks") ? readerArtworkGetResponse() : uploadResponses.shift(),
+    ));
     vi.stubGlobal("fetch", fetchMock);
     const saveAction = vi.fn().mockResolvedValue({ ok: true, id: editorProduct.id });
     const user = userEvent.setup();
@@ -770,7 +785,8 @@ describe("ProductEditor V2", () => {
     await user.upload(input!, new File(["new image"], "image-c.png", { type: "image/png" }));
     await waitFor(() => expect(editorMocks.readImageDimensions).toHaveBeenCalled());
     expect(view.queryByRole("alert")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledWith(`/api/admin/products/${encodeURIComponent(editorProduct.id)}/reader-artworks`, { cache: "no-store" });
     expect(view.container.textContent).toContain("image-c.png");
     await waitFor(() => expect(galleryPreviewOrder(view)).toContain("image-c.png"));
     expect(galleryPreviewOrder(view)).toEqual([...names, "image-c.png"]);

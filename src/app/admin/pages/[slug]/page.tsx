@@ -6,6 +6,7 @@ import { formatAdminErrors } from "@/lib/admin-errors";
 import { getTranslation } from "@/lib/products";
 import { AboutPageEditor } from "../about-page-editor";
 import { PageEditor } from "../page-editor";
+import { AdminRouteToast } from "@/components/admin/admin-toast";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -20,7 +21,7 @@ export default async function EditPage({ params, searchParams }: Props) {
 
   const query = await searchParams;
   const error = query.error ? formatAdminErrors(query.error, "pl") : undefined;
-  const feedback = error ?? (query.saved ? "Zapisano zmiany." : undefined);
+  const toastId = typeof query.toast === "string" && /^[0-9a-f-]{36}$/i.test(query.toast) ? query.toast : undefined;
   const snapshot = await getAdminContentSnapshot();
 
   if (slug === "about") {
@@ -38,13 +39,18 @@ export default async function EditPage({ params, searchParams }: Props) {
     });
 
     return (
+      <>
       <AboutPageEditor
         config={snapshot.aboutPageSettings}
         products={products}
-        feedback={feedback}
-        saved={Boolean(query.saved)}
+        feedback={error}
+        feedbackEventId={error ? toastId : undefined}
+        saved={Boolean(toastId && !error)}
+        savedEventId={toastId && !error ? toastId : undefined}
         saveAction={saveAboutPageAction}
       />
+      <AdminRouteToast eventId={toastId} kind={error ? "error" : "success"} message={error ?? "Zmiany strony zostały zapisane."} cleanPath={`/admin/pages/${slug}`} />
+      </>
     );
   }
 
@@ -54,5 +60,5 @@ export default async function EditPage({ params, searchParams }: Props) {
 
   const saveAction = saveStaticPagesAction.bind(null, slug);
 
-  return <PageEditor slug={slug} title={records.find((record) => record.locale === "en")?.title ?? slug} records={records} feedback={feedback} saved={Boolean(query.saved)} saveAction={saveAction} />;
+  return <><PageEditor slug={slug} title={records.find((record) => record.locale === "en")?.title ?? slug} records={records} feedback={error} feedbackEventId={error ? toastId : undefined} saved={Boolean(toastId && !error)} savedEventId={toastId && !error ? toastId : undefined} saveAction={saveAction} /><AdminRouteToast eventId={toastId} kind={error ? "error" : "success"} message={error ?? "Zmiany strony zostały zapisane."} cleanPath={`/admin/pages/${slug}`} /></>;
 }

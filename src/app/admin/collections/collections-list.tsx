@@ -9,8 +9,9 @@ import { AdminResourceList } from "@/components/admin/admin-resource-list";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getAdminErrorMessage, type AdminErrorCode, type AdminMutationResult } from "@/lib/admin-errors";
+import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type AdminMutationResult } from "@/lib/admin-errors";
 import type { Collection, CollectionImageStorageProvider } from "@/lib/types";
+import { useAdminToast } from "@/components/admin/admin-toast";
 
 export type AdminCollectionListRow = Collection & {
   productCount: number;
@@ -45,6 +46,7 @@ export function CollectionsResourceList({
   deleteAction: DeleteAction;
 }) {
   const router = useRouter();
+  const publishToast = useAdminToast();
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftId, setDraftId] = useState("");
@@ -116,6 +118,7 @@ export function CollectionsResourceList({
   };
 
   const saved = (result: SuccessfulMutation, savedImagePath: string) => {
+    publishToast("success", "Kolekcja została zapisana.");
     const collectionId = result.id;
     const pending = pendingImagesRef.current.filter((image) => image.path !== savedImagePath);
     pendingImagesRef.current = [];
@@ -134,6 +137,7 @@ export function CollectionsResourceList({
     const failed = await cleanupPendingImages(collectionId, pending);
     pendingImagesRef.current = [];
     setOpen(false);
+    publishToast("success", "Kolekcja została usunięta.");
     router.refresh();
     showCleanupWarning(result.id, [
       result.cleanupDeferred ? result.cleanupImagePath : undefined,
@@ -269,6 +273,7 @@ function CollectionEditorForm({
   onImageUploadStateChange: (inFlight: boolean) => void;
   onMutationStateChange: (inFlight: boolean) => void;
 }) {
+  const publishToast = useAdminToast();
   const [name, setName] = useState(item?.name ?? "");
   const [slug, setSlug] = useState(item?.slug ?? "");
   const [image, setImage] = useState<ImageDraft | null>(() => item?.imagePath && item.imageStorageProvider && item.imageContentType
@@ -330,9 +335,14 @@ function CollectionEditorForm({
         const result = await saveAction(formData);
         if (!result.ok) {
           setErrors(result.errors);
+          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
           return;
         }
         onSaved(result, String(formData.get("imagePath") ?? ""));
+      } catch {
+        const errors = [ADMIN_ERROR_CODES.INTERNAL];
+        setErrors(errors);
+        publishToast("error", getAdminErrorMessage(errors[0], "pl"));
       } finally {
         onMutationStateChange(false);
       }
@@ -350,9 +360,14 @@ function CollectionEditorForm({
         const result = await deleteAction(formData);
         if (!result.ok) {
           setErrors(result.errors);
+          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
           return;
         }
         await onDeleted(result, item.id);
+      } catch {
+        const errors = [ADMIN_ERROR_CODES.INTERNAL];
+        setErrors(errors);
+        publishToast("error", getAdminErrorMessage(errors[0], "pl"));
       } finally {
         onMutationStateChange(false);
       }

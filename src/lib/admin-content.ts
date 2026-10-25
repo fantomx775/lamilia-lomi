@@ -84,6 +84,7 @@ export function buildProductFromFormData(
       snapshot.tags.some((tag) => tag.id === id),
     ),
     assets,
+    readerArtworks: existing?.readerArtworks ?? [],
     amazonLinks: normalizePrimaryAmazonLink(parseAmazonLinks(formData, id, existing)),
     premiumCodes: parsedPremiumCodes.codes,
   };

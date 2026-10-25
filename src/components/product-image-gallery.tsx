@@ -27,11 +27,17 @@ export type ProductImageGalleryLabels = {
 type ProductImageGalleryProps = {
   images: ProductGalleryImage[];
   labels: ProductImageGalleryLabels;
+  layout?: "default" | "reader-artworks" | "inside-book";
+  visibleLimit?: number;
+  sizes?: string;
 };
 
 export function ProductImageGallery({
   images,
   labels,
+  layout = "default",
+  visibleLimit = 4,
+  sizes = "(min-width: 1280px) 600px, (min-width: 1024px) calc(50vw - 40px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)",
 }: ProductImageGalleryProps) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -115,17 +121,23 @@ export function ProductImageGallery({
 
   if (imageCount === 0) return null;
 
-  const visibleImages = images.slice(0, 4);
+  const thumbnailLimit = Math.max(1, Math.min(visibleLimit, images.length));
+  const visibleImages = images.slice(0, thumbnailLimit);
+  const thumbnailGridClassName = layout === "reader-artworks"
+    ? "grid grid-cols-2 gap-5 sm:grid-cols-2 lg:grid-cols-4"
+    : layout === "inside-book"
+      ? "grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4"
+      : "grid grid-cols-2 gap-3 sm:gap-4";
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+      <div className={thumbnailGridClassName} data-testid={layout === "reader-artworks" ? "reader-artwork-grid" : undefined}>
         {visibleImages.map((image, index) => (
           <figure key={image.id} className="group">
             <button
               type="button"
               aria-label={
-                index === 3 && imageCount > 4
+                index === thumbnailLimit - 1 && imageCount > thumbnailLimit
                   ? `${labels.openImages[index] ?? labels.previewTitle}, ${(labels.viewAllImages ?? labels.previewTitle).replace("{count}", String(imageCount))}`
                   : labels.openImages[index] ?? labels.previewTitle
               }
@@ -143,14 +155,14 @@ export function ProductImageGallery({
                   loading="lazy"
                   unoptimized={image.unoptimized}
                   className="object-contain"
-                  sizes="(min-width: 1024px) 300px, 46vw"
+                  sizes={sizes}
                 />
-                {index === 3 && imageCount > 4 ? (
+                {index === thumbnailLimit - 1 && imageCount > thumbnailLimit ? (
                   <span
                     aria-hidden="true"
                     className="absolute inset-0 grid place-items-center bg-[rgba(44,36,32,0.55)] text-3xl font-medium tabular-nums text-white"
                   >
-                    +{imageCount - 4} {labels.moreImages ?? "more"}
+                    +{imageCount - thumbnailLimit} {labels.moreImages ?? "more"}
                   </span>
                 ) : null}
                 <span
@@ -162,7 +174,7 @@ export function ProductImageGallery({
               </span>
             </button>
             {image.caption ? (
-              <figcaption className="mt-3 px-1 text-sm leading-6 text-[var(--color-muted)]">
+              <figcaption className={`mt-3 min-w-0 px-1 text-sm leading-6 text-[var(--color-muted)] ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
                 {image.caption}
               </figcaption>
             ) : null}
@@ -210,11 +222,11 @@ export function ProductImageGallery({
         onClick={(event) => {
           if (event.target === event.currentTarget) dialogRef.current?.close();
         }}
-        className="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[min(94vw,calc(52.5dvh_+_2.5rem))] max-w-none overflow-y-auto border-0 bg-transparent p-0 text-[var(--color-ink)] backdrop:bg-[rgba(44,36,32,0.78)] backdrop:backdrop-blur-sm"
+        className="fixed inset-0 m-0 h-dvh w-screen max-h-none max-w-none overflow-hidden border-0 bg-transparent p-[max(env(safe-area-inset-top),0.75rem)_max(env(safe-area-inset-right),0.75rem)_max(env(safe-area-inset-bottom),0.75rem)_max(env(safe-area-inset-left),0.75rem)] text-[var(--color-ink)] backdrop:bg-[rgba(44,36,32,0.78)] backdrop:backdrop-blur-sm"
       >
         {activeImage && activeIndex !== null ? (
-          <div className="rounded-[1.5rem] border border-white/70 bg-[var(--color-bg)] p-3 shadow-[0_30px_100px_rgba(26,21,18,0.36)] sm:p-5">
-            <div className="mb-3 flex items-center justify-between gap-4 sm:mb-4">
+          <div className="mx-auto flex h-full w-full max-w-[110rem] flex-col rounded-[1.5rem] border border-white/70 bg-[var(--color-bg)] p-3 shadow-[0_30px_100px_rgba(26,21,18,0.36)] sm:p-5">
+            <div className="mb-2 flex shrink-0 items-center justify-between gap-4 sm:mb-3">
               <p className="min-w-0 truncate text-sm font-medium tracking-wide text-[var(--color-ink-soft)]">
                 {labels.previewTitle}
               </p>
@@ -237,47 +249,52 @@ export function ProductImageGallery({
               </div>
             </div>
 
-            <div
-              data-testid="product-gallery-preview-frame"
-              onPointerDown={handlePointerDown}
-              onPointerUp={handlePointerUp}
-              className="relative mx-auto flex w-[min(100%,52.5dvh)] max-w-[40rem] aspect-[8.5/11] touch-pan-y items-center justify-center overflow-hidden rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)]"
-            >
-              <Image
-                key={activeImage.id}
-                src={activeImage.path}
-                alt={activeImage.alt}
-                fill
-                loading="eager"
-                unoptimized={activeImage.unoptimized}
-                className="object-contain"
-                sizes="(max-width: 768px) 90vw, 40rem"
-              />
+            <div className="grid min-h-0 flex-1 grid-cols-2 grid-rows-[minmax(0,1fr)_auto] items-center justify-items-center gap-2 md:grid-cols-[minmax(3rem,1fr)_auto_minmax(3rem,1fr)] md:grid-rows-1 md:gap-4">
+              <div
+                data-testid="product-gallery-preview-frame"
+                data-gallery-image-frame
+                onPointerDown={handlePointerDown}
+                onPointerUp={handlePointerUp}
+                className="relative col-span-2 row-start-1 mx-auto flex h-[min(76dvh,calc(100dvh-11rem))] max-h-full w-[min(90vw,calc((100dvh-11rem)*0.773))] max-w-full min-h-0 shrink touch-pan-y items-center justify-center overflow-hidden rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] md:col-span-1 md:col-start-2 md:h-[min(86dvh,calc(100dvh-8rem))] md:w-[min(75vw,calc((100dvh-8rem)*0.773))]"
+              >
+                <Image
+                  key={activeImage.id}
+                  src={activeImage.path}
+                  alt={activeImage.alt}
+                  fill
+                  loading="eager"
+                  unoptimized={activeImage.unoptimized}
+                  className="object-contain"
+                  sizes="(max-width: 768px) 90vw, 40rem"
+                />
+              </div>
 
               {imageCount > 1 ? (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-between px-2 sm:px-4">
+                <>
                   <button
                     type="button"
                     aria-label={labels.previousImage}
+                    data-gallery-previous
                     onClick={showPrevious}
-                    className="pointer-events-auto grid size-10 place-items-center rounded-full border border-white/80 bg-white/92 text-[var(--color-ink)] shadow-md transition hover:scale-105 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] sm:size-11"
+                    className="col-start-1 row-start-2 grid size-11 place-items-center rounded-full border border-[var(--color-border)] bg-white/95 text-[var(--color-ink)] shadow-sm transition-colors hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] motion-reduce:transition-none md:col-start-1 md:row-start-1"
                   >
                     <ChevronLeft className="size-5" aria-hidden />
                   </button>
                   <button
                     type="button"
                     aria-label={labels.nextImage}
+                    data-gallery-next
                     onClick={showNext}
-                    className="pointer-events-auto grid size-10 place-items-center rounded-full border border-white/80 bg-white/92 text-[var(--color-ink)] shadow-md transition hover:scale-105 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] sm:size-11"
+                    className="col-start-2 row-start-2 grid size-11 place-items-center rounded-full border border-[var(--color-border)] bg-white/95 text-[var(--color-ink)] shadow-sm transition-colors hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] motion-reduce:transition-none md:col-start-3 md:row-start-1"
                   >
                     <ChevronRight className="size-5" aria-hidden />
                   </button>
-                </div>
+                </>
               ) : null}
             </div>
 
             {activeImage.caption ? (
-              <p className="mt-3 px-1 text-center text-sm leading-6 text-[var(--color-muted)]">
+              <p className={`mt-2 min-w-0 shrink-0 px-1 text-center text-sm leading-6 text-[var(--color-muted)] sm:mt-3 ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
                 {activeImage.caption}
               </p>
             ) : null}

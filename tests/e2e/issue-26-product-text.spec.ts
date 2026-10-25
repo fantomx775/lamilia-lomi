@@ -66,15 +66,18 @@ test("product text fields count, warn, survive failed saves, and persist on crea
   });
 
   await page.goto("/en/login?redirectTo=/admin");
+  await page.evaluate(() => document.fonts.ready.then(() => true));
   await page.getByLabel("Email").fill("admin@lamilialomi.test");
   await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
     page.getByRole("button", { name: "Continue" }).click(),
   ]);
+  await page.evaluate(() => document.fonts.ready.then(() => true));
 
   try {
     await page.goto("/admin/products/new");
+    await page.evaluate(() => document.fonts.ready.then(() => true));
     const title = page.getByLabel("Tytuł");
     const shortDescription = page.getByLabel("Krótki opis");
 
@@ -113,12 +116,15 @@ test("product text fields count, warn, survive failed saves, and persist on crea
     await page.unrouteAll();
 
     await Promise.all([
-      page.waitForURL((url) => /\/admin\/products\/[0-9a-f-]+\?saved=1$/i.test(url.pathname + url.search)),
       page.getByRole("button", { name: /Zapisz/ }).click(),
     ]);
+    await expect(page.getByTestId("product-save-bar").getByRole("status"))
+      .toHaveText("Zapisano. Zmiany są aktualne.");
+    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
     productPath = new URL(page.url()).pathname;
 
     await page.reload();
+    await page.evaluate(() => document.fonts.ready.then(() => true));
     await expect(page.getByLabel("Tytuł")).toHaveValue(maximumTitle);
     await expect(page.getByLabel("Krótki opis")).toHaveValue(maximumDescription);
     await expect(page.locator("#product-title-counter")).toHaveText("140 / 140 znaków");
@@ -141,6 +147,7 @@ test("product text fields count, warn, survive failed saves, and persist on crea
       .toHaveText("Zapisano. Zmiany są aktualne.", { timeout: 15_000 });
 
     await page.reload();
+    await page.evaluate(() => document.fonts.ready.then(() => true));
     await expect(page.getByLabel("Tytuł")).toHaveValue(editedTitle);
     await expect(page.getByLabel("Krótki opis")).toHaveValue(editedDescription);
 
@@ -192,11 +199,12 @@ test("product text fields count, warn, survive failed saves, and persist on crea
         await page.evaluate(() => document.fonts.ready.then(() => true));
         const deleteButton = page.getByRole("button", { name: "Usuń produkt" });
         await Promise.all([
-          page.waitForURL((url) => url.pathname === "/admin/products" && url.searchParams.get("deleted") === "1", { timeout: 15_000 }),
           testInfo.project.name === "mobile"
             ? deleteButton.evaluate((button: HTMLButtonElement) => button.click())
             : deleteButton.click(),
         ]);
+        await expect(page.getByRole("status").filter({ hasText: "Produkt został usunięty." })).toBeVisible();
+        await expect(page).toHaveURL("/admin/products");
       } catch (cleanupError) {
         console.warn("Issue #26 local test product cleanup failed:", cleanupError instanceof Error ? cleanupError.message : "unknown error");
       } finally {

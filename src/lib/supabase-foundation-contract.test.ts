@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { createCollectionImagePath, isSafeCollectionImagePath } from "./collection-image-path";
+
 const root = process.cwd();
 const read = (relativePath: string) =>
   fs.readFileSync(path.join(root, relativePath), "utf8");
@@ -216,7 +218,15 @@ describe("Supabase production foundation contracts", () => {
     expect(collectionRlsTest).toContain("deleting a collection removes its assignment while preserving the product");
     expect(productAdmin).toContain("collectionId: product.collectionId ?? null");
     expect(read("src/lib/content-repository.ts")).toContain("options.includeCollections");
-    expect(read("src/lib/collection-image-path.ts")).toContain("collections/");
+    const collectionId = "11111111-1111-4111-8111-111111111111";
+    const imageId = "22222222-2222-4222-8222-222222222222";
+    const collectionPath = createCollectionImagePath(collectionId, imageId, "cover.png", "image/png");
+    const readerArtworkPath = createCollectionImagePath(collectionId, imageId, "drawing.png", "image/png", "reader-artworks");
+    expect(collectionPath).toBe(`collections/${collectionId}/image/${imageId}-cover.png`);
+    expect(readerArtworkPath).toBe(`reader-artworks/${collectionId}/image/${imageId}-drawing.png`);
+    expect(isSafeCollectionImagePath(collectionPath, collectionId)).toBe(true);
+    expect(isSafeCollectionImagePath(readerArtworkPath, collectionId)).toBe(false);
+    expect(isSafeCollectionImagePath(readerArtworkPath, collectionId, "reader-artworks")).toBe(true);
     expect(authActions).toContain("buildSupabaseAuthCallbackUrl(locale, safeRedirectTo, intent)");
     expect(authActions).toContain("setAuthResumeIntent");
     expect(authActions).toContain("redeemAuthResumeIntent");

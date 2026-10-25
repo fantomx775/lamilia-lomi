@@ -1,8 +1,10 @@
 import { getAdminContentSnapshot } from "@/lib/content-repository";
 
 import { ProductsResourceList, type AdminProductListRow } from "../products-list";
+import { AdminRouteToast } from "@/components/admin/admin-toast";
 
-export default async function AdminProductsPage() {
+export default async function AdminProductsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const query = await searchParams;
   const { products, collections, categories, tags } = await getAdminContentSnapshot();
   const collectionsById = new Map(collections.map((collection) => [collection.id, collection.name]));
   const categoriesById = new Map(categories.map((category) => [
@@ -26,5 +28,7 @@ export default async function AdminProductsPage() {
     tagNames: product.tagIds.flatMap((id) => tagsById.get(id) ?? []),
   }));
 
-  return <ProductsResourceList rows={rows} />;
+  const toastId = typeof query.toast === "string" && /^[0-9a-f-]{36}$/i.test(query.toast) ? query.toast : undefined;
+  const message = query.deleted ? "Produkt został usunięty." : query.archived ? "Produkt został zarchiwizowany." : query.error ? "Nie udało się zapisać zmian produktu." : "Produkt został zapisany.";
+  return <><ProductsResourceList rows={rows} /><AdminRouteToast eventId={toastId} kind={query.error ? "error" : "success"} message={message} cleanPath="/admin/products" /></>;
 }

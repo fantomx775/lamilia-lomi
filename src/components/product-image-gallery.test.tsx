@@ -11,6 +11,7 @@ vi.mock("next/image", () => ({
 }));
 
 import { ProductImageGallery } from "@/components/product-image-gallery";
+import { ReaderArtworkGallery } from "@/components/reader-artwork-gallery";
 
 const images = [
   {
@@ -141,6 +142,32 @@ describe("ProductImageGallery", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("shows each reader credit once in a full-width collection layout and keeps all images in the viewer", async () => {
+    const user = userEvent.setup();
+    const artworks = ["Mira", "Jo", "Lee"].map((displayName, index) => ({
+      id: `work-${index + 1}`,
+      displayName,
+      description: `Colorful page ${index + 1}`,
+      sortOrder: index,
+      src: `/api/reader-artworks/public-${index + 1}`,
+    }));
+    const { container } = render(<ReaderArtworkGallery artworks={artworks} />);
+
+    expect(screen.getByRole("heading", { name: "Colored by Our Readers" })).toBeVisible();
+    expect(screen.getByText("Colored by Mira")).toBeVisible();
+    expect(screen.getAllByText("Colored by Mira")).toHaveLength(1);
+    const grid = screen.getByTestId("reader-artwork-grid");
+    expect(grid).toHaveClass("grid-cols-2", "lg:grid-cols-4");
+    expect(container.textContent).not.toContain("storagePath");
+
+    await user.click(screen.getByRole("button", { name: "Open artwork 1 by Mira" }));
+    const dialog = screen.getByRole("dialog", { name: "Reader artwork preview" });
+    expect(within(dialog).getByText("Colored by Mira")).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Next artwork" }));
+    expect(within(dialog).getByRole("img", { name: "Colorful page 2" })).toBeVisible();
+    expect(within(dialog).getByText("2 of 3")).toBeVisible();
+  });
+
   it("keeps a single image usable without carousel controls", async () => {
     const user = userEvent.setup();
     render(<ProductImageGallery images={makeImages(1)} labels={makeLabels(1)} />);
@@ -153,7 +180,7 @@ describe("ProductImageGallery", () => {
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     expect(within(dialog).getByRole("img", { name: "Page 1" })).toBeVisible();
     expect(within(dialog).getByTestId("product-gallery-preview-frame"))
-      .toHaveClass("aspect-[8.5/11]");
+      .toHaveClass("touch-pan-y", "overflow-hidden");
     expect(within(dialog).getByRole("button", { name: "Close image preview" }))
       .toHaveClass("size-11");
     expect(within(dialog).queryByRole("button", { name: "Next image" })).not.toBeInTheDocument();
@@ -206,9 +233,15 @@ describe("ProductImageGallery", () => {
     await user.click(screen.getByRole("button", { name: "Open image 1" }));
 
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
-    expect(dialog).toHaveClass("w-[min(94vw,calc(52.5dvh_+_2.5rem))]");
+    expect(dialog).toHaveClass("h-dvh", "w-screen", "overflow-hidden");
     const closeButton = within(dialog).getByRole("button", { name: "Close image preview" });
+    const frame = within(dialog).getByTestId("product-gallery-preview-frame");
+    const previousButton = within(dialog).getByRole("button", { name: "Previous image" });
     const nextButton = within(dialog).getByRole("button", { name: "Next image" });
+    expect(frame).not.toContainElement(previousButton);
+    expect(frame).not.toContainElement(nextButton);
+    expect(previousButton).toHaveAttribute("data-gallery-previous");
+    expect(nextButton).toHaveAttribute("data-gallery-next");
 
     await user.click(nextButton);
     expect(nextButton).toHaveFocus();

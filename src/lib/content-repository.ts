@@ -9,6 +9,7 @@ import { normalizeCatalogSettings } from "./catalog-settings";
 import { normalizeAboutPageSettings } from "./about-settings";
 import { sortFeaturedProductCandidates } from "./featured-product-ranking";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
+import { listReaderArtworks } from "./reader-artworks";
 import type {
   AmazonLink,
   AboutPageSettings,
@@ -120,7 +121,10 @@ export const getPublicProductDetailSnapshotForRequest = cache(
       throw new Error(`Supabase product detail read failed: ${error.message}`);
     }
 
-    return data ? mapPublicProductDetailRow(data as DbRow) : null;
+    if (!data) return null;
+    const snapshot = mapPublicProductDetailRow(data as DbRow);
+    snapshot.products[0].readerArtworks = await listReaderArtworks(stringValue((data as DbRow).id));
+    return snapshot;
   },
 );
 
@@ -784,6 +788,7 @@ function mapProduct(
     assets: assetRows.map((asset) => mapAsset(asset, row.status as Product["status"])),
     amazonLinks: amazonRows.map(mapAmazonLink),
     premiumCodes: premiumCodeRows.map(mapPremiumCode),
+    readerArtworks: [],
   };
 }
 

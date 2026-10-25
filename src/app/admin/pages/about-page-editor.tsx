@@ -1,10 +1,11 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Save, X } from "lucide-react";
+import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { useFormStatus } from "react-dom";
 
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
+import { AdminSaveBar } from "@/components/admin/admin-save-bar";
+import { useAdminToast } from "@/components/admin/admin-toast";
 import { RichTextEditor } from "@/components/admin/rich-text-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,23 +56,37 @@ export function AboutPageEditor({
   config,
   products,
   feedback,
+  feedbackEventId,
   saved = false,
+  savedEventId,
   saveAction,
 }: {
   config: AboutPageSettings;
   products: AboutProductOption[];
   feedback?: string;
+  feedbackEventId?: string;
   saved?: boolean;
+  savedEventId?: string;
   saveAction?: (formData: FormData) => void | Promise<void>;
 }) {
   const savedValue = useMemo(() => normalizeConfig(config), [config]);
   const savedValueSignature = JSON.stringify(savedValue);
   const [baselineValue, setBaselineValue] = useState<AboutEditorState>(() => savedValue);
   const baselineSignatureRef = useRef(savedValueSignature);
+  const lastSuccessEventRef = useRef(savedEventId);
+  const submittedValueRef = useRef<AboutEditorState | null>(null);
+  const submittedDraftGenerationRef = useRef(0);
+  const draftGenerationRef = useRef(0);
   const isDirtyRef = useRef(false);
   const [value, setValue] = useState<AboutEditorState>(() => savedValue);
   const [hasUnappliedHtmlDraft, setHasUnappliedHtmlDraft] = useState(false);
   const [showDuplicateError, setShowDuplicateError] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [transportFailed, setTransportFailed] = useState(false);
+  const [feedbackDismissed, setFeedbackDismissed] = useState(false);
+  const saveInProgressRef = useRef(false);
+  const lastFeedbackEventRef = useRef(feedbackEventId ?? feedback);
+  const publishToast = useAdminToast();
   const selectedIdCounts = useMemo(() => countSelectedIds(value), [value]);
   const duplicateIds = Array.from(selectedIdCounts.entries())
     .filter(([, count]) => count > 1)
@@ -79,13 +94,32 @@ export function AboutPageEditor({
   const isDirty = hasUnappliedHtmlDraft || JSON.stringify(value) !== JSON.stringify(baselineValue);
 
   useEffect(() => {
-    if (!saved || savedValueSignature === baselineSignatureRef.current) return;
+    const newSuccessEvent = Boolean(savedEventId && savedEventId !== lastSuccessEventRef.current);
+    if (!saved || (!newSuccessEvent && savedValueSignature === baselineSignatureRef.current)) return;
+    lastSuccessEventRef.current = savedEventId;
     baselineSignatureRef.current = savedValueSignature;
     setBaselineValue(savedValue);
-    setValue(savedValue);
-    setHasUnappliedHtmlDraft(false);
-    isDirtyRef.current = false;
-  }, [saved, savedValue, savedValueSignature]);
+    const submitted = submittedValueRef.current;
+    if (submitted && JSON.stringify(value) === JSON.stringify(submitted) && draftGenerationRef.current === submittedDraftGenerationRef.current) {
+      setValue(savedValue);
+      setHasUnappliedHtmlDraft(false);
+    }
+    submittedValueRef.current = null;
+    saveInProgressRef.current = false;
+    setIsSaving(false);
+    setTransportFailed(false);
+  }, [saved, savedEventId, savedValue, savedValueSignature, value]);
+
+  useEffect(() => {
+    const currentFeedbackEvent = feedbackEventId ?? feedback;
+    if (!currentFeedbackEvent || currentFeedbackEvent === lastFeedbackEventRef.current) return;
+    lastFeedbackEventRef.current = currentFeedbackEvent;
+    setFeedbackDismissed(false);
+    saveInProgressRef.current = false;
+    setIsSaving(false);
+    setTransportFailed(false);
+    submittedValueRef.current = null;
+  }, [feedback, feedbackEventId]);
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -122,7 +156,10 @@ export function AboutPageEditor({
     const navigation = (window as AboutEditorWindow).navigation;
     const handleNavigate = (event: AboutNavigateEvent) => {
       const destination = event.destination?.url;
-      if (!destination || new URL(destination, window.location.href).href === owner) return;
+      if (!destination) return;
+      const nextUrl = new URL(destination, window.location.href);
+      const currentUrl = new URL(owner);
+      if (nextUrl.origin === currentUrl.origin && nextUrl.pathname === currentUrl.pathname) return;
       if (!confirmNavigation()) event.preventDefault();
     };
     const handlePopState = () => {
@@ -142,11 +179,15 @@ export function AboutPageEditor({
   }, []);
 
   const updateIntro = (intro: string) => {
+    setFeedbackDismissed(true);
     setValue((current) => ({ ...current, intro }));
     setShowDuplicateError(false);
+    setTransportFailed(false);
   };
 
   const updateSlot = (group: SlotGroup, slotIndex: number, productId: string) => {
+    setFeedbackDismissed(true);
+    setTransportFailed(false);
     setValue((current) => ({
       ...current,
       [group]: current[group].map((currentId, index) => index === slotIndex ? productId : currentId) as ProductIdSlots,
@@ -155,6 +196,8 @@ export function AboutPageEditor({
   };
 
   const moveSlot = (group: SlotGroup, slotIndex: number, direction: -1 | 1) => {
+    setFeedbackDismissed(true);
+    setTransportFailed(false);
     setValue((current) => ({
       ...current,
       [group]: moveSelectedProduct(current[group], slotIndex, direction),
@@ -163,36 +206,56 @@ export function AboutPageEditor({
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (duplicateIds.length === 0) {
+    event.preventDefault();
+    if (hasUnappliedHtmlDraft) {
+      return;
+    }
+    if (duplicateIds.length === 0 && saveAction && !saveInProgressRef.current) {
       setShowDuplicateError(false);
-      isDirtyRef.current = false;
+      saveInProgressRef.current = true;
+      setIsSaving(true);
+      setFeedbackDismissed(false);
+      setTransportFailed(false);
+      submittedValueRef.current = value;
+      submittedDraftGenerationRef.current = draftGenerationRef.current;
+      const formData = new FormData(event.currentTarget);
+      void Promise.resolve(saveAction(formData)).catch(() => {
+        saveInProgressRef.current = false;
+        setIsSaving(false);
+        setTransportFailed(true);
+        publishToast("error", "Nie udało się wysłać zapisu About. Twoje zmiany pozostały w edytorze.");
+      });
       return;
     }
 
-    event.preventDefault();
+    if (duplicateIds.length === 0) return;
     setShowDuplicateError(true);
   };
 
   const updateHtmlDraftState = (hasDraft: boolean) => {
+    setFeedbackDismissed(true);
+    setTransportFailed(false);
+    draftGenerationRef.current += 1;
     setHasUnappliedHtmlDraft(hasDraft);
     isDirtyRef.current = hasDraft || JSON.stringify(value) !== JSON.stringify(baselineValue);
   };
 
   return (
-    <form id="about-page-editor-form" action={saveAction} onSubmit={handleSubmit} className="grid gap-6">
+    <form id="about-page-editor-form" action={saveAction} onSubmit={handleSubmit} className="grid gap-6 pb-28">
       <AdminEditorHeader
         backHref="/admin/pages"
         backLabel="Strony"
         title="About Lamilia Lomi"
         subtitle="Ustawienia strony About"
-        actions={<AboutSubmitButton />}
+        actions={null}
       />
 
-      {feedback ? (
-        <div role="status" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">
+      {feedback && !feedbackDismissed ? (
+        <div role="alert" aria-live="assertive" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">
           {feedback}
         </div>
       ) : null}
+      {hasUnappliedHtmlDraft ? <p role="alert" className="text-sm text-[var(--color-terracotta)]">Najpierw zastosuj lub odrzuć roboczy kod HTML przed zapisaniem.</p> : null}
 
       {showDuplicateError && duplicateIds.length > 0 ? (
         <div role="alert" className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
@@ -283,7 +346,7 @@ export function AboutPageEditor({
 
       {isDirty ? <p className="text-sm text-[var(--color-terracotta)]" role="status" aria-live="polite">Masz niezapisane zmiany.</p> : null}
 
-      <div className="flex justify-end"><AboutSubmitButton /></div>
+      <AboutSaveBar dirty={isDirty} pending={isSaving} status={transportFailed || (feedback && !feedbackDismissed) ? "error" : saved ? "saved" : "idle"} disabled={!saveAction || hasUnappliedHtmlDraft || duplicateIds.length > 0} errorMessage={transportFailed ? "Nie udało się połączyć z serwerem. Twoje zmiany pozostały w edytorze." : undefined} />
     </form>
   );
 }
@@ -470,14 +533,8 @@ function ProductCombobox({
   );
 }
 
-function AboutSubmitButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" disabled={pending}>
-      <Save className="size-4" aria-hidden />
-      {pending ? "Zapisywanie…" : "Zapisz"}
-    </Button>
-  );
+function AboutSaveBar({ dirty, pending, status, disabled, errorMessage }: { dirty: boolean; pending: boolean; status: "idle" | "saved" | "error"; disabled: boolean; errorMessage?: string }) {
+  return <AdminSaveBar formId="about-page-editor-form" dirty={dirty} pending={pending} status={status} disabled={disabled} errorMessage={errorMessage} />;
 }
 
 function normalizeConfig(config: AboutPageSettings): AboutEditorState {

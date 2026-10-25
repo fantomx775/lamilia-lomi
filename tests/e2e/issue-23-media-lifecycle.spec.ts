@@ -109,10 +109,13 @@ test("replacing a synthetic product cover keeps one active image and retires the
 
     await page.getByRole("button", { name: /Zapisz/ }).click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
-    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+\?saved=1$/i);
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
     const productPath = new URL(page.url()).pathname;
     productId = productPath.split("/").at(-1);
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible({ timeout: 15_000 });
     await page.reload();
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible({ timeout: 15_000 });
 
     const contentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
     const readSnapshot = () => JSON.parse(fs.readFileSync(contentPath, "utf8")) as {
@@ -138,8 +141,10 @@ test("replacing a synthetic product cover keeps one active image and retires the
 
     await page.getByRole("button", { name: /Zapisz/ }).click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
-    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+\?saved=1$/i);
+    await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
+    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
     await page.reload();
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible({ timeout: 15_000 });
     const savedCoverSection = page.locator("#media-section-cover");
     await expect(savedCoverSection.getByRole("img", { name: `Podgląd ${replacementFilename}` })).toBeVisible();
     await expect(savedCoverSection.getByText(firstFilename, { exact: true })).toHaveCount(0);

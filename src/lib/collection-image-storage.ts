@@ -8,7 +8,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getBackendMode } from "./config";
 import { createCollectionImagePath, isSafeCollectionImagePath } from "./collection-image-path";
 import { getMediaUploadProvider, getR2StorageConfig } from "./media-r2-config";
-import { mediaFilenameForDisplay } from "./media-upload";
+import { mediaFilenameForDisplay, MAX_READER_ARTWORK_BYTES } from "./media-upload";
 import { createServiceRoleClient } from "./supabase/admin";
 
 const COLLECTION_IMAGE_BUCKET = "collection-media";
@@ -23,10 +23,12 @@ export async function storeCollectionImage(input: {
   contentType: string;
   bytes: Uint8Array;
   authorizationToken?: string | null;
+  namespace?: "collections" | "reader-artworks";
 }): Promise<{ path: string; provider: CollectionImageProvider; filename: string }> {
   const filename = mediaFilenameForDisplay(input.filename);
-  const storagePath = createCollectionImagePath(input.collectionId, input.imageId, filename, input.contentType);
-  if (input.bytes.byteLength <= 0 || input.bytes.byteLength > MAX_COLLECTION_IMAGE_BYTES) {
+  const storagePath = createCollectionImagePath(input.collectionId, input.imageId, filename, input.contentType, input.namespace);
+  const maxBytes = input.namespace === "reader-artworks" ? MAX_READER_ARTWORK_BYTES : MAX_COLLECTION_IMAGE_BYTES;
+  if (input.bytes.byteLength <= 0 || input.bytes.byteLength > maxBytes) {
     throw new Error("Invalid collection image size.");
   }
 
@@ -70,7 +72,8 @@ export async function assertCollectionImageExists(input: {
   authorizationToken?: string | null;
 }) {
   assertPath(input.storagePath, input.collectionId);
-  if (input.sizeBytes <= 0 || input.sizeBytes > MAX_COLLECTION_IMAGE_BYTES) {
+  const maxBytes = input.storagePath.startsWith("reader-artworks/") ? MAX_READER_ARTWORK_BYTES : MAX_COLLECTION_IMAGE_BYTES;
+  if (input.sizeBytes <= 0 || input.sizeBytes > maxBytes) {
     throw new Error("Invalid collection image size.");
   }
 
@@ -124,6 +127,27 @@ export async function readLocalCollectionImage(storagePath: string, collectionId
   return fs.readFile(localImagePath(storagePath));
 }
 
+export async function readCollectionImage(input: {
+  collectionId: string;
+  storagePath: string;
+  provider: CollectionImageProvider;
+  authorizationToken?: string | null;
+}): Promise<Uint8Array> {
+  assertPath(input.storagePath, input.collectionId);
+  if (input.provider === "local") return readLocalCollectionImage(input.storagePath, input.collectionId);
+  if (input.provider === "r2") {
+    const { privateBucket } = getR2StorageConfig();
+    const result = await getR2Client().send(new GetObjectCommand({ Bucket: privateBucket, Key: input.storagePath }));
+    if (!result.Body) throw new Error("Collection image is unavailable.");
+    return result.Body.transformToByteArray();
+  }
+  const { data, error } = await createServiceRoleClient({
+    storageAuthorizationToken: input.authorizationToken ?? undefined,
+  }).storage.from(COLLECTION_IMAGE_BUCKET).download(input.storagePath);
+  if (error || !data) throw new Error("Collection image is unavailable.");
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 export async function removeCollectionImage(input: {
   collectionId: string;
   storagePath: string;
@@ -154,7 +178,8 @@ function localImagePath(storagePath: string) {
 }
 
 function assertPath(storagePath: string, collectionId?: string) {
-  if (!isSafeCollectionImagePath(storagePath, collectionId)) {
+  if (!isSafeCollectionImagePath(storagePath, collectionId, "collections") &&
+      !isSafeCollectionImagePath(storagePath, collectionId, "reader-artworks")) {
     throw new Error("Invalid collection image path.");
   }
 }

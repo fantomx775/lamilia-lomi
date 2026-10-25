@@ -37,7 +37,7 @@ describe("PageEditor", () => {
     expect(title).not.toBeNull();
     await user.clear(title!);
     await user.type(title!, "Updated privacy policy");
-    await user.click(view.getAllByRole("button", { name: "Zapisz" })[0]);
+    await user.click(view.getByTestId("admin-save-bar").querySelector("button")!);
 
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
     const formData = saveAction.mock.calls[0][0] as FormData;
@@ -59,7 +59,7 @@ describe("PageEditor", () => {
 
     await user.clear(title!);
     await user.type(title!, savedTitle);
-    await user.click(view.getAllByRole("button", { name: "Zapisz" })[0]);
+    await user.click(view.getByTestId("admin-save-bar").querySelector("button")!);
     await waitFor(() => expect(saveAction).toHaveBeenCalled());
 
     const savedRecords = records.map((record) => record.locale === "en" ? { ...record, title: savedTitle } : record);
@@ -107,7 +107,7 @@ describe("PageEditor", () => {
 
     await user.click(view.getByRole("button", { name: "HTML" }));
     fireEvent.change(view.getByRole("textbox", { name: "Źródło HTML" }), { target: { value: "<p>Unconverted source</p>" } });
-    await user.click(view.getAllByRole("button", { name: "Zapisz" })[0]);
+    await user.click(view.getByTestId("admin-save-bar").querySelector("button")!);
 
     expect(saveAction).not.toHaveBeenCalled();
     expect(view.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue("<p>Unconverted source</p>");
@@ -121,11 +121,74 @@ describe("PageEditor", () => {
     const title = view.container.querySelector<HTMLInputElement>("#page-title");
 
     await user.type(title!, " updated");
-    expect(view.getByRole("status")).toHaveTextContent("Masz niezapisane zmiany.");
+    expect(view.getByText("Masz niezapisane zmiany.")).toHaveAttribute("role", "status");
     await user.click(view.getByRole("link", { name: "Strony" }));
     expect(confirm).toHaveBeenCalledWith("Masz niezapisane zmiany. Opuścić edytor i je odrzucić?");
     expect(view.container.querySelector("#page-title")).toBeInTheDocument();
     confirm.mockRestore();
+  });
+
+  it("keeps edits made during a deferred save dirty against the confirmed submitted snapshot", async () => {
+    let resolveSave!: () => void;
+    const saveAction = vi.fn(() => new Promise<void>((resolve) => { resolveSave = resolve; }));
+    const user = userEvent.setup();
+    const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "privacy");
+    const view = render(<PageEditor slug="privacy" title="Privacy Policy" records={records} saveAction={saveAction} />);
+    const title = view.container.querySelector<HTMLInputElement>("#page-title")!;
+
+    await user.type(title, " saved");
+    const submittedTitle = title.value;
+    await user.click(view.getByTestId("admin-save-bar").querySelector("button")!);
+    await waitFor(() => expect(view.getByTestId("admin-save-bar")).toHaveTextContent("Zapisywanie…"));
+    expect(view.getByTestId("admin-save-bar").querySelector("button")).toBeDisabled();
+
+    await user.type(title, " newer");
+    await user.click(view.getByRole("button", { name: "HTML" }));
+    const source = view.getByRole("textbox", { name: "Źródło HTML" });
+    fireEvent.change(source, { target: { value: "<p>Newer HTML draft</p>" } });
+    resolveSave();
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    const savedRecords = records.map((record) => record.locale === "en" ? { ...record, title: submittedTitle } : record);
+    view.rerender(<PageEditor slug="privacy" title="Privacy Policy" records={savedRecords} saved savedEventId="success-1" saveAction={saveAction} />);
+
+    await waitFor(() => expect(view.getByTestId("admin-save-bar")).toHaveTextContent("Niezapisane zmiany"));
+    expect(title).toHaveValue(`${submittedTitle} newer`);
+    expect(view.getByRole("textbox", { name: "Źródło HTML" })).toHaveValue("<p>Newer HTML draft</p>");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await user.click(view.getByRole("link", { name: "Strony" }));
+    expect(confirm).toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("acknowledges a successful save even when server normalization matches the previous baseline", async () => {
+    const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "privacy").map((record) => record.locale === "en" ? { ...record, title: "Foo" } : record);
+    const saveAction = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    const view = render(<PageEditor slug="privacy" title="Privacy Policy" records={records} saveAction={saveAction} />);
+    const title = view.container.querySelector<HTMLInputElement>("#page-title")!;
+    await user.type(title, " ");
+    expect(title).toHaveValue("Foo ");
+    await user.click(view.getByTestId("admin-save-bar").querySelector("button")!);
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+
+    view.rerender(<PageEditor slug="privacy" title="Privacy Policy" records={records} saved savedEventId="success-normalized" saveAction={saveAction} />);
+    await waitFor(() => expect(title).toHaveValue("Foo"));
+    expect(view.getByTestId("admin-save-bar")).toHaveTextContent("Zapisano");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await user.click(view.getByRole("link", { name: "Strony" }));
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("preserves dirty state and source draft after a failed save response", async () => {
+    const records = getSeedContentSnapshot().staticPages.filter((page) => page.slug === "terms");
+    const user = userEvent.setup();
+    const view = render(<PageEditor slug="terms" title="Terms" records={records} saveAction={vi.fn()} />);
+    await user.type(view.container.querySelector<HTMLInputElement>("#page-title")!, " updated");
+    view.rerender(<PageEditor slug="terms" title="Terms" records={records} feedback="Nie udało się zapisać." saveAction={vi.fn()} />);
+    expect(view.getByTestId("admin-save-bar")).toHaveTextContent("Błąd zapisu");
+    expect(view.getByTestId("admin-save-bar")).toHaveTextContent("Niezapisane zmiany");
+    expect(view.getByText("Nie udało się zapisać.")).toHaveAttribute("role", "alert");
   });
 
 });

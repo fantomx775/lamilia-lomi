@@ -28,6 +28,8 @@ type AdminResourceListProps<T> = {
   isLoading?: boolean;
   loadingState?: React.ReactNode;
   resultsLabel?: (visibleCount: number) => string;
+  desktopBreakpoint?: "lg" | "xl";
+  tableLayout?: "auto" | "fixed";
 };
 
 export function AdminResourceList<T>({
@@ -50,6 +52,8 @@ export function AdminResourceList<T>({
   isLoading = false,
   loadingState,
   resultsLabel = formatPolishResultsCount,
+  desktopBreakpoint,
+  tableLayout,
 }: AdminResourceListProps<T>) {
   const [searchValue, setSearchValue] = useState("");
   const normalizedSearch = normalizeResourceSearchText(searchValue);
@@ -88,6 +92,8 @@ export function AdminResourceList<T>({
         renderMobileCard={renderMobileCard}
         isLoading={isLoading}
         loadingState={loadingState}
+        desktopBreakpoint={desktopBreakpoint}
+        tableLayout={tableLayout}
       />
     </AdminResourceTableShell>
   );

@@ -1,9 +1,8 @@
 "use client";
 
-import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RotateCcw, Save, Star, Trash2, Undo2, Video, X } from "lucide-react";
+import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RotateCcw, Star, Trash2, Undo2, Video, X } from "lucide-react";
 import { startTransition, useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createPortal } from "react-dom";
 
 import { registerProductEditorPopStateGuard } from "@/app/admin/admin-product-editor-history-guard";
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
@@ -27,6 +26,9 @@ import {
 import { MAX_PREMIUM_CODE_BATCH_SIZE, MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Collection, Product, ProductAsset, Tag } from "@/lib/types";
+import { ReaderArtworkManager } from "./reader-artwork-manager";
+import { useAdminToast } from "@/components/admin/admin-toast";
+import { AdminSaveBar } from "@/components/admin/admin-save-bar";
 
 type ProductContentDraft = {
   title: string;
@@ -148,12 +150,21 @@ export function ProductEditor({
   deleteAction?: (formData: FormData) => void | Promise<void>;
 }) {
   const router = useRouter();
+  const publishToast = useAdminToast();
   const formPermalink = product ? `/admin/products/${product.id}` : "/admin/products/new";
   const [nativeSaveState, nativeSaveFormAction] = useActionState(
     saveFormAction ?? keepProductSaveFormState,
     emptyProductSaveFormState,
     formPermalink,
   );
+  const lastNativeToast = useRef("");
+  useEffect(() => {
+    const signature = nativeSaveState.errors.join("|");
+    if (!signature) { lastNativeToast.current = ""; return; }
+    if (lastNativeToast.current === signature) return;
+    lastNativeToast.current = signature;
+    publishToast("error", nativeSaveState.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+  }, [nativeSaveState.errors, publishToast]);
   const submittedValues = nativeSaveState.values;
   const [content, setContent] = useState<ProductContentDraft>(() => buildProductContent(product, submittedValues));
   const [assets, setAssets] = useState<AssetDraft[]>(() => buildAssets(product, submittedValues));
@@ -165,7 +176,6 @@ export function ProductEditor({
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
-  const [saveBarRoot, setSaveBarRoot] = useState<HTMLElement | null>(null);
   const [saveErrorCodes, setSaveErrorCodes] = useState<AdminErrorCode[]>(() => nativeSaveState.errors);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
@@ -282,7 +292,6 @@ export function ProductEditor({
     savedFormSignatureRef.current = productEditorFormSignature(form);
     isDirtyRef.current = false;
     setIsDirty(false);
-    setSaveBarRoot(document.body);
   }, [refreshDirtyState]);
 
   useEffect(() => {
@@ -957,6 +966,7 @@ export function ProductEditor({
       try {
         const result = await saveAction(formData);
         if (!result.ok) {
+          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
           const mapped = mapProductSaveErrors(result.errors, formData, amazonLinks, premiumCodes);
           const cleanupFailures = new Map((result.mediaCleanupFailures ?? []).map((failure) => [failure.assetId, failure]));
           setAssets((current) => current.map((asset) => {
@@ -999,7 +1009,7 @@ export function ProductEditor({
         });
 
         if (!product) {
-          const href = `/admin/products/${result.id}?saved=1`;
+          const href = `/admin/products/${result.id}?toast=${crypto.randomUUID()}`;
           const owner = currentEditorUrlRef.current;
           const guard = readProductEditorHistoryGuard(window.history.state);
           if (!navigationApiAvailableRef.current && owner && guard?.owner === owner && guard.role === "guard") {
@@ -1009,8 +1019,11 @@ export function ProductEditor({
           } else {
             setCreatedProductHref(href);
           }
+        } else {
+          publishToast("success", "Zmiany produktu zostały zapisane.");
         }
       } catch {
+        publishToast("error", "Nie udało się zapisać produktu. Spróbuj ponownie.");
         setSaveStatus("error");
         setSaveErrorCodes([ADMIN_ERROR_CODES.INTERNAL]);
       } finally {
@@ -1036,20 +1049,11 @@ export function ProductEditor({
           status={<Badge className={statusClass(productStatus)}>{statusLabels[productStatus]}</Badge>}
         />
 
-        <noscript>
-          <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-white/95 px-4 pt-3 shadow-[0_-8px_30px_rgba(47,35,29,0.08)] sm:px-6 lg:left-64 lg:px-8" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
-            <div className="mx-auto flex max-w-6xl justify-end">
-              <button type="submit" className={buttonClassName({ className: "w-fit" })}>Zapisz produkt</button>
-            </div>
-          </div>
-        </noscript>
-
         {hasActiveMediaUpload ? <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Zapis produktu będzie dostępny po zakończeniu przesyłania plików.</p> : null}
         {feedback && showRouteFeedback ? <div role="alert" className="rounded-md border border-[var(--color-border)] bg-white px-4 py-3 text-sm text-[var(--color-terracotta)]">{feedback}</div> : null}
         {saveErrorCodes.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"><p className="font-medium">Nie udało się zapisać. Twoje wpisane wartości są zachowane.</p><ul className="mt-2 list-disc space-y-1 pl-5">{Array.from(new Set(saveErrorCodes)).map((code) => <li key={code}>{getAdminErrorMessage(code, "pl")}</li>)}</ul></div> : null}
 
-        <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_19rem]">
-          <main className="grid min-w-0 gap-6">
+        <main className="mx-auto grid w-full max-w-4xl min-w-0 gap-6">
       <AdminEditorSection title="Podstawowe informacje" description="Treść produktu jest edytowana po angielsku.">
               <div className="grid min-w-0 gap-5">
                 <div className="grid min-w-0 gap-4">
@@ -1094,6 +1098,7 @@ export function ProductEditor({
             </AdminEditorSection>
 
             <MediaSections assets={assets} errors={mediaErrors} fieldErrors={fieldErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
+            <ReaderArtworkManager productId={product?.id} />
 
             <AdminEditorSection title="Sprzedaż na Amazon" description="Dodaj maksymalnie jeden link dla każdego rynku i wybierz jeden domyślny.">
               <div id="product-amazon-links" className="grid gap-3">
@@ -1168,10 +1173,7 @@ export function ProductEditor({
                 )}
               </div>
             </AdminEditorSection>
-          </main>
-
-          <aside className="grid h-fit min-w-0 gap-6 xl:sticky xl:top-6">
-            <AdminEditorSection title="Publikacja i katalog">
+            <AdminEditorSection title="Publikacja i organizacja">
               <div className="grid gap-4">
               <Field label="Status" htmlFor="product-status" error={fieldErrors["product-status"]?.[0]}>
                 <select id="product-status" name="status" value={productStatus} onChange={(event) => setProductStatus(event.target.value as Product["status"])} aria-invalid={Boolean(fieldErrors["product-status"]?.length)} aria-describedby={fieldErrors["product-status"]?.length ? "product-status-error" : undefined} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm outline-none focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]">
@@ -1192,9 +1194,6 @@ export function ProductEditor({
                 <p className="text-xs leading-5 text-[var(--color-muted)]">Liczba dni od odblokowania produktu do przypomnienia.</p>
               </Field>
               </div>
-            </AdminEditorSection>
-
-            <AdminEditorSection title="Organizacja">
               <div className="grid gap-4">
                 <Field label="Segment" htmlFor="product-audience"><select id="product-audience" name="audience" defaultValue={submittedValue(submittedValues, "audience", product?.audience ?? "kids")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm"><option value="kids">Dzieci</option><option value="adults">Dorośli</option></select></Field>
                 <Field label="Typ produktu" htmlFor="product-type"><select id="product-type" name="productType" defaultValue={submittedValue(submittedValues, "productType", product?.productType ?? "coloring-book")} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{product?.productType && !productTypes.includes(product.productType) ? <option value={product.productType}>{formatProductType(product.productType)}</option> : null}{productTypes.map((type) => <option key={type} value={type}>{formatProductType(type)}</option>)}</select></Field>
@@ -1203,8 +1202,7 @@ export function ProductEditor({
                 <CheckboxGroup label="Tagi" name="tagIds" values={tags.map((tag) => ({ id: tag.id, label: taxonomyLabel(tag.translations, tag.slug) }))} selected={submittedValuesFor(submittedValues, "tagIds", product?.tagIds ?? [])} />
               </div>
             </AdminEditorSection>
-          </aside>
-        </div>
+        </main>
         </fieldset>
       </form>
 
@@ -1212,23 +1210,9 @@ export function ProductEditor({
         <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving || isGeneratingPremiumBatch} />
       ) : null}
 
-      {saveBarRoot ? createPortal(
-        <div data-testid="product-save-bar" className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-border)] bg-white/95 px-4 pt-3 shadow-[0_-8px_30px_rgba(47,35,29,0.08)] backdrop-blur sm:px-6 lg:left-64 lg:px-8" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
-            <p role={saveStatus === "error" ? "alert" : "status"} aria-live="polite" className={`min-w-0 text-sm ${saveStatus === "error" ? "text-red-800" : "text-[var(--color-muted)]"}`}>
-              {isSaving ? "Zapisywanie…" : saveStatus === "saved" ? "Zapisano. Zmiany są aktualne." : saveStatus === "error" ? "Zapis nie powiódł się. Sprawdź wskazane błędy." : isDirty ? "Niezapisane zmiany" : product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"}
-            </p>
-            <ProductSubmitButton pending={isSaving} dirty={isDirty} disabled={isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction} />
-          </div>
-        </div>,
-        saveBarRoot,
-      ) : null}
+      <AdminSaveBar formId="product-editor-form" dirty={isDirty} pending={isSaving} status={saveStatus} disabled={isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction} testId="product-save-bar" nativeSubmitLabel="Zapisz produkt" idleMessage={product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"} savedMessage="Zapisano. Zmiany są aktualne." errorMessage="Zapis nie powiódł się. Sprawdź wskazane błędy." allowCleanSubmit />
     </div>
   );
-}
-
-function ProductSubmitButton({ pending, dirty, disabled = false }: { pending: boolean; dirty: boolean; disabled?: boolean }) {
-  return <Button type="submit" form="product-editor-form" disabled={pending || disabled} className="shrink-0"><Save className="size-4" aria-hidden />{pending ? "Zapisywanie…" : dirty ? "Zapisz zmiany" : "Zapisz"}</Button>;
 }
 
 function MediaSections({
