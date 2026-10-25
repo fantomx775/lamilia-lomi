@@ -56,6 +56,7 @@ export function CommunityCreationManager({
   const [pageError, setPageError] = useState("");
   const [descriptionDrafts, setDescriptionDrafts] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [mutationBusy, setMutationBusy] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [uploadDrawerOpen, setUploadDrawerOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -165,7 +166,8 @@ export function CommunityCreationManager({
 
   async function saveDescription(artwork: CommunityOwnerArtwork) {
     const description = descriptionDrafts[artwork.id] ?? artwork.description;
-    if (!canEdit || description.trim() === artwork.description) return;
+    if (!canEdit || mutationBusy || description.trim() === artwork.description) return;
+    setMutationBusy(true);
     setSavingId(artwork.id);
     setPageError("");
     try {
@@ -184,10 +186,13 @@ export function CommunityCreationManager({
       setPageError(error instanceof Error ? error.message : "Your description could not be saved.");
     } finally {
       setSavingId(null);
+      setMutationBusy(false);
     }
   }
 
   async function deleteArtwork(artwork: CommunityOwnerArtwork) {
+    if (mutationBusy) return;
+    setMutationBusy(true);
     setPageError("");
     try {
       const response = await fetch(`/api/community/artworks/${encodeURIComponent(artwork.id)}`, {
@@ -202,6 +207,8 @@ export function CommunityCreationManager({
       setNotice("Your artwork was deleted.");
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "This artwork could not be deleted.");
+    } finally {
+      setMutationBusy(false);
     }
   }
 
@@ -355,6 +362,7 @@ export function CommunityCreationManager({
                           <textarea
                             rows={3}
                             maxLength={240}
+                            disabled={mutationBusy}
                             value={description}
                             onChange={(event) => {
                               const value = event.currentTarget.value;
@@ -377,25 +385,25 @@ export function CommunityCreationManager({
                         {editingId === artwork.id && canEdit ? (
                           <>
                             {description.trim() !== artwork.description ? (
-                              <button type="button" disabled={savingId === artwork.id} onClick={() => void saveDescription(artwork)} className="inline-flex min-h-9 items-center rounded-md bg-[var(--color-ink)] px-3 text-xs font-medium text-white disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-save-description">
+                              <button type="button" disabled={mutationBusy || savingId === artwork.id} onClick={() => void saveDescription(artwork)} className="inline-flex min-h-9 items-center rounded-md bg-[var(--color-ink)] px-3 text-xs font-medium text-white disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-save-description">
                                 {savingId === artwork.id ? "Saving…" : "Save description"}
                               </button>
                             ) : null}
-                            <button type="button" disabled={savingId === artwork.id} onClick={() => { setEditingId(null); setDescriptionDrafts((current) => { const next = { ...current }; delete next[artwork.id]; return next; }); }} className="min-h-9 rounded-md px-2 text-xs font-medium text-[var(--color-ink)] underline underline-offset-4 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">Cancel</button>
+                            <button type="button" disabled={mutationBusy || savingId === artwork.id} onClick={() => { setEditingId(null); setDescriptionDrafts((current) => { const next = { ...current }; delete next[artwork.id]; return next; }); }} className="min-h-9 rounded-md px-2 text-xs font-medium text-[var(--color-ink)] underline underline-offset-4 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">Cancel</button>
                           </>
                         ) : canEdit ? (
-                          <button type="button" onClick={() => setEditingId(artwork.id)} className="inline-flex min-h-9 items-center rounded-md border border-[var(--color-border)] px-3 text-xs font-medium text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-edit-description">Edit description</button>
+                          <button type="button" disabled={mutationBusy} onClick={() => setEditingId(artwork.id)} className="inline-flex min-h-9 items-center rounded-md border border-[var(--color-border)] px-3 text-xs font-medium text-[var(--color-ink)] disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-edit-description">Edit description</button>
                         ) : null}
                         {canDelete && deleteId !== artwork.id ? (
-                          <button type="button" onClick={() => setDeleteId(artwork.id)} className="inline-flex min-h-9 items-center rounded-md px-2 text-xs font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-delete">Delete artwork</button>
+                          <button type="button" disabled={mutationBusy} onClick={() => setDeleteId(artwork.id)} className="inline-flex min-h-9 items-center rounded-md px-2 text-xs font-medium text-[var(--color-ink)] underline underline-offset-4 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-delete">Delete artwork</button>
                         ) : null}
                       </div>
                     {deleteId === artwork.id ? (
                       <div className="grid gap-3 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-3" role="group" aria-label="Confirm artwork deletion">
                         <p className="text-sm leading-6">Delete this artwork? It will no longer be visible.</p>
                         <div className="flex flex-wrap gap-3">
-                          <button type="button" onClick={() => void deleteArtwork(artwork)} className="min-h-10 rounded-md bg-[var(--color-ink)] px-4 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-confirm-delete">Delete artwork</button>
-                          <button type="button" onClick={() => setDeleteId(null)} className="min-h-10 rounded-md border border-[var(--color-border)] px-4 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">Keep artwork</button>
+                          <button type="button" disabled={mutationBusy} onClick={() => void deleteArtwork(artwork)} className="min-h-10 rounded-md bg-[var(--color-ink)] px-4 text-sm font-medium text-white disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" data-testid="community-artwork-confirm-delete">{mutationBusy ? "Deleting…" : "Delete artwork"}</button>
+                          <button type="button" disabled={mutationBusy} onClick={() => setDeleteId(null)} className="min-h-10 rounded-md border border-[var(--color-border)] px-4 text-sm font-medium disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">Keep artwork</button>
                         </div>
                       </div>
                     ) : null}

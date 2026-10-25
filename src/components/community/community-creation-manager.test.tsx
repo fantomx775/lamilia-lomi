@@ -108,6 +108,56 @@ describe("CommunityCreationManager", () => {
     expect(screen.queryByTestId("community-artwork-save-description")).toBeNull();
   });
 
+  it("blocks delete while a description save is pending and prevents duplicate deletion", async () => {
+    const user = userEvent.setup();
+    const artwork = {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      product: { id: "11111111-1111-4111-8111-111111111111", slug: "moon-garden", title: "Moon Garden", audience: "kids" as const },
+      contentType: "image/webp" as const,
+      description: "Original description",
+      status: "approved" as const,
+      revision: 1,
+      rejectionReason: null,
+      createdAt: "2026-10-25T00:00:00Z",
+      updatedAt: "2026-10-25T00:00:00Z",
+    };
+    const updatedArtwork = { ...artwork, description: "Updated description", status: "pending" as const, revision: 2 };
+    let resolveSave!: (response: Response) => void;
+    let resolveDelete!: (response: Response) => void;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") return await new Promise<Response>((resolve) => { resolveSave = resolve; });
+      if (init?.method === "DELETE") return await new Promise<Response>((resolve) => { resolveDelete = resolve; });
+      throw new Error("Unexpected request method.");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderManager([artwork]);
+
+    await user.click(screen.getByTestId("community-artwork-edit-description"));
+    await user.clear(screen.getByTestId("community-artwork-description"));
+    await user.type(screen.getByTestId("community-artwork-description"), "Updated description");
+    await user.click(screen.getByTestId("community-artwork-save-description"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const deleteButton = screen.getByTestId("community-artwork-delete");
+    expect(deleteButton).toBeDisabled();
+    await user.click(deleteButton);
+    expect(screen.queryByRole("group", { name: "Confirm artwork deletion" })).toBeNull();
+
+    resolveSave(new Response(JSON.stringify({ ok: true, artwork: updatedArtwork }), { status: 200 }));
+    await screen.findByText("Your description was saved. This artwork is pending review again.");
+    await user.click(screen.getByTestId("community-artwork-delete"));
+    await user.click(screen.getByTestId("community-artwork-confirm-delete"));
+    await screen.findByText("Deleting…");
+
+    const confirmDelete = screen.getByTestId("community-artwork-confirm-delete");
+    expect(confirmDelete).toBeDisabled();
+    await user.click(confirmDelete);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    resolveDelete(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    await waitFor(() => expect(screen.queryByTestId("community-artwork-card")).toBeNull());
+  });
+
   it("sends three files sequentially and retries a failed item with its stable key and frozen payload", async () => {
     const user = userEvent.setup({ applyAccept: false });
     vi.stubGlobal("crypto", { randomUUID: vi.fn()
