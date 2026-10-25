@@ -5,11 +5,17 @@ export const consentKey = "ll_cookie_consent";
 type AnalyticsWindow = Window & { dataLayer?: unknown[]; gtag?: (...args: unknown[]) => void; "ga-disable-G-NG67S3HPQZ"?: boolean };
 let initialized = false;
 let lastPage: string | undefined;
+let currentPageReferrer: string | undefined;
 let deniedInMemory = false;
 const denialCookie = "ll_analytics_denied";
 
 function hasDenialCookie() {
   return document.cookie.split(";").some(value => value.trim() === `${denialCookie}=1`);
+}
+
+function initialPageReferrer() {
+  if (!document.referrer) return "";
+  try { return new URL(document.referrer).origin; } catch { return ""; }
 }
 
 /** Return whether the choice was persisted, so withdrawal never reloads stale consent. */
@@ -37,7 +43,12 @@ export function trackEvent(name: string, values: Record<string, string | number>
   if (readConsent()?.analytics !== true) return;
   const target = window as AnalyticsWindow;
   if (target[`ga-disable-${ga4Id}`]) return;
-  target.gtag?.("event", name, { ...values, page_location: location.origin + location.pathname, send_to: ga4Id });
+  target.gtag?.("event", name, {
+    ...values,
+    page_location: location.origin + location.pathname,
+    page_referrer: currentPageReferrer ?? initialPageReferrer(),
+    send_to: ga4Id,
+  });
 }
 
 export function startAnalytics() {
@@ -53,26 +64,31 @@ export function startAnalytics() {
   target.gtag("consent", "default", { analytics_storage: "denied", ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied" });
   target.gtag("consent", "update", { analytics_storage: "granted" });
   target.gtag("js", new Date());
+  const initialLocation = location.origin + location.pathname;
+  currentPageReferrer = initialPageReferrer();
+  target.gtag("set", { page_location: initialLocation, page_referrer: currentPageReferrer });
   target.gtag("config", ga4Id, {
     send_page_view: false,
     allow_google_signals: false,
     allow_ad_personalization_signals: false,
-    page_location: location.origin + location.pathname,
-    page_referrer: document.referrer ? new URL(document.referrer).origin : "",
   });
 }
 
 export function trackPage(path: string) {
   if (readConsent()?.analytics !== true || path === lastPage) return;
+  const pageReferrer = lastPage ? location.origin + lastPage : initialPageReferrer();
   lastPage = path;
-  // Update the default URL for subsequent events after client navigation.
-  (window as AnalyticsWindow).gtag?.("set", { page_location: location.origin + path });
-  trackEvent("page_view", { page_location: location.origin + path, page_path: path });
+  currentPageReferrer = pageReferrer;
+  // Keep the current location and sanitized referrer current for later events too.
+  (window as AnalyticsWindow).gtag?.("set", { page_location: location.origin + path, page_referrer: pageReferrer });
+  trackEvent("page_view", { page_location: location.origin + path, page_path: path, page_referrer: pageReferrer });
 }
 
 export function stopAnalytics() {
   const target = window as AnalyticsWindow;
   target[`ga-disable-${ga4Id}`] = true;
+  lastPage = undefined;
+  currentPageReferrer = undefined;
   if (target.dataLayer) target.dataLayer.length = 0;
   for (const cookie of document.cookie.split(";")) {
     const name = cookie.split("=")[0].trim();

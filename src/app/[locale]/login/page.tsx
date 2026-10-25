@@ -97,7 +97,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
             <SubmitButton pendingLabel={t("pending")}>{t("continue")}</SubmitButton>
           </form>
           {canResendVerification ? (
-            <form action={resendSupabaseVerificationEmailAction} className="mt-6 grid gap-3 border-t border-[var(--color-border)] pt-5">
+            <form data-analytics-form="resend_verification" action={resendSupabaseVerificationEmailAction} className="mt-6 grid gap-3 border-t border-[var(--color-border)] pt-5">
               <input type="hidden" name="locale" value={locale} />
               <input type="hidden" name="returnTo" value={redirectTo} />
               <input type="hidden" name="code" value={code} />

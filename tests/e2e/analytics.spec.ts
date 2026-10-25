@@ -22,9 +22,23 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
     form.addEventListener("submit", e => e.preventDefault());
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   });
-  expect((await events()).some(item => item[1] === "form_submit")).toBe(true);
-  await page.goto("/en/products/moon-garden-coloring-book");
-  await expect.poll(async () => (await events()).filter(item => item[1] === "page_view").length).toBe(1);
+  const contactSubmit = (await events()).find(item => item[1] === "form_submit");
+  expect(contactSubmit?.[2]).toMatchObject({ form_name: "contact" });
+  const mobileMenuButton = page.getByRole("button", { name: "Open navigation menu" });
+  if (await mobileMenuButton.isVisible()) {
+    await mobileMenuButton.click();
+    await page.getByRole("navigation", { name: "Mobile primary navigation" }).getByRole("link", { name: "Catalog", exact: true }).click();
+  } else {
+    await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Catalog", exact: true }).click();
+  }
+  await expect(page).toHaveURL(/\/en\/products$/);
+  await page.locator('a[href="/en/products/moon-garden-coloring-book"]').first().click();
+  await expect(page).toHaveURL(/\/en\/products\/moon-garden-coloring-book$/);
+  await expect.poll(async () => (await events()).filter(item => item[1] === "page_view").length).toBe(4);
+  const pageViews = (await events()).filter(item => item[1] === "page_view").map(item => item[2] as Record<string, unknown>);
+  const origin = await page.evaluate(() => location.origin);
+  expect(pageViews.map(item => item.page_path)).toEqual(["/en", "/en/contact", "/en/products", "/en/products/moon-garden-coloring-book"]);
+  expect(pageViews.map(item => item.page_referrer)).toEqual(["", `${origin}/en`, `${origin}/en/contact`, `${origin}/en/products`]);
   await page.locator('a[target="_blank"]').filter({ hasText: /Amazon/i }).first().evaluate(link => {
     link.addEventListener("click", e => e.preventDefault());
     (link as HTMLAnchorElement).click();
@@ -32,14 +46,31 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
   // Seed media is a placeholder; use an HTML video to exercise the same delegated listener.
   await page.evaluate(() => {
     const video = document.createElement("video"); video.setAttribute("data-flipthrough", ""); document.body.append(video);
-    video.dispatchEvent(new Event("play")); video.dispatchEvent(new Event("ended"));
+    video.dispatchEvent(new Event("play")); video.dispatchEvent(new Event("play")); video.dispatchEvent(new Event("ended"));
   });
   const measured = await events();
   for (const name of ["page_view", "amazon_link_click", "video_play", "video_complete"]) expect(measured.some(item => item[1] === name), JSON.stringify(measured) + " missing " + name).toBe(true);
+  expect(measured.filter(item => item[1] === "video_play")).toHaveLength(2);
+  expect(measured.filter(item => item[1] === "video_complete")).toHaveLength(1);
   expect(JSON.stringify(measured)).not.toContain("email");
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "ll_cookie_consent" && JSON.parse(value).analytics === false) throw new DOMException("quota", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    };
+  });
   await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
   await page.getByRole("button", { name: "Essential only", exact: true }).click();
   await expect(page.getByRole("button", { name: "Cookie settings", exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const video = document.createElement("video");
+    video.setAttribute("data-flipthrough", "");
+    document.body.append(video);
+    video.dispatchEvent(new Event("play"));
+  });
+  expect(await events()).toHaveLength(0);
+  expect(await page.evaluate(() => document.cookie)).toContain("ll_analytics_denied=1");
   await page.reload();
   expect(await page.locator('script[src*="googletagmanager"]').count()).toBe(0);
 });

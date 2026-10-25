@@ -4,7 +4,7 @@ Measurement ID: `G-NG67S3HPQZ` (public identifier, fixed for this site).
 
 Basic consent mode: no Google library or analytics events before explicit consent. Advertising consent remains denied. Cookie settings below the footer allow withdrawal; GA cookies are removed and the page reloads to unload Google listeners. Consent is validated and synchronized across tabs; inaccessible or corrupt storage fails closed.
 
-Events: `page_view` on initial consent and pathname changes; `amazon_link_click` with product ID and market; `form_submit` with a fixed form name (contact, login, register, unlock); `video_play` and `video_complete` for HTML flipthrough videos. Form submission means an attempt, not successful backend delivery. No form values, premium codes, query strings, hash fragments or signed video URLs are supplied by this instrumentation.
+Events: `page_view` on initial consent and pathname changes, with the previous in-app pathname as referrer and only the external origin on the first page; `amazon_link_click` with product ID and market; `form_submit` with a fixed form name (contact, login, register, unlock, resend_verification); `video_play` and `video_complete` for HTML flipthrough videos. Form submission means an attempt, not successful backend delivery. No form values, premium codes, query strings, hash fragments or signed video URLs are supplied by this instrumentation.
 
 ## Google property setup
 

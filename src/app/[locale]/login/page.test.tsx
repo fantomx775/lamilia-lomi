@@ -121,6 +121,17 @@ describe("Login page registration CTA", () => {
     );
   });
 
+  it("labels verification resend submissions for analytics without form values", async () => {
+    const view = render(
+      await LoginPage({
+        params: Promise.resolve({ locale: "en" }),
+        searchParams: Promise.resolve({ error: "verification_required" }),
+      }),
+    );
+
+    expect(view.container.querySelector('form[data-analytics-form="login"]')).not.toBeNull();
+    expect(view.container.querySelector('form[data-analytics-form="resend_verification"]')).not.toBeNull();
+  });
   it("shows demo verification guidance without a non-functional resend form", async () => {
     pageMocks.getBackendMode.mockReturnValue("local");
 
