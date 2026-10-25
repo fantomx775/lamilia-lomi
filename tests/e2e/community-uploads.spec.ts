@@ -389,6 +389,8 @@ test("keyboard drawer state and a dropped successful response recover without a 
   page.setDefaultTimeout(12_000);
   const fixtures = await communityFixtures(testInfo);
   let intercepted = false;
+  const interceptedResponses: Array<{ status: number; body?: unknown }> = [];
+  const proxyRequests: Array<Promise<unknown>> = [];
   try {
     const owner = await fixtures.actor("retry-owner", { username: "cc_retry_artist" });
     const book = await fixtures.product("Retry Fixture Book");
@@ -416,15 +418,39 @@ test("keyboard drawer state and a dropped successful response recover without a 
     // The real server commits. Only the first response to the browser is lost,
     // exercising the advertised stable-key recovery rather than a fake backend.
     await page.route("**/api/community/artworks", async (route) => {
-      const response = await route.fetch();
-      if (!intercepted) {
+      const interceptedRequest = route.request();
+      // Chromium's intercepted postData omits file bytes. Restore only these
+      // controlled fixture files, retaining the browser's real UUID/metadata.
+      const headers = await interceptedRequest.allHeaders();
+      const submitted = await new Response(new Uint8Array(interceptedRequest.postDataBuffer()!), {
+        headers: { "content-type": headers["content-type"] },
+      }).formData();
+      const actualForm = new FormData();
+      for (const [key, value] of submitted.entries()) {
+        if (typeof value === "string") actualForm.append(key, value);
+        else {
+          if (!["rose-fox.webp", "cottage.webp"].includes(value.name)) throw new Error("Unexpected intercepted fixture file.");
+          const bytes = await readFile(path.resolve("docs/design/coloring-club/assets", value.name));
+          actualForm.append(key, new Blob([new Uint8Array(bytes)], { type: value.type }), value.name);
+        }
+      }
+      const encoded = new Request(interceptedRequest.url(), { method: "POST", body: actualForm });
+      const bytes = Buffer.from(await encoded.arrayBuffer());
+      const proxyRequest = route.fetch({ postData: bytes, headers: { ...headers,
+        "content-type": encoded.headers.get("content-type")!, "content-length": String(bytes.length),
+      } });
+      proxyRequests.push(proxyRequest);
+      const response = await proxyRequest;
+      interceptedResponses.push({ status: response.status(), ...(!response.ok() ? { body: await response.json() } : {}) });
+      if (!intercepted && response.ok()) {
         intercepted = true;
-        expect([200, 201]).toContain(response.status());
         await route.abort("failed");
       } else await route.fulfill({ response });
     });
     await page.getByTestId("community-upload-submit").click();
-    await expect(page.getByTestId("community-artwork-retry")).toBeVisible();
+    await expect(page.getByTestId("community-artwork-retry").first()).toBeVisible();
+    await expect.poll(() => interceptedResponses).toEqual([{ status: 200 }, { status: 200 }]);
+    await page.getByTestId("community-upload-submit").filter({ hasText: "Sending artwork" }).waitFor({ state: "hidden" });
     await expect(dialog).toBeVisible();
     expect((await fixtures.service.from("community_artworks").select("id", { count: "exact" }).eq("author_id", owner.id)).count).toBe(2);
     await expect(page.getByTestId("community-selected-artwork")).toHaveCount(1);
@@ -438,7 +464,11 @@ test("keyboard drawer state and a dropped successful response recover without a 
     await page.reload();
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(2);
   } finally {
-    await page.unroute("**/api/community/artworks");
-    await fixtures.cleanup();
+    try {
+      if (!page.isClosed()) await page.unroute("**/api/community/artworks");
+    } finally {
+      await Promise.allSettled(proxyRequests);
+      await fixtures.cleanup();
+    }
   }
 });

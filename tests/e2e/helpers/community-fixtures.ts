@@ -55,7 +55,7 @@ export async function communityFixtures(testInfo: TestInfo) {
 
   async function product(label: string, status: "published" | "draft" | "archived" = "published") {
     const id = randomUUID();
-    const slug = `cc-browser-${label}-${runToken}`;
+    const slug = `cc-browser-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${runToken}`;
     expect((await service.from("products").insert({ id, slug, status, audience: "adults", product_type: "coloring-book" })).error).toBeNull();
     products.push(id);
     expect((await service.from("product_translations").insert({ product_id: id, locale: "en", title: label,
