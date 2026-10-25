@@ -61,7 +61,7 @@ test("Issue 73 reader artwork admin flow stays separate, private, and usable on 
     await expect(page.getByText("Wczytywanie prac…", { exact: true })).toHaveCount(0);
     const addButton = page.getByRole("button", { name: "Dodaj pracę" });
     await expect(page.getByText("Wczytywanie prac…", { exact: true })).toHaveCount(0);
-    await expect(addButton).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Wybierz pliki prac czytelniczek" })).toBeEnabled();
 
     const png = await sharp({ create: { width: 72, height: 96, channels: 3, background: { r: 204, g: 105, b: 91 } } }).png().toBuffer();
     const uploadArtwork = async (nickname: string, name: string) => {
@@ -183,6 +183,8 @@ test("Issue 73 reader artwork admin flow stays separate, private, and usable on 
 
     await page.goto(editorPath);
     await expect(page.getByText("Wczytywanie prac…", { exact: true })).toHaveCount(0);
+    await page.getByLabel(/Obraz/).setInputFiles({ name: "contrast-preview.png", mimeType: "image/png", buffer: png });
+    await page.getByTestId("reader-artwork-draft").getByLabel("Pseudonim").fill("Contrast fixture");
     const adminAddButton = page.getByRole("button", { name: "Dodaj pracę" });
     const addContrast = await contrastAgainstWhite(adminAddButton);
     expect(addContrast.ratio).toBeGreaterThanOrEqual(4.5);

@@ -1097,8 +1097,7 @@ export function ProductEditor({
               </div>
             </AdminEditorSection>
 
-            <MediaSections assets={assets} errors={mediaErrors} fieldErrors={fieldErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
-            <ReaderArtworkManager productId={product?.id} />
+            <MediaSections productId={product?.id} assets={assets} errors={mediaErrors} fieldErrors={fieldErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
 
             <AdminEditorSection title="Sprzedaż na Amazon" description="Dodaj maksymalnie jeden link dla każdego rynku i wybierz jeden domyślny.">
               <div id="product-amazon-links" className="grid gap-3">
@@ -1216,6 +1215,7 @@ export function ProductEditor({
 }
 
 function MediaSections({
+  productId,
   assets,
   errors,
   fieldErrors,
@@ -1225,6 +1225,7 @@ function MediaSections({
   onRetry,
   onMove,
 }: {
+  productId?: string;
   assets: AssetDraft[];
   errors: Partial<Record<ProductAsset["kind"], string>>;
   fieldErrors: Record<string, string[]>;
@@ -1237,6 +1238,7 @@ function MediaSections({
   return <div className="grid min-w-0 gap-6">
     <MediaSection kind="cover" title="OKŁADKA" description={`Jedna grafika reprezentująca produkt. ${imageRatioRequirement("cover")} Możesz ją później zastąpić lub usunąć.`} assets={assets} error={errors.cover} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
     <MediaSection kind="gallery" title="GALERIA" description={`Dodaj do 20 obrazów i ustaw ich kolejność przyciskami góra/dół. ${imageRatioRequirement("gallery")}`} assets={assets} error={errors.gallery} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
+    <ReaderArtworkManager key={productId ?? "new"} productId={productId} />
     <MediaSection kind="video" title="WIDEO FLIPTHROUGH" description="Jedno publiczne wideo pokazujące zawartość produktu." assets={assets} error={errors.video} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
     <MediaSection kind="public_download" title="PUBLICZNE PLIKI DO POBRANIA" description="Pliki dostępne dla każdego odwiedzającego — bez logowania i bez odblokowania." assets={assets} error={errors.public_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
     <MediaSection kind="premium_download" title="MATERIAŁY PREMIUM" description="Prywatne materiały dostępne dopiero po weryfikacji e-maila i odblokowaniu produktu." assets={assets} error={errors.premium_download} fieldErrors={fieldErrors} onUpload={onUpload} onRemove={onRemove} onUndo={onUndo} onRetry={onRetry} onMove={onMove} />
