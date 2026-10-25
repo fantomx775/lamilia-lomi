@@ -3500,7 +3500,7 @@ test("Production smoke mints scoped Vercel cookies without forwarding the bypass
       calls.push({ url: url.href, options });
       if (options.redirect === "manual") return {
         ok: false, status: 307, url: url.href,
-        headers: { getSetCookie: () => ["_vercel_jwt=synthetic-protection-cookie; Path=/; Secure"] },
+        headers: { getSetCookie: () => ["_vercel_jwt=synthetic-protection-cookie; Path=/; _vercel_jwt=attribute-must-not-be-used; Secure"] },
       };
       return { ok: true, status: 200, url: url.href, headers: { get: () => "text/plain" }, text: async () => "ok" };
     },
@@ -3533,8 +3533,14 @@ test("Production smoke authentication fails closed before requests for unsafe ho
   assert.equal(requests, 0);
 });
 
-test("Production smoke authentication blocks when the bypass cookie is absent or invalid", async () => {
-  for (const setCookies of [[], ["_vercel_jwt=; Path=/"], ["other_cookie=not-the-token; Path=/"]]) {
+test("Production smoke authentication blocks when the bypass cookie is absent, malformed, or oversized", async () => {
+  for (const setCookies of [
+    [],
+    ["_vercel_jwt=; Path=/"],
+    ["other_cookie=not-the-token; Path=/"],
+    ["_vercel_jwt=bad\u0000value; Path=/"],
+    ["_vercel_jwt=" + "a".repeat(4097) + "; Path=/"],
+  ]) {
     const calls = [];
     const result = await runProductionSmoke("https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app", {
       paths: ["/"], vercelProtectionBypass: "synthetic-secret",

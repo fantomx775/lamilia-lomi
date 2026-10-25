@@ -2849,8 +2849,7 @@ async function runProductionSmokeInternal(environmentUrl, {
       (hasSmokeCookie && !validHeaderValue(productionSmokeCookie))) {
     return { status: "BLOCKED", checks: [], details: "Production smoke authentication input is invalid." };
   }
-  const deploymentHost = /^lamilia-lomi-[a-z0-9]{9}-fantomxs-projects\.vercel\.app$/i;
-  if (hasAuth && (baseUrl.username || baseUrl.password || baseUrl.port || !deploymentHost.test(baseUrl.hostname))) {
+  if (hasAuth && (baseUrl.username || baseUrl.password || baseUrl.port || !VERCEL_PROJECT_DEPLOYMENT_HOST.test(baseUrl.hostname))) {
     return { status: "BLOCKED", checks: [], details: "Production smoke authentication is limited to the exact immutable project deployment host." };
   }
   if (!paths.length || paths.some((path) => !isValidProductionSmokePath(path))) {
@@ -2904,11 +2903,16 @@ async function runProductionSmokeInternal(environmentUrl, {
         signal: AbortSignal.timeout(timeoutMs),
       });
       const setCookies = response.headers?.getSetCookie?.() || [];
-      const match = setCookies.map((value) => value.match(/(?:^|[,;\s])(_vercel_jwt=[^;,\s]+)/)).find(Boolean);
-      if (!(response.ok || response.status === 307) || !match) {
+      const cookiePairs = setCookies.map((value) => String(value).split(";", 1)[0]);
+      const protectionPair = cookiePairs.find((pair) => pair.startsWith("_vercel_jwt="));
+      const protectionValue = protectionPair?.slice("_vercel_jwt=".length);
+      const validProtectionValue = typeof protectionValue === "string" &&
+        protectionValue.length > 0 && protectionValue.length <= 4096 &&
+        /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/.test(protectionValue);
+      if (!(response.ok || response.status === 307) || !validProtectionValue) {
         return { status: "BLOCKED", checks: [], details: "Production smoke authentication could not be established." };
       }
-      protectionCookie = match[1];
+      protectionCookie = "_vercel_jwt=" + protectionValue;
     } catch {
       return { status: "BLOCKED", checks: [], details: "Production smoke authentication could not be established." };
     }
