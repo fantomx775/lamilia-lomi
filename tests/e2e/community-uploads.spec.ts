@@ -261,7 +261,7 @@ test("three previews become independent private creations with persistent status
     const input = page.getByTestId("community-upload-file-input");
     const pictures = ["rose-fox.webp", "coastal-light.webp", "cottage.webp"].map((file) => path.resolve("docs/design/coloring-club/assets", file));
     await input.setInputFiles([...pictures, pictures[0]]);
-    await expect(page.getByRole("alert")).toContainText("three");
+    await expect(page.getByRole("alert").filter({ hasText: "Choose up to three" })).toContainText("three");
     await expect(page.getByTestId("community-selected-artwork")).toHaveCount(0);
     await input.setInputFiles(pictures);
     const previews = page.getByTestId("community-selected-artwork");
