@@ -185,7 +185,7 @@ begin
   on conflict (user_id) do update set
     username = excluded.username,
     is_adult = true,
-    adult_attested_at = coalesce(public.community_profiles.adult_attested_at, excluded.adult_attested_at),
+    adult_attested_at = excluded.adult_attested_at,
     opted_in_at = excluded.opted_in_at,
     participation_revoked_at = null,
     rules_version = excluded.rules_version,

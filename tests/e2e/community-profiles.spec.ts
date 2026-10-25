@@ -32,12 +32,19 @@ test("real club membership, concurrency, privacy and responsive account/profile 
   const runtimeErrors: string[] = [];
   const networkFailures: Array<{ path: string; error: string | undefined }> = [];
   const consoleDiagnostics: string[] = [];
+  const navigationAborts: Array<{ path: string; error: string }> = [];
   await mkdir(folder, { recursive: true });
   function observe(target: Page) {
     target.on("pageerror", (error) => runtimeErrors.push(error.message));
-    target.on("requestfailed", (request) => networkFailures.push({
-      path: new URL(request.url()).pathname, error: request.failure()?.errorText,
-    }));
+    target.on("requestfailed", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      const error = request.failure()?.errorText;
+      // Login navigation cancels Next prefetches and its in-flight font request.
+      // Retain these observed cancellations separately from transport failures.
+      if (error === "net::ERR_ABORTED" && (pathname === "/en/login" || pathname === "/__nextjs_font/geist-latin.woff2")) {
+        navigationAborts.push({ path: pathname, error });
+      } else networkFailures.push({ path: pathname, error });
+    });
     target.on("console", (message) => {
       if (message.type() === "error") consoleDiagnostics.push(message.text());
     });
@@ -80,6 +87,12 @@ test("real club membership, concurrency, privacy and responsive account/profile 
   async function capture(target: Page, view: string) {
     for (const width of [390, 768, 1440]) {
       await target.setViewportSize({ width, height: 1000 });
+      await expect(target.getByTestId("localized-route-loading")).toHaveCount(0);
+      await expect(target.getByRole("heading", { level: 1 }).first()).toBeVisible();
+      if (new URL(target.url()).pathname === "/en/account") {
+        await expect(target.getByTestId("community-account-panel")).toBeVisible();
+      }
+      await target.evaluate(() => scrollTo(0, 0));
       await essentials(target);
       await target.evaluate(() => document.fonts.ready);
       await target.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
@@ -246,7 +259,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
       for (const context of contexts) await context.close();
       await writeFile(path.join(folder, "browser-run.json"), `${JSON.stringify({ testedSha, runId, screenshots,
         viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/PostgREST", runtimeErrors,
-        networkFailures, consoleDiagnostics, fixtureCleanup,
+        networkFailures, navigationAborts, consoleDiagnostics, fixtureCleanup,
         note: "Checkpoint run. Metadata-only artwork fixtures; real image-byte flow belongs to #81. Development badge hidden for captures. Intentional HTTP denials are tested separately from JavaScript runtime errors. Visual screenshot review recorded separately by actual reviewers." }, null, 2)}\n`);
     }
   }

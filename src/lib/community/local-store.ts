@@ -141,7 +141,7 @@ export class CommunityLocalStore {
         username,
         avatarSeed: existing?.avatarSeed ?? this.uuid(),
         isAdult: true,
-        adultAttestedAt: existing?.adultAttestedAt ?? now,
+        adultAttestedAt: now,
         optedInAt: now,
         participationRevokedAt: null,
         rulesVersion: COMMUNITY_RULES_VERSION,

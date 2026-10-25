@@ -4,7 +4,7 @@
 -- Everything, including Auth/product fixtures, rolls back.
 BEGIN;
 SET LOCAL search_path = public, extensions;
-SELECT plan(56);
+SELECT plan(58);
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.community_profiles'::regclass), 'community profiles have RLS enabled');
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.community_artworks'::regclass), 'community artworks have RLS enabled');
@@ -59,6 +59,9 @@ SELECT is(public.community_join('10000000-0000-4000-8000-000000000001','Garden_U
 INSERT INTO community_join_timestamp SELECT accepted_at FROM public.community_profiles WHERE user_id='10000000-0000-4000-8000-000000000001';
 SELECT is(public.community_join('10000000-0000-4000-8000-000000000001','garden_user',true,'2026-10-25-v1'), '10000000-0000-4000-8000-000000000001'::uuid, 'repeated join with same username is idempotent');
 SELECT is((SELECT accepted_at FROM public.community_profiles WHERE user_id='10000000-0000-4000-8000-000000000001'), (SELECT accepted_at FROM community_join_timestamp), 'idempotent join does not rewrite acceptance timestamp');
+UPDATE public.community_profiles SET participation_revoked_at=now(), adult_attested_at='2020-01-01T00:00:00Z' WHERE user_id='10000000-0000-4000-8000-000000000001';
+SELECT is(public.community_join('10000000-0000-4000-8000-000000000001','garden_user',true,'2026-10-25-v1'), '10000000-0000-4000-8000-000000000001'::uuid, 'revoked member can explicitly rejoin with fresh attestation');
+SELECT ok((SELECT adult_attested_at > '2020-01-01T00:00:00Z' FROM public.community_profiles WHERE user_id='10000000-0000-4000-8000-000000000001'), 'rejoin refreshes adult attestation timestamp');
 SELECT throws_ok($$SELECT public.community_join('10000000-0000-4000-8000-000000000001','different_name',true,'2026-10-25-v1')$$, '22023', 'use the rate-limited username change operation', 'join cannot bypass username-change limiter');
 SELECT is(public.community_change_username('10000000-0000-4000-8000-000000000001','garden_user2'), true, 'separate username-change operation succeeds');
 SELECT is(public.community_change_username('10000000-0000-4000-8000-000000000001','garden_user3'), true, 'username change limiter allows second change in window');

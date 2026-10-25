@@ -137,7 +137,8 @@ describe("Coloring Club local adapter", () => {
   });
 
   it("makes join idempotent and routes username changes through their own limiter", async () => {
-    const store = makeStore();
+    let currentTime = new Date("2026-10-25T12:00:00.000Z");
+    const store = makeStore(() => currentTime);
     const first = await store.join(member, { username: "garden_user", adultAttested: true });
     const repeated = await store.join(member, { username: "@Garden_User", adultAttested: true });
     expect(repeated.acceptedAt).toBe(first.acceptedAt);
@@ -151,6 +152,9 @@ describe("Coloring Club local adapter", () => {
     await store.leave(member);
     await expect(store.changeUsername(member, "after_leave"))
       .rejects.toBeInstanceOf(CommunityAuthorizationError);
+    currentTime = new Date("2026-10-26T12:00:00.000Z");
+    const rejoined = await store.join(member, { username: "fourth_name", adultAttested: true });
+    expect(rejoined.adultAttestedAt).toBe(currentTime.toISOString());
   });
 
   it("rechecks published product and current author eligibility before approval", async () => {
