@@ -1,0 +1,96 @@
+{
+  "runId": "cc06-local-supabase-6",
+  "screenshots": [
+    {
+      "path": "docs/verification/issue-77/cc06/heart-denial-rollback-390.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/heart-denial-rollback-768.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/heart-denial-rollback-1440.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/artwork-hearted-390.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/artwork-hearted-768.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/artwork-hearted-1440.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/gallery-popular-hearts-390.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/gallery-popular-hearts-768.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/gallery-popular-hearts-1440.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/creator-hearts-390.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/creator-hearts-768.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/creator-hearts-1440.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/product-community-hearts-390.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/product-community-hearts-768.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc06/product-community-hearts-1440.png",
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-local-supabase-6"
+    }
+  ],
+  "viewports": [
+    390,
+    768,
+    1440
+  ],
+  "backend": "isolated real Supabase/Auth/Storage",
+  "runtimeErrors": [],
+  "transportFailures": [],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "expectedHttpErrors": [
+    "403 current Auth verification intentionally revoked during held optimistic request"
+  ],
+  "fixtureCleanup": true,
+  "mobileTouch": "emulated Pixel7 real tap unlike and reload"
+}

@@ -61,6 +61,27 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(adminPage.getByTestId("community-count-approved")).toContainText("1");
     await page.reload();
     await expect(cards).toContainText("Published");
+    const artworkId = snapshot.artworks[0].id;
+    await page.goto(`http://127.0.0.1:3100/en/club/artworks/${artworkId}`);
+    const heart = page.getByTestId("community-heart-toggle");
+    await heart.click();
+    await expect(heart).toBeEnabled();
+    await expect(heart).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("community-heart-count")).toHaveText("1");
+    await page.reload();
+    await expect(heart).toHaveAttribute("aria-pressed", "true");
+    const repeated = await Promise.all([1, 2].map(() => page.request.put(`http://127.0.0.1:3100/api/community/artworks/${artworkId}/heart`, {
+      headers: { Origin: "http://127.0.0.1:3100" },
+    })));
+    for (const response of repeated) {
+      expect(response.status()).toBe(200);
+      expect(await response.json()).toMatchObject({ liked: true, likesCount: 1 });
+    }
+    await heart.click();
+    await expect(heart).toBeEnabled();
+    await expect(heart).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("community-heart-count")).toHaveText("0");
+    await page.goto("http://127.0.0.1:3100/en/library/creations");
     await cards.getByTestId("community-artwork-edit-description").click();
     await cards.getByTestId("community-artwork-description").fill("Updated local garden fixture");
     await cards.getByTestId("community-artwork-save-description").click();

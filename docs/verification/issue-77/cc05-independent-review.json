@@ -27,5 +27,12 @@
   "limitations": [
     "Historical checkpoint, not final integrated PR exact-head release evidence.",
     "No physical-device test, cloud migration or new deployment."
-  ]
+  ],
+  "followupVisualArtifactUpdate": {
+    "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+    "runId": "cc06-public-regression-1",
+    "reviewer": "/root/preflight_review",
+    "allScreenshotsReviewed": 18,
+    "note": "CC06 refresh supersedes current-path screenshot provenance from the historical CC05 source. Original assets remain in earlier Git checkpoint."
+  }
 }

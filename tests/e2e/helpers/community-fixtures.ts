@@ -170,6 +170,12 @@ export async function communityScreenshots(page: Page, folderName: string, view:
     const dialogOpen = await dialog.isVisible();
     if (dialogOpen) await dialog.locator(".overflow-y-auto").evaluate((element) => { element.scrollTop = 0; });
     else if (!new URL(page.url()).pathname.startsWith("/admin")) await essentials(page);
+    const imageScope = dialogOpen ? dialog : page;
+    for (const photo of await imageScope.locator('img[src*="/api/community/artworks/"],img[src*="/api/reader-artworks/"]').all()) {
+      if (!await photo.isVisible()) continue;
+      await photo.scrollIntoViewIfNeeded();
+      await expect.poll(() => photo.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    }
     await page.evaluate(() => document.fonts.ready);
     await page.addStyleTag({ content: "nextjs-portal { display:none !important; }" });
     await page.evaluate(() => scrollTo(0, 0));

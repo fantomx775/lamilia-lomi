@@ -43,11 +43,18 @@ test("disabled switches block real public images and mutations while preserving 
     const adminQueue = await adminPage.request.get(`${origin}/api/admin/community/artworks?status=approved&productId=${book.id}`);
     expect(adminQueue.status()).toBe(200);
     expect((await adminQueue.json()).items.map((item: { id: string }) => item.id)).toEqual([artworkId]);
+    const seededHeart = await fixtures.service.rpc("community_set_artwork_like", {
+      p_actor_user_id: owner.id, p_artwork_id: artworkId, p_liked: true,
+    });
+    expect(seededHeart.error).toBeNull();
+    expect(seededHeart.data).toMatchObject({ available: true, liked: true, likesCount: 1 });
     const mediaUrl = `${origin}/api/community/artworks/${artworkId}/media`;
     expect((await page.request.get(mediaUrl)).status()).toBe(404);
     expect((await page.request.get(`${origin}/en/club`)).status()).toBe(404);
     expect((await page.request.get(`${origin}/en/club/artworks/${artworkId}`)).status()).toBe(404);
     expect((await page.request.get(`${origin}/api/community/artworks`)).status()).toBe(404);
+    expect((await page.request.get(`${origin}/api/community/artworks/${artworkId}/heart`)).status()).toBe(404);
+    expect((await page.request.put(`${origin}/api/community/artworks/${artworkId}/heart`, { headers: { Origin: origin } })).status()).toBe(404);
     expect((await page.request.get(`${origin}/en/club/creators/cc_flags_fixture`)).status()).toBe(404);
     const sitemap = await page.request.get(`${origin}/sitemap.xml`);
     expect(sitemap.status()).toBe(200);
@@ -76,6 +83,8 @@ test("disabled switches block real public images and mutations while preserving 
     expect(settings.headers()["cache-control"]).toBe("private, no-store");
     expect((await page.request.patch(`${origin}/api/community/profile`, { headers: { Origin: origin }, data: { username: "cc_flags_new" } })).status()).toBe(404);
     expect((await page.request.get(mediaUrl)).status()).toBe(200);
+    expect((await page.request.put(`${origin}/api/community/artworks/${artworkId}/heart`, { headers: { Origin: origin } })).status()).toBe(404);
+    expect((await page.request.delete(`${origin}/api/community/artworks/${artworkId}/heart`, { headers: { Origin: origin } })).status()).toBe(404);
     expect((await page.request.patch(`${origin}/api/community/artworks/${artworkId}`, { headers: { Origin: origin }, data: { revision: 2, description: "Blocked edit" } })).status()).toBe(404);
     expect((await page.request.delete(`${origin}/api/community/artworks/${artworkId}`, { headers: { Origin: origin }, data: { revision: 2 } })).status()).toBe(200);
     expect((await page.request.get(mediaUrl)).status()).toBe(404);

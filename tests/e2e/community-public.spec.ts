@@ -193,7 +193,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await page.getByTestId("community-gallery-load-more").click();
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(25);
     await expect(page.getByTestId("community-gallery-load-more")).toHaveCount(0);
-    const uniqueLinks = await page.locator('[data-testid="community-artwork-card"] > a').evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+    const uniqueLinks = await page.locator('[data-testid="community-artwork-card"] a[href^="/en/club/artworks/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href")));
     expect(new Set(uniqueLinks).size).toBe(25);
     await page.getByTestId("community-gallery-audience-filter").selectOption("adults");
     await expect(page.getByTestId("community-gallery-empty-state")).toBeVisible();
@@ -203,7 +203,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     screenshots.push(...await communityScreenshots(page, "cc05", "gallery-empty", runId));
     await page.getByTestId("community-gallery-product-filter").selectOption(book.id);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(3);
-    await page.locator(`[data-testid="community-artwork-card"] > a[href="/en/club/artworks/${gallery[0].id}"]`).click();
+    await page.locator(`[data-testid="community-artwork-card"] a[href="/en/club/artworks/${gallery[0].id}"]`).click();
     await expect(page.getByTestId("community-artwork-detail")).toBeVisible();
     await loadedImages(page, '[data-testid="community-artwork-media"]');
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", `${origin}/en/club/artworks/${gallery[0].id}`);
@@ -273,7 +273,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await phone.goto(`${origin}/en/club?productId=${book.id}`);
     await essentials(phone);
     await expect(phone.getByTestId("community-artwork-card")).toHaveCount(3);
-    await phone.locator('[data-testid="community-artwork-card"] > a').first().tap();
+    await phone.locator('[data-testid="community-artwork-card"] a[href^="/en/club/artworks/"]').first().tap();
     await expect(phone.getByTestId("community-artwork-detail")).toBeVisible();
     await phone.getByTestId("community-artwork-creator").tap();
     await expect(phone.getByTestId("community-creator-page")).toBeVisible();

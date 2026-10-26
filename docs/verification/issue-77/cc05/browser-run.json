@@ -1,95 +1,95 @@
 {
-  "runId": "cc05-local-supabase-10",
+  "runId": "cc06-public-regression-1",
   "screenshots": [
     {
       "path": "docs/verification/issue-77/cc05/gallery-filtered-390.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/gallery-filtered-768.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/gallery-filtered-1440.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/gallery-empty-390.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/gallery-empty-768.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/gallery-empty-1440.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/artwork-detail-390.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/artwork-detail-768.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/artwork-detail-1440.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/creator-photos-390.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/creator-photos-768.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/creator-photos-1440.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/product-empty-gallery-390.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/product-empty-gallery-768.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/product-empty-gallery-1440.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/product-mixed-gallery-390.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/product-mixed-gallery-768.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     },
     {
       "path": "docs/verification/issue-77/cc05/product-mixed-gallery-1440.png",
-      "testedSha": "b215a3a8e975b4b93b3e56c8bb99835a1408ab4d",
-      "runId": "cc05-local-supabase-10"
+      "testedSha": "65a6e5d5cd2cc008861cb996052f0f52beb18470",
+      "runId": "cc06-public-regression-1"
     }
   ],
   "viewports": [
@@ -108,84 +108,84 @@
     "events": [
       {
         "type": "pointerdown",
-        "at": 1203.2000000029802,
+        "at": 1230.1000000014901,
         "trusted": true,
         "target": "<img alt=\"Curated artwork by Reader Garden\" loading=\"eager\" decoding=\"async\" data-nimg=\"fill\" class=\"object-contain\" src=\"/api/reader-artwor",
         "open": true
       },
       {
         "type": "touchstart",
-        "at": 1203.2000000029802,
+        "at": 1230.1000000014901,
         "trusted": true,
         "target": "<img alt=\"Curated artwork by Reader Garden\" loading=\"eager\" decoding=\"async\" data-nimg=\"fill\" class=\"object-contain\" src=\"/api/reader-artwor",
         "open": true
       },
       {
         "type": "pointerup",
-        "at": 1690.2000000029802,
+        "at": 1717.1000000014901,
         "trusted": true,
         "target": "<img alt=\"Curated artwork by Reader Garden\" loading=\"eager\" decoding=\"async\" data-nimg=\"fill\" class=\"object-contain\" src=\"/api/reader-artwor",
         "open": true
       },
       {
         "type": "touchend",
-        "at": 1690.2000000029802,
+        "at": 1717.1000000014901,
         "trusted": true,
         "target": "<img alt=\"Curated artwork by Reader Rose\" loading=\"eager\" decoding=\"async\" data-nimg=\"fill\" class=\"object-contain\" src=\"/api/reader-artworks",
         "open": true
       },
       {
         "type": "pointerdown",
-        "at": 1806.9000000059605,
+        "at": 1833.3999999985099,
         "trusted": true,
         "target": "<path d=\"m6 6 12 12\"></path>",
         "open": true
       },
       {
         "type": "touchstart",
-        "at": 1806.9000000059605,
+        "at": 1833.3999999985099,
         "trusted": true,
         "target": "<path d=\"m6 6 12 12\"></path>",
         "open": true
       },
       {
         "type": "pointerup",
-        "at": 1806.9000000059605,
+        "at": 1833.3999999985099,
         "trusted": true,
         "target": "<path d=\"m6 6 12 12\"></path>",
         "open": true
       },
       {
         "type": "touchend",
-        "at": 1806.9000000059605,
+        "at": 1833.3999999985099,
         "trusted": true,
         "target": "<path d=\"m6 6 12 12\"></path>",
         "open": true
       },
       {
         "type": "mousedown",
-        "at": 1806.9000000059605,
+        "at": 1833.3999999985099,
         "trusted": true,
         "target": "<path d=\"m6 6 12 12\"></path>",
         "open": true
       },
       {
         "type": "mouseup",
-        "at": 1806.9000000059605,
+        "at": 1833.3999999985099,
         "trusted": true,
         "target": "<path d=\"m6 6 12 12\"></path>",
         "open": true
       },
       {
         "type": "click",
-        "at": 1806.9000000059605,
+        "at": 1833.3999999985099,
         "trusted": true,
         "target": "<path d=\"m6 6 12 12\"></path>",
         "open": true
       },
       {
         "type": "close",
-        "at": 1824.1000000014901,
+        "at": 1850.7000000029802,
         "trusted": true,
         "target": "<dialog aria-label=\"Reader artwork preview\" class=\"fixed inset-0 m-0 h-dvh w-screen max-h-none max-w-none overflow-hidden border-0 bg-transp",
         "open": false
