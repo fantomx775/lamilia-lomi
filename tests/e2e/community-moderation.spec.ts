@@ -224,7 +224,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await expect(adminPage.getByTestId("community-moderation-reason")).toHaveAttribute("aria-invalid", "true");
     await adminPage.getByTestId("community-moderation-reason").fill("Please share your own finished colouring.");
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-rejection", runId));
-    await adminPage.getByTestId("community-moderation-confirm").click();
+    await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-confirm").click(), "moderate rejection after reason preview");
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
     observationPhase = "reload after rejection";
     await waitForQueueFetch(() => adminPage.reload(), "queue after rejection reload");
