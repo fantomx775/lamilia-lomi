@@ -142,11 +142,11 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
     await page.reload();
     await expect(productField).toHaveValue(savedProductDescription);
     await page.goto(`/en/products/${productSlug}`);
+    const readMore = page.getByRole("main").getByRole("button", { name: "Read more" });
+    if (await readMore.isVisible()) await readMore.click();
     const summaryHeading = page.getByRole("heading", { level: 2, name: "Issue 51 product summary" });
     const productDescription = summaryHeading.locator("xpath=..");
     await expect(summaryHeading).toBeVisible();
-    const readMore = page.getByRole("main").getByRole("button", { name: "Read more" });
-    if (await readMore.isVisible()) await readMore.click();
     await expect(productDescription.locator("blockquote")).toContainText("Product quotation.");
     await expect(productDescription.locator("u")).toHaveText("Underlined product copy");
     await expect(productDescription.locator("a[href^='javascript:']")).toHaveCount(0);
