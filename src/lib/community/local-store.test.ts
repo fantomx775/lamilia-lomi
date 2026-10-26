@@ -163,15 +163,49 @@ describe("Coloring Club local adapter", () => {
 
     expect(await store.submitArtworkReport(otherMember, artworkId, "privacy", "Please check the background.", [product])).toEqual({ duplicate: false });
     expect(await store.submitArtworkReport(otherMember, artworkId, "other", "A second note.", [product])).toEqual({ duplicate: true });
+    const snapshotPath = path.join(tempDirs.at(-1)!, "community.json");
+    const beforeReview = JSON.parse(fs.readFileSync(snapshotPath, "utf8")) as { reports: Array<{ retentionExpiresAt: string; createdAt: string }> };
+    expect(new Date(beforeReview.reports[0]!.retentionExpiresAt).getTime() - new Date(beforeReview.reports[0]!.createdAt).getTime()).toBe(90 * 24 * 60 * 60 * 1_000);
     const reports = await store.listAdminReports(admin, [product], { limit: 10 });
     expect(reports.items).toMatchObject([{ reason: "privacy", details: "Please check the background.", creatorUsername: "garden_user", status: "open" }]);
     expect(JSON.stringify(reports)).not.toMatch(/reporterUserId|userId|email/i);
     const report = reports.items[0];
     expect(report).toBeDefined();
     await store.updateReport(admin, report!.id, report!.revision, "reviewed");
+    const afterReview = JSON.parse(fs.readFileSync(snapshotPath, "utf8")) as { reports: Array<{ retentionExpiresAt: string }> };
+    expect(afterReview.reports[0]!.retentionExpiresAt).toBe(beforeReview.reports[0]!.retentionExpiresAt);
     await expect(store.updateReport(admin, report!.id, report!.revision, "resolve")).rejects.toBeInstanceOf(CommunityConflictError);
     const refreshed = await store.listAdminReports(admin, [product], { status: "reviewed", limit: 10 });
     expect(refreshed.items[0]).toMatchObject({ status: "reviewed", revision: 2 });
+  });
+
+  it("scrubs an expired reviewed report without dismissing it and leaves a future report intact", async () => {
+    let current = new Date("2026-10-25T12:00:00.000Z");
+    const store = makeStore(() => new Date(current));
+    const product = getPublishedProduct();
+    const unlockedMember = { ...member, unlockedProductIds: [product.id] };
+    await store.join(unlockedMember, { username: "Garden_User", adultAttested: true });
+    const artworkId = await store.createPendingArtwork(unlockedMember, input(product.id), [product]);
+    await store.moderate(admin, artworkId, 1, "approve", undefined, [product]);
+    await store.submitArtworkReport(otherMember, artworkId, "privacy", "Expired reviewed details.", [product]);
+    await store.submitArtworkReport(member, artworkId, "rights", "Future open details.", [product]);
+    const reports = await store.listAdminReports(admin, [product], { limit: 10 });
+    const reviewed = reports.items.find((report) => report.reason === "privacy")!;
+    await store.updateReport(admin, reviewed.id, reviewed.revision, "reviewed");
+
+    const snapshotPath = path.join(tempDirs.at(-1)!, "community.json");
+    const fixture = JSON.parse(fs.readFileSync(snapshotPath, "utf8")) as {
+      reports: Array<{ id: string; retentionExpiresAt: string | null }>;
+    };
+    fixture.reports.find((report) => report.id === reviewed.id)!.retentionExpiresAt = "2026-10-25T11:59:00.000Z";
+    fs.writeFileSync(snapshotPath, JSON.stringify(fixture));
+    current = new Date("2027-01-22T12:00:00.000Z"); // 89 days later: the second report is still within its 90-day deadline.
+
+    expect(await store.purgeExpiredReportDetails()).toBe(1);
+    const after = await store.listAdminReports(admin, [product], { limit: 10 });
+    expect(after.items.find((report) => report.id === reviewed.id)).toMatchObject({ status: "reviewed", reason: "privacy", details: "" });
+    expect(after.items.find((report) => report.reason === "rights")).toMatchObject({ status: "open", details: "Future open details." });
+    expect(await store.purgeExpiredReportDetails()).toBe(0);
   });
 
   it("scrubs reporter linkage and free text 30 days after a report is resolved", async () => {

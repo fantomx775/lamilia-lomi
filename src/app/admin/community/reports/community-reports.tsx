@@ -70,7 +70,7 @@ export default function CommunityReports() {
             <h2 className="break-words font-serif text-xl font-semibold">{report.creatorUsername ? `@${report.creatorUsername}` : "Twórca niedostępny"}</h2>
             <p className="text-sm">{report.product.title}</p>
             <p className="break-words text-sm text-[var(--color-muted)]">{report.description || "Praca bez opisu"}</p>
-            {report.details ? <p className="whitespace-pre-wrap break-words rounded-lg bg-[var(--color-bg)] p-3 text-sm">{report.details}</p> : <p className="text-xs text-[var(--color-muted)]">Bez dodatkowych informacji</p>}
+            {report.details ? <p className="whitespace-pre-wrap break-words rounded-lg bg-[var(--color-bg)] p-3 text-sm">{report.details}</p> : <p className="text-xs text-[var(--color-muted)]">Brak dodatkowych informacji lub usunięto je zgodnie z zasadami przechowywania zgłoszeń.</p>}
             <p className="text-xs text-[var(--color-muted)]">Zgłoszono {new Intl.DateTimeFormat("pl", { dateStyle: "medium", timeStyle: "short" }).format(new Date(report.createdAt))} · zgłaszający: konto zalogowane</p>
             {report.creatorUsername && <Link href={`/admin/community?status=approved&creator=${encodeURIComponent(report.creatorUsername)}`} className="inline-flex min-h-10 items-center text-sm font-semibold underline">Otwórz moderację prac twórcy</Link>}
             <div className="flex flex-wrap gap-2">

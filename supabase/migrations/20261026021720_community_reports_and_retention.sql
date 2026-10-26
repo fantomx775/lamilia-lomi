@@ -20,6 +20,9 @@ create index community_artwork_reports_admin_page_idx
   on public.community_artwork_reports (created_at desc, id desc);
 create index community_artwork_reports_status_page_idx
   on public.community_artwork_reports (status, created_at desc, id desc);
+create index community_artwork_reports_retention_idx
+  on public.community_artwork_reports (retention_expires_at, id)
+  where retention_expires_at is not null;
 
 create table public.community_artwork_report_events (
   id bigint generated always as identity primary key,
@@ -77,8 +80,8 @@ begin
   if v_author_id is null then
     raise exception using errcode = '40001', message = 'report target unavailable';
   end if;
-  insert into public.community_artwork_reports (artwork_id, reporter_user_id, reason, details)
-  values (p_artwork_id, p_actor_user_id, p_reason, btrim(coalesce(p_details, '')))
+  insert into public.community_artwork_reports (artwork_id, reporter_user_id, reason, details, retention_expires_at)
+  values (p_artwork_id, p_actor_user_id, p_reason, btrim(coalesce(p_details, '')), now() + interval '90 days')
   on conflict (reporter_user_id, artwork_id) where reporter_user_id is not null do nothing
   returning id into v_report_id;
   if v_report_id is null then
@@ -129,7 +132,10 @@ begin
   v_next_status := case p_action when 'reviewed' then 'reviewed' when 'resolve' then 'resolved' else 'dismissed' end;
   update public.community_artwork_reports set status = v_next_status, revision = revision + 1,
     updated_at = now(), resolved_at = case when v_next_status in ('resolved', 'dismissed') then now() else null end,
-    retention_expires_at = case when v_next_status in ('resolved', 'dismissed') then now() + interval '30 days' else null end
+    retention_expires_at = case
+      when v_next_status in ('resolved', 'dismissed') then least(now() + interval '30 days', v_report.created_at + interval '90 days')
+      else retention_expires_at
+    end
   where id = p_report_id returning revision into v_revision;
   insert into public.community_artwork_report_events (report_id, actor_user_id, action, from_status, to_status)
   values (p_report_id, p_actor_user_id, p_action, v_report.status, v_next_status);
@@ -137,9 +143,9 @@ begin
 end;
 $$;
 
--- Reports remain in the private queue until handled. After resolution, the
--- operational retention draft is 30 days; this scrub removes reporter linkage
--- and optional free text while retaining only category/status audit metadata.
+-- Private report details and identity links have a 90-day maximum from report
+-- creation. Resolution or dismissal shortens that to 30 days where possible.
+-- This scrub retains status, category, artwork context and non-identifying time metadata.
 create or replace function public.community_purge_expired_report_details(p_limit integer default 100)
 returns integer
 language plpgsql
@@ -155,8 +161,7 @@ begin
   end if;
   select array_agg(id) into v_ids from (
     select report.id from public.community_artwork_reports report
-    where report.status in ('resolved', 'dismissed')
-      and report.retention_expires_at <= now()
+    where report.retention_expires_at <= now()
       and (report.reporter_user_id is not null or report.details <> '' or exists (
         select 1 from public.community_artwork_report_events event
         where event.report_id = report.id and event.actor_user_id is not null

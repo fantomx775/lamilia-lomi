@@ -824,7 +824,7 @@ export class CommunityLocalStore {
       const existing = snapshot.reports.find((report) => report.artworkId === artworkId && report.reporterUserId === actor.userId);
       if (existing) return { duplicate: true };
       const now = this.now().toISOString();
-      const report = { id: this.uuid(), artworkId, reporterUserId: actor.userId, reason, details: details.trim(), status: "open" as const, revision: 1, createdAt: now, updatedAt: now, resolvedAt: null, retentionExpiresAt: null };
+      const report = { id: this.uuid(), artworkId, reporterUserId: actor.userId, reason, details: details.trim(), status: "open" as const, revision: 1, createdAt: now, updatedAt: now, resolvedAt: null, retentionExpiresAt: new Date(this.now().getTime() + 90 * 24 * 60 * 60 * 1_000).toISOString() };
       snapshot.reports.push(report);
       snapshot.reportEvents.push({ id: this.uuid(), reportId: report.id, actorUserId: actor.userId, action: "submitted", fromStatus: null, toStatus: "open", createdAt: now });
       return { duplicate: false };
@@ -868,7 +868,9 @@ export class CommunityLocalStore {
       report.revision += 1;
       report.updatedAt = now;
       report.resolvedAt = nextStatus === "resolved" || nextStatus === "dismissed" ? now : null;
-      report.retentionExpiresAt = report.resolvedAt ? new Date(this.now().getTime() + 30 * 24 * 60 * 60 * 1_000).toISOString() : null;
+      const maximumDeadline = new Date(report.createdAt).getTime() + 90 * 24 * 60 * 60 * 1_000;
+      if (report.resolvedAt) report.retentionExpiresAt = new Date(Math.min(new Date(now).getTime() + 30 * 24 * 60 * 60 * 1_000, maximumDeadline)).toISOString();
+      else if (!report.retentionExpiresAt) report.retentionExpiresAt = new Date(maximumDeadline).toISOString();
       return report.revision;
     });
   }
@@ -878,7 +880,12 @@ export class CommunityLocalStore {
       const now = this.now();
       let count = 0;
       for (const report of snapshot.reports) {
-        if (!report.retentionExpiresAt || new Date(report.retentionExpiresAt) > now
+        if (!report.retentionExpiresAt) {
+          const maximumDeadline = new Date(report.createdAt).getTime() + 90 * 24 * 60 * 60 * 1_000;
+          const closedDeadline = report.resolvedAt ? new Date(report.resolvedAt).getTime() + 30 * 24 * 60 * 60 * 1_000 : maximumDeadline;
+          report.retentionExpiresAt = new Date(Math.min(closedDeadline, maximumDeadline)).toISOString();
+        }
+        if (new Date(report.retentionExpiresAt) > now
           || (!report.details && !report.reporterUserId && !snapshot.reportEvents.some((event) => event.reportId === report.id && event.actorUserId !== null))) continue;
         const previous = report.status;
         for (const event of snapshot.reportEvents) if (event.reportId === report.id) event.actorUserId = null;

@@ -11,7 +11,7 @@
 
 ## Operational retention draft
 
-This is an implementation default for owner/legal review, not an approved legal retention period. Resolved or dismissed report free text and reporter linkage are scrubbed after 30 days; category, status, and minimal status-transition audit remain. Account deletion scrubs a reporter's report text/linkage even when the account never joined the community. Open reports remain in the queue until handled and should be treated as overdue after seven days; the scheduled maintenance worker purges only closed, expired details. Do not represent these defaults as a legal determination or launch approval.
+This is an engineering proposal for owner/legal review, not an approved legal retention period or legal certification. Private report details, reporter identity and event actor links have a maximum retention of 90 days from report creation. Reviewing a report does not extend that deadline. Resolving or dismissing it shortens the deadline to 30 days from that decision, capped by the original 90-day deadline. Expiry clears those private details and identity links while preserving report status, reason/category, artwork context and non-identifying event times. Account deletion also scrubs a reporter's text/linkage even when the account never joined the community. Open and reviewed reports remain in the staff queue after the deadline until handled; the seven-day overdue label remains, and expiry does not dismiss or resolve a report. The scheduled maintenance worker purges expired private details for any status. The owner and adviser must review or replace these periods before public launch.
 
 ## Consent-aware analytics
 

@@ -3,7 +3,7 @@
 -- fixture set, including Auth deletion and hard-delete checks, rolls back.
 BEGIN;
 SET LOCAL search_path = public, extensions;
-SELECT plan(86);
+SELECT plan(95);
 
 INSERT INTO auth.users (id, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 VALUES
@@ -34,6 +34,7 @@ VALUES
 
 CREATE TEMP TABLE cc85_ids (key text PRIMARY KEY, id uuid NOT NULL);
 CREATE TEMP TABLE cc85_event_ids (key text PRIMARY KEY, id bigint NOT NULL);
+CREATE TEMP TABLE cc85_report_deadlines (key text PRIMARY KEY, deadline timestamptz NOT NULL);
 CREATE TEMP TABLE cc85_outbox_claim (
   moderation_event_id bigint, author_user_id uuid, notification_type text,
   attempt_count integer, first_attempt_at timestamptz, payload_fingerprint text,
@@ -45,7 +46,7 @@ CREATE TEMP TABLE cc85_cleanup_claim (
 CREATE TEMP TABLE cc85_expected_cleanup_lease (
   storage_path text PRIMARY KEY, lease_expires_at timestamptz NOT NULL, captured_at timestamptz NOT NULL
 );
-GRANT ALL ON cc85_ids, cc85_event_ids, cc85_outbox_claim, cc85_cleanup_claim, cc85_expected_cleanup_lease TO service_role;
+GRANT ALL ON cc85_ids, cc85_event_ids, cc85_report_deadlines, cc85_outbox_claim, cc85_cleanup_claim, cc85_expected_cleanup_lease TO service_role;
 INSERT INTO public.user_product_unlocks (user_id, product_id) VALUES
   ('85000000-0000-4000-8000-000000000001', '85111111-1111-4111-8111-111111111111'),
   ('85000000-0000-4000-8000-000000000002', '85111111-1111-4111-8111-111111111111'),
@@ -65,6 +66,10 @@ WHERE state='pending';
 UPDATE public.community_account_media_cleanup_jobs
 SET lease_expires_at=now()+interval '1 day'
 WHERE state='sending';
+-- Isolate exact purge counts from expired fixtures left by earlier local journeys.
+UPDATE public.community_artwork_reports
+SET retention_expires_at=now()+interval '1 day'
+WHERE retention_expires_at <= now();
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='public.community_artwork_reports'::regclass), 'reports have RLS enabled');
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='public.community_artwork_report_events'::regclass), 'report history has RLS enabled');
@@ -119,6 +124,29 @@ SELECT 'report_id', (public.community_create_artwork_report(
 SELECT is((public.community_create_artwork_report(
   '85000000-0000-4000-8000-000000000005', (SELECT id FROM cc85_ids WHERE key='report_artwork'), 'privacy', 'Changed duplicate text'
 )->>'duplicate')::boolean, true, 'duplicate report is idempotent for a verified nonmember');
+SELECT ok((SELECT retention_expires_at BETWEEN created_at + interval '89 days' AND created_at + interval '90 days'
+  FROM public.community_artwork_reports WHERE id=(SELECT id FROM cc85_ids WHERE key='report_id')), 'new report private details expire within 90 days of creation');
+INSERT INTO cc85_ids (key, id)
+SELECT 'reviewed_report', (public.community_create_artwork_report(
+  '85000000-0000-4000-8000-000000000006', (SELECT id FROM cc85_ids WHERE key='report_artwork'), 'other', 'Reviewed details to expire.'
+)->>'reportId')::uuid;
+INSERT INTO cc85_report_deadlines
+SELECT 'reviewed', retention_expires_at FROM public.community_artwork_reports WHERE id=(SELECT id FROM cc85_ids WHERE key='reviewed_report');
+SELECT is(public.community_update_artwork_report('85000000-0000-4000-8000-000000000003',(SELECT id FROM cc85_ids WHERE key='reviewed_report'),1,'reviewed'), 2, 'administrator can mark a report reviewed');
+SELECT ok((SELECT report.retention_expires_at = deadline FROM public.community_artwork_reports report CROSS JOIN cc85_report_deadlines WHERE report.id=(SELECT id FROM cc85_ids WHERE key='reviewed_report') AND cc85_report_deadlines.key='reviewed'), 'review does not extend or reset the original retention deadline');
+INSERT INTO cc85_ids (key, id)
+SELECT 'future_report', (public.community_create_artwork_report(
+  '85000000-0000-4000-8000-000000000002', (SELECT id FROM cc85_ids WHERE key='report_artwork'), 'rights', 'Future report details remain private.'
+)->>'reportId')::uuid;
+SELECT ok((SELECT retention_expires_at > now() AND details <> '' AND reporter_user_id IS NOT NULL
+  FROM public.community_artwork_reports WHERE id=(SELECT id FROM cc85_ids WHERE key='future_report')), 'future open report remains identified until its deadline');
+UPDATE public.community_artwork_reports SET retention_expires_at=now()-interval '1 minute' WHERE id=(SELECT id FROM cc85_ids WHERE key='reviewed_report');
+SELECT is(public.community_purge_expired_report_details(10), 1, 'purge scrubs an expired reviewed report but leaves unexpired reports alone');
+SELECT ok((SELECT status='reviewed' AND reason='other' AND artwork_id=(SELECT id FROM cc85_ids WHERE key='report_artwork') AND details='' AND reporter_user_id IS NULL
+  FROM public.community_artwork_reports WHERE id=(SELECT id FROM cc85_ids WHERE key='reviewed_report')), 'expiry scrubs private details without resolving the report or removing reason/artwork context');
+SELECT ok((SELECT status='open' AND details='Future report details remain private.' AND reporter_user_id='85000000-0000-4000-8000-000000000002'
+  FROM public.community_artwork_reports WHERE id=(SELECT id FROM cc85_ids WHERE key='future_report')), 'unexpired open report remains unchanged by the purge');
+SELECT is(public.community_purge_expired_report_details(10), 0, 'repeating the purge does not scrub the same report again');
 SELECT throws_ok($$SELECT public.community_create_artwork_report('85000000-0000-4000-8000-000000000005',(SELECT id FROM cc85_ids WHERE key='report_artwork'),null,'')$$, '22023', 'invalid report', 'null report reason is rejected');
 SELECT throws_ok($$SELECT public.community_update_artwork_report('85000000-0000-4000-8000-000000000003',(SELECT id FROM cc85_ids WHERE key='report_id'),null,'resolve')$$, '22023', 'invalid report action', 'null report revision cannot bypass CAS');
 SELECT throws_ok($$SELECT public.community_update_artwork_report('85000000-0000-4000-8000-000000000003',(SELECT id FROM cc85_ids WHERE key='report_id'),1,null)$$, '22023', 'invalid report action', 'null report action is rejected');
@@ -132,6 +160,8 @@ SET LOCAL ROLE service_role;
 SELECT ok((SELECT reporter_user_id IS NULL AND details = '' FROM public.community_artwork_reports WHERE id=(SELECT id FROM cc85_ids WHERE key='report_id')), 'Auth deletion anonymizes a nonmember reporter and clears their report text');
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.community_artwork_report_events WHERE report_id=(SELECT id FROM cc85_ids WHERE key='report_id') AND actor_user_id='85000000-0000-4000-8000-000000000005'), 'Auth deletion removes nonmember reporter event identities');
 SELECT is(public.community_update_artwork_report('85000000-0000-4000-8000-000000000003',(SELECT id FROM cc85_ids WHERE key='report_id'),2,'resolve'), 3, 'administrator can resolve the anonymized report at its incremented revision');
+SELECT ok((SELECT retention_expires_at <= created_at + interval '90 days' AND retention_expires_at <= now() + interval '30 days'
+  FROM public.community_artwork_reports WHERE id=(SELECT id FROM cc85_ids WHERE key='report_id')), 'resolution sets a 30-day deadline capped by the creation-based 90-day maximum');
 UPDATE public.community_artwork_reports SET retention_expires_at=now()-interval '1 minute' WHERE id=(SELECT id FROM cc85_ids WHERE key='report_id');
 SELECT is(public.community_purge_expired_report_details(10), 1, 'retention purge selects pre-anonymized reports with later admin event identities');
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.community_artwork_report_events WHERE report_id=(SELECT id FROM cc85_ids WHERE key='report_id') AND actor_user_id IS NOT NULL), '30-day purge scrubs retained event actor links even when report identity was already null');
