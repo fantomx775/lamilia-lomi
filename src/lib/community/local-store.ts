@@ -6,6 +6,7 @@ import path from "node:path";
 
 import type {
   CommunityAdminArtwork,
+  CommunityAdminReport,
   CommunityAdminProductOption,
   CommunityArtworkStatus,
   CommunityArtworkSort,
@@ -17,6 +18,8 @@ import type {
   CommunityModerationCounts,
   CommunityModerationHistoryItem,
   CommunityPublicArtwork,
+  CommunityReportReason,
+  CommunityReportStatus,
   CommunityPublicProduct,
   CommunityPublicProductOption,
   CommunityHeartResult,
@@ -118,6 +121,12 @@ type LocalModerationEvent = {
 };
 
 type LocalArtworkLike = { artworkId: string; userId: string; createdAt: string };
+type LocalReport = {
+  id: string; artworkId: string; reporterUserId: string | null; reason: CommunityReportReason;
+  details: string; status: CommunityReportStatus; revision: number; createdAt: string; updatedAt: string;
+  resolvedAt: string | null; retentionExpiresAt: string | null;
+};
+type LocalReportEvent = { id: string; reportId: string; actorUserId: string | null; action: "submitted" | "reviewed" | "resolve" | "dismiss" | "retention_scrubbed"; fromStatus: CommunityReportStatus | null; toStatus: CommunityReportStatus; createdAt: string };
 
 type LocalRateBucket = { windowStartedAt: number; hitCount: number };
 
@@ -127,6 +136,8 @@ type LocalSnapshot = {
   artworks: LocalArtwork[];
   moderationEvents: LocalModerationEvent[];
   artworkLikes: LocalArtworkLike[];
+  reports: LocalReport[];
+  reportEvents: LocalReportEvent[];
   rateLimitBuckets: Record<string, LocalRateBucket>;
   uploadReservations: LocalUploadReservation[];
 };
@@ -778,6 +789,85 @@ export class CommunityLocalStore {
     });
   }
 
+  async submitArtworkReport(actor: LocalCommunityActor, artworkId: string, reason: CommunityReportReason, details: string, products: Product[]) {
+    assertVerified(actor);
+    if (!/^[0-9a-f-]{36}$/i.test(artworkId) || !["rights", "privacy", "harmful", "other"].includes(reason)
+      || typeof details !== "string" || Array.from(details.trim()).length > 500) throw new CommunityValidationError("Invalid report details.");
+    return this.transact((snapshot) => {
+      const artwork = snapshot.artworks.find((candidate) => candidate.id === artworkId && !candidate.deletedAt && candidate.status === "approved" && candidate.publishedAt);
+      const product = artwork && products.find((candidate) => candidate.id === artwork.productId && candidate.status === "published");
+      const profile = artwork?.authorId && snapshot.profiles.find((candidate) => candidate.userId === artwork.authorId);
+      if (!artwork || !product || !profile || !isActiveProfile(snapshot, profile.userId)) throw new CommunityConflictError("This artwork is no longer available to report.");
+      const existing = snapshot.reports.find((report) => report.artworkId === artworkId && report.reporterUserId === actor.userId);
+      if (existing) return { duplicate: true };
+      const now = this.now().toISOString();
+      const report = { id: this.uuid(), artworkId, reporterUserId: actor.userId, reason, details: details.trim(), status: "open" as const, revision: 1, createdAt: now, updatedAt: now, resolvedAt: null, retentionExpiresAt: null };
+      snapshot.reports.push(report);
+      snapshot.reportEvents.push({ id: this.uuid(), reportId: report.id, actorUserId: actor.userId, action: "submitted", fromStatus: null, toStatus: "open", createdAt: now });
+      return { duplicate: false };
+    });
+  }
+
+  async listAdminReports(actor: LocalCommunityActor, products: Product[], input: { status?: CommunityReportStatus | "all"; cursor?: { timestamp: string; id: string } | null; limit: number }) {
+    assertAdmin(actor);
+    return this.read((snapshot) => {
+      const counts: Record<CommunityReportStatus, number> = { open: 0, reviewed: 0, resolved: 0, dismissed: 0 };
+      for (const report of snapshot.reports) counts[report.status] += 1;
+      const filtered = snapshot.reports.filter((report) => !input.status || input.status === "all" || report.status === input.status)
+        .filter((report) => !input.cursor || report.createdAt < input.cursor.timestamp || (report.createdAt === input.cursor.timestamp && report.id < input.cursor.id))
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+      const rows = filtered.slice(0, input.limit + 1);
+      const items: CommunityAdminReport[] = rows.slice(0, input.limit).flatMap((report) => {
+        const artwork = snapshot.artworks.find((candidate) => candidate.id === report.artworkId);
+        const product = artwork && products.find((candidate) => candidate.id === artwork.productId);
+        if (!artwork || !product) return [];
+        const profile = artwork.authorId ? snapshot.profiles.find((candidate) => candidate.userId === artwork.authorId) : undefined;
+        return [{ id: report.id, artworkId: artwork.id, artworkStatus: artwork.status, description: artwork.description,
+          creatorUsername: profile?.username ?? null,
+          product: { id: product.id, slug: product.slug, title: product.translations.find((translation) => translation.locale === "en")?.title ?? product.slug, audience: product.audience },
+          reason: report.reason, details: report.details, status: report.status, revision: report.revision, createdAt: report.createdAt, updatedAt: report.updatedAt,
+          overdue: report.status === "open" && this.now().getTime() - new Date(report.createdAt).getTime() > 7 * 24 * 60 * 60 * 1_000 }];
+      });
+      const last = rows.length > input.limit ? rows[input.limit - 1] : null;
+      return { items, nextCursor: last ? { timestamp: last.createdAt, id: last.id } : null, counts };
+    });
+  }
+
+  async updateReport(actor: LocalCommunityActor, reportId: string, revision: number, action: "reviewed" | "resolve" | "dismiss") {
+    assertAdmin(actor);
+    return this.transact((snapshot) => {
+      const report = snapshot.reports.find((candidate) => candidate.id === reportId);
+      if (!report || report.revision !== revision || ["resolved", "dismissed"].includes(report.status)) throw new CommunityConflictError("Report changed or is already resolved.");
+      const nextStatus: CommunityReportStatus = action === "reviewed" ? "reviewed" : action === "resolve" ? "resolved" : "dismissed";
+      const now = this.now().toISOString();
+      snapshot.reportEvents.push({ id: this.uuid(), reportId, actorUserId: actor.userId, action, fromStatus: report.status, toStatus: nextStatus, createdAt: now });
+      report.status = nextStatus;
+      report.revision += 1;
+      report.updatedAt = now;
+      report.resolvedAt = nextStatus === "resolved" || nextStatus === "dismissed" ? now : null;
+      report.retentionExpiresAt = report.resolvedAt ? new Date(this.now().getTime() + 30 * 24 * 60 * 60 * 1_000).toISOString() : null;
+      return report.revision;
+    });
+  }
+
+  async purgeExpiredReportDetails() {
+    return this.transact((snapshot) => {
+      const now = this.now();
+      let count = 0;
+      for (const report of snapshot.reports) {
+        if (!report.retentionExpiresAt || new Date(report.retentionExpiresAt) > now || (!report.details && !report.reporterUserId)) continue;
+        const previous = report.status;
+        report.reporterUserId = null;
+        report.details = "";
+        report.revision += 1;
+        report.updatedAt = now.toISOString();
+        snapshot.reportEvents.push({ id: this.uuid(), reportId: report.id, actorUserId: null, action: "retention_scrubbed", fromStatus: previous, toStatus: previous, createdAt: now.toISOString() });
+        count += 1;
+      }
+      return count;
+    });
+  }
+
   async getProfile(actor: LocalCommunityActor) {
     assertVerified(actor);
     return this.read((snapshot) => {
@@ -827,7 +917,7 @@ export function buildCommunityStoragePath(actorId: string, idempotencyKey: strin
 }
 
 function initialSnapshot(): LocalSnapshot {
-  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], rateLimitBuckets: {}, uploadReservations: [] };
+  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], reports: [], reportEvents: [], rateLimitBuckets: {}, uploadReservations: [] };
 }
 
 function readSnapshot(filePath: string): LocalSnapshot {
@@ -840,7 +930,7 @@ function readSnapshot(filePath: string): LocalSnapshot {
       || (parsed.artworkLikes !== undefined && !Array.isArray(parsed.artworkLikes))) {
       throw new Error("Unexpected community local-store structure.");
     }
-    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [] } as LocalSnapshot;
+    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [], reports: parsed.reports ?? [], reportEvents: parsed.reportEvents ?? [] } as LocalSnapshot;
   } catch (error) {
     throw new Error(`Community local store is unreadable: ${error instanceof Error ? error.message : "invalid JSON"}`);
   }

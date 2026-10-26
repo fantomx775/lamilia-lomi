@@ -153,6 +153,44 @@ describe("Coloring Club local adapter", () => {
     await expect(store.setArtworkLike(member, firstId, false, [product])).rejects.toBeInstanceOf(CommunityAuthorizationError);
   });
 
+  it("accepts verified nonmember reports once and keeps reporter identity out of admin DTOs", async () => {
+    const store = makeStore();
+    const product = getPublishedProduct();
+    const unlockedMember = { ...member, unlockedProductIds: [product.id] };
+    await store.join(unlockedMember, { username: "Garden_User", adultAttested: true });
+    const artworkId = await store.createPendingArtwork(unlockedMember, input(product.id), [product]);
+    await store.moderate(admin, artworkId, 1, "approve", undefined, [product]);
+
+    expect(await store.submitArtworkReport(otherMember, artworkId, "privacy", "Please check the background.", [product])).toEqual({ duplicate: false });
+    expect(await store.submitArtworkReport(otherMember, artworkId, "other", "A second note.", [product])).toEqual({ duplicate: true });
+    const reports = await store.listAdminReports(admin, [product], { limit: 10 });
+    expect(reports.items).toMatchObject([{ reason: "privacy", details: "Please check the background.", creatorUsername: "garden_user", status: "open" }]);
+    expect(JSON.stringify(reports)).not.toMatch(/reporterUserId|userId|email/i);
+    const report = reports.items[0];
+    expect(report).toBeDefined();
+    await store.updateReport(admin, report!.id, report!.revision, "reviewed");
+    await expect(store.updateReport(admin, report!.id, report!.revision, "resolve")).rejects.toBeInstanceOf(CommunityConflictError);
+    const refreshed = await store.listAdminReports(admin, [product], { status: "reviewed", limit: 10 });
+    expect(refreshed.items[0]).toMatchObject({ status: "reviewed", revision: 2 });
+  });
+
+  it("scrubs reporter linkage and free text 30 days after a report is resolved", async () => {
+    let current = new Date("2026-10-25T12:00:00.000Z");
+    const store = makeStore(() => new Date(current));
+    const product = getPublishedProduct();
+    const unlockedMember = { ...member, unlockedProductIds: [product.id] };
+    await store.join(unlockedMember, { username: "Garden_User", adultAttested: true });
+    const artworkId = await store.createPendingArtwork(unlockedMember, input(product.id), [product]);
+    await store.moderate(admin, artworkId, 1, "approve", undefined, [product]);
+    await store.submitArtworkReport(otherMember, artworkId, "privacy", "Private report text.", [product]);
+    const report = (await store.listAdminReports(admin, [product], { limit: 10 })).items[0]!;
+    await store.updateReport(admin, report.id, report.revision, "resolve");
+    current = new Date(current.getTime() + 31 * 24 * 60 * 60 * 1000);
+    expect(await store.purgeExpiredReportDetails()).toBe(1);
+    const after = (await store.listAdminReports(admin, [product], { limit: 10 })).items[0];
+    expect(after).toMatchObject({ details: "", status: "resolved", revision: 3 });
+  });
+
   it("filters and paginates the admin queue with safe status history", async () => {
     const store = makeStore();
     const product = getPublishedProduct();

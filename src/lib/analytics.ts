@@ -14,6 +14,11 @@ export const businessEvents = [
   "video_play",
   "contact_form_submit",
   "language_change",
+  "artwork_submitted",
+  "artwork_approved",
+  "artwork_rejected",
+  "gallery_view",
+  "like_created",
 ] as const;
 
 export type BusinessEventName = (typeof businessEvents)[number];

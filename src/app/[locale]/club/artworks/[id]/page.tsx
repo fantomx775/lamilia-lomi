@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 
 import { CommunityAvatar } from "@/components/community/community-avatar";
 import { CommunityHeartControl } from "@/components/community/community-heart-control";
+import { CommunityArtworkReport } from "@/components/community/community-artwork-report";
 import { getCommunityFlags } from "@/lib/community-flags";
 import { getCommunityHeartContext, getCommunityPublicArtwork } from "@/lib/community/repository";
 import type { Locale } from "@/i18n/routing";
@@ -51,6 +52,7 @@ export default async function CommunityArtworkPage({ params }: Props) {
         </div>
         <time className="mt-5 block text-sm text-[var(--color-muted)]" dateTime={artwork.publishedAt}>Shared {new Intl.DateTimeFormat("en", { dateStyle: "long" }).format(new Date(artwork.publishedAt))}</time>
         <div className="mt-5"><CommunityHeartControl artworkId={artwork.id} likesCount={artwork.likesCount} likedByMe={artwork.likedByMe} access={heartContext.access} returnTo={`/en/club/artworks/${artwork.id}`} /></div>
+        <CommunityArtworkReport artworkId={artwork.id} access={heartContext.access} returnTo={`/en/club/artworks/${artwork.id}`} />
         <div className="mt-7 border-t border-[var(--color-border)] pt-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">From this book</p>
           <Link data-testid="community-artwork-book" href={`/en/products/${encodeURIComponent(artwork.product.slug)}`} className="mt-2 block rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-4 hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">

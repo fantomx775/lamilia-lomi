@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 
 import type { CommunityAdminArtwork, CommunityArtworkStatus, CommunityModerationAction, CommunityModerationCounts, CommunityModerationHistoryItem } from "@/lib/community/types";
+import { trackEvent } from "@/lib/analytics-client";
 
 type ProductOption = { id: string; title: string };
 type QueueResponse = { items: CommunityAdminArtwork[]; nextCursor: string | null; counts: CommunityModerationCounts };
@@ -13,11 +15,11 @@ const labels: Record<StatusFilter, string> = { pending: "Do sprawdzenia", approv
 const actionLabels: Record<CommunityModerationAction, string> = { approve: "Zatwierdź i opublikuj", reject: "Odrzuć", remove: "Usuń z galerii", restore: "Przywróć do sprawdzenia" };
 const statusOrder: CommunityArtworkStatus[] = ["pending", "approved", "rejected", "removed"];
 
-export default function CommunityModeration({ products }: { products: ProductOption[] }) {
-  const [status, setStatus] = useState<StatusFilter>("pending");
+export default function CommunityModeration({ products, initialStatus = "pending", initialCreator = "" }: { products: ProductOption[]; initialStatus?: StatusFilter; initialCreator?: string }) {
+  const [status, setStatus] = useState<StatusFilter>(initialStatus);
   const [productId, setProductId] = useState("");
-  const [creatorInput, setCreatorInput] = useState("");
-  const [creator, setCreator] = useState("");
+  const [creatorInput, setCreatorInput] = useState(initialCreator);
+  const [creator, setCreator] = useState(initialCreator);
   const [queue, setQueue] = useState<QueueResponse>({ items: [], nextCursor: null, counts: { pending: 0, approved: 0, rejected: 0, removed: 0 } });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailResponse | null>(null);
@@ -95,6 +97,8 @@ export default function CommunityModeration({ products }: { products: ProductOpt
         return;
       }
       setDetail({ artwork: payload.artwork, history: payload.history });
+      if (pendingAction === "approve") trackEvent("artwork_approved");
+      if (pendingAction === "reject") trackEvent("artwork_rejected");
       setPendingAction(null); setReason("");
       await loadQueue();
     } catch {
@@ -129,6 +133,7 @@ export default function CommunityModeration({ products }: { products: ProductOpt
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-muted)]">Panel administracyjny</p>
       <h1 className="font-serif text-3xl font-semibold text-[var(--color-ink)]">Moderacja prac</h1>
       <p className="max-w-3xl text-sm leading-6 text-[var(--color-muted)]">Sprawdzaj zgłoszenia, podejmuj decyzje i przeglądaj historię. Zmiany są zapisywane od razu.</p>
+      <Link href="/admin/community/reports" data-testid="community-reports-link" className="inline-flex min-h-10 items-center text-sm font-semibold underline">Przejdź do prywatnych zgłoszeń</Link>
     </header>
 
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Liczba prac według statusu">

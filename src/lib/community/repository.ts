@@ -13,6 +13,7 @@ import type { CommunityUploadCleanupCandidate, CommunityUploadReservationInput }
 import * as supabase from "./supabase-adapter";
 import { CommunityAuthorizationError, CommunityRateLimitError, CommunityValidationError } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
+import { encodeCommunityTimestampCursor, decodeCommunityTimestampCursor } from "./cursor";
 import type {
   CommunityAudience,
   CommunityAdminProductOption,
@@ -21,6 +22,8 @@ import type {
   CommunityCreateArtworkInput,
   CommunityHeartAccess,
   CommunityPage,
+  CommunityReportReason,
+  CommunityReportStatus,
   CommunityProfileInput,
   CommunityPublicArtwork,
   CommunityPublicProductOption,
@@ -269,6 +272,41 @@ export async function moderateCommunityArtwork(
   return supabase.moderateArtwork(actor, id, revision, action, reason);
 }
 
+export async function submitCommunityArtworkReport(actor: CommunityActor, artworkId: string, reason: CommunityReportReason, details: string, trustedIp?: string) {
+  if (!getCommunityFlags().publicEnabled) throw new CommunityAuthorizationError("Community reporting is unavailable.");
+  if (!actor.emailVerified) throw new CommunityAuthorizationError("Verify your email to report artwork.");
+  if (!isUuid(artworkId) || !["rights", "privacy", "harmful", "other"].includes(reason)
+    || typeof details !== "string" || Array.from(details.trim()).length > 500) {
+    throw new CommunityValidationError("Check the report details and try again.");
+  }
+  if (!await consumeCommunityRateLimit("artwork-report-account", actor.userId, 5, 60 * 60)) throw new CommunityRateLimitError();
+  if (trustedIp && !await consumeCommunityRateLimit("artwork-report-ip", trustedIp, 25, 60 * 60)) throw new CommunityRateLimitError();
+  if (actor.backend === "local") return localStore.submitArtworkReport(actor, artworkId, reason, details, getContentSnapshot().products);
+  return supabase.submitArtworkReport(actor, artworkId, reason, details);
+}
+
+export async function listCommunityReports(input: { status?: CommunityReportStatus | "all"; cursor?: string | null; limit?: number } = {}) {
+  const actor = await assertCommunityActor("admin");
+  const limit = Math.min(50, boundedLimit(input.limit));
+  let cursor = null;
+  if (input.cursor) {
+    cursor = decodeCommunityTimestampCursor(input.cursor);
+    if (!cursor) throw new CommunityValidationError("The report page cursor is invalid.");
+  }
+  const result = actor.backend === "local"
+    ? await localStore.listAdminReports(actor, getContentSnapshot().products, { status: input.status, cursor, limit })
+    : await supabase.listReports(actor, { status: input.status, cursor, limit });
+  return { ...result, nextCursor: result.nextCursor ? encodeCommunityTimestampCursor(result.nextCursor.timestamp, result.nextCursor.id) : null };
+}
+
+export async function updateCommunityReport(id: string, revision: number, action: "reviewed" | "resolve" | "dismiss") {
+  const actor = await assertCommunityActor("admin");
+  if (!isUuid(id) || !Number.isSafeInteger(revision) || revision < 1) throw new CommunityValidationError();
+  return actor.backend === "local"
+    ? localStore.updateReport(actor, id, revision, action)
+    : supabase.updateReport(actor, id, revision, action);
+}
+
 /** Server-only fixed-window limiter. Call with a hashed account/IP identifier. */
 export async function consumeCommunityRateLimit(
   scope: string,
@@ -288,6 +326,8 @@ export async function processCommunityArtworkCleanup(actor?: CommunityActor) {
     ? await localStore.claimUploadCleanup(actor?.backend === "local" ? actor : undefined, 10)
     : await supabase.claimArtworkUploadCleanup(10);
   for (const candidate of candidates) await removeAndFinishArtworkCleanup(candidate);
+  if (getBackendMode() === "local") await localStore.purgeExpiredReportDetails();
+  else await supabase.purgeExpiredReportDetails();
 }
 
 export async function cleanupCommunityUploadCandidate(candidate: CommunityUploadCleanupCandidate) {

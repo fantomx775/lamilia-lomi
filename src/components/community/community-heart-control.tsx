@@ -5,6 +5,7 @@ import { Heart } from "lucide-react";
 import { useRef, useState } from "react";
 
 import type { CommunityHeartAccess } from "@/lib/community/types";
+import { trackEvent } from "@/lib/analytics-client";
 
 type Props = {
   artworkId: string;
@@ -41,6 +42,7 @@ export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access
       if (!response.ok || typeof result.liked !== "boolean" || !Number.isSafeInteger(result.likesCount)) throw new Error("Reaction unavailable");
       setLiked(result.liked);
       setCount(Math.max(0, result.likesCount!));
+      if (!previousLiked && result.liked) trackEvent("like_created");
     } catch {
       setLiked(previousLiked);
       setCount(previousCount);

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AdminDrawer } from "@/components/admin/admin-drawer";
 import type { CommunityOwnerArtwork } from "@/lib/community/types";
+import { trackEvent } from "@/lib/analytics-client";
 
 type CommunityBook = { id: string; slug: string; title: string };
 type PendingImage = {
@@ -61,6 +62,7 @@ export function CommunityCreationManager({
   const [uploadDrawerOpen, setUploadDrawerOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const previewUrls = useRef(new Set<string>());
+  const trackedSubmissions = useRef(new Set<string>());
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => {
@@ -120,6 +122,10 @@ export function CommunityCreationManager({
       const result = await response.json() as { ok?: boolean; artwork?: CommunityOwnerArtwork; message?: string };
       if (!response.ok || !result.ok || !result.artwork) throw new Error(result.message ?? "This image could not be submitted. Try again.");
       setArtworks((current) => [result.artwork!, ...current.filter((artwork) => artwork.id !== result.artwork!.id)]);
+      if (!trackedSubmissions.current.has(item.idempotencyKey)) {
+        trackedSubmissions.current.add(item.idempotencyKey);
+        trackEvent("artwork_submitted");
+      }
       removePending(item.idempotencyKey);
       return true;
     } catch (error) {

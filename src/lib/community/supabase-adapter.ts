@@ -9,6 +9,7 @@ import type { CommunityActor } from "./session";
 import type {
   CommunityAdminArtwork,
   CommunityAdminProductOption,
+  CommunityAdminReport,
   CommunityArtworkStatus,
   CommunityAudience,
   CommunityCreateArtworkInput,
@@ -17,6 +18,8 @@ import type {
   CommunityModerationCounts,
   CommunityModerationHistoryItem,
   CommunityPublicArtwork,
+  CommunityReportReason,
+  CommunityReportStatus,
   CommunityPublicCreator,
   CommunityStorageProvider,
 } from "./types";
@@ -502,6 +505,77 @@ export async function setArtworkLike(actor: CommunityActor, artworkId: string, l
     throw new Error("Community operation failed.");
   }
   return { available: value.available, liked: value.liked, likesCount: Number(value.likesCount) };
+}
+
+export async function submitArtworkReport(actor: CommunityActor, artworkId: string, reason: CommunityReportReason, details: string) {
+  const result = await rpc("community_create_artwork_report", {
+    p_actor_user_id: actor.userId, p_artwork_id: artworkId, p_reason: reason, p_details: details.trim(),
+  });
+  if (!result || typeof result !== "object") throw new Error("Community operation failed.");
+  const value = result as Record<string, unknown>;
+  if (typeof value.duplicate !== "boolean") throw new Error("Community operation failed.");
+  return { duplicate: value.duplicate };
+}
+
+export async function listReports(_actor: CommunityActor, input: {
+  status?: CommunityReportStatus | "all";
+  cursor?: { timestamp: string; id: string } | null;
+  limit: number;
+}) {
+  const client = createServiceRoleClient();
+  const statuses: CommunityReportStatus[] = ["open", "reviewed", "resolved", "dismissed"];
+  const countsPromise = Promise.all(statuses.map(async (status) => {
+    const { count, error } = await client.from("community_artwork_reports").select("id", { count: "exact", head: true }).eq("status", status);
+    if (error) throw new Error("Community report counts could not be loaded.");
+    return [status, count ?? 0] as const;
+  }));
+  let query = client.from("community_artwork_reports")
+    .select("id,artwork_id,reporter_user_id,reason,details,status,revision,created_at,updated_at")
+    .order("created_at", { ascending: false }).order("id", { ascending: false });
+  if (input.status && input.status !== "all") query = query.eq("status", input.status);
+  if (input.cursor) query = query.or(`created_at.lt.${input.cursor.timestamp},and(created_at.eq.${input.cursor.timestamp},id.lt.${input.cursor.id})`);
+  const [{ data, error }, countEntries] = await Promise.all([query.limit(input.limit + 1), countsPromise]);
+  if (error) throw new Error("Community reports could not be loaded.");
+  const rows = (data ?? []) as unknown as Row[];
+  const pageRows = rows.slice(0, input.limit);
+  const artworkIds = [...new Set(pageRows.map((row) => String(row.artwork_id)))];
+  const artworkMap = new Map<string, Row>();
+  if (artworkIds.length) {
+    const { data: artworks, error: artworkError } = await client.from("community_artworks")
+      .select("id,status,description,community_profiles:community_profiles!community_artworks_author_profile_fkey(username),products!inner(id,slug,audience,status,product_translations!inner(locale,title))")
+      .in("id", artworkIds);
+    if (artworkError) throw new Error("Community report artwork could not be loaded.");
+    for (const artwork of (artworks ?? []) as unknown as Row[]) artworkMap.set(String(artwork.id), artwork);
+  }
+  const items: CommunityAdminReport[] = pageRows.flatMap((row) => {
+    const artwork = artworkMap.get(String(row.artwork_id));
+    if (!artwork) return [];
+    const product = one(artwork.products);
+    const translation = list(product.product_translations).find((item) => item.locale === "en");
+    const profile = one(artwork.community_profiles);
+    return [{
+      id: String(row.id), artworkId: String(row.artwork_id), artworkStatus: artwork.status as CommunityAdminReport["artworkStatus"],
+      description: String(artwork.description ?? ""), creatorUsername: nullableString(profile.username),
+      product: { id: String(product.id), slug: String(product.slug), title: String(translation?.title ?? product.slug), audience: product.audience as CommunityAdminReport["product"]["audience"] },
+      reason: row.reason as CommunityReportReason, details: String(row.details ?? ""), status: row.status as CommunityReportStatus,
+      revision: Number(row.revision), createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+      overdue: row.status === "open" && Date.now() - new Date(String(row.created_at)).getTime() > 7 * 24 * 60 * 60 * 1_000,
+    }];
+  });
+  const last = pageRows.length > input.limit ? pageRows[input.limit - 1] : null;
+  return {
+    items,
+    nextCursor: last ? { timestamp: String(last.created_at), id: String(last.id) } : null,
+    counts: Object.fromEntries(countEntries) as Record<CommunityReportStatus, number>,
+  };
+}
+
+export async function updateReport(actor: CommunityActor, id: string, revision: number, action: "reviewed" | "resolve" | "dismiss") {
+  return rpc("community_update_artwork_report", { p_actor_user_id: actor.userId, p_report_id: id, p_expected_revision: revision, p_action: action });
+}
+
+export async function purgeExpiredReportDetails() {
+  return rpc("community_purge_expired_report_details", { p_limit: 100 });
 }
 
 async function getLikedArtworkIds(viewerUserId: string | undefined, rows: Row[]) {

@@ -65,6 +65,26 @@ export type CommunityModerationHistoryItem = {
   moderatorLabel: "Administrator";
 };
 export type CommunityModerationCounts = Record<CommunityArtworkStatus, number>;
+export type CommunityReportReason = "rights" | "privacy" | "harmful" | "other";
+export type CommunityReportStatus = "open" | "reviewed" | "resolved" | "dismissed";
+export type CommunityAdminReport = {
+  id: string;
+  artworkId: string;
+  artworkStatus: CommunityArtworkStatus;
+  description: string;
+  creatorUsername: string | null;
+  product: CommunityPublicProduct;
+  reason: CommunityReportReason;
+  details: string;
+  status: CommunityReportStatus;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  overdue: boolean;
+};
+export type CommunityReportPage = CommunityPage<CommunityAdminReport> & {
+  counts: Record<CommunityReportStatus, number>;
+};
 export type CommunityModerationPage = CommunityPage<CommunityAdminArtwork> & {
   counts: CommunityModerationCounts;
 };

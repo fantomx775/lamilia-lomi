@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { CommunityAvatar } from "@/components/community/community-avatar";
 import { CommunityHeartControl } from "@/components/community/community-heart-control";
 import type { CommunityHeartAccess, CommunityPage, CommunityPublicArtwork, CommunityPublicProductOption } from "@/lib/community/types";
+import { trackEvent } from "@/lib/analytics-client";
 
 const PAGE_SIZE = 24;
 const subscribeToHydration = () => () => {};
@@ -38,6 +39,8 @@ export function CommunityGallery({
   const [filterKey, setFilterKey] = useState(0);
   const requestGeneration = useRef(0);
   const filterController = useRef<AbortController | null>(null);
+
+  useEffect(() => { trackEvent("gallery_view"); }, []);
 
   useEffect(() => {
     if (!filterKey) return;
