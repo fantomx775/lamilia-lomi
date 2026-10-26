@@ -79,6 +79,7 @@ describe("public Coloring Club gallery", () => {
     render(<CommunityGallery initialPage={{ items: [artwork], nextCursor: null }} products={[product]} />);
     await user.selectOptions(screen.getByTestId("community-gallery-audience-filter"), "kids");
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be updated");
+    expect(screen.queryByRole("heading", { name: "No approved artwork here yet" })).not.toBeInTheDocument();
     expect(screen.queryByText("A spring garden")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("A spring garden")).toBeVisible();

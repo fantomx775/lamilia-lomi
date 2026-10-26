@@ -49,7 +49,7 @@ export function MobileNavigation({ locale, children, communityEnabled = false }:
   const closeMenu = () => setOpenOnPathname(null);
 
   return (
-    <div ref={rootRef} className="relative md:hidden">
+    <div ref={rootRef} className="relative lg:hidden">
       <button
         ref={buttonRef}
         type="button"

@@ -106,13 +106,11 @@ export function CommunityGallery({
         </select>
       </label>
     </div>
-    {error ? <p className="mb-4 rounded-md bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error)]" role="alert">The gallery could not be updated. Please try again.</p> : null}
-    {loading && !page.items.length ? <p className="py-10 text-center text-sm text-[var(--color-muted)]" aria-live="polite">Loading approved artwork…</p> : page.items.length ? <ul data-testid="community-artwork-grid" aria-busy={loading} className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">
+    {loading && !page.items.length ? <p className="py-10 text-center text-sm text-[var(--color-muted)]" aria-live="polite">Loading approved artwork…</p> : error && !page.items.length ? <div className="rounded-xl border border-[var(--color-border)] bg-white/75 px-5 py-9 text-center" role="alert"><h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">The gallery could not be updated</h2><p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Please try again in a moment.</p><button type="button" onClick={() => { setLoading(true); setError(false); setFilterKey((key) => key + 1); }} className="mt-4 min-h-10 rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-semibold">Try again</button></div> : page.items.length ? <ul data-testid="community-artwork-grid" aria-busy={loading} className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">
       {page.items.map((artwork) => <li key={artwork.id}><CommunityArtworkCard artwork={artwork} /></li>)}
     </ul> : <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-white/60 px-5 py-12 text-center" data-testid="community-gallery-empty-state">
       <h2 className="font-serif text-2xl font-semibold text-[var(--color-ink)]">No approved artwork here yet</h2>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[var(--color-muted)]">Try a different book or audience, or come back as more community creations are approved.</p>
-      {error ? <button type="button" onClick={() => { setLoading(true); setError(false); setFilterKey((key) => key + 1); }} className="mt-4 min-h-10 rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-semibold">Try again</button> : null}
       <Link className="mt-5 inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] px-4 text-sm font-medium hover:bg-[var(--color-blush)]" href="/en/products">Browse the books</Link>
     </div>}
     <div className="mt-8 flex justify-center">

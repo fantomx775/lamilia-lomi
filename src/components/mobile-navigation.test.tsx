@@ -34,6 +34,7 @@ describe("MobileNavigation", () => {
     );
 
     const openButton = screen.getByRole("button", { name: "Open navigation menu" });
+    expect(openButton.parentElement).toHaveClass("lg:hidden");
     expect(openButton).toHaveAttribute("aria-expanded", "false");
 
     fireEvent.click(openButton);

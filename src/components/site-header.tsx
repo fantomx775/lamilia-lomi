@@ -52,7 +52,7 @@ export function SiteHeader({ locale }: {
             </span>
           </span>
         </NavigationLink>
-        <nav aria-label={labels.navigation} className="hidden items-center gap-1 md:flex">
+        <nav aria-label={labels.navigation} className="hidden items-center gap-1 lg:flex">
           <NavigationLink className={headerLinkClassName()} href={`/${locale}/products`} pendingLabel="Opening catalog">
             <BookOpen className="size-4" aria-hidden />
             {labels.products}
