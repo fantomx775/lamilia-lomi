@@ -84,4 +84,20 @@ describe("public Coloring Club gallery", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("A spring garden")).toBeVisible();
   });
+
+  it("keeps current cards and exposes a retry when loading the next page fails", async () => {
+    const extraArtwork = { ...artwork, id: "33333333-3333-4333-8333-333333333333", description: "Next page result" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, items: [extraArtwork], nextCursor: null }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CommunityGallery initialPage={{ items: [artwork], nextCursor: "continuation" }} products={[product]} />);
+    await user.click(screen.getByTestId("community-gallery-load-more"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("current gallery is still here");
+    expect(screen.getByText("A spring garden")).toBeVisible();
+    await user.click(screen.getByTestId("community-gallery-load-more"));
+    expect(await screen.findByText("Next page result")).toBeVisible();
+    expect(screen.getByText("A spring garden")).toBeVisible();
+  });
 });
