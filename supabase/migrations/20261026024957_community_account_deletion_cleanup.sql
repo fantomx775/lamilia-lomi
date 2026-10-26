@@ -6,7 +6,7 @@ create table public.community_account_media_cleanup_jobs (
   id bigint generated always as identity primary key,
   storage_provider text not null check (storage_provider in ('local', 'supabase', 'r2')),
   storage_path text not null check (
-    storage_path ~ '^community/[0-9a-f-]{36}/[0-9a-f-]{36}$'
+    storage_path ~ '^community/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
   ),
   not_before timestamptz not null,
   state text not null default 'pending' check (state in ('pending', 'sending')),

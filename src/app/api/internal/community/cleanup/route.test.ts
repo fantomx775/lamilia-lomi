@@ -38,7 +38,7 @@ describe("protected scheduled community cleanup", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, passes: 10 });
     expect(cleanup.media).toHaveBeenCalledTimes(10);
-    expect(cleanup.accountMedia).toHaveBeenCalledWith(20);
+    expect(cleanup.accountMedia).toHaveBeenCalledWith(10);
     expect(cleanup.retention).toHaveBeenCalledOnce();
     expect(cleanup.notifications).toHaveBeenCalledWith(10);
   });

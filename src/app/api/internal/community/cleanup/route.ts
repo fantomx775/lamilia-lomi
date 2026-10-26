@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     // deletions retain their durable lease and retry on a later invocation.
     // Run independently of public/upload flags so pausing the club cannot stop cleanup.
     for (let pass = 0; pass < 10; pass++) await processCommunityArtworkCleanup();
-    await processCommunityAccountMediaCleanup(20);
+    await processCommunityAccountMediaCleanup(10);
     await processCommunityReportRetention();
     await processCommunityModerationNotifications(10);
     return json({ ok: true, passes: 10 });
