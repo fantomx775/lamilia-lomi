@@ -123,7 +123,11 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       Boolean(request.headers()["next-action"]);
     const nextFlightFetch = request.method() === "GET" && request.resourceType() === "fetch" &&
       failedUrl.searchParams.has("_rsc");
-    const expectedCreateSaveCancellation = createSaveNavigationPending && (createActionPost || nextFlightFetch);
+    const exactCreatedProductFetch = request.method() === "GET" && request.resourceType() === "fetch" &&
+      productId !== "" && failedUrl.origin === new URL(page.url()).origin &&
+      failedUrl.pathname === `/admin/products/${productId}`;
+    const expectedCreateSaveCancellation = createSaveNavigationPending &&
+      (createActionPost || nextFlightFetch || exactCreatedProductFetch);
     const productMutationAction = request.method() === "POST" && failedUrl.pathname === `/admin/products/${productId}` &&
       Boolean(request.headers()["next-action"]);
     const expectedVerifiedUpdateSaveCancellation = productUpdateSavePending && productMutationAction;
