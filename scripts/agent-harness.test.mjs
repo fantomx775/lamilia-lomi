@@ -46,6 +46,264 @@ const AI_REVIEW_MARKER = "<!-- agent-harness-ai-review:v1 -->";
 const ISSUE_DELIVERY_MARKER = "<!-- agent-harness-issue-delivery:v1 -->";
 const VERIFICATION_MARKER = "<!-- agent-harness-verification:v1 -->";
 
+const GATED_PAGE_TEXT = "This page could not be found.";
+const GATED_PAGE_PATHS = [
+  "/en/club",
+  "/en/club/artworks/11111111-1111-4111-8111-111111111111",
+  "/en/club/creators/release_artist",
+];
+
+function gatedPageProof() {
+  const run = (enabled) => ({
+    status: "PASS", testedSha: CURRENT_SHA, runId: enabled ? "browser-on" : "browser-off",
+    command: enabled ? "Playwright public ON journey" : "Playwright public OFF guards",
+    publicEnabled: enabled,
+    checks: GATED_PAGE_PATHS.map((path) => ({ path, statusCode: enabled ? 200 : 404,
+      contentType: "text/html; charset=utf-8", expectedText: enabled ? "Approved community content" : GATED_PAGE_TEXT,
+      expectedTextMatched: true, sameOrigin: true, finalPathUnchanged: true })),
+  });
+  return { status: "PASS", testedSha: CURRENT_SHA, publicOn: run(true), publicOff: {
+    ...run(false), approvedFixture: { artworkPath: GATED_PAGE_PATHS[1],
+      mediaPath: "/api/community/artworks/11111111-1111-4111-8111-111111111111/media",
+      artworkStatus: "approved", ownerMediaStatus: 200,
+      anonymousMediaStatus: 404, publicListingStatus: 404, mutationsBlocked: true },
+  } };
+}
+
+function gatedPageRecord() {
+  const files = ["src/app/[locale]/club/page.tsx", "src/app/[locale]/club/artworks/[id]/page.tsx",
+    "src/app/[locale]/club/creators/[username]/page.tsx"];
+  return { files, record: cleanVerificationRecord({
+    uiBehavior: true,
+    browser: { status: "PASS", testedSha: CURRENT_SHA, runId: "browser-on", featureFlags: { publicEnabled: true } },
+    productionSmokePlan: { status: "PASS", gatedPublicPageVerification: gatedPageProof(),
+      flows: files.map((file, index) => ({ name: `gated community page ${index}`, affectedFiles: [file],
+        paths: [{ path: GATED_PAGE_PATHS[index], expectedStatus: 404, expectedText: GATED_PAGE_TEXT,
+          expectedContentType: "text/html" }] })),
+    },
+  }) };
+}
+
+function smokeResponse(url, { status = 403, text = "request denied", contentType = "application/json", finalUrl } = {}) {
+  return { ok: status >= 200 && status < 300, status, url: finalUrl ?? url.href,
+    headers: { get: () => contentType }, text: async () => text };
+}
+
+test("gated community HTML404 plans require mapped current-SHA positive and negative browser proof", () => {
+  const { files, record } = gatedPageRecord();
+  const result = validateProductionSmokePlan({ files, localVerification: { record } });
+  assert.equal(result.status, "PASS", result.details);
+  assert.deepEqual(result.paths, GATED_PAGE_PATHS);
+  for (const mutate of [
+    (copy) => { delete copy.productionSmokePlan.gatedPublicPageVerification; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.testedSha = "c".repeat(40); },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.testedSha = "c".repeat(40); },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.publicEnabled = true; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.runId = "browser-on"; },
+    (copy) => { copy.browser.runId = "different-run"; },
+    (copy) => { copy.browser.featureFlags.publicEnabled = false; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOn.checks[1].statusCode = 404; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.checks.pop(); },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.checks[0].sameOrigin = false; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.approvedFixture.ownerMediaStatus = 404; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.approvedFixture.artworkStatus = "pending"; },
+  ]) {
+    const copy = structuredClone(record);
+    mutate(copy);
+    assert.equal(validateProductionSmokePlan({ files, localVerification: { record: copy } }).status, "BLOCKED");
+  }
+});
+
+test("community HTML404 exception rejects every unsupported page, status, text and MIME contract", () => {
+  for (const path of ["/products", "/en/club/", "/pl/club", "/EN/club", "/en/club?sort=latest",
+    "/en/club#gallery", "/en/club/artworks/not-a-uuid", "/en/club/artworks/11111111-1111-4111-8111-111111111111/",
+    "/en/club/artworks/AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+    "/en/club/creators/ABCD", "/en/club/creators/ab", "/en/club/creators/unsafe%2fpath",
+    "/en/club//creators/release_artist"]) {
+    const { record } = gatedPageRecord();
+    const file = path === "/products" ? "src/app/products/page.tsx"
+      : path.includes("/artworks/") ? "src/app/[locale]/club/artworks/[id]/page.tsx"
+      : path.includes("/creators/") ? "src/app/[locale]/club/creators/[username]/page.tsx"
+      : "src/app/[locale]/club/page.tsx";
+    record.productionSmokePlan.flows = [{ name: "wrong HTML path", affectedFiles: [file],
+      paths: [{ path, expectedStatus: 404, expectedText: GATED_PAGE_TEXT, expectedContentType: "text/html" }] }];
+    assert.equal(validateProductionSmokePlan({ files: [file], localVerification: { record } }).status, "BLOCKED", path);
+  }
+  for (const change of [{ expectedText: "generic not found" }, { expectedText: "" }, { expectedContentType: undefined },
+    { expectedContentType: "application/json" }, { expectedStatus: 401 }, { expectedStatus: 500 },
+    { expectedFinalOrigin: "https://elsewhere.example.test" }, { method: "POST" }]) {
+    const { files, record } = gatedPageRecord();
+    Object.assign(record.productionSmokePlan.flows[0].paths[0], change);
+    assert.equal(validateProductionSmokePlan({ files, localVerification: { record } }).status, "BLOCKED", JSON.stringify(change));
+  }
+});
+
+test("gated HTML smoke enforces exact status, sentinel, MIME, origin and path without redirects", async () => {
+  const path = GATED_PAGE_PATHS[0];
+  const options = { paths: [path], expectations: [{ path, expectedStatus: 404,
+    expectedText: GATED_PAGE_TEXT, expectedContentType: "text/html" }], gatedPublicPageVerification: gatedPageProof(),
+    productionSmokeCookie: "", vercelProtectionBypass: "" };
+  const pass = await runProductionSmoke("https://production.example.test", { ...options, fetchImpl: async (url, init) => {
+    assert.equal(init.method, "GET");
+    assert.equal(init.redirect, "manual");
+    return smokeResponse(url, { status: 404, text: GATED_PAGE_TEXT, contentType: "text/html" });
+  } });
+  assert.equal(pass.status, "PASS");
+  assert.equal(pass.checks[0].gatedPublicPage, true);
+  for (const override of [{ status: 200 }, { status: 401 }, { status: 500 }, { status: 307 },
+    { text: "404 generic fallback" }, { text: "" }, { contentType: "application/json" },
+    { finalUrl: "https://elsewhere.example.test/en/club" }, { finalUrl: "https://production.example.test/404" },
+    { finalUrl: "https://production.example.test/en/club?unexpected=1" }]) {
+    const result = await runProductionSmoke("https://production.example.test", { ...options,
+      fetchImpl: async (url) => smokeResponse(url, { status: 404, text: GATED_PAGE_TEXT, contentType: "text/html", ...override }) });
+    assert.equal(result.status, "FAIL", JSON.stringify(override));
+  }
+  let fetched = false;
+  const blocked = await runProductionSmoke("https://production.example.test", { ...options,
+    gatedPublicPageVerification: null, fetchImpl: async () => { fetched = true; } });
+  assert.equal(blocked.status, "BLOCKED");
+  assert.equal(fetched, false);
+});
+
+test("POST smoke plans permit only bodyless API denial probes and reject method conflicts", () => {
+  const file = "src/app/api/community/join/route.ts";
+  const expectation = { path: "/api/community/join", method: "POST", expectedStatus: 403, expectedText: "request denied" };
+  const record = (paths) => ({ productionSmokePlan: { status: "PASS", flows: [{ name: "guest mutation guard", affectedFiles: [file], paths }] } });
+  const plan = validateProductionSmokePlan({ files: [file], localVerification: { record: record([expectation]) } });
+  assert.equal(plan.status, "PASS", plan.details);
+  assert.equal(plan.expectations[0].method, "POST");
+  for (const change of [{ method: "PUT" }, { method: "post" }, { expectedStatus: 200 }, { expectedStatus: 405 },
+    { expectedText: "" }, { body: "{}" }, { headers: { Origin: "https://production.example.test" } },
+    { credentials: "include" }, { origin: "https://production.example.test" },
+    { path: "/api/community/join?token=opaque" }, { path: "/api/community/join#hash" },
+    { path: "/en/club" }, { expectedFinalOrigin: "https://elsewhere.example.test" }]) {
+    const invalid = validateProductionSmokePlan({ files: [file], localVerification: { record: record([{ ...expectation, ...change }]) } });
+    assert.equal(invalid.status, "BLOCKED", JSON.stringify(change));
+  }
+  const conflict = validateProductionSmokePlan({ files: [file], localVerification: { record: record([
+    expectation, { ...expectation, method: "GET" },
+  ]) } });
+  assert.equal(conflict.status, "BLOCKED");
+  assert.match(conflict.details, /mix GET and POST/);
+});
+
+test("POST denial smoke strips application sessions and retains only deployment protection", async () => {
+  const path = "/api/community/join";
+  const host = "https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app";
+  const options = { paths: [path], expectations: [{ path, method: "POST", expectedStatus: 403, expectedText: "request denied" }],
+    productionSmokeCookie: "sb-project-auth-token=application-session; _vercel_jwt=deployment-token; lamilialomi_demo_session=demo-session",
+    vercelProtectionBypass: "" };
+  const result = await runProductionSmoke(host, { ...options, fetchImpl: async (url, init) => {
+    assert.equal(init.method, "POST");
+    assert.equal(init.redirect, "manual");
+    assert.equal(Object.hasOwn(init, "body"), false);
+    assert.equal(Object.hasOwn(init, "credentials"), false);
+    assert.deepEqual(init.headers, { Cookie: "_vercel_jwt=deployment-token" });
+    return smokeResponse(url);
+  } });
+  assert.equal(result.status, "PASS");
+  assert.equal(result.checks[0].method, "POST");
+  assert.doesNotMatch(JSON.stringify(result), /application-session|demo-session|deployment-token/);
+  const withoutProtection = await runProductionSmoke(host, { ...options,
+    productionSmokeCookie: "sb-project-auth-token=application-session",
+    fetchImpl: async (url, init) => {
+      assert.equal(init.headers, undefined);
+      return smokeResponse(url);
+    },
+  });
+  assert.equal(withoutProtection.status, "PASS");
+  for (const cookie of ["_vercel_jwt=", "_vercel_jwt=one; _vercel_jwt=two", "_vercel_jwt=invalid value"]) {
+    let fetched = false;
+    const blocked = await runProductionSmoke(host, { ...options, productionSmokeCookie: cookie,
+      fetchImpl: async () => { fetched = true; } });
+    assert.equal(blocked.status, "BLOCKED");
+    assert.equal(fetched, false);
+  }
+  for (const override of [{ status: 405 }, { status: 307 }, { finalUrl: host + "/api/unrelated" }]) {
+    const failure = await runProductionSmoke(host, { ...options, fetchImpl: async (url) => smokeResponse(url, override) });
+    assert.equal(failure.status, "FAIL");
+  }
+  const conflicting = await runProductionSmoke(host, { ...options,
+    expectations: [...options.expectations, { ...options.expectations[0], method: "GET" }] });
+  assert.equal(conflicting.status, "BLOCKED");
+});
+
+test("POST denial smoke uses newly minted protection without forwarding auth or caller input", async () => {
+  const path = "/api/account/delete";
+  let calls = 0;
+  const result = await runProductionSmoke("https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app", {
+    paths: [path], expectations: [{ path, method: "POST", expectedStatus: 401, expectedText: "guest" }],
+    productionSmokeCookie: "sb-project-auth-token=application-session", vercelProtectionBypass: "mint-token",
+    fetchImpl: async (url, init) => {
+      calls += 1;
+      if (calls === 1) {
+        assert.equal(init.method, "GET");
+        assert.equal(init.headers["x-vercel-protection-bypass"], "mint-token");
+        return { ok: false, status: 307, headers: { getSetCookie: () => ["_vercel_jwt=minted-token; Path=/; Secure; HttpOnly"] } };
+      }
+      assert.deepEqual(init.headers, { Cookie: "_vercel_jwt=minted-token" });
+      assert.equal(init.method, "POST");
+      return smokeResponse(url, { status: 401, text: "guest" });
+    },
+  });
+  assert.equal(result.status, "PASS");
+  assert.equal(calls, 2);
+});
+
+test("gated proof does not replace the existing complete browser verification gate", () => {
+  const { files, record } = gatedPageRecord();
+  const assessed = assessPullRequestVerification({ pullRequest: cleanPullRequest(), files,
+    comments: [structuredComment(VERIFICATION_MARKER, record), ...cleanAiReviewComments()], mergePolicy: cleanMergePolicy() });
+  assert.equal(assessed.productionSmokePlan.status, "PASS");
+  assert.notEqual(assessed.browserVerification.status, "PASS");
+  assert.equal(assessed.decision, "BLOCKED");
+});
+
+test("delivery carries validated OFF proof and POST method into exact-deployment smoke", async () => {
+  const fixture = createDeliveryClient();
+  const { files, record } = gatedPageRecord();
+  const apiFile = "src/app/api/community/join/route.ts";
+  files.push(apiFile);
+  record.productionSmokePlan.flows.push({ name: "join authorization denial", affectedFiles: [apiFile],
+    paths: [{ path: "/api/community/join", method: "POST", expectedStatus: 403, expectedText: "request denied" }] });
+  const plan = validateProductionSmokePlan({ files, localVerification: { record } });
+  let checked = false;
+  const result = await deliverPullRequest(fixture.client, 52, { issueNumber: 7,
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA,
+      pullRequest: { baseSha: CURRENT_BASE_SHA }, fileScope: { files }, productionSmokePlan: plan, reasons: [] }),
+    waitForDeployment: async (_client, mergeSha) => ({ status: "PASS", deployment: { id: 14, sha: mergeSha,
+      environmentUrl: "https://production.example.test" }, details: "Exact-SHA deployment passed." }),
+    smoke: async (_url, options) => {
+      checked = true;
+      assert.equal(options.gatedPublicPageVerification.testedSha, CURRENT_SHA);
+      assert.equal(options.expectations.find((item) => item.path === "/api/community/join").method, "POST");
+      return { status: "PASS", checks: [], details: "Expected OFF pages and API guard passed." };
+    },
+  });
+  assert.equal(checked, true);
+  assert.equal(result.completed, true);
+});
+
+test("delivery blocks a self-consistent gated proof from another candidate before merge", async () => {
+  const fixture = createDeliveryClient();
+  const { files, record } = gatedPageRecord();
+  const stale = "d".repeat(40);
+  record.headSha = stale;
+  record.browser.testedSha = stale;
+  record.productionSmokePlan.gatedPublicPageVerification.testedSha = stale;
+  record.productionSmokePlan.gatedPublicPageVerification.publicOn.testedSha = stale;
+  record.productionSmokePlan.gatedPublicPageVerification.publicOff.testedSha = stale;
+  const plan = validateProductionSmokePlan({ files, localVerification: { record } });
+  assert.equal(plan.status, "PASS");
+  const result = await deliverPullRequest(fixture.client, 52, {
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA,
+      pullRequest: { baseSha: CURRENT_BASE_SHA }, fileScope: { files }, productionSmokePlan: plan, reasons: [] }),
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.merged, false);
+  assert.equal(fixture.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
+});
+
 function structuredComment(marker, record, user = "author", createdAt = "2026-10-08T12:00:00Z") {
   return {
     user: { login: user },

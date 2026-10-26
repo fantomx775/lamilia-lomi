@@ -397,7 +397,8 @@ Expected responses must be HTTP 2xx unless an API path explicitly sets
 `expectedStatus` to 401 or 403 and also checks response text, or sets it to 404
 and checks for the expected error text. This supports guest authorization checks
 and known absent optional resources without treating an unexplained not-found as
-a pass; unexpected denials and all other non-2xx responses remain failures. If
+a pass. The narrow gated community-page exception below supports an intentionally
+disabled release; unexpected denials and other non-2xx responses remain failures. If
 application-flow files change, the current-SHA `productionSmokePlan` must map
 each changed source file to its affected route and expected response content;
 the pre-merge gate blocks on a missing file, mismatched route, or absent text.
@@ -417,6 +418,101 @@ Smoke expectations may use `expectedText` for text responses or an exact
 optional `expectedFinalOrigin` must be one exact HTTPS origin; without it, the
 final response must stay on the deployment origin. Recorded final URLs omit
 query strings so signed redirect parameters are not written into evidence.
+
+### Gated community pages and mutation denial probes
+
+Default smoke requests remain GET. A path may explicitly set `method: "POST"`
+only for an API authorization-denial probe with expected401/403/404 and nonempty
+response text. POST probes have no query/fragment, body, Origin, caller headers,
+or application session cookie. They retain only `_vercel_jwt` deployment
+protection, use manual redirects, and must finish on the requested origin/path.
+Unsupported methods, success-status POST expectations,405s, redirects and mixed
+GET/POST expectations for one path are blocked or fail. A denial probe is not a
+positive mutation test: the same-SHA browser verification must also exercise the
+authenticated mutation and its real backend effect.
+
+An explicit HTML404 is supported only for canonical `/en/club`,
+`/en/club/artworks/<lowercase UUID>` and
+`/en/club/creators/<lowercase 3–24 character handle>`. No query, fragment,
+encoding, trailing slash or other HTML page is allowed. The expectation must be
+GET with exact `expectedText: "This page could not be found."` and
+`expectedContentType: "text/html"`; final-origin overrides and redirects are
+not accepted. This verifies the deployed OFF state, not feature availability or
+legal readiness.
+
+Such a plan additionally requires `productionSmokePlan.gatedPublicPageVerification`
+in the current verification record. Its full SHA must match the record head.
+`publicOn` must match the existing fully validated browser run ID/SHA, whose
+`featureFlags.publicEnabled` is true. `publicOff` must be a distinct passing run
+of that same SHA. Each contains actual checked HTML responses for every mapped
+route kind; controlled fixture IDs can differ between isolated databases. A
+nonempty command/run ID alone is insufficient. For example:
+
+```json
+{
+  "status": "PASS",
+  "testedSha": "<actual full current head SHA>",
+  "publicOn": {
+    "status": "PASS",
+    "testedSha": "<same SHA>",
+    "runId": "final-public-on",
+    "command": "<actual positive browser command>",
+    "publicEnabled": true,
+    "checks": [{
+      "path": "/en/club",
+      "statusCode": 200,
+      "contentType": "text/html",
+      "expectedText": "Coloring, shared with care",
+      "expectedTextMatched": true,
+      "sameOrigin": true,
+      "finalPathUnchanged": true
+    }]
+  },
+  "publicOff": {
+    "status": "PASS",
+    "testedSha": "<same SHA>",
+    "runId": "final-public-off",
+    "command": "<actual OFF browser/integration command>",
+    "publicEnabled": false,
+    "checks": [{
+      "path": "/en/club",
+      "statusCode": 404,
+      "contentType": "text/html",
+      "expectedText": "This page could not be found.",
+      "expectedTextMatched": true,
+      "sameOrigin": true,
+      "finalPathUnchanged": true
+    }, {
+      "path": "/en/club/artworks/<actual lowercase fixture UUID>",
+      "statusCode": 404,
+      "contentType": "text/html",
+      "expectedText": "This page could not be found.",
+      "expectedTextMatched": true,
+      "sameOrigin": true,
+      "finalPathUnchanged": true
+    }],
+    "approvedFixture": {
+      "artworkPath": "/en/club/artworks/<actual lowercase fixture UUID>",
+      "mediaPath": "/api/community/artworks/<same fixture UUID>/media",
+      "artworkStatus": "approved",
+      "ownerMediaStatus": 200,
+      "anonymousMediaStatus": 404,
+      "publicListingStatus": 404,
+      "mutationsBlocked": true
+    }
+  }
+}
+```
+
+The OFF run always includes the approved fixture artwork check. Include matching
+ON artwork checks and creator checks when those route modules are mapped. Populate
+these values from real assertions, without private paths, account identifiers,
+cookies or credentials. The OFF fixture check proves that approved private
+content exists and remains owner-readable while public reads and writes are
+denied; its artwork path must be among the actual OFF checks and its media path
+must identify that same artwork. The normal current-SHA screenshots, independent review, CI, migration,
+GitHub merge-rule and exact-deployment gates still apply. The runner repeats
+status/text/MIME/origin/path validation; it never enables a feature for smoke.
 
 The deployment gate requires a Vercel Git integration deployment and success
 status for the exact merge SHA, and checks that the environment URL belongs to

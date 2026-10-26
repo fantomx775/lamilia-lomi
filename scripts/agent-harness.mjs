@@ -1397,12 +1397,89 @@ function isSupportedProductionSmokeStatus(status, path) {
   if (!Number.isInteger(status)) return false;
   if (status >= 200 && status < 300) return true;
   if (![401, 403, 404].includes(status) || !isValidProductionSmokePath(path)) return false;
-  return new URL(path, "https://agent-harness.invalid").pathname.startsWith("/api/");
+  return new URL(path, "https://agent-harness.invalid").pathname.startsWith("/api/") ||
+    (status === 404 && isGatedCommunityPagePath(path));
+}
+
+const GATED_COMMUNITY_PAGE_SENTINEL = "This page could not be found.";
+
+function isGatedCommunityPagePath(path) {
+  return typeof path === "string" && (
+    /^\/en\/club$/.test(path) ||
+    /^\/en\/club\/artworks\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(path) ||
+    /^\/en\/club\/creators\/[a-z0-9_]{3,24}$/.test(path)
+  );
+}
+
+function isGatedCommunityPageExpectation(expectation) {
+  return expectation?.expectedStatus === 404 && isGatedCommunityPagePath(expectation.path);
+}
+
+function isValidGatedCommunityPageProof(proof) {
+  if (proof?.status !== "PASS" || !validSha(proof.testedSha)) return false;
+  const validRun = (run, enabled) => run?.status === "PASS" &&
+    run.publicEnabled === enabled && typeof run.runId === "string" && Boolean(run.runId.trim()) &&
+    typeof run.command === "string" && Boolean(run.command.trim()) &&
+    run.testedSha?.toLowerCase?.() === proof.testedSha.toLowerCase() &&
+    Array.isArray(run.checks) && run.checks.length > 0 && run.checks.every((check) =>
+      isGatedCommunityPagePath(check?.path) && check.sameOrigin === true && check.finalPathUnchanged === true &&
+      check.expectedTextMatched === true && typeof check.expectedText === "string" && Boolean(check.expectedText.trim()) &&
+      check.contentType?.split?.(";", 1)[0].trim().toLowerCase() === "text/html" &&
+      check.statusCode === (enabled ? 200 : 404) &&
+      (enabled || check.expectedText === GATED_COMMUNITY_PAGE_SENTINEL));
+  return validRun(proof.publicOn, true) && validRun(proof.publicOff, false) &&
+    proof.publicOn.runId !== proof.publicOff.runId &&
+    gatedCommunityPageKind(proof.publicOff.approvedFixture?.artworkPath) === "artwork" &&
+    proof.publicOff.checks.some((check) => check.path === proof.publicOff.approvedFixture.artworkPath) &&
+    proof.publicOff.approvedFixture?.mediaPath === proof.publicOff.approvedFixture.artworkPath.replace("/en/club/artworks/", "/api/community/artworks/") + "/media" &&
+    proof.publicOff.approvedFixture?.artworkStatus === "approved" &&
+    proof.publicOff.approvedFixture?.ownerMediaStatus === 200 &&
+    proof.publicOff.approvedFixture?.anonymousMediaStatus === 404 &&
+    proof.publicOff.approvedFixture?.publicListingStatus === 404 &&
+    proof.publicOff.approvedFixture?.mutationsBlocked === true;
+}
+
+function hasMatchingGatedCommunityPageProof(record) {
+  const proof = record?.productionSmokePlan?.gatedPublicPageVerification;
+  return isValidGatedCommunityPageProof(proof) && validSha(record.headSha) &&
+    proof.testedSha.toLowerCase() === record.headSha.toLowerCase() &&
+    record.browser?.status === "PASS" &&
+    record.browser.featureFlags?.publicEnabled === true &&
+    record.browser.testedSha?.toLowerCase?.() === record.headSha.toLowerCase() &&
+    record.browser.runId === proof.publicOn.runId;
+}
+
+function gatedCommunityPageKind(path) {
+  if (!isGatedCommunityPagePath(path)) return null;
+  return path === "/en/club" ? "gallery" : path.startsWith("/en/club/artworks/") ? "artwork" : "creator";
+}
+
+function gatedCommunityProofCoversExpectations(proof, expectations) {
+  if (!isValidGatedCommunityPageProof(proof)) return false;
+  const kinds = new Set(expectations.filter(isGatedCommunityPageExpectation).map((item) => gatedCommunityPageKind(item.path)));
+  return [...kinds].every((kind) => [proof.publicOn, proof.publicOff].every((run) =>
+    run.checks.some((check) => gatedCommunityPageKind(check.path) === kind)));
 }
 
 function isValidProductionSmokeExpectationStatus(expectation) {
+  const method = expectation?.method ?? "GET";
+  if (!["GET", "POST"].includes(method)) return false;
+  if (method === "POST" && (
+    !isValidProductionSmokePath(expectation.path) ||
+    !new URL(expectation.path, "https://agent-harness.invalid").pathname.startsWith("/api/") ||
+    new URL(expectation.path, "https://agent-harness.invalid").pathname !== expectation.path ||
+    ![401, 403, 404].includes(expectation.expectedStatus) ||
+    typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+    expectation.expectedFinalOrigin !== undefined ||
+    ["body", "headers", "origin", "credentials"].some((key) => Object.hasOwn(expectation, key))
+  )) return false;
   if (expectation?.expectedStatus === undefined) return true;
   if (!isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)) return false;
+  if (isGatedCommunityPageExpectation(expectation)) {
+    return method === "GET" && expectation.expectedText === GATED_COMMUNITY_PAGE_SENTINEL &&
+      expectation.expectedContentType?.toLowerCase?.() === "text/html" &&
+      expectation.expectedFinalOrigin === undefined;
+  }
   if (expectation.expectedStatus === 404) {
     return typeof expectation.expectedText === "string" && Boolean(expectation.expectedText.trim());
   }
@@ -1517,6 +1594,7 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       paths.push(expectation.path);
       expectations.push({
         path: expectation.path,
+        ...(expectation.method !== undefined ? { method: expectation.method } : {}),
         ...(hasExpectedText ? { expectedText: expectation.expectedText.trim() } : {}),
         ...(expectation.expectedContentType !== undefined ? { expectedContentType: expectation.expectedContentType } : {}),
         ...(expectation.expectedFinalOrigin !== undefined ? { expectedFinalOrigin: expectation.expectedFinalOrigin } : {}),
@@ -1554,18 +1632,30 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
     return contentTypes.size > 1;
   });
   if (conflictingContentTypes) failures.push("Smoke plan has conflicting expected content types for one path.");
+  const conflictingMethods = uniquePaths.some((path) => new Set(expectations
+    .filter((expectation) => expectation.path === path)
+    .map((expectation) => expectation.method ?? "GET")).size > 1);
+  if (conflictingMethods) failures.push("Smoke plan cannot mix GET and POST probes for one path.");
+  const requiresGatedPageProof = expectations.some(isGatedCommunityPageExpectation);
+  const gatedPublicPageVerification = plan.gatedPublicPageVerification;
+  if (requiresGatedPageProof && (!hasMatchingGatedCommunityPageProof(rawRecord) ||
+    !gatedCommunityProofCoversExpectations(gatedPublicPageVerification, expectations))) {
+    failures.push("Gated community HTML404 probes require current-SHA positive ON browser evidence and a distinct OFF run proving mapped routes and retained approved private media.");
+  }
   return attachPrivateValue(redactPersistedData({
     status: failures.length ? "BLOCKED" : "PASS",
     required: true,
     paths: uniquePaths,
     expectations,
     flows: plan.flows,
+    ...(requiresGatedPageProof ? { gatedPublicPageVerification } : {}),
     details: failures.length
       ? failures.join(" ")
       : affectedFiles.length + " changed application-flow file(s) map to " + uniquePaths.length + " Production route(s) with expected response content.",
   }), PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN, {
     paths: uniquePaths,
     expectations,
+    ...(requiresGatedPageProof ? { gatedPublicPageVerification } : {}),
   });
 }
 
@@ -2827,6 +2917,7 @@ async function runProductionSmokeInternal(environmentUrl, {
   paths = (process.env.AGENT_HARNESS_PRODUCTION_SMOKE_PATHS || "/")
     .split(",").map((path) => path.trim()).filter(Boolean),
   expectations = [],
+  gatedPublicPageVerification = null,
   fetchImpl = fetch,
   timeoutMs = 15_000,
   vercelProtectionBypass = process.env.AGENT_HARNESS_VERCEL_PROTECTION_BYPASS,
@@ -2864,6 +2955,15 @@ async function runProductionSmokeInternal(environmentUrl, {
     !isValidProductionSmokeExpectationStatus(expectation),
   )) {
     return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path, expected text or exact MIME content type, and a valid HTTPS final origin." };
+  }
+  if (expectations.some(isGatedCommunityPageExpectation) &&
+    !gatedCommunityProofCoversExpectations(gatedPublicPageVerification, expectations)) {
+    return { status: "BLOCKED", checks: [], details: "Gated community HTML404 smoke requires validated same-SHA ON/OFF route and private-media evidence." };
+  }
+  if (paths.some((path) => new Set(expectations
+    .filter((expectation) => expectation.path === path)
+    .map((expectation) => expectation.method ?? "GET")).size > 1)) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke cannot mix GET and POST probes for one path." };
   }
   const conflictingFinalOrigins = paths.some((path) => {
     const origins = new Set(expectations
@@ -2918,21 +3018,33 @@ async function runProductionSmokeInternal(environmentUrl, {
     }
   }
   const smokeCookieHeader = [protectionCookie, hasSmokeCookie ? productionSmokeCookie : ""].filter(Boolean).join("; ");
+  const suppliedProtectionCookies = hasSmokeCookie
+    ? productionSmokeCookie.split(";").map((pair) => pair.trim()).filter((pair) => pair.startsWith("_vercel_jwt="))
+    : [];
+  const hasPostProbe = expectations.some((expectation) => expectation.method === "POST");
+  if (hasPostProbe && !protectionCookie && (suppliedProtectionCookies.length > 1 ||
+    (suppliedProtectionCookies.length === 1 && !/^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/.test(suppliedProtectionCookies[0].slice("_vercel_jwt=".length))))) {
+    return { status: "BLOCKED", checks: [], details: "POST denial probes require one valid deployment-protection cookie, without application authentication." };
+  }
+  const postCookieHeader = protectionCookie || suppliedProtectionCookies[0] || "";
   for (const path of paths) {
     const url = new URL(path, baseUrl);
     if (url.origin !== baseUrl.origin) {
       return { status: "BLOCKED", checks, details: "Production smoke paths must stay on the deployed environment origin." };
     }
     try {
+      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
+      const method = expectedForPath[0]?.method ?? "GET";
+      const gatedPage = expectedForPath.some(isGatedCommunityPageExpectation);
+      const cookieHeader = method === "POST" ? postCookieHeader : smokeCookieHeader;
       const response = await fetchImpl(url, {
-        method: "GET",
+        method,
         cache: "no-store",
-        redirect: "follow",
+        redirect: method === "POST" || gatedPage ? "manual" : "follow",
         signal: AbortSignal.timeout(timeoutMs),
-        ...(smokeCookieHeader ? { headers: { Cookie: smokeCookieHeader } } : {}),
+        ...(cookieHeader ? { headers: { Cookie: cookieHeader } } : {}),
       });
       const finalUrl = new URL(response.url || url.href);
-      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
       const expectedFinalOrigin = expectedForPath[0]?.expectedFinalOrigin ?? baseUrl.origin;
       const expectedContentType = expectedForPath.find((expectation) => expectation.expectedContentType !== undefined)?.expectedContentType;
       const responseContentType = response.headers?.get?.("content-type") || null;
@@ -2953,6 +3065,8 @@ async function runProductionSmokeInternal(environmentUrl, {
         mediaType === expectedContentType.toLowerCase();
       const check = {
         path,
+        ...(method === "POST" ? { method } : {}),
+        ...(gatedPage ? { gatedPublicPage: true } : {}),
         statusCode: response.status,
         contentType: responseContentType,
         responseBytes: responseBody.length,
@@ -2961,6 +3075,8 @@ async function runProductionSmokeInternal(environmentUrl, {
       const expectedStatus = expectedForPath.find((expectation) => expectation.expectedStatus !== undefined)?.expectedStatus;
       const expectedStatusMatched = expectedStatus === undefined || response.status === expectedStatus;
       const responseStatusPassed = expectedStatus === undefined ? response.ok : expectedStatusMatched;
+      const finalPathMatched = !(gatedPage || method === "POST") ||
+        (finalUrl.pathname === url.pathname && !finalUrl.search && !finalUrl.hash);
       if (expectedTextValues.length) {
         check.expectedText = expectedTextValues;
         check.expectedTextMatched = expectedTextMatched;
@@ -2977,7 +3093,7 @@ async function runProductionSmokeInternal(environmentUrl, {
         check.expectedStatusMatched = expectedStatusMatched;
       }
       checks.push(check);
-      if (!responseStatusPassed || finalUrl.origin !== expectedFinalOrigin || responseBodyEmpty ||
+      if (!responseStatusPassed || finalUrl.origin !== expectedFinalOrigin || !finalPathMatched || responseBodyEmpty ||
         !expectedTextMatched || !expectedContentTypeMatched) {
         return {
           status: "FAIL",
@@ -2985,6 +3101,7 @@ async function runProductionSmokeInternal(environmentUrl, {
           details: "Production smoke failed (HTTP " + response.status +
             (expectedStatus !== undefined && !expectedStatusMatched ? ", expected HTTP " + expectedStatus : "") +
             (finalUrl.origin !== expectedFinalOrigin ? ", final origin did not match the expected origin" : "") +
+            (!finalPathMatched ? ", denial probe redirected away from the expected path" : "") +
             (responseBodyEmpty ? ", empty response body" : "") +
             (!expectedTextMatched ? ", expected content was not present" : "") +
             (!expectedContentTypeMatched ? ", expected content type was not present" : "") + ").",
@@ -3871,6 +3988,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
         .flatMap((value) => String(value).split(",")).map((path) => path.trim()).filter(Boolean);
   let effectiveSmokePaths = ["/"];
   let effectiveSmokeExpectations = [];
+  let effectiveGatedPublicPageVerification = null;
   const resolveSmokePlan = (verification) => {
     const changedFiles = verification?.fileScope?.files || [];
     const plan = verification?.productionSmokePlan || verification?.fileScope?.productionSmokePlan ||
@@ -3882,6 +4000,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     const executionPlan = PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN.get(plan);
     const paths = plan.required ? executionPlan?.paths ?? plan.paths : configuredSmokePaths.length ? configuredSmokePaths : ["/"];
     const expectations = plan.required ? executionPlan?.expectations ?? plan.expectations : [];
+    const gatedPublicPageVerification = executionPlan?.gatedPublicPageVerification ?? plan.gatedPublicPageVerification ?? null;
     if (!Array.isArray(paths) || !paths.length || paths.some((path) => !isValidProductionSmokePath(path))) {
       return { status: "BLOCKED", details: "Production smoke plan contains an invalid same-origin absolute path." };
     }
@@ -3904,6 +4023,16 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     )) {
       return { status: "BLOCKED", details: "Production smoke expectations must name an included path, expected text or exact MIME content type, HTTPS final origin, and a supported HTTP status." };
     }
+    if (paths.some((path) => new Set(expectations
+      .filter((expectation) => expectation.path === path)
+      .map((expectation) => expectation.method ?? "GET")).size > 1)) {
+      return { status: "BLOCKED", details: "Production smoke cannot mix GET and POST probes for one path." };
+    }
+    if (expectations.some(isGatedCommunityPageExpectation) && (
+      !gatedCommunityProofCoversExpectations(gatedPublicPageVerification, expectations) ||
+      gatedPublicPageVerification.testedSha.toLowerCase() !== candidateSha?.toLowerCase())) {
+      return { status: "BLOCKED", details: "Gated community pages require ON/OFF proof for this exact candidate SHA." };
+    }
     const conflictingFinalOrigins = paths.some((path) => {
       const origins = new Set(expectations
         .filter((expectation) => expectation.path === path)
@@ -3922,7 +4051,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     if (conflictingContentTypes) {
       return { status: "BLOCKED", details: "Production smoke expectations cannot require conflicting content types for one path." };
     }
-    return { status: "PASS", paths, expectations, details: redactPersistedData(plan.details) };
+    return { status: "PASS", paths, expectations, gatedPublicPageVerification, details: redactPersistedData(plan.details) };
   };
   const pullRequestPath = "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number;
   let pullRequest = await client.request(pullRequestPath);
@@ -4038,6 +4167,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     }
     effectiveSmokePaths = smokePlan.paths;
     effectiveSmokeExpectations = smokePlan.expectations;
+    effectiveGatedPublicPageVerification = smokePlan.gatedPublicPageVerification;
     pullRequest = await client.request(pullRequestPath);
     if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft ||
       pullRequest.base?.ref !== "main" || pullRequest.base?.sha?.toLowerCase() !== verifiedBaseSha ||
@@ -4225,6 +4355,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     if (smokePlan.status === "PASS") {
       effectiveSmokePaths = smokePlan.paths;
       effectiveSmokeExpectations = smokePlan.expectations;
+      effectiveGatedPublicPageVerification = smokePlan.gatedPublicPageVerification;
     }
     const confirmedMerge = await resolveConfirmedMerge(client, number, candidateSha);
     if (confirmedMerge.status === "PASS") {
@@ -4365,6 +4496,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
       productionSmoke = redactPersistedData(await smoke(productionDeployment.deployment.environmentUrl, {
         paths: effectiveSmokePaths,
         expectations: effectiveSmokeExpectations,
+        ...(effectiveGatedPublicPageVerification ? { gatedPublicPageVerification: effectiveGatedPublicPageVerification } : {}),
       }));
       if (productionSmoke.status === "PASS") {
         try {
