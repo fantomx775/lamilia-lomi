@@ -50,6 +50,12 @@ No new cloud migrations, final PR, main merge, or new deployment yet. New commun
 
 Latest checkpoint supersedes older active-state notes above: source203afe5 is complete/reviewed for #81; build89tests PASS. #82 worker is actively implementing list/detail/history/moderation API and Polish admin UI. Parent owns new tests/e2e/community-moderation.spec.ts and helper; all app servers currently stopped. New #81 artifact/evidence commit pending (do not stage #82 worker source accidentally). Public owner/legal facts question remains unanswered; legal/harness constraints documented. No cloud migration/merge/deployment.
 
+## CC-09 evidence update (2026-10-26)
+
+Checkpoint CC09.md separates evidence from multiple local runs. Community ON 14/14, OFF 1/1, and the 87 visually reviewed PNGs are tied to `cfcae98e...`; the full unit and real Auth runs followed the earlier repair at `49ef139...`; fresh migration/SQL results are isolated database evidence and not a current-app-head gate. Manual exploration passed12 steps with cleanup. Screenshot hashes match the private reviewer inventory; captures remain bound to `cfcae98e...` and require exact-final-HEAD recapture and byte comparison.
+
+After those captures, `757307c` corrected approval-email wording and bumped the frozen template version; focused notifications tests (5/5) and ESLint passed. Current-head full core E2E is running on the local demo app; the earlier 42-failure exploratory run is diagnostic only and does not replace this run. Current-head full unit/typecheck/lint/build/audit, independent review, exact-head ON/OFF and Auth reruns, production smoke, hosted configuration, and release evidence remain pending. Feature flags remain OFF. No cloud migration, merge, or deployment has occurred.
+
 ## CC-04 completed locally; CC-05 next
 
 Moderation source7235601 and two incremental browser test additions are verified:92 focused tests, affected lint, typecheck/build,2 genuine Supabase moderation browser tests,OFF admin approval/private deletion and local-demo approval/edit/delete. Independent review and15 images passed. See CC04.md. Next: #83 public gallery and single integrated PDP reader section. Separate High product-deletion ordering and account-cleanup gaps are mandatory #85 work, tracked in CC85-LIFECYCLE-PLAN.md. No cloud release or issue closure is claimed.
