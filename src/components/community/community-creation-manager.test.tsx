@@ -46,11 +46,21 @@ function uploadResponse(artworkId: string) {
   } }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
+function stubObjectUrls(createObjectURL: (file?: File) => string) {
+  const NativeURL = globalThis.URL;
+  class URLWithObjectMocks extends NativeURL {}
+  Object.defineProperties(URLWithObjectMocks, {
+    createObjectURL: { value: vi.fn(createObjectURL) },
+    revokeObjectURL: { value: vi.fn() },
+  });
+  vi.stubGlobal("URL", URLWithObjectMocks);
+}
+
 describe("CommunityCreationManager", () => {
   it("keeps selected previews and descriptions when the upload drawer closes and reopens", async () => {
     const user = userEvent.setup({ applyAccept: false });
     vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") });
-    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:preview"), revokeObjectURL: vi.fn() });
+    stubObjectUrls(() => "blob:preview");
     renderManager();
 
     const trigger = screen.getByTestId("community-upload-open");
@@ -164,7 +174,7 @@ describe("CommunityCreationManager", () => {
       .mockReturnValueOnce("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
       .mockReturnValueOnce("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
       .mockReturnValueOnce("cccccccc-cccc-4ccc-8ccc-cccccccccccc") });
-    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn((file: File) => `blob:${file.name}`), revokeObjectURL: vi.fn() });
+    stubObjectUrls((file) => `blob:${file?.name ?? "preview"}`);
     const callOrder: string[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const form = init?.body as FormData;
@@ -204,7 +214,7 @@ describe("CommunityCreationManager", () => {
 
   it("does not block a valid file because a different selected file fails client validation", async () => {
     const user = userEvent.setup({ applyAccept: false });
-    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn((file: File) => `blob:${file.name}`), revokeObjectURL: vi.fn() });
+    stubObjectUrls((file) => `blob:${file?.name ?? "preview"}`);
     const fetchMock = vi.fn(async () => uploadResponse("dddddddd-dddd-4ddd-8ddd-000000000001"));
     vi.stubGlobal("fetch", fetchMock);
     renderManager();
