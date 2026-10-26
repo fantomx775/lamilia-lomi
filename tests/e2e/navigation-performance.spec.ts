@@ -315,7 +315,11 @@ async function expectPublicProductContentBeforeAccess(
   await expect(page.getByRole("link", { name: "View on Amazon" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Inside the book" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Stars and little houses" })).toBeVisible();
-  await expect(page.getByText("Flip-through · 8 sec")).toBeVisible();
+  const flipThrough = page.locator('video[data-flipthrough]');
+  await expect(flipThrough).toBeVisible();
+  await expect(flipThrough).toHaveAttribute("controls");
+  await expect(flipThrough).toHaveAttribute("preload", "none");
+  await expect(flipThrough).toHaveAttribute("poster", /(?:moon-garden\.svg|11111111-1111-4111-8111-111111111101)/i);
   await expect(page.getByRole("link", { name: /Moon Garden free guide/ })).toBeVisible();
 
   const cover = page.getByRole("img", { name: "Moon Garden cover" });
