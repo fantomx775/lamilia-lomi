@@ -42,6 +42,8 @@ test("catalog category recovery, full titles and configurable responsive cards",
     await page.screenshot({ path: path.join(directory, `${testInfo.project.name}-${name}.png`), fullPage, animations: "disabled" });
   };
   try {
+    const originalViewport = page.viewportSize();
+    expect(originalViewport).not.toBeNull();
     const snapshot = getSeedContentSnapshot();
     const first = snapshot.products[0];
     snapshot.products = Array.from({ length: 5 }, (_, index) => {
@@ -66,14 +68,16 @@ test("catalog category recovery, full titles and configurable responsive cards",
     for (const columns of [3, 4, 5] satisfies CatalogDesktopColumns[]) {
       snapshot.catalogSettings.desktopColumns = columns;
       fs.writeFileSync(store, JSON.stringify(snapshot));
+      if (testInfo.project.name === "mobile") await page.setViewportSize({ width: 768, height: 1024 });
       await page.goto("/en/products", { waitUntil: "domcontentloaded" });
       const categories = page.getByRole("region", { name: "Categories" });
-      // Mobile category rows scroll horizontally; visit each tile so its lazy
-      // image actually loads (or fails) before asserting fallback recovery.
+      // Category imagery is hidden on narrow phones. Use the tablet breakpoint
+      // to exercise real image loading and fallback, then restore the phone size.
       for (const tile of await categories.getByRole("link").all()) await tile.scrollIntoViewIfNeeded();
       await expect(categories.getByTestId("category-image-fallback")).toHaveCount(2);
       await categories.getByRole("link").first().scrollIntoViewIfNeeded();
       await expect.poll(() => categories.locator("img").evaluateAll(images => images.every(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0))).toBe(true);
+      if (testInfo.project.name === "mobile") await page.setViewportSize(originalViewport!);
       const grid = page.getByTestId("product-catalog-grid");
       await expect(grid.locator("article")).toHaveCount(5);
       for (const image of await grid.locator("img").all()) {
