@@ -2,6 +2,8 @@ import { primaryNavigation } from "./helpers/navigation";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
+import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
 
@@ -364,19 +366,28 @@ test("logged-in locked Product Detail streams before personalized access", async
 
 test("logged-in unlocked Product Detail streams before personalized access", async ({ page }, testInfo) => {
   skipWithoutDelayedLocalDemo();
-  const diagnostics = collectBrowserDiagnostics(page);
-  await page.goto(`/en/unlock/${productSlug}`);
-  await page.getByRole("button", { name: "Log in" }).click();
-  await page.getByLabel("Email").fill("locked@example.com");
-  await page.getByLabel("Password").fill("demo-password");
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel("Premium code").fill("LOMI-BOOK-2026");
-  await page.getByRole("button", { name: "Unlock premium content" }).click();
-  await expect(page.getByTestId("unlock-success-state")).toBeVisible();
+  test.skip(
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "Uses the single-use demo premium code and requires the verified loopback demo backend.",
+  );
+  const restorePremiumCodeFixture = await resetLocalPremiumCodeFixture(testInfo.project.use.baseURL);
+  try {
+    const diagnostics = collectBrowserDiagnostics(page);
+    await page.goto(`/en/unlock/${productSlug}`);
+    await page.getByRole("button", { name: "Log in" }).click();
+    await page.getByLabel("Email").fill("locked@example.com");
+    await page.getByLabel("Password").fill("demo-password");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("Premium code").fill("LOMI-BOOK-2026");
+    await page.getByRole("button", { name: "Unlock premium content" }).click();
+    await expect(page.getByTestId("unlock-success-state")).toBeVisible();
 
-  await expectPublicProductContentBeforeAccess(page, testInfo, "unlocked");
-  await expectAccessContentAfterDelay(page, "premium-download-links");
-  await attachBrowserDiagnostics(testInfo, diagnostics);
+    await expectPublicProductContentBeforeAccess(page, testInfo, "unlocked");
+    await expectAccessContentAfterDelay(page, "premium-download-links");
+    await attachBrowserDiagnostics(testInfo, diagnostics);
+  } finally {
+    restorePremiumCodeFixture();
+  }
 });
 
 test("mobile primary navigation exposes Catalog and Library without horizontal overflow", async ({ page }, testInfo) => {
