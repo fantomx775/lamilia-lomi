@@ -172,7 +172,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     const productId = "11111111-1111-4111-8111-111111111111";
     expect((await service.from("user_product_unlocks").insert({ user_id: owner.id, product_id: productId })).error).toBeNull();
     const fixtureImage = await sharp({ create: { width: 160, height: 120, channels: 3, background: "#9aa58e" } }).png().toBuffer();
-    async function art(description: string, state: "pending" | "approved" | "rejected" | "removed") {
+    async function art(description: string, state: "pending" | "approved" | "rejected" | "removed"): Promise<string> {
       const result = await page.request.post(`${appOrigin}/api/community/artworks`, {
         headers: { Origin: appOrigin }, multipart: {
           file: { name: "garden.png", mimeType: "image/png", buffer: fixtureImage }, productId,
@@ -192,12 +192,35 @@ test("real club membership, concurrency, privacy and responsive account/profile 
           if (removal.error) throw new Error("Could not remove isolated profile fixture.");
         }
       }
+      return artwork.id as string;
     }
-    await art("Warm garden afternoon", "approved");
-    await art("private_pending_cc02", "pending");
-    await art("private_rejected_cc02", "rejected");
-    await art("private_removed_cc02", "removed");
-    expect((await service.from("community_artworks").update({ created_at: "2026-10-25T10:00:00Z", updated_at: "2026-10-25T10:00:00Z", published_at: "2026-10-25T10:00:00Z" }).eq("author_id", owner.id)).error).toBeNull();
+    const warmGardenId = await art("Warm garden afternoon", "approved");
+    const pendingId = await art("private_pending_cc02", "pending");
+    const rejectedId = await art("private_rejected_cc02", "rejected");
+    const removedId = await art("private_removed_cc02", "removed");
+    const orderedFixtures = [
+      { id: warmGardenId, description: "Warm garden afternoon", createdAt: "2026-10-25T10:00:03Z" },
+      { id: pendingId, description: "private_pending_cc02", createdAt: "2026-10-25T10:00:02Z" },
+      { id: rejectedId, description: "private_rejected_cc02", createdAt: "2026-10-25T10:00:01Z" },
+      { id: removedId, description: "private_removed_cc02", createdAt: "2026-10-25T10:00:00Z" },
+    ];
+    const fixtureRows = await service.from("community_artworks")
+      .select("id,author_id,description,created_at").in("id", orderedFixtures.map((artwork) => artwork.id));
+    expect(fixtureRows.error).toBeNull();
+    expect(fixtureRows.data?.map((artwork) => artwork.id).sort()).toEqual(orderedFixtures.map((artwork) => artwork.id).sort());
+    expect(fixtureRows.data).toHaveLength(4);
+    const currentTime = Date.now();
+    for (const fixture of orderedFixtures) {
+      const row = fixtureRows.data?.find((artwork) => artwork.id === fixture.id);
+      expect(row).toMatchObject({ id: fixture.id, author_id: owner.id, description: fixture.description });
+      const originalCreatedAt = Date.parse(row?.created_at ?? "");
+      expect(Number.isFinite(originalCreatedAt) && Math.abs(currentTime - originalCreatedAt) <= 10 * 60_000).toBe(true);
+      expect((await service.from("community_artworks").update({
+        created_at: fixture.createdAt,
+        updated_at: "2026-10-25T10:00:00Z",
+        published_at: "2026-10-25T10:00:00Z",
+      }).eq("id", fixture.id).eq("author_id", owner.id)).error).toBeNull();
+    }
     await visitor.reload();
     await expect(visitor.getByText("Warm garden afternoon", { exact: true })).toBeVisible();
     const publicHtml = await visitor.content();
@@ -207,7 +230,11 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await capture(visitor, "creator-approved");
     await page.goto(`${appOrigin}/en/library/creations`);
     await expect(page.getByRole("heading", { name: "My Creations", exact: true })).toBeVisible();
-    await expect(page.getByTestId("community-artwork-card")).toHaveCount(4);
+    const creationCards = page.getByTestId("community-artwork-card");
+    await expect(creationCards).toHaveCount(4);
+    for (const [index, fixture] of orderedFixtures.entries()) {
+      await expect(creationCards.nth(index)).toContainText(fixture.description);
+    }
     for (const image of await page.getByTestId("community-artwork-preview").all()) {
       await image.scrollIntoViewIfNeeded();
       await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
