@@ -37,6 +37,14 @@ export { hashCommunityRateLimitKey };
 export * from "./types";
 export * from "./errors";
 
+export async function beginLocalCommunityProductDeletion(productId: string) {
+  return localStore.beginProductDeletion(productId);
+}
+
+export async function withLocalCommunityProductSave<T>(productId: string, operation: () => Promise<T> | T) {
+  return localStore.withProductSave(productId, operation);
+}
+
 export async function listCommunityPublicArtworks(input: {
   audience?: CommunityAudience;
   productId?: string;

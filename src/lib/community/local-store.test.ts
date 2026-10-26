@@ -204,6 +204,20 @@ describe("Coloring Club local adapter", () => {
     expect(after).toMatchObject({ details: "", status: "resolved", revision: 3 });
   });
 
+  it("fences local product deletion against community references and stale saves", async () => {
+    const store = makeStore();
+    const product = getPublishedProduct();
+    const unlockedMember = { ...member, unlockedProductIds: [product.id] };
+    await store.join(unlockedMember, { username: "Garden_User", adultAttested: true });
+    await store.createPendingArtwork(unlockedMember, input(product.id), [product]);
+    expect(await store.beginProductDeletion(product.id)).toBe(false);
+
+    const unusedProductId = "77777777-7777-4777-8777-777777777777";
+    expect(await store.beginProductDeletion(unusedProductId)).toBe(true);
+    await expect(store.withProductSave(unusedProductId, () => "saved"))
+      .rejects.toBeInstanceOf(CommunityConflictError);
+  });
+
   it("filters and paginates the admin queue with safe status history", async () => {
     const store = makeStore();
     const product = getPublishedProduct();

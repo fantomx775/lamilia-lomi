@@ -199,7 +199,8 @@ describe("Supabase production foundation contracts", () => {
     expect(rlsTest).toContain("admin direct writes to product and asset rows are restricted");
     expect(rlsTest).toContain("legacy save RPC blocks archive while public R2 media exists");
     expect(rlsTest).toContain("delete RPC blocks deletion while public R2 media exists");
-    expect(productAdmin).toContain('supabase.rpc("delete_product"');
+    expect(productAdmin).toContain('supabase.rpc("community_begin_product_deletion"');
+    expect(productAdmin).toContain('supabase.rpc("community_finalize_product_deletion"');
     expect(productAdmin).not.toContain('from("products").delete');
     expect(productAdmin).not.toContain('from("products").update');
     expect(r2PublicationMigration).toContain("grant execute on function public.set_product_asset_storage_provider(uuid, text) to authenticated, service_role");

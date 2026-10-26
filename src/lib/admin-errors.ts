@@ -37,6 +37,7 @@ export const ADMIN_ERROR_CODES = {
   CONFLICT_COLLECTION_NAME: "admin.conflict.collection_name",
   CONFLICT_SLUG: "admin.conflict.slug",
   CONFLICT_DATA: "admin.conflict.data",
+  CONFLICT_COMMUNITY_ARTWORK: "admin.conflict.community_artwork",
   RICH_TEXT_CLIENT_OUTDATED: "admin.rich_text.client_outdated",
 } as const;
 
@@ -127,6 +128,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME]: "A collection with this name already exists.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "This slug is already in use.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "These changes conflict with existing data. Refresh and try again.",
+    [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK]: "This book has Coloring Club artwork or an upload record. Archive the book instead of deleting it.",
     [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED]: "This editor is out of date. Refresh the page and reapply your changes before saving.",
   },
   pl: {
@@ -166,6 +168,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME]: "Kolekcja o takiej nazwie już istnieje.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Ten slug jest już używany.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Zmiany kolidują z istniejącymi danymi. Odśwież stronę i spróbuj ponownie.",
+    [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK]: "Ta książka ma prace lub zapis przesyłania z Klubu Kolorowania. Zarchiwizuj ją zamiast usuwać.",
     [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED]: "Ta karta edytora jest nieaktualna. Odśwież stronę i ponownie wprowadź zmiany przed zapisem.",
   },
   de: {
@@ -205,6 +208,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME]: "Eine Sammlung mit diesem Namen existiert bereits.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Dieser Slug wird bereits verwendet.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Die Änderungen stehen im Konflikt mit vorhandenen Daten. Aktualisiere die Seite und versuche es erneut.",
+    [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK]: "Dieses Buch enthält Coloring-Club-Bilder oder Upload-Datensätze. Archiviere das Buch, statt es zu löschen.",
     [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED]: "Dieser Editor ist veraltet. Aktualisiere die Seite und gib deine Änderungen erneut ein, bevor du speicherst.",
   },
   es: {
@@ -244,6 +248,7 @@ const translatedMessages = {
     [ADMIN_ERROR_CODES.CONFLICT_COLLECTION_NAME]: "Ya existe una colección con este nombre.",
     [ADMIN_ERROR_CODES.CONFLICT_SLUG]: "Este slug ya está en uso.",
     [ADMIN_ERROR_CODES.CONFLICT_DATA]: "Los cambios entran en conflicto con datos existentes. Actualiza e inténtalo de nuevo.",
+    [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK]: "Este libro tiene obras o registros de carga de Coloring Club. Archívalo en lugar de eliminarlo.",
     [ADMIN_ERROR_CODES.RICH_TEXT_CLIENT_OUTDATED]: "Este editor está desactualizado. Actualiza la página y vuelve a introducir tus cambios antes de guardar.",
   },
 } satisfies Record<StoredLocale, Record<AdminErrorCode, string>>;

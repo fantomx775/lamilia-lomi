@@ -308,16 +308,37 @@ describe("Supabase content admin mutations", () => {
     mocks.getAdminContentSnapshot.mockResolvedValue({ products: [{ id: productId, status: "draft", assets: [] }], collections: [], categories: [], tags: [], staticPages: [], catalogSettings: { desktopColumns: 4 } });
     mocks.readerArtworks = [{ id: "art-1", storagePath: `reader-artworks/${productId}/image/art-1-work.png`, storageProvider: "local" }];
     mocks.removeCollectionImage.mockImplementation(async () => { mocks.readerArtworkEvents.push("storage:art-1"); });
-    mocks.rpc.mockImplementation(async (name: string) => { mocks.readerArtworkEvents.push(`parent:${name}`); return { data: true, error: null }; });
+    mocks.rpc.mockImplementation(async (name: string) => {
+      mocks.readerArtworkEvents.push(`parent:${name}`);
+      return { data: name === "community_begin_product_deletion" ? { state: "deleting" } : true, error: null };
+    });
 
     await expect(deleteProductForRequest(productId)).resolves.toMatchObject({ ok: true });
-    expect(mocks.readerArtworkEvents).toEqual(["storage:art-1", "metadata:art-1", "parent:delete_product"]);
+    expect(mocks.readerArtworkEvents).toEqual([
+      "parent:community_begin_product_deletion", "storage:art-1", "metadata:art-1", "parent:community_finalize_product_deletion",
+    ]);
 
     mocks.readerArtworkEvents = [];
     mocks.removeCollectionImage.mockRejectedValueOnce(new Error("storage unavailable"));
     await expect(deleteProductForRequest(productId)).resolves.toMatchObject({ ok: false });
     expect(mocks.deleteReaderArtwork).toHaveBeenCalledTimes(1);
+    expect(mocks.readerArtworkEvents).toEqual(["parent:community_begin_product_deletion"]);
+  });
+
+  it("refuses product deletion before touching media when community rows reference the book", async () => {
+    mocks.getAdminContentSnapshot.mockResolvedValue({ products: [{ id: productId, status: "published", assets: [] }], collections: [], categories: [], tags: [], staticPages: [], catalogSettings: { desktopColumns: 4 } });
+    mocks.readerArtworks = [{ id: "art-1", storagePath: `reader-artworks/${productId}/image/art-1-work.png`, storageProvider: "local" }];
+    mocks.rpc.mockResolvedValue({ data: { state: "community_references" }, error: null });
+
+    await expect(deleteProductForRequest(productId)).resolves.toEqual({
+      ok: false,
+      errors: [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK],
+    });
+    expect(mocks.removeCollectionImage).not.toHaveBeenCalled();
+    expect(mocks.deleteReaderArtwork).not.toHaveBeenCalled();
     expect(mocks.readerArtworkEvents).toEqual([]);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).toHaveBeenCalledWith("community_begin_product_deletion", { requested_product_id: productId });
   });
 
   it("persists category image metadata and replaces the previous unique object", async () => {

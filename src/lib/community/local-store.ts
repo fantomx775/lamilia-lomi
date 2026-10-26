@@ -140,6 +140,7 @@ type LocalSnapshot = {
   reports: LocalReport[];
   reportEvents: LocalReportEvent[];
   notificationOutbox: LocalNotificationOutbox[];
+  productDeletionMarkers: string[];
   rateLimitBuckets: Record<string, LocalRateBucket>;
   uploadReservations: LocalUploadReservation[];
 };
@@ -271,6 +272,9 @@ export class CommunityLocalStore {
         throw new CommunityAuthorizationError("Current community rules acceptance is required.");
       }
       const product = products.find((candidate) => candidate.id === input.productId);
+      if (snapshot.productDeletionMarkers.includes(input.productId)) {
+        throw new CommunityConflictError("Product deletion is in progress.");
+      }
       if (!product || product.status !== "published" || !actor.unlockedProductIds.includes(product.id)) {
         throw new CommunityAuthorizationError("A published, unlocked product is required.");
       }
@@ -317,6 +321,9 @@ export class CommunityLocalStore {
     assertEligibleForSubmission(actor);
     validateUploadReservationInput(input);
     return this.transact((snapshot) => {
+      if (snapshot.productDeletionMarkers.includes(input.productId)) {
+        throw new CommunityConflictError("Product deletion is in progress.");
+      }
       getActiveProfile(snapshot, actor.userId);
       const product = products.find((candidate) => candidate.id === input.productId);
       if (!product || product.status !== "published" || !actor.unlockedProductIds.includes(product.id)) {
@@ -894,6 +901,25 @@ export class CommunityLocalStore {
     });
   }
 
+  async beginProductDeletion(productId: string) {
+    return this.transact((snapshot) => {
+      if (snapshot.artworks.some((artwork) => artwork.productId === productId)
+        || snapshot.uploadReservations.some((reservation) => reservation.productId === productId)) return false;
+      if (!snapshot.productDeletionMarkers.includes(productId)) snapshot.productDeletionMarkers.push(productId);
+      return true;
+    });
+  }
+
+  async withProductSave<T>(productId: string, operation: () => Promise<T> | T): Promise<T> {
+    return withFileLock(this.filePath, async () => {
+      const snapshot = readSnapshot(this.filePath);
+      if (snapshot.productDeletionMarkers.includes(productId)) {
+        throw new CommunityConflictError("Product deletion is in progress.");
+      }
+      return operation();
+    });
+  }
+
   private async read<T>(read: (snapshot: LocalSnapshot) => T): Promise<T> {
     return withFileLock(this.filePath, async () => read(readSnapshot(this.filePath)));
   }
@@ -925,7 +951,7 @@ export function buildCommunityStoragePath(actorId: string, idempotencyKey: strin
 }
 
 function initialSnapshot(): LocalSnapshot {
-  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], reports: [], reportEvents: [], notificationOutbox: [], rateLimitBuckets: {}, uploadReservations: [] };
+  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], reports: [], reportEvents: [], notificationOutbox: [], productDeletionMarkers: [], rateLimitBuckets: {}, uploadReservations: [] };
 }
 
 function readSnapshot(filePath: string): LocalSnapshot {
@@ -935,10 +961,11 @@ function readSnapshot(filePath: string): LocalSnapshot {
     if (parsed.version !== 1 || !Array.isArray(parsed.profiles) || !Array.isArray(parsed.artworks)
       || !Array.isArray(parsed.moderationEvents) || typeof parsed.rateLimitBuckets !== "object" || !parsed.rateLimitBuckets
       || (parsed.uploadReservations !== undefined && !Array.isArray(parsed.uploadReservations))
-      || (parsed.artworkLikes !== undefined && !Array.isArray(parsed.artworkLikes))) {
+      || (parsed.artworkLikes !== undefined && !Array.isArray(parsed.artworkLikes))
+      || (parsed.productDeletionMarkers !== undefined && !Array.isArray(parsed.productDeletionMarkers))) {
       throw new Error("Unexpected community local-store structure.");
     }
-    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [], reports: parsed.reports ?? [], reportEvents: parsed.reportEvents ?? [], notificationOutbox: parsed.notificationOutbox ?? [] } as LocalSnapshot;
+    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [], reports: parsed.reports ?? [], reportEvents: parsed.reportEvents ?? [], notificationOutbox: parsed.notificationOutbox ?? [], productDeletionMarkers: parsed.productDeletionMarkers ?? [] } as LocalSnapshot;
   } catch (error) {
     throw new Error(`Community local store is unreadable: ${error instanceof Error ? error.message : "invalid JSON"}`);
   }
