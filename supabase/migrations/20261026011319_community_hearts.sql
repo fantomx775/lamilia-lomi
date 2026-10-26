@@ -75,6 +75,14 @@ begin
     or new.participation_revoked_at is not null
     or new.suspended_at is not null
     or new.rules_version is distinct from '2026-10-25-v1' then
+    -- Profiling updates hold the profile row lock. Lock every affected artwork
+    -- in one stable order before the like-delete trigger adjusts counters.
+    perform artwork.id
+    from public.community_artworks artwork
+    join public.community_artwork_likes reaction on reaction.artwork_id = artwork.id
+    where reaction.user_id = new.user_id
+    order by artwork.id
+    for update of artwork;
     delete from public.community_artwork_likes where user_id = new.user_id;
   end if;
   return new;
@@ -99,25 +107,63 @@ security invoker
 set search_path = ''
 as $$
 declare
+  v_target_author_id uuid;
   v_profile public.community_profiles%rowtype;
   v_artwork public.community_artworks%rowtype;
   v_author_profile public.community_profiles%rowtype;
   v_product_status text;
   v_liked boolean;
   v_likes_count integer;
+  v_author_verified boolean;
 begin
   if p_actor_user_id is null or p_artwork_id is null or p_liked is null then
     raise exception using errcode = '22023', message = 'artwork reaction input required';
   end if;
-  if not private.community_actor_is_verified(p_actor_user_id) then
-    raise exception using errcode = '42501', message = 'verified account required';
+
+  -- Discover the author without locking the artwork. Lock all Auth and profile
+  -- rows before the artwork so concurrent withdrawal/suspension and auth
+  -- deletion cannot form a profile/Auth -> artwork cycle with the counter
+  -- cleanup triggers below.
+  select author_id into v_target_author_id
+  from public.community_artworks
+  where id = p_artwork_id;
+  if not found or v_target_author_id is null then
+    return jsonb_build_object('available', false, 'liked', false, 'likesCount', 0);
   end if;
 
-  select * into v_profile
-  from public.community_profiles
-  where user_id = p_actor_user_id
-  for share;
-  if not found or v_profile.is_adult is distinct from true
+  if p_actor_user_id <= v_target_author_id then
+    if not private.community_actor_is_verified(p_actor_user_id) then
+      raise exception using errcode = '42501', message = 'verified account required';
+    end if;
+    v_author_verified := v_target_author_id = p_actor_user_id
+      or private.community_actor_is_verified(v_target_author_id);
+  else
+    v_author_verified := private.community_actor_is_verified(v_target_author_id);
+    if not private.community_actor_is_verified(p_actor_user_id) then
+      raise exception using errcode = '42501', message = 'verified account required';
+    end if;
+  end if;
+  if not v_author_verified then
+    return jsonb_build_object('available', false, 'liked', false, 'likesCount', 0);
+  end if;
+
+  if p_actor_user_id <= v_target_author_id then
+    select * into v_profile from public.community_profiles where user_id = p_actor_user_id for share;
+    if v_target_author_id = p_actor_user_id then
+      v_author_profile := v_profile;
+    else
+      select * into v_author_profile from public.community_profiles where user_id = v_target_author_id for share;
+    end if;
+  else
+    select * into v_author_profile from public.community_profiles where user_id = v_target_author_id for share;
+    if v_target_author_id = p_actor_user_id then
+      v_profile := v_author_profile;
+    else
+      select * into v_profile from public.community_profiles where user_id = p_actor_user_id for share;
+    end if;
+  end if;
+
+  if v_profile.user_id is null or v_profile.is_adult is distinct from true
     or v_profile.adult_attested_at is null
     or v_profile.opted_in_at is null
     or v_profile.participation_revoked_at is not null
@@ -125,26 +171,22 @@ begin
     or v_profile.rules_version is distinct from '2026-10-25-v1' then
     raise exception using errcode = '42501', message = 'active community membership required';
   end if;
-
-  select * into v_artwork
-  from public.community_artworks
-  where id = p_artwork_id
-  for update;
-  if not found or v_artwork.status <> 'approved' or v_artwork.deleted_at is not null
-    or v_artwork.published_at is null or v_artwork.author_id is null then
-    return jsonb_build_object('available', false, 'liked', false, 'likesCount', 0);
-  end if;
-
-  select * into v_author_profile
-  from public.community_profiles
-  where user_id = v_artwork.author_id
-  for share;
-  if not found or v_author_profile.is_adult is distinct from true
+  if v_author_profile.user_id is null or v_author_profile.is_adult is distinct from true
     or v_author_profile.adult_attested_at is null
     or v_author_profile.opted_in_at is null
     or v_author_profile.participation_revoked_at is not null
     or v_author_profile.suspended_at is not null
     or v_author_profile.rules_version is distinct from '2026-10-25-v1' then
+    return jsonb_build_object('available', false, 'liked', false, 'likesCount', 0);
+  end if;
+
+  select * into v_artwork
+  from public.community_artworks
+  where id = p_artwork_id
+  for update;
+  if not found or v_artwork.author_id is distinct from v_target_author_id
+    or v_artwork.status <> 'approved' or v_artwork.deleted_at is not null
+    or v_artwork.published_at is null or v_artwork.author_id is null then
     return jsonb_build_object('available', false, 'liked', false, 'likesCount', 0);
   end if;
 
