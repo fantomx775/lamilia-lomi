@@ -20,6 +20,7 @@ import type {
   CommunityPage,
   CommunityProfileInput,
   CommunityPublicArtwork,
+  CommunityPublicProductOption,
 } from "./types";
 import { removeCommunityArtworkImage } from "./storage";
 
@@ -48,6 +49,14 @@ export async function getCommunityPublicArtwork(id: string) {
   if (!getCommunityFlags().publicEnabled || !isUuid(id)) return null;
   if (getBackendMode() === "local") return localStore.getPublicArtwork(id, getContentSnapshot().products);
   return supabase.getPublicArtwork(id);
+}
+
+export async function listCommunityPublicProductOptions(): Promise<CommunityPublicProductOption[]> {
+  if (!getCommunityFlags().publicEnabled) return [];
+  if (getBackendMode() === "local") {
+    return localStore.listPublicProductOptions(getContentSnapshot().products, 200);
+  }
+  return supabase.listPublicProductOptions(200);
 }
 
 export async function getCommunityPublicCreator(username: string) {

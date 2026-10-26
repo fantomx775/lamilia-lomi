@@ -1,4 +1,4 @@
-import { BookOpen, Info, Library, LogIn, UserPlus } from "lucide-react";
+import { BookOpen, Info, Library, LogIn, Palette, UserPlus } from "lucide-react";
 import Image from "next/image";
 import { Suspense, type ReactNode } from "react";
 
@@ -6,6 +6,7 @@ import { MobileNavigation } from "@/components/mobile-navigation";
 import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 import { getHeaderAccountStateForRequest } from "@/lib/session.server";
+import { getCommunityFlags } from "@/lib/community-flags";
 
 import { buttonClassName } from "./ui/button";
 
@@ -20,6 +21,7 @@ export function SiteHeader({ locale }: {
     login: "Log in",
     navigation: "Primary navigation",
   };
+  const communityEnabled = getCommunityFlags().publicEnabled;
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
@@ -55,6 +57,7 @@ export function SiteHeader({ locale }: {
             <BookOpen className="size-4" aria-hidden />
             {labels.products}
           </NavigationLink>
+          {communityEnabled && locale === "en" ? <NavigationLink className={headerLinkClassName()} href="/en/club" pendingLabel="Opening Coloring Club"><Palette className="size-4" aria-hidden />Coloring Club</NavigationLink> : null}
           <NavigationLink
             className={headerLinkClassName()}
             href={`/${locale}/about`}
@@ -73,7 +76,7 @@ export function SiteHeader({ locale }: {
           <Suspense fallback={<HeaderAccountFallback locale={locale} />}>
             <HeaderAccountLink locale={locale} labels={labels} />
           </Suspense>
-          <MobileNavigation locale={locale}>
+          <MobileNavigation locale={locale} communityEnabled={communityEnabled}>
             <Suspense fallback={<MobileGuestAccountLinks locale={locale} />}>
               <MobileAccountLinks locale={locale} />
             </Suspense>

@@ -10,6 +10,8 @@ export type CommunityPublicProduct = {
   audience: CommunityAudience;
 };
 
+export type CommunityPublicProductOption = Pick<CommunityPublicProduct, "id" | "slug" | "title" | "audience">;
+
 export type CommunityPublicCreator = {
   username: string;
   avatarSeed: string;

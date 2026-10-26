@@ -1,4 +1,5 @@
 import { cache } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -41,7 +42,7 @@ export default async function CreatorProfilePage({ params }: PageProps) {
   if (!creator) notFound();
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
+    <div data-testid="community-creator-page" className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
       <Card>
         <CardHeader className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
           <CommunityAvatar username={creator.username} seed={creator.avatarSeed} className="size-16 text-lg" />
@@ -59,10 +60,12 @@ export default async function CreatorProfilePage({ params }: PageProps) {
                 {creator.artworks.map((artwork) => (
                   <li key={artwork.id}>
                     <Card className="h-full shadow-none">
-                      <CardContent className="grid h-full content-start gap-3 p-4">
-                        <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-terracotta)]">Approved creation</p>
-                        <h3 className="break-words font-serif text-xl font-semibold text-[var(--color-ink)]">
-                          {artwork.description || `Artwork for ${artwork.product.title}`}
+                      <CardContent className="grid h-full content-start gap-3 p-3 sm:p-4">
+                        <Link href={`/${locale}/club/artworks/${artwork.id}`} className="relative block aspect-[4/5] overflow-hidden rounded-lg bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" aria-label={`View artwork${artwork.description ? `: ${artwork.description}` : ""}`}>
+                          <Image src={`/api/community/artworks/${artwork.id}/media`} alt={artwork.description ? `Coloring by @${creator.username}: ${artwork.description}` : `Coloring by @${creator.username}`} fill unoptimized loading="lazy" sizes="(max-width: 639px) 90vw, (max-width: 1023px) 45vw, 30vw" className="object-cover" />
+                        </Link>
+                        <h3 className="line-clamp-2 break-words font-serif text-lg font-semibold text-[var(--color-ink)]">
+                          <Link href={`/${locale}/club/artworks/${artwork.id}`} className="hover:underline">{artwork.description || `Artwork for ${artwork.product.title}`}</Link>
                         </h3>
                         <p className="text-sm text-[var(--color-muted)]">
                           From <Link className="font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" href={`/${locale}/products/${encodeURIComponent(artwork.product.slug)}`}>{artwork.product.title}</Link>

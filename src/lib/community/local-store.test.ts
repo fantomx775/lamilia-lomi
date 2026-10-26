@@ -65,6 +65,26 @@ function input(productId: string) {
 }
 
 describe("Coloring Club local adapter", () => {
+  it("uses stable published-time and artwork-ID cursors without duplicates", async () => {
+    const store = makeStore();
+    const product = getPublishedProduct();
+    const unlockedMember = { ...member, unlockedProductIds: [product.id] };
+    await store.join(unlockedMember, { username: "Garden_User", adultAttested: true });
+    const ids: string[] = [];
+    for (let index = 0; index < 3; index += 1) {
+      const submission = { ...input(product.id), idempotencyKey: `55555555-5555-4555-8555-55555555555${index}` };
+      const id = await store.createPendingArtwork(unlockedMember, submission, [product]);
+      ids.push(id);
+      await store.moderate(admin, id, 1, "approve", undefined, [product]);
+    }
+    const first = await store.listPublicArtworks({ products: [product], limit: 2 });
+    const second = await store.listPublicArtworks({ products: [product], limit: 2, cursor: first.nextCursor });
+    expect(first.items).toHaveLength(2);
+    expect(second.items).toHaveLength(1);
+    expect([...first.items, ...second.items].map((item) => item.id)).toEqual(ids.slice().sort().reverse());
+    expect(second.nextCursor).toBeNull();
+  });
+
   it("keeps approved public DTOs allow-listed and applies status/revision transitions", async () => {
     const store = makeStore();
     const product = getPublishedProduct();

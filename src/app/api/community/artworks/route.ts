@@ -25,6 +25,9 @@ import { getCommunityActorForRequest } from "@/lib/community/session";
 import { storeCommunityArtworkImage, readCommunityArtworkImage } from "@/lib/community/storage";
 import { CommunityAuthorizationError, CommunityConflictError, CommunityRateLimitError, CommunityValidationError } from "@/lib/community/errors";
 import { getMediaUploadProvider } from "@/lib/media-r2-config";
+import { listCommunityPublicArtworks } from "@/lib/community/repository";
+import { decodeCommunityTimestampCursor } from "@/lib/community/cursor";
+import type { CommunityAudience } from "@/lib/community/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +37,40 @@ export const maxDuration = 60;
 const MAX_MULTIPART_BYTES = COMMUNITY_IMAGE_MAX_BYTES + 64 * 1024;
 const ALLOWED_FIELDS = new Set(["file", "productId", "description", "idempotencyKey", "rulesAccepted"]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export async function GET(request: Request) {
+  if (!getCommunityFlags().publicEnabled) return disabledResponse();
+  const url = new URL(request.url);
+  const allowed = new Set(["audience", "productId", "sort", "cursor", "limit"]);
+  if ([...url.searchParams.keys()].some((key) => !allowed.has(key))
+    || [...allowed].some((key) => url.searchParams.getAll(key).length > 1)) {
+    return communityJson({ ok: false, error: "invalid_input", message: "Check the gallery filters." }, 400);
+  }
+  const audienceValue = url.searchParams.get("audience");
+  const productId = url.searchParams.get("productId");
+  const sort = url.searchParams.get("sort") ?? "latest";
+  const cursor = url.searchParams.get("cursor");
+  const limitValue = url.searchParams.get("limit");
+  const limit = limitValue === null ? 24 : /^\d{1,2}$/.test(limitValue) ? Number(limitValue) : Number.NaN;
+  if ((audienceValue !== null && audienceValue !== "kids" && audienceValue !== "adults")
+    || (productId !== null && !UUID_PATTERN.test(productId))
+    || sort !== "latest"
+    || (cursor !== null && !decodeCommunityTimestampCursor(cursor))
+    || !Number.isSafeInteger(limit) || limit < 1 || limit > 48) {
+    return communityJson({ ok: false, error: "invalid_input", message: "Check the gallery filters." }, 400);
+  }
+  try {
+    const page = await listCommunityPublicArtworks({
+      audience: (audienceValue ?? undefined) as CommunityAudience | undefined,
+      productId: productId?.toLowerCase(),
+      cursor,
+      limit,
+    });
+    return communityJson({ ok: true, ...page });
+  } catch {
+    return communityJson({ ok: false, error: "unavailable", message: "The Coloring Club gallery could not be loaded." }, 503);
+  }
+}
 
 export async function POST(request: Request) {
   if (!getCommunityFlags().uploadsEnabled) return disabledResponse();

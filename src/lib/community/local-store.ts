@@ -17,6 +17,7 @@ import type {
   CommunityModerationHistoryItem,
   CommunityPublicArtwork,
   CommunityPublicProduct,
+  CommunityPublicProductOption,
   CommunityStorageProvider,
 } from "./types";
 import type { Product } from "../types";
@@ -580,7 +581,7 @@ export class CommunityLocalStore {
     cursor?: string | null;
   }): Promise<CommunityPage<CommunityPublicArtwork>> {
     const limit = boundedLimit(input.limit);
-    const cursor = decodeCursor(input.cursor);
+    const cursor = decodeCommunityTimestampCursor(input.cursor);
     return this.read((snapshot) => {
       const productsById = new Map(input.products.map((product) => [product.id, product]));
       const profilesById = new Map(snapshot.profiles.map((profile) => [profile.userId, profile]));
@@ -590,11 +591,21 @@ export class CommunityLocalStore {
         .filter(({ product, profile }) => product?.status === "published" && profile && isActiveProfile(snapshot, profile.userId))
         .filter(({ product }) => !input.audience || product!.audience === input.audience)
         .filter(({ product }) => !input.productId || product!.id === input.productId)
-        .filter(({ artwork }) => !cursor || `${artwork.publishedAt}|${artwork.id}` < cursor)
+        .filter(({ artwork }) => !cursor || artwork.publishedAt! < cursor.timestamp || (artwork.publishedAt === cursor.timestamp && artwork.id < cursor.id))
         .sort((left, right) => right.artwork.publishedAt!.localeCompare(left.artwork.publishedAt!) || right.artwork.id.localeCompare(left.artwork.id))
         .slice(0, limit + 1);
-      return page(eligible.slice(0, limit).map(({ artwork, product, profile }) => toPublicArtwork(artwork, product!, profile!)), eligible.length > limit ? eligible[limit - 1].artwork : null);
+      const pageItems = eligible.slice(0, limit);
+      const items = pageItems.map(({ artwork, product, profile }) => toPublicArtwork(artwork, product!, profile!));
+      const last = pageItems.at(-1)?.artwork;
+      return { items, nextCursor: eligible.length > limit && last?.publishedAt ? encodeCommunityTimestampCursor(last.publishedAt, last.id) : null };
     });
+  }
+
+  listPublicProductOptions(products: Product[], limit = 200): CommunityPublicProductOption[] {
+    return products.filter((product) => product.status === "published")
+      .map((product) => ({ id: product.id, slug: product.slug, title: product.translations.find((translation) => translation.locale === "en")?.title ?? product.slug, audience: product.audience }))
+      .sort((a, b) => a.title.localeCompare(b.title, "en"))
+      .slice(0, boundedLimit(limit));
   }
 
   async getPublicArtwork(artworkId: string, products: Product[]): Promise<CommunityPublicArtwork | null> {
@@ -994,20 +1005,6 @@ function boundedLimit(value: number | undefined) {
   return value;
 }
 
-function encodeCursor(artwork: LocalArtwork) {
-  return Buffer.from(`${artwork.publishedAt}|${artwork.id}`).toString("base64url");
-}
-
-function decodeCursor(cursor: string | null | undefined) {
-  if (!cursor) return null;
-  try {
-    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-    return /^\d{4}-\d\d-\d\dT.+\|[0-9a-f-]{36}$/i.test(decoded) ? decoded : null;
-  } catch {
-    return null;
-  }
-}
-
 function encodeAdminCursor(createdAt: string, id: string) {
   return encodeCommunityTimestampCursor(createdAt, id);
 }
@@ -1015,12 +1012,4 @@ function encodeAdminCursor(createdAt: string, id: string) {
 function decodeAdminCursor(cursor: string | null | undefined) {
   const parsed = decodeCommunityTimestampCursor(cursor);
   return parsed ? { createdAt: parsed.timestamp, id: parsed.id } : null;
-}
-
-function page<T>(items: T[], extra?: LocalArtwork | null): CommunityPage<T> {
-  const item = extra as LocalArtwork | null | undefined;
-  return {
-    items,
-    nextCursor: item?.publishedAt ? encodeCursor(item) : null,
-  };
 }

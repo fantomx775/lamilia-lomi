@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
 
 export type ProductGalleryImage = {
@@ -11,6 +12,7 @@ export type ProductGalleryImage = {
   alt: string;
   caption: string | null;
   unoptimized: boolean;
+  captionHref?: string;
 };
 
 export type ProductImageGalleryLabels = {
@@ -175,7 +177,7 @@ export function ProductImageGallery({
             </button>
             {image.caption ? (
               <figcaption className={`mt-3 min-w-0 px-1 text-sm leading-6 text-[var(--color-muted)] ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
-                {image.caption}
+                {image.captionHref ? <Link href={image.captionHref} className="font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">{image.caption}</Link> : image.caption}
               </figcaption>
             ) : null}
           </figure>

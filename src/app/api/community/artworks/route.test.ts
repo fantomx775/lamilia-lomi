@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   normalize: vi.fn(),
   store: vi.fn(),
   read: vi.fn(),
+  listPublic: vi.fn(),
   order: [] as string[],
 }));
 
@@ -43,11 +44,13 @@ vi.mock("@/lib/community/repository", () => ({
   getMyCommunityArtwork: mocks.getMyArtwork,
   processCommunityArtworkCleanup: mocks.processCleanup,
   scheduleCommunityArtworkUploadCleanup: mocks.scheduleCleanup,
+  listCommunityPublicArtworks: mocks.listPublic,
 }));
 vi.mock("@/lib/media-r2-config", () => ({ getMediaUploadProvider: mocks.getMediaUploadProvider }));
 
-import { POST } from "./route";
+import { GET, POST } from "./route";
 import { CommunityConflictError, CommunityValidationError } from "@/lib/community/errors";
+import { encodeCommunityTimestampCursor } from "@/lib/community/cursor";
 
 const actor = { backend: "local" as const, userId: "11111111-1111-4111-8111-111111111111", emailVerified: true, role: "user" as const, unlockedProductIds: [] };
 const productId = "22222222-2222-4222-8222-222222222222";
@@ -81,6 +84,7 @@ describe("community artwork upload API", () => {
     vi.clearAllMocks();
     mocks.order = [];
     mocks.getCommunityFlags.mockReturnValue({ uploadsEnabled: true, publicEnabled: false });
+    mocks.listPublic.mockResolvedValue({ items: [], nextCursor: null });
     mocks.getBackendMode.mockReturnValue("local");
     mocks.getActor.mockResolvedValue(actor);
     mocks.assertEligibility.mockImplementation(async () => { mocks.order.push("eligibility"); });
@@ -174,5 +178,42 @@ describe("community artwork upload API", () => {
     const response = await POST(uploadRequest());
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+});
+
+describe("community public gallery API", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getCommunityFlags.mockReturnValue({ uploadsEnabled: false, publicEnabled: true });
+    mocks.listPublic.mockResolvedValue({ items: [{ id: "safe-artwork" }], nextCursor: null });
+  });
+
+  it("returns a bounded safe page using only latest, audience, product and timestamp cursor filters", async () => {
+    const response = await GET(new Request(`http://localhost/api/community/artworks?audience=kids&productId=${productId}&sort=latest&limit=2`));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({ ok: true, items: [{ id: "safe-artwork" }], nextCursor: null });
+    expect(mocks.listPublic).toHaveBeenCalledWith({ audience: "kids", productId, cursor: null, limit: 2 });
+  });
+
+  it("accepts the opaque microsecond-preserving continuation cursor", async () => {
+    const cursor = encodeCommunityTimestampCursor("2026-10-25T12:00:00.123456+00:00", "99999999-9999-4999-8999-999999999999");
+    const response = await GET(new Request(`http://localhost/api/community/artworks?cursor=${cursor}`));
+    expect(response.status).toBe(200);
+    expect(mocks.listPublic).toHaveBeenCalledWith({ audience: undefined, productId: undefined, cursor, limit: 24 });
+  });
+
+  it("rejects unsupported sorting, duplicated or unknown parameters, malformed cursors and unbounded limits", async () => {
+    for (const query of ["sort=popular", "audience=kids&audience=adults", "debug=true", "limit=49", "cursor=bad"]) {
+      const response = await GET(new Request(`http://localhost/api/community/artworks?${query}`));
+      expect(response.status).toBe(400);
+    }
+    expect(mocks.listPublic).not.toHaveBeenCalled();
+  });
+
+  it("hides the listing when the public flag is off", async () => {
+    mocks.getCommunityFlags.mockReturnValue({ uploadsEnabled: true, publicEnabled: false });
+    expect((await GET(new Request("http://localhost/api/community/artworks"))).status).toBe(404);
+    expect(mocks.listPublic).not.toHaveBeenCalled();
   });
 });

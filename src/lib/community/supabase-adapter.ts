@@ -34,7 +34,7 @@ export async function listPublicArtworks(input: {
   limit: number;
   cursor?: string | null;
 }): Promise<CommunityPage<CommunityPublicArtwork>> {
-  const offset = parseOffset(input.cursor);
+  const cursor = decodeCommunityTimestampCursor(input.cursor);
   const client = createServiceRoleClient();
   let query = client.from("community_artworks")
     .select(PUBLIC_ARTWORK_SELECT)
@@ -50,16 +50,38 @@ export async function listPublicArtworks(input: {
     .eq("community_profiles.rules_version", COMMUNITY_RULES_VERSION);
   if (input.productId) query = query.eq("product_id", input.productId);
   if (input.audience) query = query.eq("products.audience", input.audience);
+  if (cursor) query = query.or(`published_at.lt.${cursor.timestamp},and(published_at.eq.${cursor.timestamp},id.lt.${cursor.id})`);
   const { data, error } = await query
     .order("published_at", { ascending: false })
     .order("id", { ascending: false })
-    .range(offset, offset + input.limit);
+    .limit(input.limit + 1);
   if (error) throw new Error("Community gallery read failed.");
   const rows = (data ?? []) as unknown as Row[];
+  const items = rows.slice(0, input.limit).map(mapPublicArtwork);
+  const last = items.at(-1);
   return {
-    items: rows.slice(0, input.limit).map(mapPublicArtwork),
-    nextCursor: rows.length > input.limit ? String(offset + input.limit + 1) : null,
+    items,
+    nextCursor: rows.length > input.limit && last ? encodeCommunityTimestampCursor(last.publishedAt, last.id) : null,
   };
+}
+
+export async function listPublicProductOptions(limit = 200) {
+  const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 200) : 200;
+  const { data, error } = await createServiceRoleClient().from("products")
+    .select("id,slug,audience,product_translations!inner(locale,title)")
+    .eq("status", "published")
+    .eq("product_translations.locale", "en")
+    .order("slug", { ascending: true })
+    .limit(safeLimit);
+  if (error) throw new Error("Community book filters could not be loaded.");
+  return ((data ?? []) as unknown as Row[]).map((row) => {
+    const translation = list(row.product_translations).find((candidate) => candidate.locale === "en");
+    return {
+      id: String(row.id), slug: String(row.slug),
+      title: typeof translation?.title === "string" ? translation.title : String(row.slug),
+      audience: row.audience as CommunityAudience,
+    };
+  });
 }
 
 export async function getPublicArtwork(id: string): Promise<CommunityPublicArtwork | null> {
@@ -516,12 +538,6 @@ function list(value: unknown): Row[] {
 
 function nullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
-}
-
-function parseOffset(cursor: string | null | undefined) {
-  if (!cursor) return 0;
-  if (!/^\d{1,8}$/.test(cursor)) return 0;
-  return Math.min(Number(cursor), 1_000_000);
 }
 
 function encodeAdminCursor(createdAt: string, id: string) {
