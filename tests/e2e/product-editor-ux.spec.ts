@@ -40,6 +40,20 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
   const simulatedFailures: string[] = [];
   const browserDiagnostics = createBrowserDiagnostics();
   collectBrowserDiagnostics(page, browserDiagnostics);
+  const readerArtworkResponses = new Map<string, Array<{ phase?: string; response: Promise<{ status: number; body: unknown }> }>>();
+  const verifiedReaderArtworkReads = browserDiagnostics.verifiedReaderArtworkReads;
+  page.on("response", (response) => {
+    const request = response.request();
+    const match = new URL(response.url()).pathname.match(/^\/api\/admin\/products\/([0-9a-f-]{36})\/reader-artworks$/i);
+    if (request.method() === "GET" && match) {
+      const records = readerArtworkResponses.get(match[1]) ?? [];
+      records.push({ phase: browserDiagnostics.pendingNavigationPhases.at(-1), response: response.json().then(
+        (body: unknown) => ({ status: response.status(), body }),
+        () => ({ status: response.status(), body: null }),
+      ) });
+      readerArtworkResponses.set(match[1], records);
+    }
+  });
   let productPath: string | undefined;
   let createdProductId: string | undefined;
   let createdProductSlug: string | undefined;
@@ -110,6 +124,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
       productPath = new URL(page.url()).pathname;
       createdProductId = productPath.split("/").at(-1)!;
+      await waitForReaderArtworkList(page, createdProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
     });
     const verifiedProductPath = productPath!;
     const persistedProductId = createdProductId!;
@@ -167,10 +182,12 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.getByRole("link", { name: titleText, exact: false }).click();
       await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
+      await waitForReaderArtworkList(page, persistedProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
       await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
       await page.reload();
       await waitForProductEditorReady(page);
+      await waitForReaderArtworkList(page, persistedProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
       await expect(page.getByLabel("Adres produktu")).toHaveValue(slug);
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
       await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
@@ -181,6 +198,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.goBack();
       await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
+      await waitForReaderArtworkList(page, persistedProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
     });
     await page.getByLabel("Pozycja w katalogu").fill("39");
     await expect(page.getByTestId("product-save-bar")).toContainText("Niezapisane zmiany");
@@ -204,6 +222,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.getByRole("link", { name: titleText, exact: false }).click();
       await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
+      await waitForReaderArtworkList(page, persistedProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
     });
 
@@ -217,11 +236,13 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.goBack();
       await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
+      await waitForReaderArtworkList(page, persistedProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
       await page.goForward();
       await expect(page).toHaveURL(/\/admin\/products$/);
       await page.goBack();
       await expect(page).toHaveURL(editorUrlRegex(verifiedProductPath));
+      await waitForReaderArtworkList(page, persistedProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
       await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("38");
     });
 
@@ -262,6 +283,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page.getByLabel("Status")).toHaveValue("published");
       await page.reload();
       await expect(page.getByTestId("product-save-bar")).toBeVisible();
+      await waitForReaderArtworkList(page, persistedProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
       await expect(page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ })).toBeEnabled();
       await expect(page.getByLabel("Status")).toHaveValue("published");
       await expect(page.locator("form header").getByText("Opublikowany", { exact: true })).toBeVisible();
@@ -281,6 +303,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       await expect(page.locator("form header").getByText("Zarchiwizowany", { exact: true })).toBeVisible();
       await expect(page.getByLabel("Status")).toHaveValue("archived");
       await page.reload();
+      await waitForReaderArtworkList(page, persistedProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
       await expect(page.getByLabel("Status")).toHaveValue("archived");
       await expect(page.locator("form header").getByText("Zarchiwizowany", { exact: true })).toBeVisible();
     });
@@ -451,7 +474,11 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
       body: Buffer.from(JSON.stringify(browserDiagnostics, null, 2)),
       contentType: "application/json",
     });
-    console.log(`BROWSER_DIAGNOSTICS ${testInfo.project.name} ${JSON.stringify(browserDiagnostics)}`);
+    resolveReaderArtworkReadProofs(browserDiagnostics);
+    console.log(`BROWSER_DIAGNOSTICS ${testInfo.project.name} ${JSON.stringify({
+      ...browserDiagnostics,
+      verifiedReaderArtworkReads: [...browserDiagnostics.verifiedReaderArtworkReads],
+    })}`);
     if (testFailed) {
       if (cleanupFailures.length > 0) {
         console.error(`SECONDARY_CLEANUP_FAILURES ${JSON.stringify(cleanupFailures.map(formatError))}`);
@@ -633,6 +660,7 @@ function createBrowserDiagnostics() {
       reason: string;
     }>,
     pendingNavigationPhases: [] as string[],
+    verifiedReaderArtworkReads: new Set<string>(),
   };
 }
 
@@ -706,6 +734,24 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
         ...requestDetails,
         disposition: "expected",
         reason: "The browser canceled a pending optimized product-list image when the test immediately reopened the editor; both route destinations and the saved product state are asserted.",
+      });
+    } else if (
+      error === "Load request cancelled" && request.method() === "GET" && request.resourceType() === "fetch" &&
+      /^\/api\/admin\/products\/([0-9a-f-]{36})\/reader-artworks$/i.test(url.pathname) &&
+      requestPhase && [
+        "create product and open its editor",
+        "save edited product, leave, reopen, and reload",
+        "open products and go Back to editor",
+        "accept Forward navigation and reopen editor",
+        "navigate away, unmount, and traverse history",
+        "save and reload edited product states",
+      ].includes(requestPhase) &&
+      requestContext?.sourcePage === `${url.origin}${url.pathname.replace(/^\/api/, "").replace(/\/reader-artworks$/, "")}`
+    ) {
+      diagnostics.failedRequests.push({
+        ...requestDetails,
+        disposition: "pending-reader-artwork-proof",
+        reason: `Reader-artwork read canceled during ${requestPhase}; awaiting the phase's successful read and hydrated-control proof.`,
       });
     } else if (
       isCancelled && request.method() === "GET" && request.resourceType() === "fetch" &&
@@ -791,6 +837,7 @@ function describeEditorNavigationRequest(request: import("@playwright/test").Req
 }
 
 function assertBrowserDiagnosticsClean(diagnostics: ReturnType<typeof createBrowserDiagnostics>) {
+  resolveReaderArtworkReadProofs(diagnostics);
   const unmatchedNetworkConsoleErrors: string[] = [];
   const consumedResponseIndexes = new Set<number>();
   const consumedRequestIndexes = new Set<number>();
@@ -836,6 +883,18 @@ function assertBrowserDiagnosticsClean(diagnostics: ReturnType<typeof createBrow
     unmatchedNetworkConsoleErrors: [],
     expectedHttpFailuresNotObserved: [],
   });
+}
+
+function resolveReaderArtworkReadProofs(diagnostics: ReturnType<typeof createBrowserDiagnostics>) {
+  for (const request of diagnostics.failedRequests) {
+    if (request.disposition !== "pending-reader-artwork-proof") continue;
+    const id = request.url.match(/\/api\/admin\/products\/([0-9a-f-]{36})\/reader-artworks$/i)?.[1];
+    const hasReadinessProof = Boolean(id && request.navigationPhase && diagnostics.verifiedReaderArtworkReads.has(`${request.navigationPhase}:${id}`));
+    request.disposition = hasReadinessProof ? "expected" : "unresolved";
+    request.reason = hasReadinessProof
+      ? `The reader-artwork GET was canceled during ${request.navigationPhase}; before continuing, that phase verified a successful HTTP 200 JSON artwork list and the enabled, hydrated editor control.`
+      : `The reader-artwork GET was canceled during ${request.navigationPhase} without a successful same-phase list response and hydrated-control proof.`;
+  }
 }
 
 function formatError(error: unknown) {
@@ -1034,6 +1093,25 @@ async function waitForProductEditorReady(page: Page) {
   const saveBar = page.getByTestId("product-save-bar");
   await expect(saveBar).toBeVisible();
   await expect(saveBar.getByRole("button", { name: /Zapisz/ })).toBeEnabled();
+}
+
+async function waitForReaderArtworkList(
+  page: Page,
+  productId: string,
+  responses: Map<string, Array<{ phase?: string; response: Promise<{ status: number; body: unknown }> }>>,
+  verifiedReads: Set<string>,
+  phase?: string,
+) {
+  const uploadButton = page.getByRole("button", { name: "Wybierz pliki prac czytelniczek" });
+  await expect(uploadButton).toBeEnabled({ timeout: 20_000 });
+  const records = responses.get(productId) ?? [];
+  const matching = records.filter((record) => record.phase === phase);
+  const responseRecord = matching.at(-1) ?? (phase ? undefined : records.at(-1));
+  expect(responseRecord, `Expected a reader-artwork list response during ${phase ?? "the current editor load"} for ${productId}.`).toBeDefined();
+  const result = await responseRecord!.response;
+  expect(result.status).toBe(200);
+  expect(result.body).toEqual(expect.objectContaining({ artworks: expect.any(Array) }));
+  if (phase) verifiedReads.add(`${phase}:${productId}`);
 }
 
 function listFilesRecursively(directory: string): string[] {
