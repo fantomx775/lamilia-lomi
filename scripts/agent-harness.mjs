@@ -1463,8 +1463,16 @@ function gatedCommunityProofCoversExpectations(proof, expectations) {
 
 function isValidProductionSmokeExpectationStatus(expectation) {
   const method = expectation?.method ?? "GET";
-  if (!["GET", "POST"].includes(method)) return false;
-  if (method === "POST" && (
+  if (!["GET", "POST", "DELETE"].includes(method)) return false;
+  // This mutation-only route cannot be probed with GET. Its first guard rejects
+  // every request without Origin, before identity, body parsing or deletion.
+  if (method === "DELETE" && (
+    !/^\/api\/community\/artworks\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(expectation.path) ||
+    expectation.expectedStatus !== 403 ||
+    expectation.expectedText !== "Refresh the page and try again." ||
+    expectation.expectedContentType !== "application/json"
+  )) return false;
+  if (method !== "GET" && (
     !isValidProductionSmokePath(expectation.path) ||
     !new URL(expectation.path, "https://agent-harness.invalid").pathname.startsWith("/api/") ||
     new URL(expectation.path, "https://agent-harness.invalid").pathname !== expectation.path ||
@@ -1635,7 +1643,7 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
   const conflictingMethods = uniquePaths.some((path) => new Set(expectations
     .filter((expectation) => expectation.path === path)
     .map((expectation) => expectation.method ?? "GET")).size > 1);
-  if (conflictingMethods) failures.push("Smoke plan cannot mix GET and POST probes for one path.");
+  if (conflictingMethods) failures.push("Smoke plan cannot mix different HTTP methods for one path.");
   const requiresGatedPageProof = expectations.some(isGatedCommunityPageExpectation);
   const gatedPublicPageVerification = plan.gatedPublicPageVerification;
   if (requiresGatedPageProof && (!hasMatchingGatedCommunityPageProof(rawRecord) ||
@@ -2963,7 +2971,7 @@ async function runProductionSmokeInternal(environmentUrl, {
   if (paths.some((path) => new Set(expectations
     .filter((expectation) => expectation.path === path)
     .map((expectation) => expectation.method ?? "GET")).size > 1)) {
-    return { status: "BLOCKED", checks: [], details: "Production smoke cannot mix GET and POST probes for one path." };
+    return { status: "BLOCKED", checks: [], details: "Production smoke cannot mix different HTTP methods for one path." };
   }
   const conflictingFinalOrigins = paths.some((path) => {
     const origins = new Set(expectations
@@ -3021,12 +3029,12 @@ async function runProductionSmokeInternal(environmentUrl, {
   const suppliedProtectionCookies = hasSmokeCookie
     ? productionSmokeCookie.split(";").map((pair) => pair.trim()).filter((pair) => pair.startsWith("_vercel_jwt="))
     : [];
-  const hasPostProbe = expectations.some((expectation) => expectation.method === "POST");
-  if (hasPostProbe && !protectionCookie && (suppliedProtectionCookies.length !== 1 ||
+  const hasMutationProbe = expectations.some((expectation) => expectation.method !== undefined && expectation.method !== "GET");
+  if (hasMutationProbe && !protectionCookie && (suppliedProtectionCookies.length !== 1 ||
     (suppliedProtectionCookies.length === 1 && !/^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/.test(suppliedProtectionCookies[0].slice("_vercel_jwt=".length))))) {
-    return { status: "BLOCKED", checks: [], details: "POST denial probes require one valid deployment-protection cookie, without application authentication." };
+    return { status: "BLOCKED", checks: [], details: "Bodyless API denial probes require one valid deployment-protection cookie, without application authentication." };
   }
-  const postCookieHeader = protectionCookie || suppliedProtectionCookies[0] || "";
+  const denialCookieHeader = protectionCookie || suppliedProtectionCookies[0] || "";
   for (const path of paths) {
     const url = new URL(path, baseUrl);
     if (url.origin !== baseUrl.origin) {
@@ -3036,11 +3044,11 @@ async function runProductionSmokeInternal(environmentUrl, {
       const expectedForPath = expectations.filter((expectation) => expectation.path === path);
       const method = expectedForPath[0]?.method ?? "GET";
       const gatedPage = expectedForPath.some(isGatedCommunityPageExpectation);
-      const cookieHeader = method === "POST" ? postCookieHeader : smokeCookieHeader;
+      const cookieHeader = method !== "GET" ? denialCookieHeader : smokeCookieHeader;
       const response = await fetchImpl(url, {
         method,
         cache: "no-store",
-        redirect: method === "POST" || gatedPage ? "manual" : "follow",
+        redirect: method !== "GET" || gatedPage ? "manual" : "follow",
         signal: AbortSignal.timeout(timeoutMs),
         ...(cookieHeader ? { headers: { Cookie: cookieHeader } } : {}),
       });
@@ -3065,7 +3073,7 @@ async function runProductionSmokeInternal(environmentUrl, {
         mediaType === expectedContentType.toLowerCase();
       const check = {
         path,
-        ...(method === "POST" ? { method } : {}),
+        ...(method !== "GET" ? { method } : {}),
         ...(gatedPage ? { gatedPublicPage: true } : {}),
         statusCode: response.status,
         contentType: responseContentType,
@@ -3075,7 +3083,7 @@ async function runProductionSmokeInternal(environmentUrl, {
       const expectedStatus = expectedForPath.find((expectation) => expectation.expectedStatus !== undefined)?.expectedStatus;
       const expectedStatusMatched = expectedStatus === undefined || response.status === expectedStatus;
       const responseStatusPassed = expectedStatus === undefined ? response.ok : expectedStatusMatched;
-      const finalPathMatched = !(gatedPage || method === "POST") ||
+      const finalPathMatched = !(gatedPage || method !== "GET") ||
         (finalUrl.pathname === url.pathname && !finalUrl.search && !finalUrl.hash);
       if (expectedTextValues.length) {
         check.expectedText = expectedTextValues;
@@ -4026,7 +4034,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     if (paths.some((path) => new Set(expectations
       .filter((expectation) => expectation.path === path)
       .map((expectation) => expectation.method ?? "GET")).size > 1)) {
-      return { status: "BLOCKED", details: "Production smoke cannot mix GET and POST probes for one path." };
+      return { status: "BLOCKED", details: "Production smoke cannot mix different HTTP methods for one path." };
     }
     if (expectations.some(isGatedCommunityPageExpectation) && (
       !gatedCommunityProofCoversExpectations(gatedPublicPageVerification, expectations) ||

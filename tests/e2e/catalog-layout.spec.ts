@@ -21,10 +21,12 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
   ]);
 
   const releaseContentStoreLock = await acquireLocalContentStoreLock();
+  const originalColumns = await page.getByRole("combobox", { name: "Karty w wierszu na dużych ekranach" }).inputValue();
+  if (!["3", "4", "5"].includes(originalColumns)) {
+    releaseContentStoreLock();
+    throw new Error("Unexpected original catalog column setting.");
+  }
   try {
-    await expect(
-      page.getByRole("combobox", { name: "Karty w wierszu na dużych ekranach" }),
-    ).toHaveValue("4");
     await saveCatalogColumns(page, "5");
     await expect(
       page.getByRole("status").filter({ hasText: "Ustawienia katalogu zostały zapisane." }),
@@ -89,7 +91,7 @@ test("admin catalog preference persists and stays responsive", async ({ page }, 
     try {
       await page.setViewportSize({ width: 1440, height: 900 });
       await page.goto("/admin/settings");
-      await saveCatalogColumns(page, "4");
+      await saveCatalogColumns(page, originalColumns as "3" | "4" | "5");
     } finally {
       releaseContentStoreLock();
     }
@@ -109,7 +111,7 @@ async function saveCatalogColumns(page: Page, columns: "3" | "4" | "5") {
 
 async function dismissCookieConsent(page: Page) {
   const essentialConsent = page.getByRole("button", {
-    name: "Essential",
+    name: "Essential only",
     exact: true,
   });
 

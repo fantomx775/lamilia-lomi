@@ -346,7 +346,12 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
         const acceptDialogs = (dialog: import("@playwright/test").Dialog) => void dialog.accept();
         page.on("dialog", acceptDialogs);
         try {
+          const editorReady = page.waitForResponse(response => response.request().method() === "GET"
+            && new URL(response.url()).pathname === `/api/admin/products/${productId}/reader-artworks`
+            && response.status() === 200);
           await page.goto(productPath);
+          await editorReady;
+          await expect(page.getByText("Wczytywanie prac…", { exact: true })).toHaveCount(0);
           const deleteProduct = page.getByRole("button", { name: "Usuń produkt", exact: true });
           await expect(deleteProduct).toBeVisible();
           await expect(deleteProduct).toBeEnabled();

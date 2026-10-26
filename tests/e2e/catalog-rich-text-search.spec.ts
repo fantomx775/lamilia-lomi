@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
@@ -79,15 +79,21 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     const productSlug = await page.getByLabel("Adres produktu").inputValue();
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
     await productEditor.fill("Catalog split phrase");
-    await productEditor.press("Control+Home");
-    for (let index = 0; index < 8; index += 1) await productEditor.press("ArrowRight");
-    for (let index = 0; index < 5; index += 1) await productEditor.press("Shift+ArrowRight");
+    if (testInfo.project.name === "mobile") await selectFixtureText(productEditor, "split");
+    else {
+      await productEditor.press("Control+Home");
+      for (let index = 0; index < 8; index += 1) await productEditor.press("ArrowRight");
+      for (let index = 0; index < 5; index += 1) await productEditor.press("Shift+ArrowRight");
+    }
     await page.getByRole("button", { name: "Pogrubienie" }).click();
     await expect(productEditor.locator("strong")).toHaveText("split");
 
-    await productEditor.press("Control+Home");
-    for (let index = 0; index < 14; index += 1) await productEditor.press("ArrowRight");
-    for (let index = 0; index < 6; index += 1) await productEditor.press("Shift+ArrowRight");
+    if (testInfo.project.name === "mobile") await selectFixtureText(productEditor, "phrase");
+    else {
+      await productEditor.press("Control+Home");
+      for (let index = 0; index < 14; index += 1) await productEditor.press("ArrowRight");
+      for (let index = 0; index < 6; index += 1) await productEditor.press("Shift+ArrowRight");
+    }
     await page.getByRole("button", { name: "Dodaj lub edytuj link" }).click();
     await page.getByLabel("Adres strony").fill("https://metadata-only.example/catalog");
     await page.getByRole("button", { name: "Zapisz link" }).click();
@@ -136,12 +142,12 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
 });
 
 async function signInAsAdmin(page: Page) {
-  await page.goto("/pl/login?redirectTo=/admin");
-  await page.getByLabel("E-mail").fill("admin@lamilialomi.test");
-  await page.getByLabel("Hasło").fill("demo-password");
+  await page.goto("/en/login?returnTo=/admin");
+  await page.getByLabel("Email").fill("admin@lamilialomi.test");
+  await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
-    page.getByRole("button", { name: "Kontynuuj" }).click(),
+    page.getByRole("button", { name: "Continue" }).click(),
   ]);
 }
 
@@ -166,4 +172,33 @@ function isExpectedLoginRedirectAbort(request: {
     request.error === "net::ERR_ABORTED" &&
     request.hasNextActionHeader
   );
+}
+
+/** Set up a mobile text selection for the real toolbar/save/search flow.
+ * Android emulation does not implement desktop Control+Home selection semantics.
+ */
+async function selectFixtureText(editor: Locator, text: string) {
+  await editor.evaluate((element, target) => {
+    (element as HTMLElement).focus();
+    const nodes: Text[] = [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) nodes.push(node as Text);
+    const start = nodes.map((item) => item.textContent).join("").indexOf(target);
+    if (start < 0) throw new Error("Missing fixture text to select.");
+    const boundary = (offset: number): [Text, number] => {
+      for (const item of nodes) {
+        if (offset <= item.length) return [item, offset];
+        offset -= item.length;
+      }
+      throw new Error("Fixture text selection exceeded editor content.");
+    };
+    const range = document.createRange();
+    range.setStart(...boundary(start));
+    range.setEnd(...boundary(start + target.length));
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    if (selection?.toString() !== target) throw new Error("Fixture text selection did not match.");
+  }, text);
 }

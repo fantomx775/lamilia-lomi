@@ -25,7 +25,9 @@ test("public pages use English only and retired locale links reach English", asy
   await page.goto("/en");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   const header = page.getByRole("banner");
-  await expect(header.getByRole("link", { name: "Catalog" })).toBeVisible();
+  const menu = header.getByRole("button", { name: "Open navigation menu", exact: true });
+  if (await menu.isVisible()) await menu.click();
+  await expect(header.getByRole("link", { name: "Catalog", exact: true })).toBeVisible();
   await expect(header.getByRole("link", { name: "My Library" })).toBeVisible();
   await expect(header.getByText("Dzieci", { exact: true })).toHaveCount(0);
   await expect(header.getByText("PL", { exact: true })).toHaveCount(0);

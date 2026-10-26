@@ -1153,7 +1153,7 @@ async function saveSafeScreenshot(
     () => window.localStorage.getItem("ll_cookie_consent") === null,
   );
   if (consentPending) {
-    await page.getByRole("button", { name: "Essential", exact: true }).click();
+    await page.getByRole("button", { name: "Essential only", exact: true }).click();
   }
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   await mkdir(evidenceFolder, { recursive: true });

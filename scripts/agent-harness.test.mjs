@@ -184,7 +184,7 @@ test("POST smoke plans permit only bodyless API denial probes and reject method 
     expectation, { ...expectation, method: "GET" },
   ]) } });
   assert.equal(conflict.status, "BLOCKED");
-  assert.match(conflict.details, /mix GET and POST/);
+  assert.match(conflict.details, /mix different HTTP methods/);
 });
 
 test("POST denial smoke strips application sessions and retains only deployment protection", async () => {
@@ -240,6 +240,44 @@ test("POST denial smoke uses newly minted protection without forwarding auth or 
   });
   assert.equal(result.status, "PASS");
   assert.equal(calls, 2);
+});
+
+test("mutation-only artwork deletion probes are canonical, bodyless, protected and denied before deletion", async () => {
+  const path = "/api/community/artworks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const file = "src/app/api/community/artworks/[id]/route.ts";
+  const expectation = { path, method: "DELETE", expectedStatus: 403,
+    expectedText: "Refresh the page and try again.", expectedContentType: "application/json" };
+  const record = { productionSmokePlan: { status: "PASS", flows: [{ name: "private artwork deletion", affectedFiles: [file], paths: [expectation] }] } };
+  assert.equal(validateProductionSmokePlan({ files: [file], localVerification: { record } }).status, "PASS");
+  for (const change of [{ path: path + "?probe=1" }, { path: path.replace("aaaaaaaa", "AAAAAAAA") },
+    { path: "/api/account/delete" }, { method: "PATCH" }, { method: "PUT" }, { expectedStatus: 200 },
+    { expectedStatus: 401 }, { expectedStatus: 404 }, { expectedText: "Forbidden" },
+    { expectedContentType: undefined }, { body: {} }, { headers: { Origin: "https://example.test" } }]) {
+    const invalid = structuredClone(record);
+    Object.assign(invalid.productionSmokePlan.flows[0].paths[0], change);
+    assert.equal(validateProductionSmokePlan({ files: [file], localVerification: { record: invalid } }).status, "BLOCKED", JSON.stringify(change));
+  }
+  const host = "https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app";
+  let called = false;
+  assert.equal((await runProductionSmoke(host, { paths: [path], expectations: [expectation],
+    productionSmokeCookie: "", vercelProtectionBypass: "", fetchImpl: async () => { called = true; } })).status, "BLOCKED");
+  assert.equal(called, false);
+  const options = { paths: [path], expectations: [expectation], vercelProtectionBypass: "",
+    productionSmokeCookie: "sb-project-auth-token=app-secret; _vercel_jwt=deployment-token" };
+  const result = await runProductionSmoke(host, { ...options, fetchImpl: async (url, init) => {
+    assert.equal(init.method, "DELETE");
+    assert.equal(init.redirect, "manual");
+    assert.equal(Object.hasOwn(init, "body"), false);
+    assert.deepEqual(init.headers, { Cookie: "_vercel_jwt=deployment-token" });
+    return smokeResponse(url, { status: 403, text: expectation.expectedText, contentType: "application/json" });
+  } });
+  assert.equal(result.status, "PASS");
+  assert.equal(result.checks[0].method, "DELETE");
+  for (const override of [{ status: 405 }, { status: 307 }, { text: "Forbidden" }, { contentType: "text/html" }, { finalUrl: host + "/api/elsewhere" }]) {
+    assert.equal((await runProductionSmoke(host, { ...options, fetchImpl: async (url) => smokeResponse(url, {
+      status: 403, text: expectation.expectedText, contentType: "application/json", ...override,
+    }) })).status, "FAIL");
+  }
 });
 
 test("gated proof does not replace the existing complete browser verification gate", () => {

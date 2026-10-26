@@ -32,7 +32,7 @@ test("homepage banner selects the supplied responsive artwork and keeps navigati
       await page.evaluate(() => document.fonts.ready);
       await expect(page.getByTestId("localized-page-loading")).toHaveCount(0, { timeout: 30_000 });
       await expect(page.getByRole("heading", { level: 1, name: "LamiliaLomi" })).toBeVisible();
-      const essentialConsent = page.getByRole("button", { name: "Essential", exact: true });
+      const essentialConsent = page.getByRole("button", { name: "Essential only", exact: true });
       if (width === 390) {
         await expect(essentialConsent).toBeVisible();
         await essentialConsent.click();

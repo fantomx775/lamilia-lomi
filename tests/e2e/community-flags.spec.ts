@@ -50,6 +50,12 @@ test("disabled switches block real public images and mutations while preserving 
     });
     expect(seededHeart.error).toBeNull();
     expect(seededHeart.data).toMatchObject({ available: true, liked: true, likesCount: 1 });
+    const bodylessDelete = await page.request.delete(`${origin}/api/community/artworks/${artworkId}`, { maxRedirects: 0 });
+    expect(bodylessDelete.status()).toBe(403);
+    expect(bodylessDelete.headers()["content-type"]).toContain("application/json");
+    expect(await bodylessDelete.json()).toMatchObject({ ok: false, error: "invalid_request", message: "Refresh the page and try again." });
+    expect((await fixtures.service.from("community_artworks").select("status,revision,deleted_at").eq("id", artworkId).single()).data)
+      .toMatchObject({ status: "approved", revision: 2, deleted_at: null });
     const mediaUrl = `${origin}/api/community/artworks/${artworkId}/media`;
     const anonymousMediaStatus = (await page.request.get(mediaUrl)).status();
     expect(anonymousMediaStatus).toBe(404);

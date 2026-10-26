@@ -68,7 +68,11 @@ test("catalog category recovery, full titles and configurable responsive cards",
       fs.writeFileSync(store, JSON.stringify(snapshot));
       await page.goto("/en/products", { waitUntil: "domcontentloaded" });
       const categories = page.getByRole("region", { name: "Categories" });
+      // Mobile category rows scroll horizontally; visit each tile so its lazy
+      // image actually loads (or fails) before asserting fallback recovery.
+      for (const tile of await categories.getByRole("link").all()) await tile.scrollIntoViewIfNeeded();
       await expect(categories.getByTestId("category-image-fallback")).toHaveCount(2);
+      await categories.getByRole("link").first().scrollIntoViewIfNeeded();
       await expect.poll(() => categories.locator("img").evaluateAll(images => images.every(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0))).toBe(true);
       const grid = page.getByTestId("product-catalog-grid");
       await expect(grid.locator("article")).toHaveCount(5);

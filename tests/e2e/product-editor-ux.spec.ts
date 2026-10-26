@@ -707,6 +707,17 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
         disposition: "expected",
         reason: "The browser canceled a pending optimized product-list image when the test immediately reopened the editor; both route destinations and the saved product state are asserted.",
       });
+    } else if (
+      isCancelled && request.method() === "GET" && request.resourceType() === "fetch" &&
+      requestPhase === "delete test product and verify cleanup" &&
+      /^\/api\/admin\/products\/[0-9a-f-]{36}\/reader-artworks$/.test(url.pathname) &&
+      requestContext?.sourcePage === `${url.origin}${url.pathname.replace(/^\/api/, "").replace(/\/reader-artworks$/, "")}`
+    ) {
+      diagnostics.failedRequests.push({
+        ...requestDetails,
+        disposition: "expected",
+        reason: "The browser canceled this editor's reader-artwork list while leaving the product being deleted; the phase verifies the redirect and actual product removal.",
+      });
     } else if (isCancelled && requestPhase && isVerifiedEditorNavigationRequest(request, url)) {
       diagnostics.failedRequests.push({
         ...requestDetails,

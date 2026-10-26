@@ -588,3 +588,5 @@ reference in the PR body or any PR commit message blocks delivery; unreadable
 commit history also blocks until it can be verified.
 
 POST denial probes require one deployment-protection cookie even when no application session is configured. Missing protection blocks before fetch, preventing an upstream Vercel denial from being mistaken for an application response.
+
+A mutation-only `/api/community/artworks/<canonical lowercase UUID>` route additionally permits an explicit bodyless DELETE probe with exact403, `application/json` and `Refresh the page and try again.`. Its missing-Origin guard runs before body/authentication/deletion. The runner requires deployment protection, strips all application sessions, sends no Origin/body/custom headers, and rejects redirects,405, other paths/statuses/text. PATCH/PUT and general DELETE remain unsupported; positive owner edit/delete journeys remain required separately.

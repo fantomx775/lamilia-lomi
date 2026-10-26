@@ -51,7 +51,7 @@ test("T09 product titles, statuses, search, and responsive table layout", async 
     await expect(page.getByRole("link", { name: `Edytuj produkt ${title}`, exact: true })).toHaveCount(1);
     await expect(page.getByRole("link", { name: "Edytuj produkt Moon Garden Coloring Book", exact: true })).toHaveCount(0);
     await search.fill("");
-    await expect(page.getByText("5 wyników", { exact: true })).toBeVisible();
+    await expect(page.getByText(`${store.products.length} wyników`, { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: `Edytuj produkt ${title}`, exact: true })).toHaveCount(1);
     await search.evaluate((input: HTMLInputElement) => input.blur());
 

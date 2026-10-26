@@ -13,6 +13,7 @@ test.setTimeout(240_000);
 
 test("Issue 60 route skeleton retains streaming geometry", async ({page}, testInfo) => {
   test.skip(!(await isLocalDemoAppTarget(page,testInfo.project.use.baseURL)),"Requires the local delay hook.");
+  test.skip(!Number(process.env.LAMILIA_TEST_PRODUCT_DETAIL_DELAY_MS), "Run separately with the actual development-server product delay hook enabled.");
   await page.addInitScript(()=>localStorage.setItem("ll_cookie_consent",JSON.stringify({essential:true,analytics:false})));
   if(testInfo.project.name === "chromium") await page.setViewportSize({width:1440,height:900});
   await page.goto("/en/products",{waitUntil:"domcontentloaded"});
@@ -173,8 +174,10 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
     await expect(opener).toBeFocused();
     const video=inside.locator("video");
     await expect(video).toHaveAttribute("controls","");
-    await expect.poll(()=>video.evaluate(el=>(el as HTMLVideoElement).readyState),{timeout:45_000}).toBeGreaterThan(0);
+    // The current native player deliberately uses preload=none; a play intent
+    // must start the network request before readiness can increase.
     await video.evaluate(el=>(el as HTMLVideoElement).play());
+    await expect.poll(()=>video.evaluate(el=>(el as HTMLVideoElement).readyState),{timeout:45_000}).toBeGreaterThan(0);
     await expect.poll(()=>video.evaluate(el=>(el as HTMLVideoElement).currentTime),{timeout:15_000}).toBeGreaterThan(0);
     await video.evaluate(el=>(el as HTMLVideoElement).pause());
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);

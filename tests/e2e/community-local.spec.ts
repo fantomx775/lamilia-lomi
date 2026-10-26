@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { essentials } from "./helpers/community-fixtures";
 

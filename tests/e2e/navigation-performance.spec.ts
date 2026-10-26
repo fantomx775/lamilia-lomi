@@ -1,3 +1,4 @@
+import { primaryNavigation } from "./helpers/navigation";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -92,7 +93,7 @@ test("desktop primary navigation journey reaches Catalog, Product Detail, Librar
   await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   timings.push({ transition: "Catalog → Product Detail", clickToContentMs: Date.now() - started });
 
-  const primaryNav = page.locator('nav[aria-label="Primary navigation"]:visible');
+  const primaryNav = await primaryNavigation(page);
   started = Date.now();
   await primaryNav.getByRole("link", { name: "Catalog" }).click();
   await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
@@ -123,9 +124,12 @@ test("tablet header navigation is visible and fits the viewport", async ({ page 
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.goto("/en/products");
 
-  const nav = page.locator('nav[aria-label="Primary navigation"]:visible');
-  await expect(nav.getByRole("link", { name: "Catalog" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "My Library" })).toBeVisible();
+  const toggle = page.getByRole("button", { name: "Open navigation menu", exact: true });
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  const nav = page.getByRole("navigation", { name: "Mobile primary navigation", exact: true });
+  await expect(nav.getByRole("link", { name: "Catalog", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "My Library", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("tablet-catalog-navigation.png"), fullPage: true });
 });
@@ -423,7 +427,7 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/en");
   appOrigin = new URL(page.url()).origin;
-  const nav = page.locator('nav[aria-label="Primary navigation"]:visible');
+  const nav = await primaryNavigation(page);
   await expect(nav).toBeVisible();
   await expect(nav.getByRole("link", { name: "Catalog" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "My Library" })).toBeVisible();
@@ -435,7 +439,7 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
   completedAndLeftRscRoutes.add("/en/library");
 
-  await nav.getByRole("link", { name: "Catalog", exact: true }).tap();
+  await (await primaryNavigation(page)).getByRole("link", { name: "Catalog", exact: true }).tap();
   await expect(page).toHaveURL(/\/en\/products$/);
   await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

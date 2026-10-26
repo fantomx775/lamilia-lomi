@@ -1,3 +1,4 @@
+import { primaryNavigation } from "./helpers/navigation";
 import { expect, test } from "@playwright/test";
 
 const navigationTestBaseUrl = new URL(
@@ -181,7 +182,7 @@ test("primary navigation feedback keeps the storefront journey semantic and resp
 
   try {
     await page.goto("/en");
-    await page.getByRole("button", { name: "Essential" }).click();
+    await page.getByRole("button", { name: "Essential only" }).click();
     await capture("home.png");
 
     const browseCatalog = page.getByRole("link", { name: "Browse catalog" });
@@ -207,7 +208,7 @@ test("primary navigation feedback keeps the storefront journey semantic and resp
     await backToCatalog.click();
     await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
 
-    const header = page.locator('nav[aria-label="Primary navigation"]:visible');
+    const header = await primaryNavigation(page);
     await header.getByRole("link", { name: "My Library" }).click();
     await expect(page.getByTestId("library-guest-state")).toBeVisible();
     await capture("library.png");
@@ -219,7 +220,7 @@ test("primary navigation feedback keeps the storefront journey semantic and resp
     await expect(page.getByRole("heading", { name: "Create account" })).toBeVisible();
     await capture("register.png");
 
-    const responsiveNav = page.locator('nav[aria-label="Primary navigation"]:visible');
+    const responsiveNav = await primaryNavigation(page);
     await expect(responsiveNav.getByRole("link", { name: "Catalog" })).toBeVisible();
     await expect(responsiveNav.getByRole("link", { name: "My Library" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
@@ -279,7 +280,7 @@ test("admin navigation shows pending feedback for local demo admins", async ({ p
     });
 
     await page.goto("/en/login?redirectTo=/admin");
-    await page.getByRole("button", { name: "Essential" }).click();
+    await page.getByRole("button", { name: "Essential only" }).click();
     await page.getByLabel("Email").fill("admin@lamilialomi.test");
     await page.getByLabel("Password").fill("demo-password");
     await Promise.all([
@@ -310,7 +311,7 @@ test("admin navigation shows pending feedback for local demo admins", async ({ p
     ]);
     await page.goto("/en");
     await page.locator("header").getByRole("link", { name: "Account" }).click();
-    await expect(page.getByRole("heading", { name: "Account" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
     await capture("authenticated-account.png");
 
     expect(pageErrors).toEqual([]);
