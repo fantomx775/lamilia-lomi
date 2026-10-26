@@ -15,7 +15,6 @@ type TrackedRequest = {
   path: string;
   method: string;
   resource: string;
-  headers: Promise<void>;
   rsc?: string;
   prefetchHeader?: string;
   segmentPrefetch?: string;
@@ -86,7 +85,6 @@ export class NextCancellationObserver {
   private readonly loginProofs: LoginProof[] = [];
   private readonly usedIntentIds = new Set<string>();
   private readonly usedRequestIds = new Set<string>();
-  private readonly pendingMetadata: Promise<void>[] = [];
   private readonly outcomes: Record<string, unknown>[] = [];
   private readonly loginRedirects: Record<string, unknown>[] = [];
   private readonly productRedirects: Record<string, unknown>[] = [];
@@ -194,24 +192,26 @@ export class NextCancellationObserver {
         path: parsed.pathname,
         method: request.method(),
         resource: request.resourceType(),
-        headers: Promise.resolve(),
         nextActionHeader: false,
         responseStatus: null,
         request,
       };
       this.requestIds.set(request, tracked);
       this.tracked.push(tracked);
-      const metadata = sameOrigin ? request.allHeaders().then((headers) => {
-        tracked.rsc = headers.rsc;
-        tracked.prefetchHeader = headers["next-router-prefetch"];
-        const segment = headers["next-router-segment-prefetch"];
-        tracked.segmentPrefetch = typeof segment === "string" && segment.length <= 512 ? segment : undefined;
-        tracked.nextActionHeader = typeof headers["next-action"] === "string" && headers["next-action"].length > 0;
-      }).catch(() => {
-        tracked.nextActionHeader = false;
-      }) : Promise.resolve();
-      tracked.headers = metadata;
-      this.pendingMetadata.push(metadata);
+      if (sameOrigin) {
+        try {
+          // Read synchronously and retain only the safe routing markers. Never store cookie,
+          // authorization, request-body, or opaque Server Action header values.
+          const headers = request.headers();
+          tracked.rsc = headers.rsc;
+          tracked.prefetchHeader = headers["next-router-prefetch"];
+          const segment = headers["next-router-segment-prefetch"];
+          tracked.segmentPrefetch = typeof segment === "string" && segment.length <= 512 ? segment : undefined;
+          tracked.nextActionHeader = typeof headers["next-action"] === "string" && headers["next-action"].length > 0;
+        } catch {
+          tracked.nextActionHeader = false;
+        }
+      }
     };
     const onResponse = (response: import("@playwright/test").Response) => {
       const tracked = this.requestIds.get(response.request());
@@ -332,7 +332,6 @@ export class NextCancellationObserver {
     if (!observed || observed.pathname !== expected.pathname || observed.search !== expected.search) {
       throw new Error("The page did not reach the expected same-origin navigation destination.");
     }
-    await Promise.all(this.pendingMetadata);
     const target = expected.pathname + expected.search;
     const intent = [...this.intents].reverse().find((candidate) => candidate.pageId === pageId && candidate.trusted &&
       candidate.href && (() => { const u = new URL(candidate.href); return u.pathname + u.search === target; })());
@@ -356,13 +355,10 @@ export class NextCancellationObserver {
   }) {
     if (this.finished || this.finishing) throw new Error("Cannot add login proof after evidence finalization has started.");
     const tracked = this.requireTracked(request);
-    await tracked.headers;
     const expected = absoluteHttpUrl(input.expectedUrl, this.origin);
     const observed = absoluteHttpUrl(page.url(), this.origin);
     const requestUrl = absoluteHttpUrl(tracked.url, this.origin);
-    const response = await request.response();
-    if (response && tracked.responseStatus === null) tracked.responseStatus = response.status();
-    const responseStatus = tracked.responseStatus ?? response?.status() ?? null;
+    const responseStatus = tracked.responseStatus;
     if (!tracked.sameOrigin || !expected || !observed || !requestUrl || request.method() !== "POST" ||
       tracked.resource !== "fetch" || requestUrl.pathname !== "/en/login" ||
       (tracked.error !== undefined && tracked.error !== "net::ERR_ABORTED") || !tracked.nextActionHeader ||
@@ -433,7 +429,6 @@ export class NextCancellationObserver {
 
   private async finalize() {
     for (const stop of this.stopRequestHandlers.splice(0)) stop();
-    await Promise.all(this.pendingMetadata);
     const waitForPending = async (timeoutMs: number) => {
       const pendingNow = this.tracked.filter((tracked) => !tracked.isTerminal);
       if (!pendingNow.length) return { drained: true, pending: pendingNow };
@@ -449,9 +444,21 @@ export class NextCancellationObserver {
       let drain = await waitForPending(1_500);
       if (!drain.drained) {
         this.teardownStartedAt = Date.now();
-        await Promise.all([...this.pages].map(async (page) => {
+        const closePages = Promise.all([...this.pages].map(async (page) => {
           if (!page.isClosed()) await page.close({ runBeforeUnload: false });
-        }));
+        })).then(() => ({ status: "closed" as const }), () => ({ status: "failed" as const }));
+        let closeTimer: ReturnType<typeof setTimeout> | undefined;
+        const pagesClosed = await Promise.race([
+          closePages,
+          new Promise<{ status: "timeout" }>((resolve) => { closeTimer = setTimeout(() => resolve({ status: "timeout" }), 2_000); }),
+        ]);
+        if (closeTimer) clearTimeout(closeTimer);
+        if (pagesClosed.status !== "closed") {
+          const stillPending = this.tracked.filter((tracked) => !tracked.isTerminal);
+          const pendingSummary = stillPending.slice(0, 8).map((tracked) => `${tracked.method} ${tracked.path}`).join(", ");
+          const stageFailure = pagesClosed.status === "timeout" ? "timed out" : "failed";
+          throw new Error(`Browser observer page-close stage ${stageFailure} with ${stillPending.length} request(s) unsettled${pendingSummary ? `: ${pendingSummary}` : ""}.`);
+        }
         drain = await waitForPending(10_000);
       }
       if (!drain.drained) {
