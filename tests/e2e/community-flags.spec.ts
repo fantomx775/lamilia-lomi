@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
-import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { communityFixtures, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 import { COMMUNITY_RULES_VERSION } from "../../src/lib/community/rules";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
@@ -17,6 +17,7 @@ test("disabled switches block real public images and mutations while preserving 
     const moderator = await fixtures.actor("flags-admin", { admin: true });
     const book = await fixtures.product("Feature Flag Fixture Book");
     await fixtures.unlock(owner.id, book.id);
+    const curated = await fixtures.readerArtwork(book.id, "Curated Flag Fixture", 0, "cottage.webp");
     // Bootstrap controlled, valid private bytes through service-only reservation
     // RPCs because the HTTP upload endpoint is intentionally OFF in this server.
     const image = await sharp({ create: { width: 80, height: 60, channels: 3, background: "#8b9c87" } }).webp().toBuffer();
@@ -44,7 +45,19 @@ test("disabled switches block real public images and mutations while preserving 
     expect((await adminQueue.json()).items.map((item: { id: string }) => item.id)).toEqual([artworkId]);
     const mediaUrl = `${origin}/api/community/artworks/${artworkId}/media`;
     expect((await page.request.get(mediaUrl)).status()).toBe(404);
+    expect((await page.request.get(`${origin}/en/club`)).status()).toBe(404);
+    expect((await page.request.get(`${origin}/en/club/artworks/${artworkId}`)).status()).toBe(404);
+    expect((await page.request.get(`${origin}/api/community/artworks`)).status()).toBe(404);
     expect((await page.request.get(`${origin}/en/club/creators/cc_flags_fixture`)).status()).toBe(404);
+    const sitemap = await page.request.get(`${origin}/sitemap.xml`);
+    expect(sitemap.status()).toBe(200);
+    expect(await sitemap.text()).not.toContain("/en/club");
+    await page.goto(`${origin}/en/products/${book.slug}`);
+    await essentials(page);
+    await expect(page.getByRole("heading", { name: "Colored by Our Readers", exact: true })).toHaveCount(1);
+    await expect(page.getByTestId("reader-artwork-grid")).toContainText("Curated Flag Fixture");
+    expect((await page.request.get(`${origin}/api/reader-artworks/${curated.id}`)).status()).toBe(200);
+    await expect(page.getByRole("link", { name: "Share your art", exact: true })).toHaveCount(0);
     expect((await page.request.post(`${origin}/api/community/join`, { headers: { Origin: origin }, data: {
       username: "cc_flags_guest", adultAttested: true, rulesAccepted: true, rulesVersion: COMMUNITY_RULES_VERSION,
     } })).status()).toBe(404);

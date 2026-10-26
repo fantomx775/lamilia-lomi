@@ -53,3 +53,7 @@ Latest checkpoint supersedes older active-state notes above: source203afe5 is co
 ## CC-04 completed locally; CC-05 next
 
 Moderation source7235601 and two incremental browser test additions are verified:92 focused tests, affected lint, typecheck/build,2 genuine Supabase moderation browser tests,OFF admin approval/private deletion and local-demo approval/edit/delete. Independent review and15 images passed. See CC04.md. Next: #83 public gallery and single integrated PDP reader section. Separate High product-deletion ordering and account-cleanup gaps are mandatory #85 work, tracked in CC85-LIFECYCLE-PLAN.md. No cloud release or issue closure is claimed.
+
+## CC-05 verified locally; CC-06 next
+
+Sourceb215a3a: public gallery/detail/creator photos and single mixed PDP passed114focusedtests,lint/typecheck/build,2actualSupabasebrowsertests27.0s andflagsOFF24.1s. Independentreviewinspectedfullsource+all18images; no material galleryfindings. ActualemulatedPixel7nativegesture/tapclosepassed withtrustedevents. See CC05.md. Next#84hearts; #85mandatorylifecycleHighandlegal/OFFharness workremain. DraftPR91exists, no newcloudmigration/merge/deployment.

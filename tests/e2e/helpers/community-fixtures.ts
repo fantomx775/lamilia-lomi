@@ -1,4 +1,4 @@
-import { expect, type Browser, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
+import { expect, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type TestInfo } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -20,6 +20,7 @@ export async function communityFixtures(testInfo: TestInfo) {
   const anon = createClient(status.API_URL, status.ANON_KEY, options);
   const users: string[] = [];
   const products: string[] = [];
+  const curatedObjects = new Map<string, string>();
   const contexts: BrowserContext[] = [];
   const password = `Cc-${randomUUID()}-9!`;
   const trackedPages = new Set<Page>();
@@ -69,6 +70,19 @@ export async function communityFixtures(testInfo: TestInfo) {
     expect((await service.from("user_product_unlocks").insert({ user_id: userId, product_id: productId })).error).toBeNull();
   }
 
+  async function readerArtwork(productId: string, displayName: string, sortOrder: number, filename: string) {
+    if (!products.includes(productId) || !/^[a-z0-9-]+\.webp$/.test(filename)) throw new Error("Unsafe curated fixture.");
+    const bytes = await readFile(path.resolve("docs/design/coloring-club/assets", filename));
+    const id = randomUUID();
+    const storagePath = `reader-artworks/${productId}/image/${id}-${filename}`;
+    expect((await service.storage.from("collection-media").upload(storagePath, bytes, { contentType: "image/webp", upsert: false })).error).toBeNull();
+    curatedObjects.set(id, storagePath);
+    expect((await service.from("product_reader_artworks").insert({ id, product_id: productId, storage_path: storagePath,
+      storage_provider: "supabase", filename, content_type: "image/webp", size_bytes: bytes.length,
+      display_name: displayName, description: `Curated artwork by ${displayName}`, sort_order: sortOrder, is_visible: true })).error).toBeNull();
+    return { id, storagePath };
+  }
+
   function setEmailVerified(userId: string, verified: boolean) {
     if (!users.includes(userId) || !/^[a-f0-9-]{36}$/.test(userId)) throw new Error("Unsafe fixture identity.");
     execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
@@ -77,19 +91,19 @@ export async function communityFixtures(testInfo: TestInfo) {
     });
   }
 
-  async function newPage(browser: Browser) {
-    const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 } });
+  async function newPage(browser: Browser, contextOptions: BrowserContextOptions = {}) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, ...contextOptions, ignoreHTTPSErrors: true });
     contexts.push(context);
     return context.newPage();
   }
 
-  async function login(page: Page, account: { email: string; password: string }, returnTo = "/en/library/creations") {
+  async function login(page: Page, account: { email: string; password: string }, returnTo = "/en/library/creations", expectedDestination = returnTo) {
     observeMutations(page);
     await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/login?returnTo=${encodeURIComponent(returnTo)}`);
     await page.getByLabel("Email", { exact: true }).fill(account.email);
     await page.getByLabel("Password", { exact: true }).fill(account.password);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page).toHaveURL(`${COMMUNITY_TEST_ORIGIN}${returnTo}`);
+    await expect(page).toHaveURL(`${COMMUNITY_TEST_ORIGIN}${expectedDestination}`);
     await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
     if (!returnTo.startsWith("/admin")) await essentials(page);
   }
@@ -102,6 +116,10 @@ export async function communityFixtures(testInfo: TestInfo) {
         if (!page.isClosed()) await page.getByTestId("community-upload-submit").filter({ hasText: "Sending artwork" }).waitFor({ state: "hidden", timeout: 90_000 });
       }
       await Promise.all([...activeMutations.values()]);
+      for (const [id, storagePath] of curatedObjects) {
+        expect((await service.storage.from("collection-media").remove([storagePath])).error).toBeNull();
+        expect((await service.from("product_reader_artworks").delete().eq("id", id).in("product_id", products)).error).toBeNull();
+      }
       // Each object prefix belongs exclusively to an account created by this fixture.
       // Remove stored bytes even if an interrupted upload did not finalize an art row.
       for (const id of users) {
@@ -130,7 +148,7 @@ export async function communityFixtures(testInfo: TestInfo) {
     }
   }
 
-  return { service, anon, actor, product, unlock, setEmailVerified, newPage, login, cleanup, users, products };
+  return { service, anon, actor, product, unlock, readerArtwork, setEmailVerified, newPage, login, cleanup, users, products };
 }
 
 export async function essentials(page: Page) {
@@ -155,7 +173,16 @@ export async function communityScreenshots(page: Page, folderName: string, view:
     await page.evaluate(() => document.fonts.ready);
     await page.addStyleTag({ content: "nextjs-portal { display:none !important; }" });
     await page.evaluate(() => scrollTo(0, 0));
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    const overflow = await page.evaluate(() => ({
+      width: innerWidth, contentWidth: document.documentElement.scrollWidth,
+      elements: [...document.querySelectorAll("body *")].flatMap((element) => {
+        const box = element.getBoundingClientRect();
+        return box.width && (box.left < -1 || box.right > innerWidth + 1)
+          ? [{ tag: element.tagName, className: element.getAttribute("class"), left: box.left, right: box.right,
+            text: element.textContent?.slice(0, 90) }] : [];
+      }).slice(0, 12),
+    }));
+    expect(overflow.contentWidth, JSON.stringify(overflow)).toBeLessThanOrEqual(width + 1);
     const filename = `${view}-${width}.png`;
     await page.screenshot({ path: path.join(folder, filename), fullPage: !dialogOpen, caret: "initial" });
     screenshots.push({ path: `docs/verification/issue-77/${folderName}/${filename}`, testedSha, runId });

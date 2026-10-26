@@ -1,0 +1,11 @@
+# Public Coloring Club gallery
+
+`/en/club` lists approved, undeleted artwork from published books and active adult creators who accepted the current rules. Book and audience filters are independent of the viewer's unlocks. The API accepts only `audience=kids|adults`, a product UUID, `sort=latest`, an opaque cursor and `limit=1..48`; duplicate or unknown parameters fail validation. UI pages contain24works. Latest uses `published_at DESC,id DESC`, preserving database microseconds in cursors. Popular sorting and real hearts follow #84.
+
+`/en/club/artworks/:id` and `/en/club/creators/:username` use the same eligibility projection. Missing, private or ineligible artwork returns404 with noindex metadata. Creator pages contain up to24approved works; no email, Auth UUID, unlock history, storage path or moderation reason is serialized. Public photos use the application media route directly with no image optimization or provider URLs. That route rechecks access per request and returns private/no-store bytes.
+
+Public routes, listing, media and navigation are gated by `COLORING_CLUB_PUBLIC_ENABLED`. Sitemap community entries are dynamic and eligible-only, bounded to5pages of100works; OFF omits them. This bound avoids unbounded release queries and is not a claim to enumerate an unlimited future gallery.
+
+The existing PDP has one mixed `Colored by Our Readers` section, preserving curated ordering and keyboard/touch preview, with up to4approved community works and a link to the filtered public gallery. Community credits link to creator profiles. Curated artwork and the original uncolored `Inside the book` section remain available independently of the public flag. Public-enabled empty books have a deliberate empty state. Submission CTAs distinguish guest login with safe returnTo, email verification, locked book and an unlocked verified owner. Server upload authorization remains authoritative.
+
+Filter changes clear stale cards, abort old requests and invalidate late pagination results. Fetch failures show a distinct retry state; failed load-more keeps current cards with an alert. Tablet header navigation uses the same1024px breakpoint as the compact menu so the added Club entry fits.
