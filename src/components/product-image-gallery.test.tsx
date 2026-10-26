@@ -130,12 +130,16 @@ describe("ProductImageGallery", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     const frame = within(dialog).getByTestId("product-gallery-preview-frame");
+    const previewImage = within(dialog).getByRole("img", { name: "Stars and little houses" });
     fireEvent.pointerDown(frame, { pointerType: "touch", clientX: 280 });
     fireEvent.pointerUp(frame, { pointerType: "touch", clientX: 80 });
 
     expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBeVisible();
+    expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBe(previewImage);
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
     expect(within(dialog).getByRole("img", { name: "Stars and little houses" })).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Close image preview" }));
+    await waitFor(() => expect(dialog).not.toHaveAttribute("open"));
   });
 
   it("renders no gallery for an empty image list", () => {

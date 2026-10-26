@@ -260,7 +260,6 @@ export function ProductImageGallery({
                 className="relative col-span-2 row-start-1 mx-auto flex h-[min(76dvh,calc(100dvh-11rem))] max-h-full w-[min(90vw,calc((100dvh-11rem)*0.773))] max-w-full min-h-0 shrink touch-pan-y items-center justify-center overflow-hidden rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] md:col-span-1 md:col-start-2 md:h-[min(86dvh,calc(100dvh-8rem))] md:w-[min(75vw,calc((100dvh-8rem)*0.773))]"
               >
                 <Image
-                  key={activeImage.id}
                   src={activeImage.path}
                   alt={activeImage.alt}
                   fill
