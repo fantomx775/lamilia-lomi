@@ -3268,6 +3268,87 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   assert.equal(verifiedMerge.mergeBase.reviewedBaseSha, CURRENT_BASE_SHA);
   assert.equal(verifiedMerge.mergeBase.reviewedBaseShaVerified, true);
 
+  const mergedWithoutRestSha = { ...mergedPullRequest };
+  delete mergedWithoutRestSha.merge_commit_sha;
+  let graphMergeCalls = 0;
+  const mergedWithoutRestShaClient = {
+    ...mergedClient,
+    graphql: async (query, variables) => {
+      if (query.includes("headRefOid") && query.includes("mergeCommit")) {
+        graphMergeCalls += 1;
+        return { repository: { pullRequest: {
+          merged: true,
+          headRefOid: CURRENT_SHA,
+          mergeCommit: { oid: "d".repeat(40) },
+        } } };
+      }
+      return client.graphql(query, variables);
+    },
+    request: async (path) => {
+      if (path === "/repos/example/repo/pulls/52") return mergedWithoutRestSha;
+      if (path.endsWith("/commits/" + "d".repeat(40))) {
+        return { sha: "d".repeat(40), parents: [{ sha: CURRENT_BASE_SHA }, { sha: CURRENT_SHA }] };
+      }
+      return client.request(path);
+    },
+  };
+  const recoveredMerge = await verifyPullRequest(mergedWithoutRestShaClient, 52, { allowMerged: true });
+  assert.equal(recoveredMerge.decision, "VERIFIED_MERGE");
+  assert.equal(recoveredMerge.pullRequest.merged, true);
+  assert.equal(recoveredMerge.mergeBase.sha, CURRENT_BASE_SHA);
+  assert.equal(recoveredMerge.mergeBase.reviewedBaseShaVerified, true);
+  assert.equal(graphMergeCalls, 1);
+
+  let mixedSnapshotReads = 0;
+  const mixedMergeSnapshotsClient = {
+    ...mergedWithoutRestShaClient,
+    request: async (path) => {
+      if (path === "/repos/example/repo/pulls/52") {
+        mixedSnapshotReads += 1;
+        return mixedSnapshotReads === 1
+          ? { ...mergedPullRequest, merge_commit_sha: "e".repeat(40) }
+          : mergedWithoutRestSha;
+      }
+      if (path.endsWith("/commits/" + "d".repeat(40))) {
+        return { sha: "d".repeat(40), parents: [{ sha: CURRENT_BASE_SHA }, { sha: CURRENT_SHA }] };
+      }
+      return client.request(path);
+    },
+  };
+  const mixedMergeSnapshots = await verifyPullRequest(mixedMergeSnapshotsClient, 52, { allowMerged: true });
+  assert.equal(mixedMergeSnapshots.decision, "BLOCKED");
+  assert.equal(mixedMergeSnapshots.mergeBase.status, "BLOCKED");
+  assert.equal(mixedMergeSnapshots.mergeBase.sha, null);
+
+  const mismatchedGraphMergeClient = {
+    ...mergedWithoutRestShaClient,
+    graphql: async (query, variables) => query.includes("headRefOid") && query.includes("mergeCommit")
+      ? { repository: { pullRequest: {
+          merged: true,
+          headRefOid: "f".repeat(40),
+          mergeCommit: { oid: "d".repeat(40) },
+        } } }
+      : client.graphql(query, variables),
+  };
+  const mismatchedGraphMerge = await verifyPullRequest(mismatchedGraphMergeClient, 52, { allowMerged: true });
+  assert.equal(mismatchedGraphMerge.decision, "BLOCKED");
+  assert.equal(mismatchedGraphMerge.mergeBase.status, "BLOCKED");
+  assert.ok(mismatchedGraphMerge.reasons.some((reason) => /first parent/.test(reason)));
+
+  const unavailableGraphMergeClient = {
+    ...mergedWithoutRestShaClient,
+    graphql: async (query, variables) => {
+      if (query.includes("headRefOid") && query.includes("mergeCommit")) {
+        throw new Error("GitHub merged-PR GraphQL fields are unavailable.");
+      }
+      return client.graphql(query, variables);
+    },
+  };
+  const unavailableGraphMerge = await verifyPullRequest(unavailableGraphMergeClient, 52, { allowMerged: true });
+  assert.equal(unavailableGraphMerge.decision, "BLOCKED");
+  assert.equal(unavailableGraphMerge.mergeBase.status, "BLOCKED");
+  assert.ok(unavailableGraphMerge.reasons.some((reason) => /first parent/.test(reason)));
+
   const mergedWithWrongParentClient = {
     ...mergedClient,
     request: async (path) => {
@@ -3653,7 +3734,7 @@ test("verify-pr reads exact-SHA evidence and branch policy without write or merg
   };
   const paginatedRules = await verifyPullRequest(paginatedRulesClient, 52);
   assert.equal(paginatedRules.checks.required.status, "PASS");
-});
+}, 15_000);
 
 test("waits for a successful Production deployment of the exact merge SHA", async () => {
   const mergeSha = "c".repeat(40);
