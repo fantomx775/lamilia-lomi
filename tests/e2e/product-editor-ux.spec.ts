@@ -736,7 +736,7 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
         reason: "The browser canceled a pending optimized product-list image when the test immediately reopened the editor; both route destinations and the saved product state are asserted.",
       });
     } else if (
-      error === "Load request cancelled" && request.method() === "GET" && request.resourceType() === "fetch" &&
+      isCancelled && request.method() === "GET" && request.resourceType() === "fetch" &&
       /^\/api\/admin\/products\/([0-9a-f-]{36})\/reader-artworks$/i.test(url.pathname) &&
       requestPhase && [
         "create product and open its editor",
