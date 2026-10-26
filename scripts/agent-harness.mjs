@@ -2051,6 +2051,51 @@ function inspectExpectedLoginRedirects(items, redirects, { testedSha, runId, ori
     : { status: "PASS", details: entries.length + " asserted login redirect cancellation(s) matched current-run identity evidence." };
 }
 
+function inspectClosedPrefetches(closedPrefetches, { testedSha, runId, origin, failedRequests, expectedNext }) {
+  if (closedPrefetches === undefined) return { status: "PASS", details: "No page-close prefetch observations were recorded." };
+  if (!Array.isArray(closedPrefetches)) return { status: "FAIL", details: "Closed prefetch observations must be an array." };
+  if (closedPrefetches.length > 900) return { status: "FAIL", details: "Closed prefetch observations exceed the bounded limit." };
+  const nextOutcomes = Array.isArray(expectedNext) ? expectedNext : [];
+  const closedPlusNext = closedPrefetches.length + nextOutcomes.length;
+  const closedPlusPrefetch = closedPrefetches.length + nextOutcomes.filter((outcome) => outcome?.kind === "next-prefetch").length;
+  if (closedPlusNext > 1000 || closedPlusPrefetch > 900) return { status: "FAIL", details: "Closed and canceled prefetch observations exceed the shared Next evidence bounds." };
+  if (!safeEvidenceUrl(origin + "/", origin, { allowQuery: false })) return { status: "FAIL", details: "The browser evidence origin is missing or invalid." };
+  const problems = [];
+  const ids = new Set();
+  const requestIds = new Set(nextOutcomes.map((outcome) => outcome?.requestId).filter((id) => typeof id === "string"));
+  const failedRequestIds = new Set((failedRequests ?? []).map((entry) => entry?.requestId).filter((id) => typeof id === "string"));
+  for (const outcome of closedPrefetches) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      problems.push("malformed closed prefetch observation");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    const url = safeEvidenceUrl(outcome.requestUrl, origin);
+    const prefetchHeader = outcome.prefetchHeader;
+    const segmentPrefetch = outcome.segmentPrefetch;
+    const recognizedPrefetch = prefetchHeader === "1" ||
+      (typeof segmentPrefetch === "string" && segmentPrefetch.length > 0 && segmentPrefetch.length <= 512);
+    const requestId = typeof outcome.requestId === "string" ? outcome.requestId : "";
+    const valid = id && id.length <= 128 && !ids.has(id) && requestId && requestId.length <= 128 && !requestIds.has(requestId) &&
+      !failedRequestIds.has(requestId) && outcome.testedSha === testedSha && outcome.runId === runId && outcome.origin === origin &&
+      typeof outcome.pageId === "string" && outcome.pageId.length > 0 && outcome.pageId.length <= 128 &&
+      typeof outcome.requestUrl === "string" && outcome.requestUrl.length <= 2048 && url &&
+      outcome.requestPath === url.pathname && typeof outcome.requestPath === "string" && outcome.requestPath.length <= 512 &&
+      outcome.requestMethod === "GET" && outcome.resource === "fetch" && outcome.rsc === "1" && recognizedPrefetch &&
+      (outcome.responseStatus === null || (Number.isInteger(outcome.responseStatus) && outcome.responseStatus >= 200 && outcome.responseStatus < 300)) &&
+      outcome.phase === "teardown" && outcome.pageClosed === true && outcome.closedByObserver === true &&
+      outcome.completionObserved === false && outcome.terminalObservation === "page-closed-without-request-terminal-event" &&
+      !("error" in outcome) && !("observedFailure" in outcome) &&
+      !outcome.requestPath.startsWith("/api/") && outcome.requestPath !== "/api" && !outcome.requestPath.startsWith("/_next/image") &&
+      !/\.(?:png|jpe?g|webp|gif|svg|woff2?|css|js|mp4|webm)$/i.test(outcome.requestPath);
+    if (!valid) problems.push(id && ids.has(id) ? "duplicate closed prefetch outcome id" : "invalid or colliding closed prefetch observation");
+    if (id) ids.add(id);
+    if (requestId) requestIds.add(requestId);
+  }
+  if (problems.length) return { status: "FAIL", details: problems.length + " invalid closed prefetch observation(s)." };
+  return { status: "PASS", details: closedPrefetches.length + " prefetch request(s) were still open only after an observer-owned page close." };
+}
+
 function hasAbortedNetworkRequest(item) {
   return item && ["error", "errorText", "message"].some((key) =>
     typeof item[key] === "string" && item[key].toUpperCase().includes("NET::ERR_ABORTED"),
@@ -2115,6 +2160,11 @@ export function validateBrowserVerification({
     record.expectedLoginRedirects,
     { testedSha, runId, origin: record.origin },
   );
+  const closedPrefetches = inspectClosedPrefetches(record.closedPrefetches, {
+    testedSha, runId, origin: record.origin,
+    failedRequests: failedNetworkRequests ?? [],
+    expectedNext: record.expectedNextCancellations,
+  });
   const ordinaryNetwork = failedNetworkRequests?.filter((item) => ![
     "navigation-canceled", "next-canceled", "login-redirect-canceled",
   ].includes(item?.disposition)) ?? failedNetworkRequests;
@@ -2143,6 +2193,7 @@ export function validateBrowserVerification({
     console.status === "PASS" &&
     network.status === "PASS" && expectedNavigationCancellations.status === "PASS" &&
     expectedNextCancellations.status === "PASS" && expectedLoginRedirects.status === "PASS" &&
+    closedPrefetches.status === "PASS" &&
     pageErrorsValid;
   const failures = [];
   if (!screenshotsValid) failures.push("screenshots must be listed in the PR files and bound to the current-SHA browser run ID");
@@ -2155,6 +2206,7 @@ export function validateBrowserVerification({
   if (expectedNavigationCancellations.status !== "PASS") failures.push(expectedNavigationCancellations.details);
   if (expectedNextCancellations.status !== "PASS") failures.push(expectedNextCancellations.details);
   if (expectedLoginRedirects.status !== "PASS") failures.push(expectedLoginRedirects.details);
+  if (closedPrefetches.status !== "PASS") failures.push(closedPrefetches.details);
   if (!pageErrorsValid) failures.push("browser page errors are present or malformed");
   if (record.status !== "PASS" || !record.tool || !record.flows?.length) {
     failures.push("browser tool, affected flow, or PASS result is missing");
@@ -2164,7 +2216,7 @@ export function validateBrowserVerification({
       ? "PASS"
       : record.status === "FAIL" || console.status === "FAIL" || network.status === "FAIL" ||
         expectedNavigationCancellations.status === "FAIL" || expectedNextCancellations.status === "FAIL" ||
-        expectedLoginRedirects.status === "FAIL"
+        expectedLoginRedirects.status === "FAIL" || closedPrefetches.status === "FAIL"
         ? "FAIL"
         : record.status === "NOT RUN"
           ? "NOT RUN"

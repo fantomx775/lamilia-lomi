@@ -1965,6 +1965,14 @@ test("validates bounded Next RSC prefetch/link and identity-verified login cance
     assertions: [{ name: "fixture account identity", status: "PASS", details: "The current cookie-bound account response contains the new fixture identity." }],
     assertionStatus: "PASS", details: "The real login action reached the intended destination and authenticated the fixture account.",
   };
+  const closedPrefetch = {
+    id: "closed-prefetch-1", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "page-3", requestId: "request-4", requestUrl: `${origin}/en/club?audience=adults&_rsc=ghi`,
+    requestPath: "/en/club", requestMethod: "GET", resource: "fetch", rsc: "1",
+    prefetchHeader: "1", segmentPrefetch: undefined, responseStatus: null,
+    phase: "teardown", pageClosed: true, closedByObserver: true, completionObserved: false,
+    terminalObservation: "page-closed-without-request-terminal-event",
+  };
   const browser = {
     status: "PASS", tool: "Playwright", testedSha: CURRENT_SHA, runId, origin,
     flows: ["Next navigation and verified fixture login"],
@@ -1979,6 +1987,7 @@ test("validates bounded Next RSC prefetch/link and identity-verified login cance
       { url: loginUrl, path: "/en/login", method: "POST", resource: "fetch", error: "net::ERR_ABORTED", pageId: "page-2", requestId: "request-3", disposition: "login-redirect-canceled", nextServerAction: true, phase: "navigation", outcomeId: login.id, reason: login.details },
     ],
     expectedNextCancellations: [prefetch, link],
+    closedPrefetches: [closedPrefetch],
     expectedLoginRedirects: [login],
   };
   const validate = (candidate) => validateBrowserVerification({
@@ -2042,6 +2051,23 @@ test("validates bounded Next RSC prefetch/link and identity-verified login cance
     (candidate) => { candidate.expectedLoginRedirects[0].assertions[0].status = "FAIL"; },
     (candidate) => { candidate.expectedLoginRedirects.push(structuredClone(candidate.expectedLoginRedirects[0])); },
     (candidate) => { candidate.failedNetworkRequests.push({ ...structuredClone(candidate.failedNetworkRequests[0]), requestId: "different-request", url: `${origin}/_next/static/chunk.js` }); },
+    (candidate) => { candidate.closedPrefetches[0].requestMethod = "POST"; },
+    (candidate) => { candidate.closedPrefetches[0].resource = "image"; },
+    (candidate) => { candidate.closedPrefetches[0].requestUrl = `${origin}/api/community/artworks?_rsc=ghi`; candidate.closedPrefetches[0].requestPath = "/api/community/artworks"; },
+    (candidate) => { candidate.closedPrefetches[0].requestUrl = "https://attacker.example/en/club?_rsc=ghi"; },
+    (candidate) => { candidate.closedPrefetches[0].responseStatus = 404; },
+    (candidate) => { candidate.closedPrefetches[0].responseStatus = 500; },
+    (candidate) => { candidate.closedPrefetches[0].prefetchHeader = undefined; candidate.closedPrefetches[0].segmentPrefetch = undefined; },
+    (candidate) => { candidate.closedPrefetches[0].pageClosed = false; },
+    (candidate) => { candidate.closedPrefetches[0].closedByObserver = false; },
+    (candidate) => { candidate.closedPrefetches[0].completionObserved = true; },
+    (candidate) => { candidate.closedPrefetches[0].terminalObservation = "requestfinished"; },
+    (candidate) => { candidate.closedPrefetches[0].error = "net::ERR_ABORTED"; },
+    (candidate) => { candidate.closedPrefetches[0].requestId = "request-1"; },
+    (candidate) => { candidate.closedPrefetches[0].requestId = "x".repeat(129); },
+    (candidate) => { candidate.expectedNextCancellations = { unexpected: "shape" }; },
+    (candidate) => { candidate.failedNetworkRequests.push({ url: `${origin}/cdn/widget.js`, path: "/cdn/widget.js", method: "GET", resource: "script", error: "net::ERR_FAILED", requestId: "request-4", disposition: "unrelated", reason: "A previously documented optional third-party script failure." }); },
+    (candidate) => { candidate.closedPrefetches.push(structuredClone(candidate.closedPrefetches[0])); },
   ];
   for (const [index, mutate] of invalidCases.entries()) {
     const invalid = structuredClone(browser);

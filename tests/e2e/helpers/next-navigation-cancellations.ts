@@ -42,6 +42,7 @@ type ObserverSnapshot = {
   origin: string;
   failedNetworkRequests: Array<Record<string, unknown>>;
   expectedNextCancellations: Array<Record<string, unknown>>;
+  closedPrefetches: Array<Record<string, unknown>>;
   expectedNavigationCancellations: Array<Record<string, unknown>>;
   expectedLoginRedirects: Array<Record<string, unknown>>;
   unresolved: Array<Record<string, unknown>>;
@@ -78,6 +79,7 @@ export class NextCancellationObserver {
   private readonly requestIds = new WeakMap<Request, TrackedRequest>();
   private readonly tracked: TrackedRequest[] = [];
   private readonly pageIds = new WeakMap<Page, string>();
+  private readonly pagesById = new Map<string, Page>();
   private readonly pages = new Set<Page>();
   private readonly observedPages = new WeakSet<Page>();
   private readonly intents: ClickIntent[] = [];
@@ -85,9 +87,11 @@ export class NextCancellationObserver {
   private readonly loginProofs: LoginProof[] = [];
   private readonly usedIntentIds = new Set<string>();
   private readonly usedRequestIds = new Set<string>();
+  private readonly closedByObserver = new Set<string>();
   private readonly outcomes: Record<string, unknown>[] = [];
   private readonly loginRedirects: Record<string, unknown>[] = [];
   private readonly productRedirects: Record<string, unknown>[] = [];
+  private finalClosedPrefetches: Array<Record<string, unknown>> = [];
   private readonly intentional = new Set<TrackedRequest>();
   private readonly detachHandlers: Array<() => void> = [];
   private readonly stopRequestHandlers: Array<() => void> = [];
@@ -117,6 +121,7 @@ export class NextCancellationObserver {
     this.pages.add(page);
     const pageId = `page-${randomUUID()}`;
     this.pageIds.set(page, pageId);
+    this.pagesById.set(pageId, page);
     await page.exposeBinding(this.bindingName, (source, raw: unknown) => {
       if (!raw || typeof raw !== "object") return;
       const intent = raw as { href?: unknown; sourceUrl?: unknown; trusted?: unknown; at?: unknown };
@@ -267,6 +272,53 @@ export class NextCancellationObserver {
       tracked.path !== "/api" && !tracked.path.startsWith("/api/") && !tracked.path.startsWith("/_next/image") &&
       !/\.(?:png|jpe?g|webp|gif|svg|woff2?|css|js|mp4|webm)$/i.test(tracked.path) &&
       withoutNextRsc(new URL(tracked.url)) === proof.target);
+  }
+
+  private pendingDiagnostics(requests: TrackedRequest[]) {
+    return requests.slice(0, 8).map((tracked) => {
+      const page = this.pagesById.get(tracked.pageId);
+      const safeRsc = tracked.rsc === "1" ? "1" : tracked.rsc ? "present-other" : "absent";
+      const safePrefetch = tracked.prefetchHeader === "1" ? "1" : tracked.prefetchHeader ? "present-other" : "absent";
+      const segmentPrefetch = tracked.segmentPrefetch ? "present" : "absent";
+      const status = tracked.responseStatus === null ? "none" : String(tracked.responseStatus);
+      return `${tracked.method} ${tracked.path} resource=${tracked.resource} sameOrigin=${tracked.sameOrigin} rsc=${safeRsc} nextRouterPrefetch=${safePrefetch} segmentPrefetch=${segmentPrefetch} responseStatus=${status} pageClosed=${page?.isClosed() ?? true}`;
+    }).join(", ");
+  }
+
+  private isClosedPrefetch(tracked: TrackedRequest) {
+    const recognizedPrefetch = tracked.prefetchHeader === "1" ||
+      (typeof tracked.segmentPrefetch === "string" && tracked.segmentPrefetch.length > 0 && tracked.segmentPrefetch.length <= 512);
+    return this.closedByObserver.has(tracked.pageId) && tracked.sameOrigin && !tracked.error && !tracked.isTerminal &&
+      tracked.method === "GET" && tracked.resource === "fetch" && tracked.rsc === "1" && recognizedPrefetch &&
+      !tracked.path.startsWith("/api/") && tracked.path !== "/api" && !tracked.path.startsWith("/_next/image") &&
+      !/\.(?:png|jpe?g|webp|gif|svg|woff2?|css|js|mp4|webm)$/i.test(tracked.path) &&
+      (tracked.responseStatus === null || (tracked.responseStatus >= 200 && tracked.responseStatus < 300));
+  }
+
+  private recordClosedPrefetch(tracked: TrackedRequest) {
+    if (this.usedRequestIds.has(tracked.id)) throw new Error("A request cannot be recorded more than once in Next evidence.");
+    this.usedRequestIds.add(tracked.id);
+    return {
+      id: `closed-prefetch-${randomUUID()}`,
+      testedSha: this.testedSha,
+      runId: this.runId,
+      origin: this.origin,
+      pageId: tracked.pageId,
+      requestId: tracked.id,
+      requestUrl: tracked.url,
+      requestPath: tracked.path,
+      requestMethod: tracked.method,
+      resource: tracked.resource,
+      rsc: tracked.rsc,
+      prefetchHeader: tracked.prefetchHeader,
+      segmentPrefetch: tracked.segmentPrefetch,
+      responseStatus: tracked.responseStatus,
+      phase: "teardown",
+      pageClosed: true,
+      closedByObserver: true,
+      completionObserved: false,
+      terminalObservation: "page-closed-without-request-terminal-event",
+    };
   }
 
   private recordLinkCancellation(proof: DestinationProof, tracked: TrackedRequest) {
@@ -445,7 +497,10 @@ export class NextCancellationObserver {
       if (!drain.drained) {
         this.teardownStartedAt = Date.now();
         const closePages = Promise.all([...this.pages].map(async (page) => {
-          if (!page.isClosed()) await page.close({ runBeforeUnload: false });
+          if (page.isClosed()) return;
+          await page.close({ runBeforeUnload: false });
+          const pageId = [...this.pagesById].find(([, observedPage]) => observedPage === page)?.[0];
+          if (pageId) this.closedByObserver.add(pageId);
         })).then(() => ({ status: "closed" as const }), () => ({ status: "failed" as const }));
         let closeTimer: ReturnType<typeof setTimeout> | undefined;
         const pagesClosed = await Promise.race([
@@ -455,16 +510,23 @@ export class NextCancellationObserver {
         if (closeTimer) clearTimeout(closeTimer);
         if (pagesClosed.status !== "closed") {
           const stillPending = this.tracked.filter((tracked) => !tracked.isTerminal);
-          const pendingSummary = stillPending.slice(0, 8).map((tracked) => `${tracked.method} ${tracked.path}`).join(", ");
+          const pendingSummary = this.pendingDiagnostics(stillPending);
           const stageFailure = pagesClosed.status === "timeout" ? "timed out" : "failed";
           throw new Error(`Browser observer page-close stage ${stageFailure} with ${stillPending.length} request(s) unsettled${pendingSummary ? `: ${pendingSummary}` : ""}.`);
         }
         drain = await waitForPending(10_000);
       }
-      if (!drain.drained) {
-        const pendingSummary = drain.pending.slice(0, 8).map((tracked) => `${tracked.method} ${tracked.path}`).join(", ");
-        throw new Error(`Browser request observer timed out waiting for ${drain.pending.length} request(s) to settle${pendingSummary ? `: ${pendingSummary}` : ""}.`);
+      const pendingAfterDrain = this.tracked.filter((tracked) => !tracked.isTerminal);
+      const closedPrefetches = pendingAfterDrain.filter((tracked) => this.isClosedPrefetch(tracked)).map((tracked) => {
+        if (this.usedRequestIds.has(tracked.id)) throw new Error("A request cannot be both a Next cancellation and a closed prefetch.");
+        return this.recordClosedPrefetch(tracked);
+      });
+      const remainingPending = pendingAfterDrain.filter((tracked) => !this.isClosedPrefetch(tracked));
+      if (remainingPending.length) {
+        const pendingSummary = this.pendingDiagnostics(remainingPending);
+        throw new Error(`Browser request observer timed out waiting for ${remainingPending.length} non-prefetch request(s) to settle${pendingSummary ? `: ${pendingSummary}` : ""}.`);
       }
+      this.finalClosedPrefetches = closedPrefetches;
     } finally {
       for (const detach of this.detachHandlers.splice(0)) detach();
     }
@@ -483,6 +545,7 @@ export class NextCancellationObserver {
         !(tracked.prefetchHeader === "1" || (tracked.segmentPrefetch && tracked.segmentPrefetch.length <= 512)) ||
         (tracked.responseStatus !== null && (tracked.responseStatus < 200 || tracked.responseStatus >= 300))) continue;
       if (this.prefetchCount >= 900 || this.outcomes.length >= 1000) throw new Error("Next cancellation evidence exceeded its per-run bound.");
+      if (this.usedRequestIds.has(tracked.id)) throw new Error("A Next request cannot be recorded more than once.");
       const id = `next-prefetch-${randomUUID()}`;
       const details = "A same-origin Next RSC prefetch request with an explicit router prefetch header was canceled; the observed response was absent or successful.";
       const outcome = {
@@ -500,6 +563,10 @@ export class NextCancellationObserver {
       tracked.outcome = outcome;
       this.outcomes.push(outcome);
       this.prefetchCount += 1;
+      this.usedRequestIds.add(tracked.id);
+    }
+    if (this.prefetchCount + this.finalClosedPrefetches.length > 900 || this.outcomes.length + this.finalClosedPrefetches.length > 1000) {
+      throw new Error("Next request cancellation and closed-prefetch evidence exceeded its per-run bound.");
     }
     const failedNetworkRequests = this.tracked.filter((tracked) => tracked.error).map((tracked) => {
       if (tracked.disposition && tracked.outcome) return {
@@ -533,6 +600,7 @@ export class NextCancellationObserver {
       origin: this.origin,
       failedNetworkRequests: freezeRecords(failedNetworkRequests),
       expectedNextCancellations: freezeRecords(this.outcomes),
+      closedPrefetches: freezeRecords(this.finalClosedPrefetches),
       expectedNavigationCancellations: freezeRecords(this.productRedirects),
       expectedLoginRedirects: freezeRecords(this.loginRedirects),
       unresolved: freezeRecords(unresolved),

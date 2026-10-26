@@ -419,6 +419,18 @@ The bound is 1,000 outcomes total (maximum 900 prefetches and 100 link
 navigations). Invalid, stale, duplicate, unmatched, external, API, asset,
 image, non-GET, and HTTP error outcomes fail.
 
+At browser evidence finalization, an RSC prefetch can remain open even after
+the observer closes its own page and the browser emits no terminal network
+event. Such a request is recorded separately in `closedPrefetches`; it is not
+invented as a failed request or an `ERR_ABORTED`. The record is accepted only
+for the exact same-origin HTTPS `GET`/`fetch`, `rsc: "1"` request with an
+observed router-prefetch header, no observed error, no response or a 2xx
+response, and proof that the observer closed the page and no completion event
+was observed. Closed-prefetch request IDs cannot collide with failed network
+requests or typed Next cancellation outcomes. API, media, asset, external,
+non-prefetch, and HTTP error requests remain fatal. This optional array keeps
+older browser records valid when no page-close prefetches were observed.
+
 A canceled login Server Action is a separate case recorded as
 `login-redirect-canceled` with one matching `expectedLoginRedirects` outcome.
 It requires the exact same-origin `POST /en/login` request with one safe
