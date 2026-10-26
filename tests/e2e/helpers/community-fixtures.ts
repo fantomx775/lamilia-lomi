@@ -4,9 +4,53 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { NextCancellationObserver } from "./next-navigation-cancellations";
 import { COMMUNITY_RULES_VERSION } from "../../../src/lib/community/rules";
 
 export const COMMUNITY_TEST_ORIGIN = "https://127.0.0.1:3443";
+
+export function createCommunityNavigationObserver(runId: string) {
+  return new NextCancellationObserver({
+    testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    runId, origin: COMMUNITY_TEST_ORIGIN,
+  });
+}
+
+/** Real form login; identity checks never serialize fixture credentials or HTML. */
+export async function loginCommunityFixture(page: Page, account: { email: string; password: string },
+  returnTo = "/en/library/creations", expectedDestination = returnTo, observer?: NextCancellationObserver, requireEmptyEmail = false) {
+  if (observer) await observer.observe(page);
+  const before = observer ? await page.request.get(`${COMMUNITY_TEST_ORIGIN}/en/account`) : null;
+  if (before) {
+    expect(before.status()).toBe(200);
+    expect(await before.text()).not.toContain(account.email);
+  }
+  await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/login?returnTo=${encodeURIComponent(returnTo)}`);
+  if (requireEmptyEmail) await expect(page.getByLabel("Email", { exact: true })).toHaveValue("");
+  await page.getByLabel("Email", { exact: true }).fill(account.email);
+  await page.getByLabel("Password", { exact: true }).fill(account.password);
+  const submitted = observer ? page.waitForRequest((request) => request.method() === "POST"
+    && new URL(request.url()).origin === COMMUNITY_TEST_ORIGIN && new URL(request.url()).pathname === "/en/login") : null;
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  const expectedUrl = `${COMMUNITY_TEST_ORIGIN}${expectedDestination}`;
+  await expect(page).toHaveURL(expectedUrl);
+  await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
+  if (!returnTo.startsWith("/admin")) await essentials(page);
+  if (observer && submitted) {
+    await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+    const accountPage = await page.request.get(`${COMMUNITY_TEST_ORIGIN}/en/account`);
+    expect(accountPage.status()).toBe(200);
+    const html = await accountPage.text();
+    expect(html).toContain(account.email);
+    expect(html).toContain("Log out");
+    await observer.assertLoginRedirect(await submitted, page, { expectedUrl, freshFixtureIdentity: true,
+      authenticatedServerAccount: true, accountStatus: accountPage.status(), assertions: [
+        { name: "real UI login destination", status: "PASS", details: "The submitted form reached the exact expected destination and rendered its heading." },
+        { name: "authenticated server account identity", status: "PASS", details: "A real cookie-bound server-rendered account response contains this newly signed-in fixture identity and its logout control; the identity was absent before submission. Credentials and account HTML are not retained." },
+      ] });
+  }
+}
+
 
 /** Keep exact-head rerun manifests outside Git without rewriting prior checkpoints. */
 export async function communityArtifactPath(folderName: string, filename = "browser-run.json") {
@@ -19,7 +63,7 @@ export async function communityArtifactPath(folderName: string, filename = "brow
 }
 
 /** Test-only safety boundary: never run controlled destructive cases on cloud resources. */
-export async function communityFixtures(testInfo: TestInfo) {
+export async function communityFixtures(testInfo: TestInfo, observer?: NextCancellationObserver) {
   if (testInfo.project.use.baseURL !== COMMUNITY_TEST_ORIGIN || process.env.LAMILIA_BACKEND !== "supabase") {
     throw new Error("Community browser fixtures require the isolated local HTTPS application.");
   }
@@ -191,18 +235,14 @@ export async function communityFixtures(testInfo: TestInfo) {
   async function newPage(browser: Browser, contextOptions: BrowserContextOptions = {}) {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, ...contextOptions, ignoreHTTPSErrors: true });
     contexts.push(context);
-    return context.newPage();
+    const page = await context.newPage();
+    if (observer) await observer.observe(page);
+    return page;
   }
 
   async function login(page: Page, account: { email: string; password: string }, returnTo = "/en/library/creations", expectedDestination = returnTo) {
     observeMutations(page);
-    await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/login?returnTo=${encodeURIComponent(returnTo)}`);
-    await page.getByLabel("Email", { exact: true }).fill(account.email);
-    await page.getByLabel("Password", { exact: true }).fill(account.password);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page).toHaveURL(`${COMMUNITY_TEST_ORIGIN}${expectedDestination}`);
-    await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
-    if (!returnTo.startsWith("/admin")) await essentials(page);
+    await loginCommunityFixture(page, account, returnTo, expectedDestination, observer);
   }
 
   async function cleanup() {

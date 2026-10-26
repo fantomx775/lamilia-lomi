@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { createCommunityNavigationObserver, communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 const origin = COMMUNITY_TEST_ORIGIN;
@@ -122,15 +122,15 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     "Requires the isolated local Supabase moderation application.");
   test.setTimeout(240_000);
   page.setDefaultTimeout(12_000);
-  const fixtures = await communityFixtures(testInfo);
   const screenshots: Array<{ path: string; testedSha: string; runId: string }> = [];
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc04-local-supabase-1";
+  const nextEvidence = createCommunityNavigationObserver(runId);
+  const fixtures = await communityFixtures(testInfo, nextEvidence);
+  await nextEvidence.observe(page);
+  let nextDiagnostics: Awaited<ReturnType<typeof nextEvidence.finish>> | undefined;
   const runtimeErrors: string[] = [];
   const httpEvidence = communityHttpEvidence(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId);
   let httpDiagnostics: ReturnType<typeof httpEvidence.finish> | undefined;
-  const transportFailures: Array<{ path: string; error: string | undefined; phase: string }> = [];
-  let observationPhase = "fixture setup";
-  const navigationAborts: Array<{ path: string; resource: string }> = [];
   const activeQueueReads = new Set<object>();
   function observe(target: Page) {
     target.on("pageerror", (error) => runtimeErrors.push(error.message));
@@ -142,13 +142,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     const settleQueueRead = (request: object) => { activeQueueReads.delete(request); };
     target.on("requestfinished", settleQueueRead);
     target.on("requestfailed", settleQueueRead);
-    target.on("requestfailed", (request) => {
-      const pathname = new URL(request.url()).pathname;
-      if (request.failure()?.errorText === "net::ERR_ABORTED" && (pathname === "/en/login"
-        || pathname.startsWith("/__nextjs_font/") || (request.resourceType() === "image" && pathname.startsWith("/api/community/artworks/")))) {
-        navigationAborts.push({ path: pathname, resource: request.resourceType() });
-      } else transportFailures.push({ path: pathname, error: request.failure()?.errorText, phase: observationPhase });
-    });
+
   }
   observe(page);
   let cleaned = false;
@@ -177,7 +171,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await expect(adminPage.getByTestId("community-moderation-item")).toHaveCount(3);
     const detail = adminPage.getByTestId("community-moderation-detail");
     async function waitForQueueFetch(trigger: () => Promise<unknown>, label: string) {
-      observationPhase = `${label}: waiting for request`;
+
       // Register before the control action so an older in-flight filter response
       // cannot satisfy this wait. Await the body as well as the response headers.
       const requestPromise = adminPage.waitForRequest((request) => {
@@ -187,14 +181,14 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
       await trigger();
       const request = await requestPromise;
       const response = await request.response();
-      if (!response) throw new Error("The moderation queue request ended without a response.");
+      if (!response) throw new Error(`${label}: the moderation queue request ended without a response.`);
       expect(await response.finished()).toBeNull();
       expect(response.status()).toBe(200);
       const payload = await response.json();
       expect(payload).toMatchObject({ ok: true });
       expect(Array.isArray(payload.items)).toBe(true);
       await waitForQueueReadsToSettle();
-      observationPhase = `${label}: response body completed`;
+
     }
     async function waitForQueueReadsToSettle() {
       await expect.poll(() => activeQueueReads.size, { timeout: 12_000 }).toBe(0);
@@ -216,7 +210,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-pending", runId));
     await apply("approve");
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
-    observationPhase = "reload after approval";
+
     await waitForQueueFetch(() => adminPage.reload(), "queue after approval reload");
     await expect(adminPage.getByTestId("community-count-approved")).toContainText("1");
     const visitor = await fixtures.newPage(browser);
@@ -229,7 +223,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-rejection", runId));
     await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-confirm").click(), "moderate rejection after reason preview");
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
-    observationPhase = "reload after rejection";
+
     await waitForQueueFetch(() => adminPage.reload(), "queue after rejection reload");
     await expect(adminPage.getByTestId("community-count-rejected")).toContainText("1");
     expect((await visitor.request.get(`${origin}/api/community/artworks/${coast.id}/media`)).status()).toBe(404);
@@ -244,7 +238,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await select(rose.description);
     await expect(adminPage.getByTestId("community-moderation-history")).toContainText("Please remove identifying information.");
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-removal-history", runId));
-    observationPhase = "owner library navigation";
+
     await page.goto(`${origin}/en/library/creations`);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(3);
     await expect(page.getByText("Please share your own finished colouring.", { exact: true })).toBeVisible();
@@ -274,21 +268,22 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await waitForQueueFetch(() => adminPage.getByRole("button", { name: "Filtruj", exact: true }).click(), "empty author filter");
     await expect(adminPage.getByTestId("community-moderation-item")).toHaveCount(0);
     await expect(adminPage.getByText("Brak prac w tej kolejce.", { exact: false })).toBeVisible();
-    observationPhase = "final screenshot and diagnostics";
+
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-empty", runId));
     await waitForQueueReadsToSettle();
     expect(runtimeErrors).toEqual([]);
-    expect(transportFailures).toEqual([]);
+    nextDiagnostics = await nextEvidence.finish();
+    expect(nextDiagnostics.unresolved).toEqual([]);
     httpDiagnostics = httpEvidence.finish();
   } finally {
     try {
-      await fixtures.cleanup();
-      cleaned = true;
+      try { nextDiagnostics ??= await nextEvidence.finish(); }
+      finally { await fixtures.cleanup(); cleaned = true; }
     } finally {
       await mkdir("docs/verification/issue-77/cc04", { recursive: true });
       await writeFile(await communityArtifactPath("cc04"), `${JSON.stringify({ runId, screenshots,
         viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/Storage", runtimeErrors,
-        transportFailures, navigationAborts, ...httpDiagnostics, fixtureCleanup: cleaned }, null, 2)}\n`);
+        ...nextDiagnostics, ...httpDiagnostics, fixtureCleanup: cleaned }, null, 2)}\n`);
     }
   }
 });

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { communityArtifactPath } from "./helpers/community-fixtures";
+import { communityArtifactPath, createCommunityNavigationObserver, loginCommunityFixture } from "./helpers/community-fixtures";
 import { COMMUNITY_RULES_VERSION } from "../../src/lib/community/rules";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
@@ -27,6 +27,9 @@ test("real club membership, concurrency, privacy and responsive account/profile 
   const contexts: BrowserContext[] = [];
   const password = `P0-${randomUUID()}-8!`;
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc02-local-supabase-1";
+  const nextEvidence = createCommunityNavigationObserver(runId);
+  let nextDiagnostics: Awaited<ReturnType<typeof nextEvidence.finish>> | undefined;
+  await nextEvidence.observe(page);
   if (!/^[a-z0-9_-]+$/i.test(runId)) throw new Error("Unsafe browser run identifier.");
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const set = process.env.COMMUNITY_SCREENSHOT_SET;
@@ -35,21 +38,10 @@ test("real club membership, concurrency, privacy and responsive account/profile 
   const folder = path.resolve("docs/verification/issue-77", folderName);
   const screenshots: Array<{ path: string; testedSha: string; runId: string }> = [];
   const runtimeErrors: string[] = [];
-  const networkFailures: Array<{ path: string; error: string | undefined }> = [];
   const consoleDiagnostics: string[] = [];
-  const navigationAborts: Array<{ path: string; error: string }> = [];
   await mkdir(folder, { recursive: true });
   function observe(target: Page) {
     target.on("pageerror", (error) => runtimeErrors.push(error.message));
-    target.on("requestfailed", (request) => {
-      const pathname = new URL(request.url()).pathname;
-      const error = request.failure()?.errorText;
-      // Login navigation cancels Next prefetches and its in-flight font request.
-      // Retain these observed cancellations separately from transport failures.
-      if (error === "net::ERR_ABORTED" && (pathname === "/en/login" || pathname === "/__nextjs_font/geist-latin.woff2")) {
-        navigationAborts.push({ path: pathname, error });
-      } else networkFailures.push({ path: pathname, error });
-    });
     target.on("console", (message) => {
       if (message.type() === "error") consoleDiagnostics.push(message.text());
     });
@@ -74,12 +66,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     if (await button.isVisible()) await button.click();
   }
   async function login(target: Page, email: string) {
-    await target.goto(`${appOrigin}/en/login?returnTo=%2Fen%2Faccount`);
-    await expect(target.getByLabel("Email", { exact: true })).toHaveValue("");
-    await target.getByLabel("Email", { exact: true }).fill(email);
-    await target.getByLabel("Password", { exact: true }).fill(password);
-    await target.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(target).toHaveURL(`${appOrigin}/en/account`);
+    await loginCommunityFixture(target, { email, password }, "/en/account", "/en/account", nextEvidence, true);
     await expect(target.getByTestId("community-account-panel")).toBeVisible();
     await essentials(target);
   }
@@ -87,6 +74,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 } });
     contexts.push(context);
     const target = await context.newPage();
+    await nextEvidence.observe(target);
     observe(target);
     return target;
   }
@@ -277,42 +265,46 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await page.reload();
     await expect(panel.getByLabel("Public username", { exact: true })).toHaveValue(longUsername);
     expect(runtimeErrors).toEqual([]);
-    expect(networkFailures).toEqual([]);
+    nextDiagnostics = await nextEvidence.finish();
+    expect(nextDiagnostics.unresolved).toEqual([]);
     expect(consoleDiagnostics).toEqual([]);
   } finally {
     // Remove exactly these controlled local accounts/artwork audit rows; nothing
     // is deleted from a cloud project or another local project's infrastructure.
     try {
-      if (ids.length) {
-        if (ids.some((id) => !/^[0-9a-f-]{36}$/.test(id))) throw new Error("Unsafe local cleanup identity.");
-        for (const id of ids) {
-          const prefix = `community/${id}`;
-          const listed = await service.storage.from("collection-media").list(prefix);
-          if (listed.error) throw new Error("Isolated profile fixture object listing failed.");
-          const objects = (listed.data ?? []).filter((item) => item.id).map((item) => `${prefix}/${item.name}`);
-          if (objects.length && (await service.storage.from("collection-media").remove(objects)).error) throw new Error("Isolated profile fixture object cleanup failed.");
+      try { nextDiagnostics ??= await nextEvidence.finish(); }
+      finally {
+        if (ids.length) {
+          if (ids.some((id) => !/^[0-9a-f-]{36}$/.test(id))) throw new Error("Unsafe local cleanup identity.");
+          for (const id of ids) {
+            const prefix = `community/${id}`;
+            const listed = await service.storage.from("collection-media").list(prefix);
+            if (listed.error) throw new Error("Isolated profile fixture object listing failed.");
+            const objects = (listed.data ?? []).filter((item) => item.id).map((item) => `${prefix}/${item.name}`);
+            if (objects.length && (await service.storage.from("collection-media").remove(objects)).error) throw new Error("Isolated profile fixture object cleanup failed.");
+          }
+          const literals = ids.map((id) => `'${id}'::uuid`).join(",");
+          execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
+            input: `BEGIN; DELETE FROM public.community_upload_reservations WHERE author_id IN (${literals});
+              DELETE FROM public.community_moderation_email_outbox WHERE moderation_event_id IN
+                (SELECT id FROM public.community_moderation_events WHERE artwork_id IN
+                  (SELECT id FROM public.community_artworks WHERE author_id IN (${literals})));
+              DELETE FROM public.community_moderation_events WHERE artwork_id IN
+              (SELECT id FROM public.community_artworks WHERE author_id IN (${literals}));
+              DELETE FROM public.community_artworks WHERE author_id IN (${literals}); COMMIT;`, stdio: ["pipe", "pipe", "pipe"],
+          });
+          for (const id of ids) {
+            const result = await service.auth.admin.deleteUser(id);
+            if (result.error) throw new Error("Isolated community Auth fixture cleanup failed.");
+          }
         }
-        const literals = ids.map((id) => `'${id}'::uuid`).join(",");
-        execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
-          input: `BEGIN; DELETE FROM public.community_upload_reservations WHERE author_id IN (${literals});
-            DELETE FROM public.community_moderation_email_outbox WHERE moderation_event_id IN
-              (SELECT id FROM public.community_moderation_events WHERE artwork_id IN
-                (SELECT id FROM public.community_artworks WHERE author_id IN (${literals})));
-            DELETE FROM public.community_moderation_events WHERE artwork_id IN
-            (SELECT id FROM public.community_artworks WHERE author_id IN (${literals}));
-            DELETE FROM public.community_artworks WHERE author_id IN (${literals}); COMMIT;`, stdio: ["pipe", "pipe", "pipe"],
-        });
-        for (const id of ids) {
-          const result = await service.auth.admin.deleteUser(id);
-          if (result.error) throw new Error("Isolated community Auth fixture cleanup failed.");
-        }
+        fixtureCleanup = true;
       }
-      fixtureCleanup = true;
     } finally {
       for (const context of contexts) await context.close();
       await writeFile(await communityArtifactPath("cc02"), `${JSON.stringify({ testedSha, runId, screenshots,
         viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/PostgREST", runtimeErrors,
-        networkFailures, navigationAborts, consoleDiagnostics, fixtureCleanup,
+        ...nextDiagnostics, consoleErrors: consoleDiagnostics, fixtureCleanup,
         note: "Checkpoint run with real validated uploads and private image-byte fixtures. Development badge hidden for captures. Intentional HTTP denials are tested separately from JavaScript runtime errors. Visual screenshot review recorded separately by actual reviewers." }, null, 2)}\n`);
     }
   }

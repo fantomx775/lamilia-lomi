@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { createCommunityNavigationObserver, communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -225,20 +225,15 @@ test("three previews become independent private creations with persistent status
     "Requires the isolated real Supabase upload application.");
   test.setTimeout(240_000);
   page.setDefaultTimeout(12_000);
-  const fixtures = await communityFixtures(testInfo);
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc03-local-supabase-1";
+  const nextEvidence = createCommunityNavigationObserver(runId);
+  const fixtures = await communityFixtures(testInfo, nextEvidence);
+  await nextEvidence.observe(page);
+  let nextDiagnostics: Awaited<ReturnType<typeof nextEvidence.finish>> | undefined;
   const screenshots: Array<{ path: string; testedSha: string; runId: string }> = [];
   const runtimeErrors: string[] = [];
-  const failures: Array<{ path: string; error: string | undefined }> = [];
-  const navigationAborts: string[] = [];
   const consoleErrors: string[] = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
-  page.on("requestfailed", (request) => {
-    const pathname = new URL(request.url()).pathname;
-    const error = request.failure()?.errorText;
-    if (error === "net::ERR_ABORTED" && (pathname === "/en/login" || pathname.startsWith("/__nextjs_font/"))) navigationAborts.push(pathname);
-    else failures.push({ path: pathname, error });
-  });
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   let cleaned = false;
   try {
@@ -322,17 +317,18 @@ test("three previews become independent private creations with persistent status
     await expect(cards).toHaveCount(2);
     await readyArtworkPreviews(page);
     expect(runtimeErrors).toEqual([]);
-    expect(failures).toEqual([]);
+    nextDiagnostics = await nextEvidence.finish();
+    expect(nextDiagnostics.unresolved).toEqual([]);
     expect(consoleErrors).toEqual([]);
   } finally {
     try {
-      await fixtures.cleanup();
-      cleaned = true;
+      try { nextDiagnostics ??= await nextEvidence.finish(); }
+      finally { await fixtures.cleanup(); cleaned = true; }
     } finally {
       await mkdir("docs/verification/issue-77/cc03", { recursive: true });
       await writeFile(await communityArtifactPath("cc03"), `${JSON.stringify({ runId, screenshots,
         viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/Storage", runtimeErrors,
-        networkFailures: failures, navigationAborts, consoleErrors, fixtureCleanup: cleaned }, null, 2)}\n`);
+        ...nextDiagnostics, consoleErrors, fixtureCleanup: cleaned }, null, 2)}\n`);
     }
   }
 });

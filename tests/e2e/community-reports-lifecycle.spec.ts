@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN as origin } from "./helpers/community-fixtures";
+import { createCommunityNavigationObserver, communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN as origin } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -12,9 +12,12 @@ test("real private reports, admin decisions, notification intent and account med
     "Requires the isolated HTTPS Supabase app, flags ON and all P0 migrations.");
   test.setTimeout(180_000);
   page.setDefaultTimeout(12_000);
-  const fixtures = await communityFixtures(testInfo);
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc07-local-lifecycle-1";
+  const nextEvidence = createCommunityNavigationObserver(runId);
+  const fixtures = await communityFixtures(testInfo, nextEvidence);
+  await nextEvidence.observe(page);
+  let nextDiagnostics: Awaited<ReturnType<typeof nextEvidence.finish>> | undefined;
   const screenshots: { path: string; testedSha: string; runId: string }[] = [];
   const runtimeErrors: string[] = [];
   const consoleErrors: { message: string; url: string }[] = [];
@@ -24,10 +27,14 @@ test("real private reports, admin decisions, notification intent and account med
   const expectedNavigationCancellations: Record<string, unknown>[] = [];
   let observationPhase = "fixture setup";
   const terminals = new Map<object, Promise<void>>();
+  const activeReportReads = new Set<object>();
   function observe(target: typeof page) {
     const settle = new Map<object, () => void>();
-    target.on("request", (request) => terminals.set(request, new Promise<void>((resolve) => settle.set(request, resolve))));
-    const finished = (request: object) => { settle.get(request)?.(); settle.delete(request); };
+    target.on("request", (request) => {
+      terminals.set(request, new Promise<void>((resolve) => settle.set(request, resolve)));
+      if (request.method() === "GET" && new URL(request.url()).pathname === "/api/admin/community/reports") activeReportReads.add(request);
+    });
+    const finished = (request: object) => { settle.get(request)?.(); settle.delete(request); activeReportReads.delete(request); };
     target.on("requestfinished", finished);
     target.on("requestfailed", finished);
     target.on("pageerror", (error) => runtimeErrors.push(error.message));
@@ -62,6 +69,18 @@ test("real private reports, admin decisions, notification intent and account med
     expect([200, 201]).toContain(uploaded.status());
     const artwork = (await uploaded.json()).artwork as { id: string; revision: number };
     const adminPage = await fixtures.newPage(browser);
+    async function waitForReportRefresh(trigger: () => Promise<unknown>, label: string) {
+      const requested = adminPage.waitForRequest((request) => request.method() === "GET"
+        && new URL(request.url()).pathname === "/api/admin/community/reports");
+      await trigger();
+      const response = await (await requested).response();
+      if (!response) throw new Error(`${label}: report queue ended without a response.`);
+      expect(await response.finished()).toBeNull();
+      expect(response.status()).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true });
+      await expect.poll(() => activeReportReads.size).toBe(0);
+    }
+
     observe(adminPage);
     await fixtures.login(adminPage, moderator, "/admin/community");
     const approved = await adminPage.request.post(`${origin}/api/admin/community/artworks/${artwork.id}/moderation`, {
@@ -97,6 +116,7 @@ test("real private reports, admin decisions, notification intent and account med
       // one exact request to its rendered refusal and actual preservation checks.
       expect(canceledDeletion.error).toBe("net::ERR_ABORTED");
       expect(canceledDeletion.resource).toBe("fetch");
+      expect(canceledDeletion.phase).toBe("product deletion refusal");
       expect(canceledDeletion.nextServerAction).toBe(true);
       // The toast consumes error/toast parameters after rendering. Preserve
       // the actual redirect frame URL as well as the final clean address.
@@ -116,6 +136,7 @@ test("real private reports, admin decisions, notification intent and account med
         observedFailure: canceledDeletion.error, destinationUrl: destination.href, observedDestinationUrl, finalUrl: adminPage.url(),
         expectedText, observedText, assertionStatus: "PASS", productPreserved: true, curatedRowPreserved: true,
         curatedBytesPreserved: true, details });
+      nextEvidence.classifyProductRefusal(deletionRequest, expectedNavigationCancellations.at(-1)!);
       Object.assign(canceledDeletion, { disposition: "navigation-canceled", outcomeId: "product-deletion-refusal", reason: details });
     }
     observationPhase = "reports and notifications";
@@ -155,21 +176,21 @@ test("real private reports, admin decisions, notification intent and account med
     expect(adminListing.status()).toBe(200);
     const adminBody = await adminListing.text();
     for (const privateValue of [reporter.id, reporter.email, owner.email]) expect(adminBody).not.toContain(privateValue);
-    await adminPage.goto(`${origin}/admin/community/reports`);
+    await waitForReportRefresh(() => adminPage.goto(`${origin}/admin/community/reports`), "initial report queue");
     await expect(adminPage.getByTestId("community-report-item")).toHaveCount(1);
     screenshots.push(...await communityScreenshots(adminPage, "cc07", "admin-reports", runId));
-    await adminPage.getByTestId("community-report-reviewed").click();
+    await waitForReportRefresh(() => adminPage.getByTestId("community-report-reviewed").click(), "mark report reviewed");
     await expect(adminPage.getByTestId("community-report-item")).toHaveCount(0);
-    await adminPage.getByTestId("community-report-status-filter").selectOption("reviewed");
+    await waitForReportRefresh(() => adminPage.getByTestId("community-report-status-filter").selectOption("reviewed"), "reviewed report filter");
     await expect(adminPage.getByTestId("community-report-item")).toHaveCount(1);
     const stale = await adminPage.request.post(`${origin}/api/admin/community/reports/${reportId}`, {
       headers: { Origin: origin }, data: { action: "dismiss", revision: 1 },
     });
     expect(stale.status()).toBe(409);
-    await adminPage.getByTestId("community-report-resolve").click();
+    await waitForReportRefresh(() => adminPage.getByTestId("community-report-resolve").click(), "resolve report");
     await expect(adminPage.getByTestId("community-report-item")).toHaveCount(0);
-    await adminPage.reload();
-    await adminPage.getByTestId("community-report-status-filter").selectOption("resolved");
+    await waitForReportRefresh(() => adminPage.reload(), "report queue reload");
+    await waitForReportRefresh(() => adminPage.getByTestId("community-report-status-filter").selectOption("resolved"), "resolved report filter");
     await expect(adminPage.getByTestId("community-report-item")).toHaveCount(1);
 
     // Persistent account quota is tested at its actual HTTP boundary.
@@ -226,13 +247,17 @@ test("real private reports, admin decisions, notification intent and account med
     expect((await fixtures.service.storage.from("collection-media").download(objectPath)).error).not.toBeNull();
     expect(runtimeErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
-    expect(failedNetworkRequests.filter((failure) => failure.disposition !== "navigation-canceled")).toEqual([]);
+    nextDiagnostics = await nextEvidence.finish();
+    expect(nextDiagnostics.unresolved).toEqual([]);
     passed = true;
   } finally {
     try {
-      const scopes = ["artwork-report-account", "account-deletion"];
-      const keys = fixtures.users.flatMap((id) => scopes.map((scope) => createHash("sha256").update(`${scope}:${id}`).digest("hex")));
-      if (keys.length) expect((await fixtures.service.from("community_rate_limit_buckets").delete().in("bucket_key", keys)).error).toBeNull();
+      try { nextDiagnostics ??= await nextEvidence.finish(); }
+      finally {
+        const scopes = ["artwork-report-account", "account-deletion"];
+        const keys = fixtures.users.flatMap((id) => scopes.map((scope) => createHash("sha256").update(`${scope}:${id}`).digest("hex")));
+        if (keys.length) expect((await fixtures.service.from("community_rate_limit_buckets").delete().in("bucket_key", keys)).error).toBeNull();
+      }
     } finally {
       let fixtureCleanup = false;
       try { await fixtures.cleanup(); fixtureCleanup = true; }
@@ -240,7 +265,7 @@ test("real private reports, admin decisions, notification intent and account med
         await writeFile(await communityArtifactPath("cc07"), JSON.stringify({
           status: passed && fixtureCleanup ? "PASS" : "FAIL",
           testedSha,
-          runId, screenshots, runtimeErrors, consoleErrors, failedNetworkRequests, expectedNavigationCancellations, fixtureCleanup,
+          runId, screenshots, runtimeErrors, consoleErrors, rawObservedNetworkEvents: failedNetworkRequests, ...nextDiagnostics, fixtureCleanup,
           mailProvider: "NOT RUN: local launcher intentionally has no Resend key",
         }, null, 2));
       }

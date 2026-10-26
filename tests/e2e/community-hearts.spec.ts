@@ -4,7 +4,7 @@ import { devices, expect, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { communityArtifactPath, communityFixtures, communityScreenshots, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { createCommunityNavigationObserver, communityArtifactPath, communityFixtures, communityScreenshots, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 const origin = COMMUNITY_TEST_ORIGIN;
@@ -163,19 +163,19 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
   enabled(testInfo);
   test.setTimeout(180_000);
   page.setDefaultTimeout(12_000);
-  const fixtures = await communityFixtures(testInfo);
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc06-local-supabase-1";
+  const nextEvidence = createCommunityNavigationObserver(runId);
+  const fixtures = await communityFixtures(testInfo, nextEvidence);
+  await nextEvidence.observe(page);
+  let nextDiagnostics: Awaited<ReturnType<typeof nextEvidence.finish>> | undefined;
   const screenshots: { path: string; testedSha: string; runId: string }[] = [];
   const runtimeErrors: string[] = [];
-  const transportFailures: string[] = [];
   const httpEvidence = communityHttpEvidence(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId);
   let httpDiagnostics: ReturnType<typeof httpEvidence.finish> | undefined;
   function observe(target: Page) {
     target.on("pageerror", (error) => runtimeErrors.push(error.message));
     httpEvidence.observe(target);
-    target.on("requestfailed", (request) => {
-      transportFailures.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText}`);
-    });
+
   }
   observe(page);
   let release = () => {};
@@ -205,6 +205,9 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     await page.locator(selector).getByRole("link", { name: /Log in to like/ }).click();
     await expect(page).toHaveURL(/\/en\/login\?returnTo=/);
     expect(new URL(page.url()).searchParams.get("returnTo")).toBe(detailPath);
+    await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
+    await nextEvidence.assertDestination(page, { expectedUrl: `${origin}/en/login?returnTo=${encodeURIComponent(detailPath)}`,
+      assertions: [{ name: "heart login destination", status: "PASS", details: "The real anonymous heart link reached the login form with this artwork's exact returnTo; its email input is visible." }] });
     await fixtures.login(page, member, detailPath);
     const control = page.locator(selector);
     const button = control.getByTestId("community-heart-toggle");
@@ -315,20 +318,22 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     await phone.reload();
     await expect(phone.locator(selector).getByTestId("community-heart-count")).toHaveText("1");
     expect(runtimeErrors).toEqual([]);
-    expect(transportFailures).toEqual([]);
+    nextDiagnostics = await nextEvidence.finish();
+    expect(nextDiagnostics.unresolved).toEqual([]);
     httpDiagnostics = httpEvidence.finish();
   } finally {
     release();
     try {
       if (!page.isClosed()) await page.unrouteAll({ behavior: "wait" });
     } finally {
-      await fixtures.cleanup();
+      try { nextDiagnostics ??= await nextEvidence.finish(); }
+      finally { await fixtures.cleanup(); }
     }
   }
   await mkdir(path.resolve("docs/verification/issue-77/cc06"), { recursive: true });
   await writeFile(await communityArtifactPath("cc06"), JSON.stringify({
     runId, screenshots, viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/Storage",
-    runtimeErrors, transportFailures, ...httpDiagnostics,
+    runtimeErrors, ...nextDiagnostics, ...httpDiagnostics,
     fixtureCleanup: true, mobileTouch: "emulated Pixel7 real tap unlike and reload",
   }, null, 2) + "\n");
 });
