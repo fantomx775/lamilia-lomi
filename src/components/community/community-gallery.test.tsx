@@ -3,6 +3,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/image", () => ({ default: (props: { src: string; alt: string; loading?: string; className?: string }) => createElement("img", props) }));
@@ -25,6 +26,22 @@ const artwork: CommunityPublicArtwork = {
 };
 
 describe("public Coloring Club gallery", () => {
+  it("keeps SSR filters disabled until mounted, then sends the selected sort request", async () => {
+    const props = { initialPage: { items: [], nextCursor: null }, products: [product] };
+    const html = renderToString(<CommunityGallery {...props} />);
+    expect(html).toContain('data-testid="community-gallery-sort" class="');
+    expect(html).toMatch(/data-testid="community-gallery-sort"[^>]*disabled/);
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, items: [], nextCursor: null }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CommunityGallery {...props} />);
+    const sort = screen.getByTestId("community-gallery-sort");
+    await waitFor(() => expect(sort).toBeEnabled());
+    await userEvent.setup().selectOptions(sort, "popular");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(new URL(String(fetchMock.mock.calls[0][0]), "http://localhost").searchParams.get("sort")).toBe("popular");
+  });
+
   it("renders approved cards with only gated app media paths and synchronized initial filters", () => {
     render(<CommunityGallery initialPage={{ items: [artwork], nextCursor: null }} products={[product]} initialAudience="kids" initialProductId={product.id} />);
     expect(screen.getByTestId("community-gallery-audience-filter")).toHaveValue("kids");

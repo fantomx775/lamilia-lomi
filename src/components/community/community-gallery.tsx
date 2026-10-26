@@ -2,13 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { CommunityAvatar } from "@/components/community/community-avatar";
 import { CommunityHeartControl } from "@/components/community/community-heart-control";
 import type { CommunityHeartAccess, CommunityPage, CommunityPublicArtwork, CommunityPublicProductOption } from "@/lib/community/types";
 
 const PAGE_SIZE = 24;
+const subscribeToHydration = () => () => {};
 
 export function CommunityGallery({
   initialPage,
@@ -29,6 +30,9 @@ export function CommunityGallery({
   const [productId, setProductId] = useState(initialProductId);
   const [sort, setSort] = useState(initialSort);
   const [page, setPage] = useState(initialPage);
+  // Keep SSR controls inert until the client handlers have been committed.
+  // Otherwise an option can be selected before hydration and silently reset.
+  const mounted = useSyncExternalStore(subscribeToHydration, () => true, () => false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [filterKey, setFilterKey] = useState(0);
@@ -119,19 +123,19 @@ export function CommunityGallery({
     <div className="mb-7 flex flex-wrap items-end gap-3 rounded-xl border border-[var(--color-border)] bg-white/75 p-4" aria-label="Gallery filters">
       <label className="grid min-w-40 flex-1 gap-1.5 text-sm font-medium text-[var(--color-ink)]">
         Audience
-        <select data-testid="community-gallery-audience-filter" className={selectClass} value={audience} onChange={(event) => changeFilters(event.target.value, productId)}>
+        <select data-testid="community-gallery-audience-filter" className={selectClass} value={audience} disabled={!mounted} onChange={(event) => changeFilters(event.target.value, productId)}>
           <option value="">All audiences</option><option value="kids">Kids</option><option value="adults">Adults</option>
         </select>
       </label>
       <label className="grid min-w-48 flex-[2] gap-1.5 text-sm font-medium text-[var(--color-ink)]">
         Book
-        <select data-testid="community-gallery-product-filter" className={selectClass} value={productId} onChange={(event) => changeFilters(audience, event.target.value)}>
+        <select data-testid="community-gallery-product-filter" className={selectClass} value={productId} disabled={!mounted} onChange={(event) => changeFilters(audience, event.target.value)}>
           <option value="">All books</option>{products.map((product) => <option key={product.id} value={product.id}>{product.title}</option>)}
         </select>
       </label>
       <label className="grid min-w-36 flex-1 gap-1.5 text-sm font-medium text-[var(--color-ink)]">
         Sort by
-        <select data-testid="community-gallery-sort" className={selectClass} value={sort} onChange={(event) => changeSort(event.target.value as "latest" | "popular")}>
+        <select data-testid="community-gallery-sort" className={selectClass} value={sort} disabled={!mounted} onChange={(event) => changeSort(event.target.value as "latest" | "popular")}>
           <option value="latest">Newest first</option><option value="popular">Most loved</option>
         </select>
       </label>
