@@ -2,6 +2,7 @@ import { CommunityValidationError } from "@/lib/community/errors";
 import { communityErrorResponse, communityJson } from "@/lib/community/http";
 import { listCommunityModerationQueue } from "@/lib/community/repository";
 import { getCommunityAdminAccess } from "@/lib/community/admin-http";
+import { decodeCommunityTimestampCursor } from "@/lib/community/cursor";
 import type { CommunityArtworkStatus } from "@/lib/community/types";
 
 export const dynamic = "force-dynamic";
@@ -41,10 +42,5 @@ export async function GET(request: Request) {
 }
 
 function isValidCursor(cursor: string) {
-  if (!/^[A-Za-z0-9_-]{1,256}$/.test(cursor)) return false;
-  try {
-    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-    const match = decoded.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z)\|([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
-    return Boolean(match && !Number.isNaN(Date.parse(match[1])));
-  } catch { return false; }
+  return decodeCommunityTimestampCursor(cursor) !== null;
 }

@@ -64,9 +64,9 @@ test("actual admin authorization, filtered pagination, conflict fencing and priv
     let cursor: string | null = null;
     for (let index = 0; index < 3; index++) {
       const response = await adminPage.request.get(`${endpoint}?${new URLSearchParams({ status: "all", limit: "2", ...(cursor ? { cursor } : {}) })}`);
-      expect(response.status()).toBe(200);
-      expect(response.headers()["cache-control"]).toBe("private, no-store");
       const body = await response.json();
+      expect({ page: index, status: response.status(), error: body.error, message: body.message }).toMatchObject({ status: 200 });
+      expect(response.headers()["cache-control"]).toBe("private, no-store");
       expect(body.counts).toEqual({ pending: 5, approved: 0, rejected: 0, removed: 0 });
       seen.push(...body.items.map((item: { id: string }) => item.id));
       cursor = body.nextCursor;

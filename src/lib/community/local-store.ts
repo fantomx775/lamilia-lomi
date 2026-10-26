@@ -27,6 +27,7 @@ import {
   CommunityValidationError,
 } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
+import { decodeCommunityTimestampCursor, encodeCommunityTimestampCursor } from "./cursor";
 
 export {
   CommunityAuthorizationError,
@@ -1008,18 +1009,12 @@ function decodeCursor(cursor: string | null | undefined) {
 }
 
 function encodeAdminCursor(createdAt: string, id: string) {
-  return Buffer.from(`${createdAt}|${id}`).toString("base64url");
+  return encodeCommunityTimestampCursor(createdAt, id);
 }
 
 function decodeAdminCursor(cursor: string | null | undefined) {
-  if (!cursor) return null;
-  try {
-    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-    const match = decoded.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z)\|([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
-    return match ? { createdAt: match[1], id: match[2] } : null;
-  } catch {
-    return null;
-  }
+  const parsed = decodeCommunityTimestampCursor(cursor);
+  return parsed ? { createdAt: parsed.timestamp, id: parsed.id } : null;
 }
 
 function page<T>(items: T[], extra?: LocalArtwork | null): CommunityPage<T> {

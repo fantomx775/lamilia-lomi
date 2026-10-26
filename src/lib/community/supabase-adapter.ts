@@ -4,6 +4,7 @@ import { createServiceRoleClient } from "../supabase/admin";
 import { buildCommunityStoragePath, hashCommunityRateLimitKey } from "./local-store";
 import { CommunityAuthorizationError, mapCommunityDatabaseError } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
+import { decodeCommunityTimestampCursor, encodeCommunityTimestampCursor } from "./cursor";
 import type { CommunityActor } from "./session";
 import type {
   CommunityAdminArtwork,
@@ -170,7 +171,7 @@ export async function listAdminArtworks(actor: CommunityActor, input: { status?:
   if (input.status && input.status !== "all") query = query.eq("status", input.status);
   if (input.productId) query = query.eq("product_id", input.productId);
   if (input.creator) query = query.ilike("community_profiles.username", `${input.creator.replace(/[\\%_]/g, "\\$&")}%`);
-  if (cursor) query = query.or(`created_at.gt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.gt.${cursor.id})`);
+  if (cursor) query = query.or(`created_at.gt.${cursor.timestamp},and(created_at.eq.${cursor.timestamp},id.gt.${cursor.id})`);
   const { data, error } = await query.limit(input.limit + 1);
   if (error) throw new Error("Community moderation queue could not be loaded.");
   const rows = ((data ?? []) as unknown as Row[]);
@@ -524,16 +525,9 @@ function parseOffset(cursor: string | null | undefined) {
 }
 
 function encodeAdminCursor(createdAt: string, id: string) {
-  return Buffer.from(`${createdAt}|${id}`).toString("base64url");
+  return encodeCommunityTimestampCursor(createdAt, id);
 }
 
 function parseAdminCursor(cursor: string | null | undefined) {
-  if (!cursor || cursor.length > 256) return null;
-  try {
-    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
-    const match = decoded.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z)\|([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
-    return match ? { createdAt: match[1], id: match[2] } : null;
-  } catch {
-    return null;
-  }
+  return decodeCommunityTimestampCursor(cursor);
 }

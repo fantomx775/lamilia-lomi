@@ -14,7 +14,7 @@ const nav: DashboardNavItem[] = [
   { href: "/admin/categories", label: "Kategorie", icon: "categories" },
   { href: "/admin/tags", label: "Tagi", icon: "tags" },
   { href: "/admin/users", label: "Użytkownicy", icon: "users" },
-  { href: "/admin/community", label: "Moderacja społeczności", icon: "community" },
+  { href: "/admin/community", label: "Społeczność", icon: "community" },
   { href: "/admin/pages", label: "Strony", icon: "pages" },
   { href: "/admin/settings", label: "Ustawienia", icon: "settings" },
 ];
