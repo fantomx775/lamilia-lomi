@@ -3133,6 +3133,32 @@ export async function verifyPullRequest(client, pullRequestNumber, {
   const latestPullRequestResult = await result(client.request(pullRequestPath));
   const latestPullRequest = latestPullRequestResult.value;
   const isMergedRecovery = allowMerged && Boolean(pullRequest?.merged) && Boolean(latestPullRequest?.merged);
+  let assessmentPullRequest = latestPullRequest || pullRequest;
+  let mergedRecoveryStable = true;
+  if (isMergedRecovery && (!validSha(pullRequest?.merge_commit_sha) || !validSha(latestPullRequest?.merge_commit_sha))) {
+    const confirmedMerge = await resolveConfirmedMerge(client, number, headSha);
+    const confirmedPullRequest = confirmedMerge.pullRequest;
+    const observedRestMergeShas = [pullRequest?.merge_commit_sha, latestPullRequest?.merge_commit_sha]
+      .filter(validSha)
+      .map((sha) => sha.toLowerCase());
+    const recoveredSnapshotMatches = confirmedMerge.status === "PASS" &&
+      confirmedPullRequest?.merged === true &&
+      confirmedPullRequest.head?.sha?.toLowerCase() === headSha?.toLowerCase() &&
+      confirmedPullRequest.base?.ref === pullRequest?.base?.ref &&
+      confirmedPullRequest.state === pullRequest?.state &&
+      Boolean(confirmedPullRequest.draft) === Boolean(pullRequest?.draft) &&
+      validSha(confirmedMerge.mergeSha) &&
+      observedRestMergeShas.every((sha) => sha === confirmedMerge.mergeSha.toLowerCase());
+    mergedRecoveryStable = recoveredSnapshotMatches;
+    if (recoveredSnapshotMatches) {
+      assessmentPullRequest = {
+        ...assessmentPullRequest,
+        merged: true,
+        merge_commit_sha: confirmedMerge.mergeSha,
+        head: { ...assessmentPullRequest.head, sha: headSha },
+      };
+    }
+  }
   const snapshotStable = Boolean(
     latestPullRequest &&
     latestPullRequest.head?.sha === pullRequest.head?.sha &&
@@ -3141,10 +3167,12 @@ export async function verifyPullRequest(client, pullRequestNumber, {
     Boolean(latestPullRequest.draft) === Boolean(pullRequest.draft) &&
     latestPullRequest.base?.ref === pullRequest.base?.ref &&
     (isMergedRecovery
-      ? latestPullRequest.merge_commit_sha?.toLowerCase() === pullRequest.merge_commit_sha?.toLowerCase()
-      : latestPullRequest.base?.sha === pullRequest.base?.sha),
+      ? (validSha(latestPullRequest.merge_commit_sha) && validSha(pullRequest.merge_commit_sha)
+        ? latestPullRequest.merge_commit_sha.toLowerCase() === pullRequest.merge_commit_sha.toLowerCase()
+        : mergedRecoveryStable)
+      : latestPullRequest.base?.sha === pullRequest.base?.sha) &&
+    mergedRecoveryStable,
   );
-  const assessmentPullRequest = latestPullRequest || pullRequest;
   const mergePolicy = mergePolicyResult.value || {
     available: false,
     requiredChecks: null,
