@@ -1,5 +1,6 @@
 import { communityErrorResponse, communityJson, isSameOriginCommunityRequest, readBoundedJson } from "@/lib/community/http";
 import { updateCommunityReport } from "@/lib/community/repository";
+import { getCommunityAdminAccess } from "@/lib/community/admin-http";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -8,6 +9,8 @@ const ACTIONS = ["reviewed", "resolve", "dismiss"] as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+  const access = await getCommunityAdminAccess();
+  if (access.response) return access.response;
   if (!isSameOriginCommunityRequest(request)) return communityJson({ ok: false, error: "forbidden", message: "This request could not be verified." }, 403);
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return communityJson({ ok: false, error: "invalid_body", message: "Send a valid report decision." }, 400);
   const body = await readBoundedJson(request);

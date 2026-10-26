@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), update: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), update: vi.fn(), access: vi.fn() }));
 vi.mock("@/lib/community/repository", () => ({ listCommunityReports: mocks.list, updateCommunityReport: mocks.update }));
+vi.mock("@/lib/community/admin-http", () => ({ getCommunityAdminAccess: mocks.access }));
 import { GET } from "./route";
 import { POST } from "./[id]/route";
 
@@ -15,7 +16,17 @@ function post(body: unknown, origin = true) {
 }
 
 describe("admin community reports API", () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.list.mockResolvedValue({ items: [], nextCursor: null, counts: { open: 0, reviewed: 0, resolved: 0, dismissed: 0 } }); mocks.update.mockResolvedValue(2); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.access.mockResolvedValue({ actor: { userId: "admin", role: "admin", emailVerified: true } }); mocks.list.mockResolvedValue({ items: [], nextCursor: null, counts: { open: 0, reviewed: 0, resolved: 0, dismissed: 0 } }); mocks.update.mockResolvedValue(2); });
+  it("returns the explicit auth/admin gate response for both list and decision routes", async () => {
+    for (const status of [401, 403, 503]) {
+      mocks.access.mockResolvedValueOnce({ response: new Response(null, { status }) });
+      expect((await GET(new Request("https://lamilialomi.example/api/admin/community/reports"))).status).toBe(status);
+      mocks.access.mockResolvedValueOnce({ response: new Response(null, { status }) });
+      expect((await POST(post({ action: "resolve", revision: 1 }), context)).status).toBe(status);
+    }
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
   it("validates filters and delegates bounded pages to the admin repository", async () => {
     expect((await GET(new Request("https://lamilialomi.example/api/admin/community/reports?status=open&other=1"))).status).toBe(400);
     expect((await GET(new Request("https://lamilialomi.example/api/admin/community/reports?status=open&limit=30"))).status).toBe(200);

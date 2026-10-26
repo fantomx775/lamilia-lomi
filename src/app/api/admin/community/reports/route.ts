@@ -1,5 +1,6 @@
 import { communityErrorResponse, communityJson } from "@/lib/community/http";
 import { listCommunityReports } from "@/lib/community/repository";
+import { getCommunityAdminAccess } from "@/lib/community/admin-http";
 import type { CommunityReportStatus } from "@/lib/community/types";
 
 export const dynamic = "force-dynamic";
@@ -7,6 +8,8 @@ export const revalidate = 0;
 const STATUSES = ["open", "reviewed", "resolved", "dismissed", "all"] as const;
 
 export async function GET(request: Request) {
+  const access = await getCommunityAdminAccess();
+  if (access.response) return access.response;
   const url = new URL(request.url);
   const allowed = new Set(["status", "limit", "cursor"]);
   if ([...url.searchParams.keys()].some((key) => !allowed.has(key)) || [...url.searchParams.keys()].some((key) => url.searchParams.getAll(key).length !== 1)) {
