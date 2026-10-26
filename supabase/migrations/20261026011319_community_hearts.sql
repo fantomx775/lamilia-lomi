@@ -220,3 +220,145 @@ end;
 $$;
 revoke all on function public.community_set_artwork_like(uuid, uuid, boolean) from public, anon, authenticated;
 grant execute on function public.community_set_artwork_like(uuid, uuid, boolean) to service_role;
+
+-- Keep approval's eligible-author locks ahead of the artwork row. Reactions
+-- add a profile -> artwork cleanup path, so the original moderation lock order
+-- (artwork -> author profile) could deadlock with suspension/deletion.
+create or replace function public.community_moderate_artwork(
+  p_actor_user_id uuid,
+  p_artwork_id uuid,
+  p_expected_revision integer,
+  p_action text,
+  p_reason text default null
+) returns integer
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_artwork public.community_artworks%rowtype;
+  v_admin_role text;
+  v_author_profile public.community_profiles%rowtype;
+  v_author_user_id uuid;
+  v_product_id uuid;
+  v_product_status text;
+  v_next_status text;
+  v_new_revision integer;
+begin
+  if p_action not in ('approve', 'reject', 'remove', 'restore') then
+    raise exception using errcode = '22023', message = 'invalid moderation action';
+  end if;
+  if p_action in ('reject', 'remove') and char_length(btrim(coalesce(p_reason, ''))) not between 1 and 500 then
+    raise exception using errcode = '22023', message = 'moderation reason required';
+  end if;
+
+  if p_action = 'approve' then
+    select author_id, product_id into v_author_user_id, v_product_id
+    from public.community_artworks where id = p_artwork_id and deleted_at is null;
+    if not found then
+      raise exception using errcode = '40001', message = 'artwork is unavailable or revision changed';
+    end if;
+    if v_author_user_id is null then
+      raise exception using errcode = '42501', message = 'active eligible author required for approval';
+    end if;
+
+    -- Auth share locks serialize account deletion/unverification. Acquire the
+    -- moderator and author in a stable order before their profile/artwork rows.
+    if p_actor_user_id <= v_author_user_id then
+      if not private.community_actor_is_verified(p_actor_user_id) then
+        raise exception using errcode = '42501', message = 'active administrator required';
+      end if;
+      if v_author_user_id <> p_actor_user_id and not private.community_actor_is_verified(v_author_user_id) then
+        raise exception using errcode = '42501', message = 'active eligible author required for approval';
+      end if;
+    else
+      if not private.community_actor_is_verified(v_author_user_id) then
+        raise exception using errcode = '42501', message = 'active eligible author required for approval';
+      end if;
+      if not private.community_actor_is_verified(p_actor_user_id) then
+        raise exception using errcode = '42501', message = 'active administrator required';
+      end if;
+    end if;
+
+    select p.role into v_admin_role
+    from public.profiles p where p.id = p_actor_user_id for share;
+    if v_admin_role is distinct from 'admin' then
+      raise exception using errcode = '42501', message = 'active administrator required';
+    end if;
+    select * into v_author_profile
+    from public.community_profiles cp where cp.user_id = v_author_user_id for share;
+    if not found or not v_author_profile.is_adult or v_author_profile.adult_attested_at is null
+      or v_author_profile.opted_in_at is null or v_author_profile.participation_revoked_at is not null
+      or v_author_profile.suspended_at is not null or v_author_profile.rules_version <> '2026-10-25-v1' then
+      raise exception using errcode = '42501', message = 'active eligible author required for approval';
+    end if;
+  else
+    if not private.community_actor_is_verified(p_actor_user_id) then
+      raise exception using errcode = '42501', message = 'active administrator required';
+    end if;
+    select p.role into v_admin_role from public.profiles p where p.id = p_actor_user_id for share;
+    if v_admin_role is distinct from 'admin' then
+      raise exception using errcode = '42501', message = 'active administrator required';
+    end if;
+  end if;
+
+  select * into v_artwork from public.community_artworks
+  where id = p_artwork_id and deleted_at is null for update;
+  if not found or v_artwork.revision <> p_expected_revision then
+    raise exception using errcode = '40001', message = 'artwork is unavailable or revision changed';
+  end if;
+  if p_action = 'approve' and (v_artwork.author_id is distinct from v_author_user_id
+    or v_artwork.product_id is distinct from v_product_id
+    or v_author_profile.is_adult is distinct from true or v_author_profile.adult_attested_at is null
+    or v_author_profile.opted_in_at is null or v_author_profile.participation_revoked_at is not null
+    or v_author_profile.suspended_at is not null or v_author_profile.rules_version <> '2026-10-25-v1') then
+    raise exception using errcode = '40001', message = 'artwork is unavailable or revision changed';
+  end if;
+  v_next_status := case p_action
+    when 'approve' then 'approved'
+    when 'reject' then 'rejected'
+    when 'remove' then 'removed'
+    when 'restore' then 'pending'
+  end;
+  if not (
+    (p_action in ('approve', 'reject') and v_artwork.status = 'pending')
+    or (p_action = 'remove' and v_artwork.status = 'approved')
+    or (p_action = 'restore' and v_artwork.status = 'removed')
+  ) then
+    raise exception using errcode = '40001', message = 'moderation transition is not allowed';
+  end if;
+  if p_action = 'approve' then
+    -- Match the heart RPC's artwork -> product lock order. Product archival
+    -- does not lock artwork rows, and this share lock still rechecks publication
+    -- at the approval decision while avoiding an artwork/product lock cycle.
+    select p.status into v_product_status
+    from public.products p where p.id = v_product_id for share;
+    if v_product_status is distinct from 'published' then
+      raise exception using errcode = '42501', message = 'published product required for approval';
+    end if;
+    if not exists (
+      select 1 from public.user_product_unlocks u
+      where u.user_id = v_author_user_id and u.product_id = v_product_id
+    ) then
+      raise exception using errcode = '42501', message = 'unlocked product required for approval';
+    end if;
+  end if;
+  update public.community_artworks set
+    status = v_next_status,
+    moderation_reason = case when p_action in ('reject', 'remove') then btrim(p_reason) else null end,
+    published_at = case when p_action = 'approve' then now() else null end,
+    revision = revision + 1,
+    updated_at = now()
+  where id = p_artwork_id
+  returning revision into v_new_revision;
+  insert into public.community_moderation_events (
+    artwork_id, actor_user_id, revision, from_status, to_status, reason
+  ) values (
+    p_artwork_id, p_actor_user_id, v_new_revision, v_artwork.status, v_next_status,
+    case when p_action in ('reject', 'remove') then btrim(p_reason) else null end
+  );
+  return v_new_revision;
+end;
+$$;
+revoke all on function public.community_moderate_artwork(uuid, uuid, integer, text, text) from public, anon, authenticated;
+grant execute on function public.community_moderate_artwork(uuid, uuid, integer, text, text) to service_role;
