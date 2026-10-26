@@ -857,6 +857,7 @@ export class CommunityLocalStore {
       for (const report of snapshot.reports) {
         if (!report.retentionExpiresAt || new Date(report.retentionExpiresAt) > now || (!report.details && !report.reporterUserId)) continue;
         const previous = report.status;
+        for (const event of snapshot.reportEvents) if (event.reportId === report.id) event.actorUserId = null;
         report.reporterUserId = null;
         report.details = "";
         report.revision += 1;

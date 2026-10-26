@@ -54,7 +54,7 @@ declare
   v_report_id uuid;
   v_author_id uuid;
 begin
-  if p_actor_user_id is null or p_artwork_id is null
+  if p_actor_user_id is null or p_artwork_id is null or p_reason is null
     or p_reason not in ('rights', 'privacy', 'harmful', 'other')
     or char_length(coalesce(p_details, '')) > 500 then
     raise exception using errcode = '22023', message = 'invalid report';
@@ -107,7 +107,8 @@ declare
   v_next_status text;
   v_revision integer;
 begin
-  if p_action not in ('reviewed', 'resolve', 'dismiss') then
+  if p_action is null or p_report_id is null or p_expected_revision is null or p_expected_revision < 1
+    or p_action not in ('reviewed', 'resolve', 'dismiss') then
     raise exception using errcode = '22023', message = 'invalid report action';
   end if;
   if not private.community_actor_is_verified(p_actor_user_id) then
@@ -141,7 +142,7 @@ $$;
 create or replace function public.community_purge_expired_report_details(p_limit integer default 100)
 returns integer
 language plpgsql
-security invoker
+security definer
 set search_path = ''
 as $$
 declare
@@ -160,6 +161,9 @@ begin
     limit p_limit for update skip locked
   ) expired;
   if v_ids is null then return 0; end if;
+  update public.community_artwork_report_events event
+  set actor_user_id = null
+  where event.report_id = any(v_ids);
   with scrubbed as (
     update public.community_artwork_reports report
     set reporter_user_id = null, details = '', revision = revision + 1, updated_at = now()
@@ -183,6 +187,9 @@ begin
   update public.community_artwork_reports
   set reporter_user_id = null, details = '', revision = revision + 1, updated_at = now()
   where reporter_user_id = old.id;
+  update public.community_artwork_report_events
+  set actor_user_id = null
+  where actor_user_id = old.id;
   return old;
 end;
 $$;
