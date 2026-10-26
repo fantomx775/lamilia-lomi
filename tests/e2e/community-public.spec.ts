@@ -1,8 +1,9 @@
 import { devices, expect, test, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { communityFixtures, communityScreenshots, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { communityArtifactPath, communityHtmlCheck, communityFixtures, communityScreenshots, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 const origin = COMMUNITY_TEST_ORIGIN;
@@ -316,11 +317,22 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     expect(runtimeErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
     expect(transportFailures).toEqual([]);
+    const checks = [
+      await communityHtmlCheck(page.request, "/en/club", 200, "Coloring, shared with care"),
+      await communityHtmlCheck(page.request, `/en/club/artworks/${gallery[0].id}`, 200, "A rose-colored woodland friend"),
+      await communityHtmlCheck(page.request, "/en/club/creators/cc_gallery_artist", 200, "@cc_gallery_artist"),
+    ];
+    await writeFile(await communityArtifactPath("cc05", "public-on-proof.json"), JSON.stringify({
+      status: "PASS", testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+      runId, publicEnabled: true,
+      command: "LAMILIA_BACKEND=supabase PLAYWRIGHT_BASE_URL=https://127.0.0.1:3443 RUN_COMMUNITY_PUBLIC_E2E=1 npx playwright test tests/e2e/community-public.spec.ts --project=chromium --workers=1",
+      checks,
+    }, null, 2));
   } finally {
     await fixtures.cleanup();
   }
   await mkdir(path.resolve("docs/verification/issue-77/cc05"), { recursive: true });
-  await writeFile(path.resolve("docs/verification/issue-77/cc05/browser-run.json"), JSON.stringify({
+  await writeFile(await communityArtifactPath("cc05"), JSON.stringify({
     runId, screenshots, viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/Storage",
     runtimeErrors, consoleErrors, transportFailures, fixtureCleanup: true,
     mobileTouch: { device: "emulated Pixel 7", gesture: "CDP touch-source synthesizeScrollGesture with preventFling, followed by locator touchscreen tap-close", events: touchEvidence },

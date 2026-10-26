@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -330,7 +330,7 @@ test("three previews become independent private creations with persistent status
       cleaned = true;
     } finally {
       await mkdir("docs/verification/issue-77/cc03", { recursive: true });
-      await writeFile("docs/verification/issue-77/cc03/browser-run.json", `${JSON.stringify({ runId, screenshots,
+      await writeFile(await communityArtifactPath("cc03"), `${JSON.stringify({ runId, screenshots,
         viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/Storage", runtimeErrors,
         networkFailures: failures, navigationAborts, consoleErrors, fixtureCleanup: cleaned }, null, 2)}\n`);
     }

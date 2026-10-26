@@ -1,4 +1,4 @@
-import { expect, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type TestInfo } from "@playwright/test";
+import { expect, type APIRequestContext, type Browser, type BrowserContext, type BrowserContextOptions, type Page, type TestInfo } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -7,6 +7,16 @@ import path from "node:path";
 import { COMMUNITY_RULES_VERSION } from "../../../src/lib/community/rules";
 
 export const COMMUNITY_TEST_ORIGIN = "https://127.0.0.1:3443";
+
+/** Keep exact-head rerun manifests outside Git without rewriting prior checkpoints. */
+export async function communityArtifactPath(folderName: string, filename = "browser-run.json") {
+  if (!/^[a-z0-9_-]+$/i.test(folderName) || !/^[a-z0-9_.-]+$/i.test(filename)) throw new Error("Unsafe evidence path.");
+  const base = process.env.COMMUNITY_ARTIFACT_DIR;
+  if (base && !path.isAbsolute(base)) throw new Error("Evidence directory must be absolute.");
+  const folder = base ? path.join(base, folderName) : path.resolve("docs/verification/issue-77", folderName);
+  await mkdir(folder, { recursive: true });
+  return path.join(folder, filename);
+}
 
 /** Test-only safety boundary: never run controlled destructive cases on cloud resources. */
 export async function communityFixtures(testInfo: TestInfo) {
@@ -39,8 +49,8 @@ export async function communityFixtures(testInfo: TestInfo) {
   }
   const runToken = randomUUID().slice(0, 8);
 
-  async function actor(label: string, options: { admin?: boolean; username?: string; verified?: boolean } = {}) {
-    const email = `cc-browser-${label}-${runToken}@example.test`;
+  async function actor(label: string, options: { admin?: boolean; username?: string; verified?: boolean; stableEmail?: boolean } = {}) {
+    const email = `cc-browser-${label}${options.stableEmail ? "" : `-${runToken}`}@example.test`;
     const created = await service.auth.admin.createUser({ email, password, email_confirm: options.verified !== false,
       user_metadata: { role: "admin", terms_accepted: true, preferred_locale: "en" } });
     if (created.error || !created.data.user) throw new Error("Unable to create isolated community test account.");
@@ -50,6 +60,7 @@ export async function communityFixtures(testInfo: TestInfo) {
     if (options.username) {
       expect((await service.rpc("community_join", { p_actor_user_id: id, p_username: options.username,
         p_adult_attested: true, p_rules_version: COMMUNITY_RULES_VERSION })).error).toBeNull();
+      expect((await service.from("community_profiles").update({ avatar_seed: "11111111-1111-4111-8111-111111111111" }).eq("user_id", id)).error).toBeNull();
     }
     return { id, email, password };
   }
@@ -132,16 +143,29 @@ export async function communityFixtures(testInfo: TestInfo) {
       }
       if (users.length) {
         const identities = users.map((id) => `'${id}'::uuid`).join(",");
+        const productIds = products.length ? products.map((id) => `'${id}'::uuid`).join(",") : "NULL::uuid";
+        const ownedArt = `SELECT id FROM public.community_artworks WHERE author_id IN (${identities}) OR product_id IN (${productIds})`;
         execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
-          input: `BEGIN; DELETE FROM public.community_upload_reservations WHERE author_id IN (${identities});
-            DELETE FROM public.community_moderation_events WHERE artwork_id IN
-            (SELECT id FROM public.community_artworks WHERE author_id IN (${identities}));
-            DELETE FROM public.community_artworks WHERE author_id IN (${identities}); COMMIT;`,
+          input: `BEGIN;
+            DELETE FROM public.community_account_media_cleanup_jobs WHERE split_part(storage_path, '/', 2)::uuid IN (${identities});
+            DELETE FROM public.community_upload_reservations WHERE author_id IN (${identities}) OR product_id IN (${productIds});
+            DELETE FROM public.community_artwork_report_events WHERE report_id IN
+              (SELECT id FROM public.community_artwork_reports WHERE artwork_id IN (${ownedArt}));
+            DELETE FROM public.community_artwork_reports WHERE artwork_id IN (${ownedArt});
+            DELETE FROM public.community_moderation_email_outbox WHERE moderation_event_id IN
+              (SELECT id FROM public.community_moderation_events WHERE artwork_id IN (${ownedArt}));
+            DELETE FROM public.community_moderation_events WHERE artwork_id IN (${ownedArt});
+            DELETE FROM public.community_artworks WHERE id IN (${ownedArt}); COMMIT;`,
           stdio: ["pipe", "pipe", "pipe"],
         });
       }
       for (const id of products) expect((await service.from("products").delete().eq("id", id)).error).toBeNull();
-      for (const id of users) expect((await service.auth.admin.deleteUser(id)).error).toBeNull();
+      for (const id of users) {
+        const existing = await service.auth.admin.getUserById(id);
+        if (existing.error?.code === "user_not_found") continue;
+        expect(existing.error).toBeNull();
+        expect((await service.auth.admin.deleteUser(id)).error).toBeNull();
+      }
     } finally {
       for (const context of contexts) await context.close();
       await anon.auth.signOut();
@@ -159,6 +183,9 @@ export async function essentials(page: Page) {
 
 export async function communityScreenshots(page: Page, folderName: string, view: string, runId: string) {
   if (!/^[a-z0-9_-]+$/i.test(folderName) || !/^[a-z0-9_-]+$/i.test(view)) throw new Error("Unsafe screenshot path.");
+  const set = process.env.COMMUNITY_SCREENSHOT_SET;
+  if (set && !/^[a-z0-9_-]+$/i.test(set)) throw new Error("Unsafe screenshot set.");
+  if (set) folderName = `${set}-${folderName}`;
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const folder = path.resolve("docs/verification/issue-77", folderName);
   await mkdir(folder, { recursive: true });
@@ -166,9 +193,12 @@ export async function communityScreenshots(page: Page, folderName: string, view:
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
-    const dialog = page.getByRole("dialog", { name: "Share your art", exact: true });
-    const dialogOpen = await dialog.isVisible();
-    if (dialogOpen) await dialog.locator(".overflow-y-auto").evaluate((element) => { element.scrollTop = 0; });
+    const dialog = page.getByRole("dialog").filter({ visible: true });
+    const dialogOpen = await dialog.count() === 1;
+    if (dialogOpen) {
+      await dialog.evaluate((element) => { element.scrollTop = 0; });
+      for (const scroller of await dialog.locator(".overflow-y-auto").all()) await scroller.evaluate((element) => { element.scrollTop = 0; });
+    }
     else if (!new URL(page.url()).pathname.startsWith("/admin")) await essentials(page);
     const imageScope = dialogOpen ? dialog : page;
     for (const photo of await imageScope.locator('img[src*="/api/community/artworks/"],img[src*="/api/reader-artworks/"]').all()) {
@@ -190,8 +220,22 @@ export async function communityScreenshots(page: Page, folderName: string, view:
     }));
     expect(overflow.contentWidth, JSON.stringify(overflow)).toBeLessThanOrEqual(width + 1);
     const filename = `${view}-${width}.png`;
-    await page.screenshot({ path: path.join(folder, filename), fullPage: !dialogOpen, caret: "initial" });
+    await page.screenshot({ path: path.join(folder, filename), fullPage: !dialogOpen, caret: "hide", animations: "disabled" });
     screenshots.push({ path: `docs/verification/issue-77/${folderName}/${filename}`, testedSha, runId });
   }
   return screenshots;
+}
+
+/** Observe actual HTTP responses; no claim is emitted before every assertion passes. */
+export async function communityHtmlCheck(request: APIRequestContext, pathname: string, statusCode: 200 | 404, expectedText: string) {
+  const response = await request.get(`${COMMUNITY_TEST_ORIGIN}${pathname}`, { maxRedirects: 0 });
+  const final = new URL(response.url());
+  const contentType = response.headers()["content-type"]?.split(";")[0].trim();
+  expect(response.status()).toBe(statusCode);
+  expect(contentType).toBe("text/html");
+  expect(final.origin).toBe(COMMUNITY_TEST_ORIGIN);
+  expect(final.pathname + final.search + final.hash).toBe(pathname);
+  expect(await response.text()).toContain(expectedText);
+  return { path: pathname, statusCode: response.status(), contentType,
+    expectedText, expectedTextMatched: true, sameOrigin: true, finalPathUnchanged: true };
 }

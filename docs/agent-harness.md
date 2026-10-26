@@ -586,3 +586,5 @@ JSON and exits successfully only for `READY_FOR_MERGE`; both
 cannot mistake them for merge approval. A local-repository GitHub closing
 reference in the PR body or any PR commit message blocks delivery; unreadable
 commit history also blocks until it can be verified.
+
+POST denial probes require one deployment-protection cookie even when no application session is configured. Missing protection blocks before fetch, preventing an upstream Vercel denial from being mistaken for an application response.

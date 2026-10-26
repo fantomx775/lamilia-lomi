@@ -204,15 +204,7 @@ test("POST denial smoke strips application sessions and retains only deployment 
   assert.equal(result.status, "PASS");
   assert.equal(result.checks[0].method, "POST");
   assert.doesNotMatch(JSON.stringify(result), /application-session|demo-session|deployment-token/);
-  const withoutProtection = await runProductionSmoke(host, { ...options,
-    productionSmokeCookie: "sb-project-auth-token=application-session",
-    fetchImpl: async (url, init) => {
-      assert.equal(init.headers, undefined);
-      return smokeResponse(url);
-    },
-  });
-  assert.equal(withoutProtection.status, "PASS");
-  for (const cookie of ["_vercel_jwt=", "_vercel_jwt=one; _vercel_jwt=two", "_vercel_jwt=invalid value"]) {
+  for (const cookie of ["", "sb-project-auth-token=application-session", "_vercel_jwt=", "_vercel_jwt=one; _vercel_jwt=two", "_vercel_jwt=invalid value"]) {
     let fetched = false;
     const blocked = await runProductionSmoke(host, { ...options, productionSmokeCookie: cookie,
       fetchImpl: async () => { fetched = true; } });

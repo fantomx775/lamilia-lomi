@@ -3022,7 +3022,7 @@ async function runProductionSmokeInternal(environmentUrl, {
     ? productionSmokeCookie.split(";").map((pair) => pair.trim()).filter((pair) => pair.startsWith("_vercel_jwt="))
     : [];
   const hasPostProbe = expectations.some((expectation) => expectation.method === "POST");
-  if (hasPostProbe && !protectionCookie && (suppliedProtectionCookies.length > 1 ||
+  if (hasPostProbe && !protectionCookie && (suppliedProtectionCookies.length !== 1 ||
     (suppliedProtectionCookies.length === 1 && !/^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/.test(suppliedProtectionCookies[0].slice("_vercel_jwt=".length))))) {
     return { status: "BLOCKED", checks: [], details: "POST denial probes require one valid deployment-protection cookie, without application authentication." };
   }

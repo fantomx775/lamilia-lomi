@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { communityArtifactPath } from "./helpers/community-fixtures";
 import { COMMUNITY_RULES_VERSION } from "../../src/lib/community/rules";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
@@ -28,7 +29,10 @@ test("real club membership, concurrency, privacy and responsive account/profile 
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc02-local-supabase-1";
   if (!/^[a-z0-9_-]+$/i.test(runId)) throw new Error("Unsafe browser run identifier.");
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  const folder = path.resolve("docs/verification/issue-77/cc02");
+  const set = process.env.COMMUNITY_SCREENSHOT_SET;
+  if (set && !/^[a-z0-9_-]+$/i.test(set)) throw new Error("Unsafe screenshot set.");
+  const folderName = set ? `${set}-cc02` : "cc02";
+  const folder = path.resolve("docs/verification/issue-77", folderName);
   const screenshots: Array<{ path: string; testedSha: string; runId: string }> = [];
   const runtimeErrors: string[] = [];
   const networkFailures: Array<{ path: string; error: string | undefined }> = [];
@@ -100,8 +104,8 @@ test("real club membership, concurrency, privacy and responsive account/profile 
       await target.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
       expect(await target.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
       const filename = `${view}-${width}.png`;
-      await target.screenshot({ path: path.join(folder, filename), fullPage: true, caret: "initial" });
-      screenshots.push({ path: `docs/verification/issue-77/cc02/${filename}`, testedSha, runId });
+      await target.screenshot({ path: path.join(folder, filename), fullPage: true, caret: "hide", animations: "disabled" });
+      screenshots.push({ path: `docs/verification/issue-77/${folderName}/${filename}`, testedSha, runId });
     }
   }
   async function postJoin(target: Page, username: string, extra: Record<string, unknown> = {}) {
@@ -260,6 +264,9 @@ test("real club membership, concurrency, privacy and responsive account/profile 
         const literals = ids.map((id) => `'${id}'::uuid`).join(",");
         execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
           input: `BEGIN; DELETE FROM public.community_upload_reservations WHERE author_id IN (${literals});
+            DELETE FROM public.community_moderation_email_outbox WHERE moderation_event_id IN
+              (SELECT id FROM public.community_moderation_events WHERE artwork_id IN
+                (SELECT id FROM public.community_artworks WHERE author_id IN (${literals})));
             DELETE FROM public.community_moderation_events WHERE artwork_id IN
             (SELECT id FROM public.community_artworks WHERE author_id IN (${literals}));
             DELETE FROM public.community_artworks WHERE author_id IN (${literals}); COMMIT;`, stdio: ["pipe", "pipe", "pipe"],
@@ -272,7 +279,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
       fixtureCleanup = true;
     } finally {
       for (const context of contexts) await context.close();
-      await writeFile(path.join(folder, "browser-run.json"), `${JSON.stringify({ testedSha, runId, screenshots,
+      await writeFile(await communityArtifactPath("cc02"), `${JSON.stringify({ testedSha, runId, screenshots,
         viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/PostgREST", runtimeErrors,
         networkFailures, navigationAborts, consoleDiagnostics, fixtureCleanup,
         note: "Checkpoint run with real validated uploads and private image-byte fixtures. Development badge hidden for captures. Intentional HTTP denials are tested separately from JavaScript runtime errors. Visual screenshot review recorded separately by actual reviewers." }, null, 2)}\n`);

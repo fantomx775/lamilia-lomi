@@ -4,7 +4,7 @@
 -- Everything, including Auth/product fixtures, rolls back.
 BEGIN;
 SET LOCAL search_path = public, extensions;
-SELECT plan(58);
+SELECT plan(60);
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.community_profiles'::regclass), 'community profiles have RLS enabled');
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.community_artworks'::regclass), 'community artworks have RLS enabled');
@@ -154,12 +154,16 @@ SELECT public.community_create_pending_artwork(
   'community/10000000-0000-4000-8000-000000000001/dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   'supabase','image/png',12345,'Deleted author test','dddddddd-dddd-4ddd-8ddd-dddddddddddd');
 RESET ROLE;
+CREATE TEMP TABLE erased_artwork AS SELECT id FROM public.community_artworks WHERE idempotency_key='dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+GRANT SELECT ON erased_artwork TO service_role;
 DELETE FROM auth.users WHERE id='10000000-0000-4000-8000-000000000001';
 SET LOCAL ROLE service_role;
-SELECT throws_ok($$SELECT public.community_moderate_artwork('10000000-0000-4000-8000-000000000004',(SELECT id FROM public.community_artworks WHERE idempotency_key='dddddddd-dddd-4ddd-8ddd-dddddddddddd'),1,'approve',null)$$, '42501', 'active eligible author required for approval', 'admin cannot approve artwork after author deletion');
+SELECT ok((SELECT author_id IS NULL AND storage_path IS NULL AND idempotency_key IS NULL AND status='removed' AND deleted_at IS NOT NULL FROM public.community_artworks WHERE id=(SELECT id FROM erased_artwork)), 'author erasure irreversibly tombstones and redacts artwork');
+SELECT throws_ok($$SELECT public.community_moderate_artwork('10000000-0000-4000-8000-000000000004',(SELECT id FROM erased_artwork),2,'approve',null)$$, '40001', 'artwork is unavailable or revision changed', 'admin cannot approve terminal artwork after author deletion');
+SELECT ok(EXISTS(SELECT 1 FROM public.community_moderation_events WHERE artwork_id=(SELECT id FROM erased_artwork) AND actor_user_id IS NULL AND reason IS NULL AND to_status='removed'), 'account erasure appends an anonymous removal audit event');
 RESET ROLE;
 
-SELECT ok((SELECT count(*) = 3 FROM public.community_moderation_events WHERE artwork_id=(SELECT id FROM community_artwork_result)), 'admin moderation decisions are append-only audit rows');
+SELECT ok((SELECT count(*) = 4 FROM public.community_moderation_events WHERE artwork_id=(SELECT id FROM community_artwork_result)), 'moderation decisions remain with the additional anonymous erasure event');
 SELECT ok(NOT has_table_privilege('service_role', 'public.community_moderation_events', 'UPDATE') AND NOT has_table_privilege('service_role', 'public.community_moderation_events', 'DELETE'), 'service role cannot update or delete moderation audit rows');
 
 SELECT * FROM finish();

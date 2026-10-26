@@ -1,7 +1,9 @@
+import { execFileSync } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
-import { communityFixtures, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { communityArtifactPath, communityHtmlCheck, communityFixtures, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 import { COMMUNITY_RULES_VERSION } from "../../src/lib/community/rules";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
@@ -49,10 +51,16 @@ test("disabled switches block real public images and mutations while preserving 
     expect(seededHeart.error).toBeNull();
     expect(seededHeart.data).toMatchObject({ available: true, liked: true, likesCount: 1 });
     const mediaUrl = `${origin}/api/community/artworks/${artworkId}/media`;
-    expect((await page.request.get(mediaUrl)).status()).toBe(404);
+    const anonymousMediaStatus = (await page.request.get(mediaUrl)).status();
+    expect(anonymousMediaStatus).toBe(404);
+    const checks = [];
+    for (const pathname of ["/en/club", `/en/club/artworks/${artworkId}`, "/en/club/creators/cc_flags_fixture"]) {
+      checks.push(await communityHtmlCheck(page.request, pathname, 404, "This page could not be found."));
+    }
     expect((await page.request.get(`${origin}/en/club`)).status()).toBe(404);
     expect((await page.request.get(`${origin}/en/club/artworks/${artworkId}`)).status()).toBe(404);
-    expect((await page.request.get(`${origin}/api/community/artworks`)).status()).toBe(404);
+    const publicListingStatus = (await page.request.get(`${origin}/api/community/artworks`)).status();
+    expect(publicListingStatus).toBe(404);
     expect((await page.request.get(`${origin}/api/community/artworks/${artworkId}/heart`)).status()).toBe(404);
     expect((await page.request.put(`${origin}/api/community/artworks/${artworkId}/heart`, { headers: { Origin: origin } })).status()).toBe(404);
     expect((await page.request.get(`${origin}/en/club/creators/cc_flags_fixture`)).status()).toBe(404);
@@ -82,7 +90,12 @@ test("disabled switches block real public images and mutations while preserving 
     expect(settings.status()).toBe(200);
     expect(settings.headers()["cache-control"]).toBe("private, no-store");
     expect((await page.request.patch(`${origin}/api/community/profile`, { headers: { Origin: origin }, data: { username: "cc_flags_new" } })).status()).toBe(404);
-    expect((await page.request.get(mediaUrl)).status()).toBe(200);
+    const ownerMediaStatus = (await page.request.get(mediaUrl)).status();
+    expect(ownerMediaStatus).toBe(200);
+    const reportDenied = await page.request.post(`${origin}/api/community/artworks/${artworkId}/report`, {
+      headers: { Origin: origin }, data: { reason: "privacy" },
+    });
+    expect(reportDenied.status()).toBe(404);
     expect((await page.request.put(`${origin}/api/community/artworks/${artworkId}/heart`, { headers: { Origin: origin } })).status()).toBe(404);
     expect((await page.request.delete(`${origin}/api/community/artworks/${artworkId}/heart`, { headers: { Origin: origin } })).status()).toBe(404);
     expect((await page.request.patch(`${origin}/api/community/artworks/${artworkId}`, { headers: { Origin: origin }, data: { revision: 2, description: "Blocked edit" } })).status()).toBe(404);
@@ -92,6 +105,15 @@ test("disabled switches block real public images and mutations while preserving 
     await panel.getByRole("button", { name: "Leave the Coloring Club", exact: true }).click();
     await panel.getByRole("button", { name: "Confirm leave", exact: true }).click();
     await expect(panel.getByRole("status")).toContainText("You left");
+    const cronSecret = (await readFile("/tmp/lamilia-p0-preflight/community-cron-secret", "utf8")).trim();
+    expect((await page.request.get(`${origin}/api/internal/community/cleanup`, { headers: { Authorization: `Bearer ${cronSecret}` } })).status()).toBe(200);
+    await writeFile(await communityArtifactPath("cc07", "public-off-proof.json"), JSON.stringify({
+      status: "PASS", testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+      runId: process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc07-public-off-1", publicEnabled: false,
+      command: "LAMILIA_BACKEND=supabase PLAYWRIGHT_BASE_URL=https://127.0.0.1:3443 RUN_COMMUNITY_FLAGS_OFF_E2E=1 npx playwright test tests/e2e/community-flags.spec.ts --project=chromium --workers=1",
+      checks, approvedFixture: { artworkPath: `/en/club/artworks/${artworkId}`, mediaPath: `/api/community/artworks/${artworkId}/media`,
+        artworkStatus: "approved", ownerMediaStatus, anonymousMediaStatus, publicListingStatus, mutationsBlocked: true },
+    }, null, 2));
   } finally {
     await fixtures.cleanup();
   }

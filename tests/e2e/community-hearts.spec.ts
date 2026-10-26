@@ -2,7 +2,7 @@ import { devices, expect, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { communityFixtures, communityScreenshots, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { communityArtifactPath, communityFixtures, communityScreenshots, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 const origin = COMMUNITY_TEST_ORIGIN;
@@ -313,7 +313,7 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     }
   }
   await mkdir(path.resolve("docs/verification/issue-77/cc06"), { recursive: true });
-  await writeFile(path.resolve("docs/verification/issue-77/cc06/browser-run.json"), JSON.stringify({
+  await writeFile(await communityArtifactPath("cc06"), JSON.stringify({
     runId, screenshots, viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/Storage",
     runtimeErrors, transportFailures, consoleErrors, expectedHttpErrors: ["403 current Auth verification intentionally revoked during held optimistic request"],
     fixtureCleanup: true, mobileTouch: "emulated Pixel7 real tap unlike and reload",
