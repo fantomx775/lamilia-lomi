@@ -42,21 +42,12 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
   collectBrowserDiagnostics(page, browserDiagnostics);
   const readerArtworkResponses = new Map<string, Array<{ phase?: string; response: Promise<{ status: number; body: unknown }> }>>();
   const verifiedReaderArtworkReads = browserDiagnostics.verifiedReaderArtworkReads;
-  page.on("response", (response) => {
-    const request = response.request();
-    const match = new URL(response.url()).pathname.match(/^\/api\/admin\/products\/([0-9a-f-]{36})\/reader-artworks$/i);
-    if (request.method() === "GET" && match) {
-      const records = readerArtworkResponses.get(match[1]) ?? [];
-      records.push({ phase: browserDiagnostics.pendingNavigationPhases.at(-1), response: response.json().then(
-        (body: unknown) => ({ status: response.status(), body }),
-        () => ({ status: response.status(), body: null }),
-      ) });
-      readerArtworkResponses.set(match[1], records);
-    }
-  });
+  trackReaderArtworkResponses(page, browserDiagnostics, readerArtworkResponses);
   let productPath: string | undefined;
   let createdProductId: string | undefined;
   let createdProductSlug: string | undefined;
+  let verifiedProductPath = "";
+  let persistedProductId = "";
   let uploadedAsset: UploadedAssetFixture | undefined;
   let testFailed = false;
 
@@ -118,41 +109,41 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
     expect(simulatedFailures).toHaveLength(1);
     await page.unrouteAll();
 
-    await withExpectedNavigation(browserDiagnostics, "create product and open its editor", async () => {
+    await withExpectedNavigation(browserDiagnostics, "initial post-create editor hydration", async () => {
       await page.getByRole("button", { name: /Zapisz/ }).click();
       await expect(page.getByText(/^(Zapisano\. Zmiany są aktualne\.|Zapisano zmiany\.)$/)).toBeVisible();
       await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
       productPath = new URL(page.url()).pathname;
       createdProductId = productPath.split("/").at(-1)!;
       await waitForReaderArtworkList(page, createdProductId, readerArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
-    });
-    const verifiedProductPath = productPath!;
-    const persistedProductId = createdProductId!;
-    expect(persistedProductId).toMatch(/^[0-9a-f-]{36}$/i);
-    createdProductId = persistedProductId;
-    await expect(page.getByTestId("product-save-bar").getByRole("status"))
-      .toHaveText("Wszystkie zmiany są zapisane");
-    await waitForAdminTransition(page);
-    await expect(page.locator('#product-editor-form input[name="id"]')).toHaveValue(persistedProductId);
-    await expect(page.getByLabel("Status")).toHaveValue("draft");
-    await expect(page.getByLabel("Adres produktu")).toHaveValue(slug);
-    await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("37");
-    await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
+      verifiedProductPath = productPath;
+      persistedProductId = createdProductId;
+      expect(persistedProductId).toMatch(/^[0-9a-f-]{36}$/i);
+      createdProductId = persistedProductId;
+      await expect(page.getByTestId("product-save-bar").getByRole("status"))
+        .toHaveText("Wszystkie zmiany są zapisane");
+      await waitForAdminTransition(page);
+      await expect(page.locator('#product-editor-form input[name="id"]')).toHaveValue(persistedProductId);
+      await expect(page.getByLabel("Status")).toHaveValue("draft");
+      await expect(page.getByLabel("Adres produktu")).toHaveValue(slug);
+      await expect(page.getByLabel("Pozycja w katalogu")).toHaveValue("37");
+      await expect(page.getByLabel("Przypomnienie o opinii po (dniach)")).toHaveValue("9");
 
-    if (testInfo.project.use.isMobile === true) {
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    } else {
-      await page.evaluate(() => window.scrollTo(0, 0));
-    }
-    const saveBar = page.getByTestId("product-save-bar");
-    await expect(saveBar).toBeVisible();
-    await expect(saveBar.getByRole("button", { name: /Zapisz/ })).toBeVisible();
-    const saveBarBox = await saveBar.boundingBox();
-    const viewport = page.viewportSize();
-    expect(saveBarBox).not.toBeNull();
-    expect(viewport).not.toBeNull();
-    expect(saveBarBox!.y + saveBarBox!.height).toBeLessThanOrEqual(viewport!.height + 1);
-    await saveScreenshot(page, testInfo, "product-editor-" + testInfo.project.name + ".png");
+      if (testInfo.project.use.isMobile === true) {
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      } else {
+        await page.evaluate(() => window.scrollTo(0, 0));
+      }
+      const saveBar = page.getByTestId("product-save-bar");
+      await expect(saveBar).toBeVisible();
+      await expect(saveBar.getByRole("button", { name: /Zapisz/ })).toBeVisible();
+      const saveBarBox = await saveBar.boundingBox();
+      const viewport = page.viewportSize();
+      expect(saveBarBox).not.toBeNull();
+      expect(viewport).not.toBeNull();
+      expect(saveBarBox!.y + saveBarBox!.height).toBeLessThanOrEqual(viewport!.height + 1);
+      await saveScreenshot(page, testInfo, "product-editor-" + testInfo.project.name + ".png");
+    });
 
     await page.getByLabel("Pozycja w katalogu").fill("38");
     await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toHaveCount(0);
@@ -334,14 +325,20 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         const legacyPage = await legacyContext.newPage();
         await legacyPage.bringToFront();
         collectBrowserDiagnostics(legacyPage, browserDiagnostics);
-        await legacyPage.goto(verifiedProductPath);
-        await waitForProductEditorReady(legacyPage);
+        const legacyReaderArtworkResponses = new Map<string, Array<{ phase?: string; response: Promise<{ status: number; body: unknown }> }>>();
+        trackReaderArtworkResponses(legacyPage, browserDiagnostics, legacyReaderArtworkResponses);
+        await withExpectedNavigation(browserDiagnostics, "legacy initial editor hydration", async () => {
+          await legacyPage.goto(verifiedProductPath);
+          await waitForProductEditorReady(legacyPage);
+          await waitForReaderArtworkList(legacyPage, persistedProductId, legacyReaderArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
+        });
         await withExpectedNavigation(browserDiagnostics, "legacy browser Back/Forward and internal navigation", async () => {
           await legacyPage.locator('a[href="/admin/products"]').last().click();
           await expect(legacyPage).toHaveURL(/\/admin\/products$/);
           await legacyPage.goBack();
           await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await waitForProductEditorReady(legacyPage);
+          await waitForReaderArtworkList(legacyPage, persistedProductId, legacyReaderArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
           await legacyPage.getByLabel("Pozycja w katalogu").fill("41");
 
@@ -362,6 +359,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           await legacyPage.getByRole("link", { name: titleText, exact: false }).click();
           await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await waitForProductEditorReady(legacyPage);
+          await waitForReaderArtworkList(legacyPage, persistedProductId, legacyReaderArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
 
           await legacyPage.getByLabel("Pozycja w katalogu").fill("43");
@@ -374,6 +372,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
           await legacyPage.goBack();
           await expect(legacyPage).toHaveURL(editorUrlRegex(verifiedProductPath));
           await waitForProductEditorReady(legacyPage);
+          await waitForReaderArtworkList(legacyPage, persistedProductId, legacyReaderArtworkResponses, verifiedReaderArtworkReads, browserDiagnostics.pendingNavigationPhases.at(-1));
           await expect(legacyPage.getByLabel("Pozycja w katalogu")).toHaveValue("40");
           await legacyPage.getByLabel("Pozycja w katalogu").fill("44");
 
@@ -739,7 +738,9 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
       isCancelled && request.method() === "GET" && request.resourceType() === "fetch" &&
       /^\/api\/admin\/products\/([0-9a-f-]{36})\/reader-artworks$/i.test(url.pathname) &&
       requestPhase && [
-        "create product and open its editor",
+        "initial post-create editor hydration",
+        "legacy initial editor hydration",
+        "legacy browser Back/Forward and internal navigation",
         "save edited product, leave, reopen, and reload",
         "open products and go Back to editor",
         "accept Forward navigation and reopen editor",
@@ -812,6 +813,24 @@ function collectBrowserDiagnostics(page: Page, diagnostics: ReturnType<typeof cr
       status: response.status(),
       disposition: "unresolved",
     });
+  });
+}
+
+function trackReaderArtworkResponses(
+  page: Page,
+  diagnostics: ReturnType<typeof createBrowserDiagnostics>,
+  responses: Map<string, Array<{ phase?: string; response: Promise<{ status: number; body: unknown }> }>>,
+) {
+  page.on("response", (response) => {
+    const request = response.request();
+    const match = new URL(response.url()).pathname.match(/^\/api\/admin\/products\/([0-9a-f-]{36})\/reader-artworks$/i);
+    if (request.method() !== "GET" || !match) return;
+    const records = responses.get(match[1]) ?? [];
+    records.push({ phase: diagnostics.pendingNavigationPhases.at(-1), response: response.json().then(
+      (body: unknown) => ({ status: response.status(), body }),
+      () => ({ status: response.status(), body: null }),
+    ) });
+    responses.set(match[1], records);
   });
 }
 
