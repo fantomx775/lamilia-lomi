@@ -294,7 +294,7 @@ migration or dependency manifest changes.
     "flows": [{
       "name": "localized products page",
       "affectedFiles": ["src/app/[locale]/products/page.tsx"],
-      "paths": [{"path": "/pl/products", "expectedText": "Produkty"}]
+      "paths": [{"path": "/en/products", "expectedText": "Browse LamiliaLomi books"}]
     }]
   },
   "checks": [

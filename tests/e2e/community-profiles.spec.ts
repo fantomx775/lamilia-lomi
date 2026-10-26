@@ -100,6 +100,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
       }
       await target.evaluate(() => scrollTo(0, 0));
       await essentials(target);
+      await target.mouse.move(0, 0);
       await target.evaluate(() => document.fonts.ready);
       await target.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
       expect(await target.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
