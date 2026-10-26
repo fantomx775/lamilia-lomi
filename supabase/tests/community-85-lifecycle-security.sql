@@ -42,7 +42,9 @@ CREATE TEMP TABLE cc85_outbox_claim (
 CREATE TEMP TABLE cc85_cleanup_claim (
   id bigint, storage_provider text, storage_path text, lease_token uuid
 );
-CREATE TEMP TABLE cc85_expected_cleanup_lease (lease_expires_at timestamptz NOT NULL);
+CREATE TEMP TABLE cc85_expected_cleanup_lease (
+  storage_path text PRIMARY KEY, lease_expires_at timestamptz NOT NULL, captured_at timestamptz NOT NULL
+);
 GRANT ALL ON cc85_ids, cc85_event_ids, cc85_outbox_claim, cc85_cleanup_claim, cc85_expected_cleanup_lease TO service_role;
 INSERT INTO public.user_product_unlocks (user_id, product_id) VALUES
   ('85000000-0000-4000-8000-000000000001', '85111111-1111-4111-8111-111111111111'),
@@ -208,7 +210,9 @@ INSERT INTO public.community_upload_reservations (
   ('85000000-0000-4000-8000-000000000004', '85400000-0000-4000-8000-000000000002', '85222222-2222-4222-8222-222222222222',
    'community/85000000-0000-4000-8000-000000000004/85400000-0000-4000-8000-000000000002', 'supabase', 'image/webp',
    1000, 900, '', repeat('d',64), '85400000-0000-4000-8000-000000000006', now()+interval '30 minutes');
-INSERT INTO cc85_expected_cleanup_lease SELECT max(lease_expires_at) FROM public.community_upload_reservations WHERE author_id='85000000-0000-4000-8000-000000000004';
+INSERT INTO cc85_expected_cleanup_lease (storage_path, lease_expires_at, captured_at)
+SELECT storage_path, lease_expires_at, now() FROM public.community_upload_reservations
+WHERE author_id='85000000-0000-4000-8000-000000000004';
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.community_account_media_cleanup_jobs WHERE storage_path like 'community/85000000-0000-4000-8000-000000000004/%'), 'account media ledger is empty before Auth deletion');
 
 RESET ROLE;
@@ -216,8 +220,11 @@ DELETE FROM auth.users WHERE id='85000000-0000-4000-8000-000000000004';
 SET LOCAL ROLE service_role;
 SELECT is((SELECT count(*) FROM public.community_account_media_cleanup_jobs WHERE storage_path like 'community/85000000-0000-4000-8000-000000000004/%'), 2::bigint, 'Auth deletion queues artwork and in-flight reservation paths');
 SELECT is((SELECT count(*) FROM public.community_account_media_cleanup_jobs WHERE storage_path='community/85000000-0000-4000-8000-000000000004/85400000-0000-4000-8000-000000000001'), 1::bigint, 'duplicate artwork and reservation path is deduplicated');
-SELECT ok((SELECT min(not_before) >= (SELECT lease_expires_at + interval '2 minutes' FROM cc85_expected_cleanup_lease)
-  FROM public.community_account_media_cleanup_jobs WHERE storage_path like 'community/85000000-0000-4000-8000-000000000004/%'), 'cleanup waits beyond the active writer lease plus safety margin');
+SELECT ok(NOT EXISTS (
+  SELECT 1 FROM public.community_account_media_cleanup_jobs job
+  JOIN cc85_expected_cleanup_lease expected USING (storage_path)
+  WHERE job.not_before < greatest(expected.lease_expires_at + interval '2 minutes', expected.captured_at + interval '12 minutes')
+), 'each cleanup path waits for its own active lease plus safety margin and the minimum delay');
 SELECT ok((SELECT author_id IS NULL AND description='' AND moderation_reason IS NULL AND storage_path IS NULL AND deleted_at IS NOT NULL AND status='removed'
   FROM public.community_artworks WHERE id=(SELECT id FROM cc85_ids WHERE key='erase_artwork')), 'Auth deletion makes the artwork private and removes its identity/content/path');
 SELECT ok((SELECT reason IS NULL FROM public.community_moderation_events WHERE id=(SELECT id FROM cc85_event_ids WHERE key='erase_event')), 'account deletion clears historical private moderation reason');
