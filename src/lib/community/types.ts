@@ -44,6 +44,23 @@ export type CommunityAdminArtwork = CommunityOwnerArtwork & {
   publishedAt: string | null;
 };
 
+export type CommunityAdminProductOption = { id: string; slug: string; title: string };
+
+export type CommunityModerationAction = "approve" | "reject" | "remove" | "restore";
+export type CommunityModerationHistoryItem = {
+  id: string;
+  revision: number;
+  fromStatus: CommunityArtworkStatus | null;
+  toStatus: CommunityArtworkStatus;
+  reason: string | null;
+  createdAt: string;
+  moderatorLabel: "Administrator";
+};
+export type CommunityModerationCounts = Record<CommunityArtworkStatus, number>;
+export type CommunityModerationPage = CommunityPage<CommunityAdminArtwork> & {
+  counts: CommunityModerationCounts;
+};
+
 export type CommunityPage<T> = {
   items: T[];
   nextCursor: string | null;

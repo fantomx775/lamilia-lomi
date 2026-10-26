@@ -14,6 +14,8 @@ import * as supabase from "./supabase-adapter";
 import { CommunityAuthorizationError, CommunityValidationError } from "./errors";
 import type {
   CommunityAudience,
+  CommunityAdminProductOption,
+  CommunityArtworkStatus,
   CommunityCreateArtworkInput,
   CommunityPage,
   CommunityProfileInput,
@@ -196,11 +198,26 @@ export async function listMyCommunityArtworks(limit = 50) {
   return supabase.listOwnerArtworks(actor, safeLimit);
 }
 
-export async function listCommunityModerationQueue(limit = 50) {
+export async function listCommunityModerationQueue(input: { status?: CommunityArtworkStatus | "all"; productId?: string; creator?: string; cursor?: string | null; limit?: number } = {}) {
   const actor = await assertCommunityActor("admin");
-  const safeLimit = boundedLimit(limit);
-  if (actor.backend === "local") return localStore.listAdminQueue(actor, getContentSnapshot().products, safeLimit);
-  return supabase.listAdminQueue(actor, safeLimit);
+  const safeLimit = input.limit === undefined ? 30 : Math.min(50, boundedLimit(input.limit));
+  const normalized = { ...input, limit: safeLimit };
+  if (actor.backend === "local") return localStore.listAdminArtworks(actor, getContentSnapshot().products, normalized);
+  return supabase.listAdminArtworks(actor, normalized);
+}
+
+export async function getCommunityModerationArtwork(id: string) {
+  const actor = await assertCommunityActor("admin");
+  if (!isUuid(id)) throw new Error("Invalid artwork ID.");
+  if (actor.backend === "local") return localStore.getAdminArtwork(actor, id, getContentSnapshot().products);
+  return supabase.getAdminArtwork(actor, id);
+}
+
+export async function listCommunityModerationProductOptions(): Promise<CommunityAdminProductOption[]> {
+  const actor = await assertCommunityActor("admin");
+  const limit = 500;
+  if (actor.backend === "local") return localStore.listAdminProductOptions(actor, getContentSnapshot().products, limit);
+  return supabase.listAdminProductOptions(actor, limit);
 }
 
 export async function moderateCommunityArtwork(

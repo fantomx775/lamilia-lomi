@@ -107,6 +107,38 @@ describe("Coloring Club local adapter", () => {
     expect(await store.listMyArtworks(unlockedMember, [product])).toEqual([]);
   });
 
+  it("filters and paginates the admin queue with safe status history", async () => {
+    const store = makeStore();
+    const product = getPublishedProduct();
+    const unlocked = { ...member, unlockedProductIds: [product.id] };
+    await store.join(unlocked, { username: "garden_user", adultAttested: true });
+    const firstId = await store.createPendingArtwork(unlocked, input(product.id), [product]);
+    const secondId = await store.createPendingArtwork(unlocked, { ...input(product.id), idempotencyKey: "55555555-5555-4555-8555-555555555555" }, [product]);
+    const firstPage = await store.listAdminArtworks(admin, [product], { status: "pending", creator: "garden_", limit: 1 });
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.items[0]).toMatchObject({ id: firstId, creatorUsername: "garden_user" });
+    expect(firstPage.counts.pending).toBe(2);
+    expect(firstPage.nextCursor).toBeTruthy();
+    const nextPage = await store.listAdminArtworks(admin, [product], { status: "pending", creator: "garden_", limit: 1, cursor: firstPage.nextCursor });
+    expect(nextPage.items.map((item) => item.id)).toEqual([secondId]);
+    await store.moderate(admin, firstId, 1, "reject", "Please remove personal details.", [product]);
+    const detail = await store.getAdminArtwork(admin, firstId, [product]);
+    expect(detail?.artwork).toMatchObject({ status: "rejected", revision: 2, creatorUsername: "garden_user", rejectionReason: "Please remove personal details." });
+    expect(detail?.history).toMatchObject([{ revision: 2, fromStatus: "pending", toStatus: "rejected", reason: "Please remove personal details.", moderatorLabel: "Administrator" }]);
+    expect(JSON.stringify(detail)).not.toMatch(/actorUserId|authorId|userId|email|storagePath/i);
+    expect((await store.listAdminArtworks(admin, [product], { status: "pending" })).items).toHaveLength(1);
+    expect((await store.listAdminArtworks(admin, [product], { status: "rejected" })).counts.rejected).toBe(1);
+  });
+
+  it("returns only a bounded product ID, slug, and English title projection to admins", async () => {
+    const store = makeStore();
+    const products = getSeedContentSnapshot().products;
+    const options = store.listAdminProductOptions(admin, products, 1);
+    expect(options).toHaveLength(1);
+    expect(Object.keys(options[0]).sort()).toEqual(["id", "slug", "title"]);
+    expect(() => store.listAdminProductOptions(member, products, 1)).toThrow(CommunityAuthorizationError);
+  });
+
   it("requires verified adult opt-in and an unlocked published product", async () => {
     const store = makeStore();
     const product = getPublishedProduct();

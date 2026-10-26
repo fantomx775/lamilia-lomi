@@ -6,11 +6,15 @@ import path from "node:path";
 
 import type {
   CommunityAdminArtwork,
+  CommunityAdminProductOption,
+  CommunityArtworkStatus,
   CommunityAudience,
   CommunityCreateArtworkInput,
   CommunityImageContentType,
   CommunityOwnerArtwork,
   CommunityPage,
+  CommunityModerationCounts,
+  CommunityModerationHistoryItem,
   CommunityPublicArtwork,
   CommunityPublicProduct,
   CommunityStorageProvider,
@@ -651,18 +655,70 @@ export class CommunityLocalStore {
     });
   }
 
-  async listAdminQueue(actor: LocalCommunityActor, products: Product[], limit = 50): Promise<CommunityAdminArtwork[]> {
+  async listAdminArtworks(actor: LocalCommunityActor, products: Product[], input: { status?: CommunityArtworkStatus | "all"; productId?: string; creator?: string; cursor?: string | null; limit?: number } = {}): Promise<CommunityPage<CommunityAdminArtwork> & { counts: CommunityModerationCounts }> {
     assertAdmin(actor);
-    return this.read((snapshot) => snapshot.artworks
-      .filter((artwork) => artwork.status === "pending" && !artwork.deletedAt)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-      .slice(0, boundedLimit(limit))
-      .flatMap((artwork) => {
+    const limit = boundedLimit(input.limit ?? 50);
+    const cursor = decodeAdminCursor(input.cursor);
+    return this.read((snapshot) => {
+      const profiles = new Map(snapshot.profiles.map((profile) => [profile.userId, profile]));
+      const countStatuses: CommunityArtworkStatus[] = ["pending", "approved", "rejected", "removed"];
+      const filtered = snapshot.artworks.filter((artwork) => {
+        if (artwork.deletedAt) return false;
+        if (input.status && input.status !== "all" && artwork.status !== input.status) return false;
+        if (input.productId && artwork.productId !== input.productId) return false;
+        if (input.creator && !(profiles.get(artwork.authorId)?.username ?? "").startsWith(input.creator)) return false;
+        if (cursor && (artwork.createdAt < cursor.createdAt || (artwork.createdAt === cursor.createdAt && artwork.id <= cursor.id))) return false;
+        return true;
+      }).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      const counts = Object.fromEntries(countStatuses.map((status) => [status, snapshot.artworks.filter((artwork) => {
+        if (artwork.deletedAt || artwork.status !== status) return false;
+        if (input.productId && artwork.productId !== input.productId) return false;
+        return !input.creator || (profiles.get(artwork.authorId)?.username ?? "").startsWith(input.creator);
+      }).length])) as CommunityModerationCounts;
+      const rows = filtered.slice(0, limit + 1);
+      const items = rows.slice(0, limit).flatMap((artwork) => {
         const product = products.find((candidate) => candidate.id === artwork.productId);
         if (!product) return [];
-        const profile = artwork.authorId ? snapshot.profiles.find((candidate) => candidate.userId === artwork.authorId) : undefined;
+        const profile = artwork.authorId ? profiles.get(artwork.authorId) : undefined;
         return [{ ...toOwnerArtwork(artwork, product), creatorUsername: profile?.username ?? null, publishedAt: artwork.publishedAt }];
-      }));
+      });
+      const last = items.at(-1);
+      return { items, counts, nextCursor: rows.length > limit && last ? encodeAdminCursor(last.createdAt, last.id) : null };
+    });
+  }
+
+  async listAdminQueue(actor: LocalCommunityActor, products: Product[], limit = 50): Promise<CommunityAdminArtwork[]> {
+    return (await this.listAdminArtworks(actor, products, { status: "pending", limit })).items;
+  }
+
+  listAdminProductOptions(actor: LocalCommunityActor, products: Product[], limit = 500): CommunityAdminProductOption[] {
+    assertAdmin(actor);
+    const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 500) : 500;
+    return products.slice(0, safeLimit).map((product) => ({
+      id: product.id,
+      slug: product.slug,
+      title: product.translations.find((translation) => translation.locale === "en")?.title || product.slug,
+    }));
+  }
+
+  async getAdminArtwork(actor: LocalCommunityActor, artworkId: string, products: Product[]) {
+    assertAdmin(actor);
+    return this.read((snapshot) => {
+      const artwork = snapshot.artworks.find((candidate) => candidate.id === artworkId && !candidate.deletedAt);
+      if (!artwork) return null;
+      const product = products.find((candidate) => candidate.id === artwork.productId);
+      if (!product) return null;
+      const profile = artwork.authorId ? snapshot.profiles.find((candidate) => candidate.userId === artwork.authorId) : undefined;
+      const history = snapshot.moderationEvents.filter((event) => event.artworkId === artworkId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+        .slice(0, 100)
+        .reverse()
+        .map((event): CommunityModerationHistoryItem => ({
+          id: event.id, revision: event.revision, fromStatus: event.fromStatus, toStatus: event.toStatus,
+          reason: event.reason, createdAt: event.createdAt, moderatorLabel: "Administrator",
+        }));
+      return { artwork: { ...toOwnerArtwork(artwork, product), creatorUsername: profile?.username ?? null, publishedAt: artwork.publishedAt }, history };
+    });
   }
 
   async getProfile(actor: LocalCommunityActor) {
@@ -946,6 +1002,21 @@ function decodeCursor(cursor: string | null | undefined) {
   try {
     const decoded = Buffer.from(cursor, "base64url").toString("utf8");
     return /^\d{4}-\d\d-\d\dT.+\|[0-9a-f-]{36}$/i.test(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+function encodeAdminCursor(createdAt: string, id: string) {
+  return Buffer.from(`${createdAt}|${id}`).toString("base64url");
+}
+
+function decodeAdminCursor(cursor: string | null | undefined) {
+  if (!cursor) return null;
+  try {
+    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+    const match = decoded.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z)\|([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+    return match ? { createdAt: match[1], id: match[2] } : null;
   } catch {
     return null;
   }

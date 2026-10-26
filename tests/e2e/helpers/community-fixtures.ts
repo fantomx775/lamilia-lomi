@@ -29,7 +29,7 @@ export async function communityFixtures(testInfo: TestInfo) {
     trackedPages.add(page);
     const completions = new Map<object, () => void>();
     page.on("request", (request) => {
-      if (!new URL(request.url()).pathname.startsWith("/api/community/artworks") || request.method() === "GET") return;
+      if (!/^\/api\/(?:admin\/)?community\/artworks/.test(new URL(request.url()).pathname) || request.method() === "GET") return;
       activeMutations.set(request, new Promise<void>((resolve) => completions.set(request, resolve)));
     });
     const finish = (request: object) => { completions.get(request)?.(); completions.delete(request); activeMutations.delete(request); };
@@ -91,7 +91,7 @@ export async function communityFixtures(testInfo: TestInfo) {
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page).toHaveURL(`${COMMUNITY_TEST_ORIGIN}${returnTo}`);
     await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
-    await essentials(page);
+    if (!returnTo.startsWith("/admin")) await essentials(page);
   }
 
   async function cleanup() {
@@ -151,7 +151,7 @@ export async function communityScreenshots(page: Page, folderName: string, view:
     const dialog = page.getByRole("dialog", { name: "Share your art", exact: true });
     const dialogOpen = await dialog.isVisible();
     if (dialogOpen) await dialog.locator(".overflow-y-auto").evaluate((element) => { element.scrollTop = 0; });
-    else await essentials(page);
+    else if (!new URL(page.url()).pathname.startsWith("/admin")) await essentials(page);
     await page.evaluate(() => document.fonts.ready);
     await page.addStyleTag({ content: "nextjs-portal { display:none !important; }" });
     await page.evaluate(() => scrollTo(0, 0));

@@ -7,10 +7,14 @@ import { COMMUNITY_RULES_VERSION } from "./rules";
 import type { CommunityActor } from "./session";
 import type {
   CommunityAdminArtwork,
+  CommunityAdminProductOption,
+  CommunityArtworkStatus,
   CommunityAudience,
   CommunityCreateArtworkInput,
   CommunityOwnerArtwork,
   CommunityPage,
+  CommunityModerationCounts,
+  CommunityModerationHistoryItem,
   CommunityPublicArtwork,
   CommunityPublicCreator,
   CommunityStorageProvider,
@@ -138,18 +142,80 @@ export async function getOwnerArtwork(actor: CommunityActor, id: string): Promis
   return data ? mapOwnerArtwork(data as unknown as Row) : null;
 }
 
-export async function listAdminQueue(actor: CommunityActor, limit: number): Promise<CommunityAdminArtwork[]> {
+export async function listAdminArtworks(actor: CommunityActor, input: { status?: CommunityArtworkStatus | "all"; productId?: string; creator?: string; cursor?: string | null; limit: number }): Promise<CommunityPage<CommunityAdminArtwork> & { counts: CommunityModerationCounts }> {
   if (actor.role !== "admin") throw new Error("Administrator access required.");
   const client = createServiceRoleClient();
-  const { data, error } = await client.from("community_artworks")
-    .select(ADMIN_ARTWORK_SELECT)
-    .eq("status", "pending")
+  const cursor = parseAdminCursor(input.cursor);
+  const filterQuery = (status?: CommunityArtworkStatus) => {
+    let query = client.from("community_artworks").select(input.creator
+      ? "id,community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username)"
+      : "id", { count: "exact", head: true }).is("deleted_at", null);
+    if (status) query = query.eq("status", status);
+    if (input.productId) query = query.eq("product_id", input.productId);
+    if (input.creator) query = query.ilike("community_profiles.username", `${input.creator.replace(/[\\%_]/g, "\\$&")}%`);
+    return query;
+  };
+  const statuses: CommunityArtworkStatus[] = ["pending", "approved", "rejected", "removed"];
+  const countResults = await Promise.all(statuses.map((status) => filterQuery(status)));
+  if (countResults.some((result) => result.error)) throw new Error("Community moderation counts could not be loaded.");
+  const counts = Object.fromEntries(statuses.map((status, index) => [status, countResults[index].count ?? 0])) as CommunityModerationCounts;
+  const adminSelect = input.creator
+    ? `${OWNER_ARTWORK_SELECT},community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username)`
+    : ADMIN_ARTWORK_SELECT;
+  let query = client.from("community_artworks")
+    .select(adminSelect)
     .is("deleted_at", null)
     .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .limit(limit);
+    .order("id", { ascending: true });
+  if (input.status && input.status !== "all") query = query.eq("status", input.status);
+  if (input.productId) query = query.eq("product_id", input.productId);
+  if (input.creator) query = query.ilike("community_profiles.username", `${input.creator.replace(/[\\%_]/g, "\\$&")}%`);
+  if (cursor) query = query.or(`created_at.gt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.gt.${cursor.id})`);
+  const { data, error } = await query.limit(input.limit + 1);
   if (error) throw new Error("Community moderation queue could not be loaded.");
-  return ((data ?? []) as unknown as Row[]).map(mapAdminArtwork);
+  const rows = ((data ?? []) as unknown as Row[]);
+  const items = rows.slice(0, input.limit).map(mapAdminArtwork);
+  const last = items.at(-1);
+  return { items, counts, nextCursor: rows.length > input.limit && last ? encodeAdminCursor(last.createdAt, last.id) : null };
+}
+
+export async function listAdminQueue(actor: CommunityActor, limit: number): Promise<CommunityAdminArtwork[]> {
+  return (await listAdminArtworks(actor, { status: "pending", limit })).items;
+}
+
+export async function listAdminProductOptions(actor: CommunityActor, limit = 500): Promise<CommunityAdminProductOption[]> {
+  if (actor.role !== "admin") throw new Error("Administrator access required.");
+  const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 500) : 500;
+  const { data, error } = await createServiceRoleClient().from("products")
+    .select("id,slug,product_translations!inner(locale,title)")
+    .eq("product_translations.locale", "en")
+    .order("slug", { ascending: true })
+    .limit(safeLimit);
+  if (error) throw new Error("Community product filters could not be loaded.");
+  return ((data ?? []) as unknown as Row[]).map((row) => {
+    const translation = list(row.product_translations).find((candidate) => candidate.locale === "en");
+    return { id: String(row.id), slug: String(row.slug), title: typeof translation?.title === "string" ? translation.title : String(row.slug) };
+  });
+}
+
+export async function getAdminArtwork(actor: CommunityActor, id: string): Promise<{ artwork: CommunityAdminArtwork; history: CommunityModerationHistoryItem[] } | null> {
+  if (actor.role !== "admin") throw new Error("Administrator access required.");
+  const client = createServiceRoleClient();
+  const { data, error } = await client.from("community_artworks").select(ADMIN_ARTWORK_SELECT)
+    .eq("id", id).is("deleted_at", null).maybeSingle();
+  if (error) throw new Error("Community moderation detail could not be loaded.");
+  if (!data) return null;
+  const { data: events, error: historyError } = await client.from("community_moderation_events")
+    .select("id,revision,from_status,to_status,reason,created_at")
+    .eq("artwork_id", id).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(100);
+  if (historyError) throw new Error("Community moderation history could not be loaded.");
+  const history = ((events ?? []) as unknown as Row[]).reverse().map((row): CommunityModerationHistoryItem => ({
+    id: String(row.id), revision: Number(row.revision),
+    fromStatus: nullableString(row.from_status) as CommunityArtworkStatus | null,
+    toStatus: String(row.to_status) as CommunityArtworkStatus,
+    reason: nullableString(row.reason), createdAt: String(row.created_at), moderatorLabel: "Administrator",
+  }));
+  return { artwork: mapAdminArtwork(data as unknown as Row), history };
 }
 
 export async function getOwnerProfile(actor: CommunityActor) {
@@ -455,4 +521,19 @@ function parseOffset(cursor: string | null | undefined) {
   if (!cursor) return 0;
   if (!/^\d{1,8}$/.test(cursor)) return 0;
   return Math.min(Number(cursor), 1_000_000);
+}
+
+function encodeAdminCursor(createdAt: string, id: string) {
+  return Buffer.from(`${createdAt}|${id}`).toString("base64url");
+}
+
+function parseAdminCursor(cursor: string | null | undefined) {
+  if (!cursor || cursor.length > 256) return null;
+  try {
+    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+    const match = decoded.match(/^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z)\|([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+    return match ? { createdAt: match[1], id: match[2] } : null;
+  } catch {
+    return null;
+  }
 }
