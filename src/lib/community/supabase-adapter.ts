@@ -447,7 +447,7 @@ export async function getArtworkMediaForRequest(id: string, actor?: CommunityAct
   }
   const { data, error } = await query.maybeSingle();
   if (error) throw new Error("Community image is unavailable.");
-  if (!data || (actor?.role !== "admin" && actor && data.author_id !== actor.userId)) return null;
+  if (!data || typeof data.storage_path !== "string" || (actor?.role !== "admin" && actor && data.author_id !== actor.userId)) return null;
   return {
     authorId: String(data.author_id),
     storagePath: String(data.storage_path),
@@ -576,6 +576,29 @@ export async function updateReport(actor: CommunityActor, id: string, revision: 
 
 export async function purgeExpiredReportDetails() {
   return rpc("community_purge_expired_report_details", { p_limit: 100 });
+}
+
+export type AccountMediaCleanupJob = {
+  id: number;
+  storage_provider: CommunityStorageProvider;
+  storage_path: string;
+  lease_token: string;
+};
+
+export async function claimAccountMediaCleanup(leaseToken: string, limit = 10) {
+  const result = await rpc("community_claim_account_media_cleanup", { p_lease_token: leaseToken, p_limit: limit });
+  if (!Array.isArray(result)) throw new Error("Account media cleanup queue could not be read.");
+  return result.map((row) => {
+    const value = row as Row;
+    return {
+      id: Number(value.id), storage_provider: String(value.storage_provider) as CommunityStorageProvider,
+      storage_path: String(value.storage_path), lease_token: String(value.lease_token),
+    } satisfies AccountMediaCleanupJob;
+  });
+}
+
+export async function finishAccountMediaCleanup(id: number, leaseToken: string, result: "deleted" | "retry") {
+  return rpc("community_finish_account_media_cleanup", { p_id: id, p_lease_token: leaseToken, p_result: result });
 }
 
 export type CommunityNotificationClaim = {

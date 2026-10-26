@@ -4,6 +4,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CommunityAccountPanel } from "@/components/community/community-account-panel";
+import { AccountDeletionPanel } from "@/components/account/account-deletion-panel";
 import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 import { getCommunityFlags } from "@/lib/community-flags";
@@ -123,6 +124,7 @@ export default async function AccountPage({ params }: Props) {
             creatorProfileBaseHref={`/${locale}/club/creators`}
             contactHref={`/${locale}/contact`}
           />
+          <AccountDeletionPanel locale={locale} />
           <form action={logoutAction}>
             <input type="hidden" name="locale" value={locale} />
             <Button type="submit" variant="outline">

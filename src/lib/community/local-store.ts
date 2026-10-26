@@ -71,9 +71,9 @@ type LocalProfile = {
 
 type LocalArtwork = {
   id: string;
-  authorId: string;
+  authorId: string | null;
   productId: string;
-  storagePath: string;
+  storagePath: string | null;
   storageProvider: CommunityStorageProvider;
   contentType: CommunityImageContentType;
   sizeBytes: number;
@@ -112,7 +112,7 @@ type LocalUploadReservation = {
 type LocalModerationEvent = {
   id: string;
   artworkId: string;
-  actorUserId: string;
+  actorUserId: string | null;
   revision: number;
   fromStatus: LocalArtwork["status"];
   toStatus: LocalArtwork["status"];
@@ -127,7 +127,12 @@ type LocalReport = {
   resolvedAt: string | null; retentionExpiresAt: string | null;
 };
 type LocalReportEvent = { id: string; reportId: string; actorUserId: string | null; action: "submitted" | "reviewed" | "resolve" | "dismiss" | "retention_scrubbed"; fromStatus: CommunityReportStatus | null; toStatus: CommunityReportStatus; createdAt: string };
-type LocalNotificationOutbox = { moderationEventId: string; authorId: string; notificationType: "approved" | "rejected"; state: "queued"; createdAt: string };
+type LocalNotificationOutbox = { moderationEventId: string; authorId: string | null; notificationType: "approved" | "rejected"; state: "queued" | "suppressed"; createdAt: string };
+type LocalAccountMediaCleanupJob = {
+  id: string; storagePath: string; storageProvider: CommunityStorageProvider;
+  notBefore: string; nextAttemptAt: string; attemptCount: number;
+  state: "pending" | "sending"; leaseToken: string | null; leaseExpiresAt: string | null;
+};
 
 type LocalRateBucket = { windowStartedAt: number; hitCount: number };
 
@@ -141,6 +146,7 @@ type LocalSnapshot = {
   reportEvents: LocalReportEvent[];
   notificationOutbox: LocalNotificationOutbox[];
   productDeletionMarkers: string[];
+  accountMediaCleanupJobs: LocalAccountMediaCleanupJob[];
   rateLimitBuckets: Record<string, LocalRateBucket>;
   uploadReservations: LocalUploadReservation[];
 };
@@ -168,6 +174,10 @@ export type CommunityUploadCleanupCandidate = {
   leaseToken: string;
   storagePath: string;
   storageProvider: CommunityStorageProvider;
+};
+
+export type CommunityAccountMediaCleanupCandidate = {
+  id: string; storagePath: string; storageProvider: CommunityStorageProvider; leaseToken: string;
 };
 
 export type LocalCommunityActor = {
@@ -494,7 +504,7 @@ export class CommunityLocalStore {
     if (actor && !actor.emailVerified) actor = undefined;
     return this.read((snapshot) => {
       const artwork = snapshot.artworks.find((candidate) => candidate.id === artworkId && !candidate.deletedAt);
-      if (!artwork?.authorId) return null;
+      if (!artwork?.authorId || !artwork.storagePath) return null;
       const isOwnerOrAdmin = Boolean(actor && (actor.userId === artwork.authorId || actor.role === "admin"));
       if (!isOwnerOrAdmin) {
         if (!allowPublic) return null;
@@ -747,14 +757,14 @@ export class CommunityLocalStore {
         if (artwork.deletedAt) return false;
         if (input.status && input.status !== "all" && artwork.status !== input.status) return false;
         if (input.productId && artwork.productId !== input.productId) return false;
-        if (input.creator && !(profiles.get(artwork.authorId)?.username ?? "").startsWith(input.creator)) return false;
+        if (input.creator && !(artwork.authorId ? profiles.get(artwork.authorId)?.username ?? "" : "").startsWith(input.creator)) return false;
         if (cursor && (artwork.createdAt < cursor.createdAt || (artwork.createdAt === cursor.createdAt && artwork.id <= cursor.id))) return false;
         return true;
       }).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
       const counts = Object.fromEntries(countStatuses.map((status) => [status, snapshot.artworks.filter((artwork) => {
         if (artwork.deletedAt || artwork.status !== status) return false;
         if (input.productId && artwork.productId !== input.productId) return false;
-        return !input.creator || (profiles.get(artwork.authorId)?.username ?? "").startsWith(input.creator);
+        return !input.creator || (artwork.authorId ? profiles.get(artwork.authorId)?.username ?? "" : "").startsWith(input.creator);
       }).length])) as CommunityModerationCounts;
       const rows = filtered.slice(0, limit + 1);
       const items = rows.slice(0, limit).flatMap((artwork) => {
@@ -920,6 +930,104 @@ export class CommunityLocalStore {
     });
   }
 
+  async deleteAccount(userId: string) {
+    return this.transact((snapshot) => {
+      const now = this.now();
+      const nowIso = now.toISOString();
+      const reservations = snapshot.uploadReservations.filter((reservation) => reservation.authorId === userId);
+      const artworks = snapshot.artworks.filter((artwork) => artwork.authorId === userId);
+      const byPath = new Map<string, { storagePath: string; storageProvider: CommunityStorageProvider; notBefore: string }>();
+      const queuePath = (storagePath: string, storageProvider: CommunityStorageProvider, leaseExpiresAt?: string) => {
+        const notBeforeMs = Math.max(now.getTime() + 12 * 60 * 1_000, leaseExpiresAt ? Date.parse(leaseExpiresAt) + 2 * 60 * 1_000 : 0);
+        const key = `${storageProvider}:${storagePath}`;
+        const existing = byPath.get(key);
+        byPath.set(key, { storagePath, storageProvider, notBefore: new Date(Math.max(notBeforeMs, existing ? Date.parse(existing.notBefore) : 0)).toISOString() });
+      };
+      for (const reservation of reservations) queuePath(reservation.storagePath, reservation.storageProvider, reservation.leaseExpiresAt);
+      for (const artwork of artworks) if (artwork.storagePath) queuePath(artwork.storagePath, artwork.storageProvider);
+      for (const job of byPath.values()) {
+        if (snapshot.accountMediaCleanupJobs.some((candidate) => candidate.storagePath === job.storagePath && candidate.storageProvider === job.storageProvider)) continue;
+        snapshot.accountMediaCleanupJobs.push({
+          id: this.uuid(), ...job, nextAttemptAt: nowIso, attemptCount: 0,
+          state: "pending", leaseToken: null, leaseExpiresAt: null,
+        });
+      }
+
+      const artworkIds = new Set(artworks.map((artwork) => artwork.id));
+      for (const event of snapshot.moderationEvents) {
+        if (artworkIds.has(event.artworkId) || event.actorUserId === userId) {
+          event.actorUserId = null;
+          event.reason = null;
+        }
+      }
+      for (const artwork of artworks) {
+        artwork.authorId = null;
+        artwork.storagePath = null;
+        artwork.idempotencyKey = "";
+        artwork.description = "";
+        artwork.moderationReason = null;
+        artwork.status = "removed";
+        artwork.publishedAt = null;
+        artwork.deletedAt = artwork.deletedAt ?? nowIso;
+        artwork.revision += 1;
+        artwork.updatedAt = nowIso;
+      }
+      snapshot.artworkLikes = snapshot.artworkLikes.filter((like) => like.userId !== userId && !artworkIds.has(like.artworkId));
+      snapshot.uploadReservations = snapshot.uploadReservations.filter((reservation) => reservation.authorId !== userId);
+      snapshot.profiles = snapshot.profiles.filter((profile) => profile.userId !== userId);
+      for (const report of snapshot.reports) {
+        if (report.reporterUserId === userId) {
+          report.reporterUserId = null;
+          report.details = "";
+        }
+      }
+      for (const event of snapshot.reportEvents) if (event.actorUserId === userId) event.actorUserId = null;
+      for (const notification of snapshot.notificationOutbox) {
+        if (notification.authorId === userId && notification.state === "queued") {
+          notification.authorId = null;
+          notification.state = "suppressed";
+        }
+      }
+      return snapshot.accountMediaCleanupJobs.filter((job) => byPath.has(`${job.storageProvider}:${job.storagePath}`)).length;
+    });
+  }
+
+  async claimAccountMediaCleanup(limit = 10): Promise<CommunityAccountMediaCleanupCandidate[]> {
+    return this.transact((snapshot) => {
+      const now = this.now();
+      const candidates = snapshot.accountMediaCleanupJobs
+        .filter((job) => Date.parse(job.notBefore) <= now.getTime()
+          && ((job.state === "pending" && Date.parse(job.nextAttemptAt) <= now.getTime())
+            || (job.state === "sending" && job.leaseExpiresAt !== null && Date.parse(job.leaseExpiresAt) <= now.getTime())))
+        .sort((a, b) => a.notBefore.localeCompare(b.notBefore) || a.nextAttemptAt.localeCompare(b.nextAttemptAt) || a.id.localeCompare(b.id))
+        .slice(0, Math.max(1, Math.min(limit, 50)));
+      for (const job of candidates) {
+        job.state = "sending";
+        job.leaseToken = this.uuid();
+        job.leaseExpiresAt = new Date(now.getTime() + 5 * 60 * 1_000).toISOString();
+        job.attemptCount += 1;
+      }
+      return candidates.map((job) => ({ id: job.id, storagePath: job.storagePath, storageProvider: job.storageProvider, leaseToken: job.leaseToken! }));
+    });
+  }
+
+  async finishAccountMediaCleanup(candidate: CommunityAccountMediaCleanupCandidate, result: "deleted" | "retry") {
+    return this.transact((snapshot) => {
+      const job = snapshot.accountMediaCleanupJobs.find((item) => item.id === candidate.id
+        && item.state === "sending" && item.leaseToken === candidate.leaseToken);
+      if (!job) return false;
+      if (result === "deleted") {
+        snapshot.accountMediaCleanupJobs = snapshot.accountMediaCleanupJobs.filter((item) => item !== job);
+        return true;
+      }
+      job.state = "pending";
+      job.leaseToken = null;
+      job.leaseExpiresAt = null;
+      job.nextAttemptAt = new Date(this.now().getTime() + Math.min(360, 5 * 2 ** Math.min(job.attemptCount, 6)) * 60 * 1_000).toISOString();
+      return true;
+    });
+  }
+
   private async read<T>(read: (snapshot: LocalSnapshot) => T): Promise<T> {
     return withFileLock(this.filePath, async () => read(readSnapshot(this.filePath)));
   }
@@ -951,7 +1059,7 @@ export function buildCommunityStoragePath(actorId: string, idempotencyKey: strin
 }
 
 function initialSnapshot(): LocalSnapshot {
-  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], reports: [], reportEvents: [], notificationOutbox: [], productDeletionMarkers: [], rateLimitBuckets: {}, uploadReservations: [] };
+  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], reports: [], reportEvents: [], notificationOutbox: [], productDeletionMarkers: [], accountMediaCleanupJobs: [], rateLimitBuckets: {}, uploadReservations: [] };
 }
 
 function readSnapshot(filePath: string): LocalSnapshot {
@@ -962,10 +1070,11 @@ function readSnapshot(filePath: string): LocalSnapshot {
       || !Array.isArray(parsed.moderationEvents) || typeof parsed.rateLimitBuckets !== "object" || !parsed.rateLimitBuckets
       || (parsed.uploadReservations !== undefined && !Array.isArray(parsed.uploadReservations))
       || (parsed.artworkLikes !== undefined && !Array.isArray(parsed.artworkLikes))
-      || (parsed.productDeletionMarkers !== undefined && !Array.isArray(parsed.productDeletionMarkers))) {
+      || (parsed.productDeletionMarkers !== undefined && !Array.isArray(parsed.productDeletionMarkers))
+      || (parsed.accountMediaCleanupJobs !== undefined && !Array.isArray(parsed.accountMediaCleanupJobs))) {
       throw new Error("Unexpected community local-store structure.");
     }
-    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [], reports: parsed.reports ?? [], reportEvents: parsed.reportEvents ?? [], notificationOutbox: parsed.notificationOutbox ?? [], productDeletionMarkers: parsed.productDeletionMarkers ?? [] } as LocalSnapshot;
+    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [], reports: parsed.reports ?? [], reportEvents: parsed.reportEvents ?? [], notificationOutbox: parsed.notificationOutbox ?? [], productDeletionMarkers: parsed.productDeletionMarkers ?? [], accountMediaCleanupJobs: parsed.accountMediaCleanupJobs ?? [] } as LocalSnapshot;
   } catch (error) {
     throw new Error(`Community local store is unreadable: ${error instanceof Error ? error.message : "invalid JSON"}`);
   }

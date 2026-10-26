@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const cleanup = vi.hoisted(() => ({ media: vi.fn(), retention: vi.fn(), notifications: vi.fn() }));
-vi.mock("@/lib/community/repository", () => ({ processCommunityArtworkCleanup: cleanup.media, processCommunityReportRetention: cleanup.retention }));
+const cleanup = vi.hoisted(() => ({ media: vi.fn(), accountMedia: vi.fn(), retention: vi.fn(), notifications: vi.fn() }));
+vi.mock("@/lib/community/repository", () => ({ processCommunityArtworkCleanup: cleanup.media, processCommunityAccountMediaCleanup: cleanup.accountMedia, processCommunityReportRetention: cleanup.retention }));
 vi.mock("@/lib/community/notifications", () => ({ processCommunityModerationNotifications: cleanup.notifications }));
 import { GET } from "./route";
 
@@ -13,6 +13,7 @@ const request = (authorization?: string) => new Request("https://example.test/ap
 describe("protected scheduled community cleanup", () => {
   beforeEach(() => {
     cleanup.media.mockReset().mockResolvedValue(undefined);
+    cleanup.accountMedia.mockReset().mockResolvedValue({ claimed: 0 });
     cleanup.retention.mockReset().mockResolvedValue(undefined);
     cleanup.notifications.mockReset().mockResolvedValue({ claimed: 0, sent: 0, suppressed: 0, retrying: 0 });
     vi.stubEnv("CRON_SECRET", token);
@@ -37,6 +38,7 @@ describe("protected scheduled community cleanup", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, passes: 10 });
     expect(cleanup.media).toHaveBeenCalledTimes(10);
+    expect(cleanup.accountMedia).toHaveBeenCalledWith(20);
     expect(cleanup.retention).toHaveBeenCalledOnce();
     expect(cleanup.notifications).toHaveBeenCalledWith(10);
   });

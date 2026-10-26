@@ -218,6 +218,27 @@ describe("Coloring Club local adapter", () => {
       .rejects.toBeInstanceOf(CommunityConflictError);
   });
 
+  it("queues local account media before removing private community identity", async () => {
+    let current = new Date("2026-10-25T12:00:00.000Z");
+    const store = makeStore(() => new Date(current));
+    const product = getPublishedProduct();
+    const unlockedMember = { ...member, unlockedProductIds: [product.id] };
+    await store.join(unlockedMember, { username: "Garden_User", adultAttested: true });
+    const artworkId = await store.createPendingArtwork(unlockedMember, input(product.id), [product]);
+    expect(await store.getArtworkMedia(artworkId, [product], unlockedMember)).not.toBeNull();
+
+    expect(await store.deleteAccount(USER_A)).toBe(1);
+    expect(await store.getArtworkMedia(artworkId, [product], unlockedMember)).toBeNull();
+    expect(await store.getProfile(unlockedMember)).toBeNull();
+    expect(await store.claimAccountMediaCleanup()).toEqual([]);
+
+    current = new Date(current.getTime() + 13 * 60 * 1_000);
+    const [candidate] = await store.claimAccountMediaCleanup();
+    expect(candidate).toMatchObject({ storagePath: `community/${USER_A}/${ID_KEY}`, storageProvider: "local" });
+    expect(await store.finishAccountMediaCleanup(candidate!, "deleted")).toBe(true);
+    expect(await store.claimAccountMediaCleanup()).toEqual([]);
+  });
+
   it("filters and paginates the admin queue with safe status history", async () => {
     const store = makeStore();
     const product = getPublishedProduct();

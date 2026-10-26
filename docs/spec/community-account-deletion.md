@@ -1,0 +1,9 @@
+# Account deletion and community media cleanup
+
+`POST /api/account/delete` accepts only `{ "confirmation": "DELETE" }`, requires a same-origin request and the current verified account, and uses a server-side one-per-day account limit. It never accepts a user ID or role. Supabase deletion targets only the Auth user returned by the verified session; local demo mode removes the corresponding local community data and closes the demo session.
+
+Before the Auth row cascades, a database trigger copies each authored artwork and upload-reservation object key into a service-only cleanup ledger with no user/profile/reservation foreign key. Duplicate keys are coalesced. The ledger contains only provider, object key, eligibility time and retry state. The key is private and is removed from the artwork row immediately. Authored works become hidden tombstones, descriptions and moderation reasons are cleared, reactions are removed, and report/audit identity links are nulled where account deletion makes them unnecessary.
+
+Cleanup waits at least 12 minutes and until the stored upload lease plus a two-minute margin. The existing protected maintenance route claims jobs with five-minute fencing leases, removes bytes through the private community storage helper, and deletes a ledger row only after success. Provider failures use bounded retries; missing objects are safe to remove again. Pausing public gallery and uploads does not stop cleanup.
+
+Before confirmation, the account screen explains that product unlock access tied to the account ends and that redeemed single-use premium codes remain consumed. Account deletion does not claim that backups are erased immediately. Operational report-text retention is currently a 30-day engineering draft after resolution; the controller, final retention schedule and backup behavior still require owner/advisor review before public enablement. Flags remain OFF until the separate readiness review is complete.

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { getBackendMode } from "../config";
 import { getCommunityFlags } from "../community-flags";
 import { getContentSnapshot } from "../content-store";
@@ -9,7 +11,7 @@ import {
   CommunityLocalStore,
   hashCommunityRateLimitKey,
 } from "./local-store";
-import type { CommunityUploadCleanupCandidate, CommunityUploadReservationInput } from "./local-store";
+import type { CommunityAccountMediaCleanupCandidate, CommunityUploadCleanupCandidate, CommunityUploadReservationInput } from "./local-store";
 import * as supabase from "./supabase-adapter";
 import { CommunityAuthorizationError, CommunityRateLimitError, CommunityValidationError } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
@@ -39,6 +41,10 @@ export * from "./errors";
 
 export async function beginLocalCommunityProductDeletion(productId: string) {
   return localStore.beginProductDeletion(productId);
+}
+
+export async function deleteLocalCommunityAccount(userId: string) {
+  return localStore.deleteAccount(userId);
 }
 
 export async function withLocalCommunityProductSave<T>(productId: string, operation: () => Promise<T> | T) {
@@ -341,6 +347,18 @@ export async function processCommunityReportRetention() {
   return supabase.purgeExpiredReportDetails();
 }
 
+export async function processCommunityAccountMediaCleanup(limit = 20) {
+  if (getBackendMode() === "local") {
+    const candidates = await localStore.claimAccountMediaCleanup(limit);
+    for (const candidate of candidates) await removeAccountMediaCleanupCandidate(candidate);
+    return { claimed: candidates.length };
+  }
+  const leaseToken = randomUUID();
+  const candidates = await supabase.claimAccountMediaCleanup(leaseToken, Math.min(Math.max(limit, 1), 50));
+  for (const candidate of candidates) await removeAccountMediaCleanupCandidate(candidate);
+  return { claimed: candidates.length };
+}
+
 export async function cleanupCommunityUploadCandidate(candidate: CommunityUploadCleanupCandidate) {
   await removeAndFinishArtworkCleanup(candidate);
 }
@@ -356,6 +374,28 @@ async function removeAndFinishArtworkCleanup(candidate: CommunityUploadCleanupCa
     else await supabase.finishArtworkUploadCleanup(candidate);
   } catch {
     console.error("[community-media] Private artwork cleanup will retry.");
+  }
+}
+
+async function removeAccountMediaCleanupCandidate(candidate: CommunityAccountMediaCleanupCandidate | supabase.AccountMediaCleanupJob) {
+  const local = "storagePath" in candidate;
+  const provider = local ? candidate.storageProvider : candidate.storage_provider;
+  const storagePath = local ? candidate.storagePath : candidate.storage_path;
+  const leaseToken = local ? candidate.leaseToken : candidate.lease_token;
+  const match = /^community\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.exec(storagePath);
+  try {
+    if (!match) throw new Error("Invalid account cleanup object key.");
+    await removeCommunityArtworkImage({ authorId: match[1]!, storagePath, storageProvider: provider });
+    if (local) await localStore.finishAccountMediaCleanup(candidate, "deleted");
+    else await supabase.finishAccountMediaCleanup(Number(candidate.id), leaseToken, "deleted");
+  } catch {
+    try {
+      if (local) await localStore.finishAccountMediaCleanup(candidate, "retry");
+      else await supabase.finishAccountMediaCleanup(Number(candidate.id), leaseToken, "retry");
+    } catch {
+      // A fenced lease will become eligible on a later scheduled pass.
+    }
+    console.error("[community-account-cleanup] Private media deletion will retry.");
   }
 }
 
