@@ -198,9 +198,16 @@ async function signInAsAdmin(page: Page) {
   await page.goto("/en/login?redirectTo=/admin");
   await page.getByLabel("Email").fill("admin@lamilialomi.test");
   await page.getByLabel("Password").fill("demo-password");
+  const loginActionFinished = page.waitForEvent("requestfinished", (request) => {
+    const url = new URL(request.url());
+    return request.method() === "POST" &&
+      url.pathname === "/en/login" &&
+      (Boolean(request.headers()["next-action"]) || request.isNavigationRequest());
+  });
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
     page.getByRole("button", { name: "Continue" }).click(),
+    loginActionFinished,
   ]);
 }
 
