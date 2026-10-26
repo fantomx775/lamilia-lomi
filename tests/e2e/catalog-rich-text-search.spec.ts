@@ -146,7 +146,12 @@ async function signInAsAdmin(page: Page) {
 }
 
 async function waitForDocumentFonts(page: Page) {
-  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+  const loadedGeistFaces = await page.evaluate(async () => {
+    const loaded = await document.fonts.load("16px Geist", "LamiliaLomi");
+    await document.fonts.ready;
+    return loaded.filter((face) => face.family === "Geist").length;
+  });
+  expect(loadedGeistFaces).toBeGreaterThan(0);
 }
 
 function safeUrl(value: string) {
