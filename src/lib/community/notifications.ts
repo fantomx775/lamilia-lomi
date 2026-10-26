@@ -7,7 +7,7 @@ import { getResendClient } from "@/lib/email";
 
 import * as supabase from "./supabase-adapter";
 
-const TEMPLATE_VERSION = "cc-status-2026-10-26-v1";
+const TEMPLATE_VERSION = "cc-status-2026-10-26-v2";
 const FROM = "LamiliaLomi <hello@lamilialomi.com>";
 
 /**
@@ -66,7 +66,7 @@ function buildStatusMessage(status: "approved" | "rejected") {
   if (status === "approved") {
     return {
       subject: "Your Coloring Club artwork was approved",
-      text: `Your Coloring Club artwork was approved and is now visible in the gallery.${manageUrl ? `\n\nView your creations: ${manageUrl}` : ""}`,
+      text: `Your Coloring Club artwork was approved. You can review its status in My Creations.${manageUrl ? `\n\nView your creations: ${manageUrl}` : ""}`,
     };
   }
   return {

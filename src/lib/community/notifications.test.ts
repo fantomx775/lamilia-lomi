@@ -17,10 +17,15 @@ vi.mock("./supabase-adapter", () => ({
 
 import { processCommunityModerationNotifications } from "./notifications";
 
-const originalEnv = { secret: process.env.AUTH_RESUME_SECRET, appUrl: process.env.NEXT_PUBLIC_APP_URL };
+const originalEnv = {
+  secret: process.env.AUTH_RESUME_SECRET,
+  appUrl: process.env.NEXT_PUBLIC_APP_URL,
+  publicEnabled: process.env.COLORING_CLUB_PUBLIC_ENABLED,
+};
 afterEach(() => {
   if (originalEnv.secret === undefined) delete process.env.AUTH_RESUME_SECRET; else process.env.AUTH_RESUME_SECRET = originalEnv.secret;
   if (originalEnv.appUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL; else process.env.NEXT_PUBLIC_APP_URL = originalEnv.appUrl;
+  if (originalEnv.publicEnabled === undefined) delete process.env.COLORING_CLUB_PUBLIC_ENABLED; else process.env.COLORING_CLUB_PUBLIC_ENABLED = originalEnv.publicEnabled;
 });
 
 beforeEach(() => {
@@ -36,14 +41,18 @@ beforeEach(() => {
 });
 
 describe("community moderation notification outbox", () => {
-  it("sends a generic idempotent email and persists no recipient in the payload fingerprint", async () => {
+  it.each(["false", "true"])("sends a status-only approval email when public gallery flag is %s", async (publicEnabled) => {
+    process.env.COLORING_CLUB_PUBLIC_ENABLED = publicEnabled;
     const result = await processCommunityModerationNotifications(1);
     expect(result).toMatchObject({ claimed: 1, sent: 1 });
+    const message = mocks.resend?.emails.send.mock.calls[0]?.[0];
     expect(mocks.resend?.emails.send).toHaveBeenCalledWith(expect.objectContaining({
       to: ["author@example.test"], subject: "Your Coloring Club artwork was approved",
       text: expect.stringContaining("/en/library/creations"),
     }), { idempotencyKey: "community-moderation/41" });
-    expect(mocks.prepare).toHaveBeenCalledWith(41, expect.any(String), expect.stringMatching(/^[a-f0-9]{64}$/), "cc-status-2026-10-26-v1");
+    expect(message?.text).toContain("Your Coloring Club artwork was approved. You can review its status in My Creations.");
+    expect(message?.text).not.toMatch(/visible in the gallery/i);
+    expect(mocks.prepare).toHaveBeenCalledWith(41, expect.any(String), expect.stringMatching(/^[a-f0-9]{64}$/), "cc-status-2026-10-26-v2");
     expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "sent", providerMessageId: "resend-id" }));
     expect(JSON.stringify(mocks.prepare.mock.calls)).not.toContain("author@example.test");
   });
