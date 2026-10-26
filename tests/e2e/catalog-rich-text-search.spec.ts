@@ -79,21 +79,11 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     const productSlug = await page.getByLabel("Adres produktu").inputValue();
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
     await productEditor.fill("Catalog split phrase");
-    if (testInfo.project.name === "mobile") await selectFixtureText(productEditor, "split");
-    else {
-      await productEditor.press("Control+Home");
-      for (let index = 0; index < 8; index += 1) await productEditor.press("ArrowRight");
-      for (let index = 0; index < 5; index += 1) await productEditor.press("Shift+ArrowRight");
-    }
+    await selectFixtureText(productEditor, "split");
     await page.getByRole("button", { name: "Pogrubienie" }).click();
     await expect(productEditor.locator("strong")).toHaveText("split");
 
-    if (testInfo.project.name === "mobile") await selectFixtureText(productEditor, "phrase");
-    else {
-      await productEditor.press("Control+Home");
-      for (let index = 0; index < 14; index += 1) await productEditor.press("ArrowRight");
-      for (let index = 0; index < 6; index += 1) await productEditor.press("Shift+ArrowRight");
-    }
+    await selectFixtureText(productEditor, "phrase");
     await page.getByRole("button", { name: "Dodaj lub edytuj link" }).click();
     await page.getByLabel("Adres strony").fill("https://metadata-only.example/catalog");
     await page.getByRole("button", { name: "Zapisz link" }).click();
@@ -168,14 +158,14 @@ function isExpectedLoginRedirectAbort(request: {
 }) {
   return (
     request.method === "POST" &&
-    request.url.endsWith("/pl/login") &&
+    request.url.endsWith("/en/login") &&
     request.error === "net::ERR_ABORTED" &&
     request.hasNextActionHeader
   );
 }
 
-/** Set up a mobile text selection for the real toolbar/save/search flow.
- * Android emulation does not implement desktop Control+Home selection semantics.
+/** Select exact fixture text for the real toolbar/save/search flow.
+ * This tests catalog search; keyboard editing has separate browser coverage.
  */
 async function selectFixtureText(editor: Locator, text: string) {
   await editor.evaluate((element, target) => {

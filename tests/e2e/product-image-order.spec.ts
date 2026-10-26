@@ -266,20 +266,18 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
 
     createSaveNavigationPending = true;
     try {
-      await Promise.all([
-        page.getByRole("button", { name: /Zapisz/ }).click(),
-      ]);
+      await page.getByRole("button", { name: /Zapisz/ }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
+      await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
+      productPath = new URL(page.url()).pathname;
+      await expect(page.getByTestId("product-save-bar").getByRole("status"))
+        .toHaveText("Wszystkie zmiany są zapisane");
+      await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
+      await assertSubmittedGalleryOrder(page, expectedOrder.map((fixture) => fixture.name));
+      await capture(page, testInfo, "05-saved-product");
     } finally {
       createSaveNavigationPending = false;
     }
-    await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
-    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
-    productPath = new URL(page.url()).pathname;
-    await expect(page.getByTestId("product-save-bar").getByRole("status"))
-      .toHaveText("Wszystkie zmiany są zapisane");
-    await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
-    await assertSubmittedGalleryOrder(page, expectedOrder.map((fixture) => fixture.name));
-    await capture(page, testInfo, "05-saved-product");
 
     await page.reload();
     await expect(page.getByRole("heading", { name: /Edycja: E2E Image Order/ })).toBeVisible();
