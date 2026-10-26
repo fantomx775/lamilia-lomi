@@ -20,6 +20,7 @@ import {
   referencesIssue,
   readLatestResumeCheckpoint,
   releaseDeliveryLease,
+  renewDeliveryLease,
   resolveConfirmedMerge,
   repositoryFromRemote,
   summarizeGitHubChecks,
@@ -4416,6 +4417,9 @@ test("concurrent delivery workers are serialized by an expiring GitHub ref lease
   const commits = new Map();
   let sequence = 0;
   let replaceRefDuringNextPatch = null;
+  const refReadPath = "/repos/example/repo/git/ref/heads/agent-harness-locks/pr-52";
+  const refPatchPath = "/repos/example/repo/git/refs/heads/agent-harness-locks/pr-52";
+  const observedRefRequests = [];
   const client = {
     owner: "example",
     repo: "repo",
@@ -4428,13 +4432,14 @@ test("concurrent delivery workers are serialized by an expiring GitHub ref lease
         refs.set(body.ref, body.sha);
         return { ref: body.ref, object: { sha: body.sha } };
       }
-      const refPath = "/repos/example/repo/git/ref/heads/agent-harness-locks/pr-52";
-      if (path === refPath && method === "GET") {
+      if (path === refReadPath && method === "GET") {
+        observedRefRequests.push({ method, path });
         const sha = refs.get("refs/heads/agent-harness-locks/pr-52");
         if (!sha) throw new Error("GET ref failed (404): Not Found");
         return { object: { sha } };
       }
-      if (path === refPath && method === "PATCH") {
+      if (path === refPatchPath && method === "PATCH") {
+        observedRefRequests.push({ method, path });
         const body = JSON.parse(options.body);
         const commit = commits.get(body.sha);
         if (replaceRefDuringNextPatch) {
@@ -4513,12 +4518,18 @@ test("concurrent delivery workers are serialized by an expiring GitHub ref lease
   assert.ok(Date.parse(JSON.parse(latestBlob).expiresAt) <= Date.now());
 
   const oldOwner = await acquireDeliveryLease(client, 52, { nonce: "release-race-owner" });
+  const renewal = await renewDeliveryLease(client, oldOwner);
+  assert.equal(renewal.status, "PASS");
   const successorSha = "c".repeat(40);
   commits.set(successorSha, { sha: successorSha, tree: latest.tree, parents: [oldOwner.sha] });
   replaceRefDuringNextPatch = successorSha;
   const release = await releaseDeliveryLease(client, oldOwner);
   assert.equal(release.status, "BLOCKED");
   assert.equal(refs.get("refs/heads/agent-harness-locks/pr-52"), successorSha);
+  assert.ok(observedRefRequests.some((request) => request.method === "GET" && request.path === refReadPath));
+  assert.ok(observedRefRequests.some((request) => request.method === "PATCH" && request.path === refPatchPath));
+  assert.equal(observedRefRequests.some((request) => request.method === "PATCH" && request.path === refReadPath), false);
+  assert.equal(observedRefRequests.some((request) => request.method === "GET" && request.path === refPatchPath), false);
 });
 
 test("an expired worker is fenced before its next GitHub side effect", async () => {
@@ -4528,7 +4539,8 @@ test("an expired worker is fenced before its next GitHub side effect", async () 
   const commits = new Map();
   let sequence = 0;
   const refName = "refs/heads/agent-harness-locks/pr-52";
-  const refPath = "/repos/example/repo/git/ref/heads/agent-harness-locks/pr-52";
+  const refReadPath = "/repos/example/repo/git/ref/heads/agent-harness-locks/pr-52";
+  const refPatchPath = "/repos/example/repo/git/refs/heads/agent-harness-locks/pr-52";
   const client = {
     owner: "example",
     repo: "repo",
@@ -4541,12 +4553,12 @@ test("an expired worker is fenced before its next GitHub side effect", async () 
         refs.set(body.ref, body.sha);
         return {};
       }
-      if (path === refPath && method === "GET") {
+      if (path === refReadPath && method === "GET") {
         const sha = refs.get(refName);
         if (!sha) throw new Error("GET ref failed (404): Not Found");
         return { object: { sha } };
       }
-      if (path === refPath && method === "PATCH") {
+      if (path === refPatchPath && method === "PATCH") {
         const body = JSON.parse(options.body);
         const commit = commits.get(body.sha);
         const currentSha = refs.get(refName);

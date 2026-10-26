@@ -3710,6 +3710,7 @@ export async function acquireDeliveryLease(client, pullRequestNumber, {
   const number = parseIssueNumber(pullRequestNumber);
   const ref = "refs/heads/agent-harness-locks/pr-" + number;
   const apiRef = "/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/agent-harness-locks/pr-" + number;
+  const apiPatchRef = "/repos/" + client.owner + "/" + client.repo + "/git/refs/heads/agent-harness-locks/pr-" + number;
   const encodeLease = async (payload, baseTreeSha = null) => {
     const blob = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/blobs", {
       method: "POST",
@@ -3780,7 +3781,7 @@ export async function acquireDeliveryLease(client, pullRequestNumber, {
           expiresAt: new Date(now() + leaseMs).toISOString(),
           parentSha: current.object.sha,
         }, existing.commit.tree.sha);
-        await client.request(apiRef, {
+        await client.request(apiPatchRef, {
           method: "PATCH",
           body: JSON.stringify({ sha: updated.sha, force: false }),
         });
@@ -3831,6 +3832,8 @@ async function readDeliveryLease(client, lease) {
 async function advanceDeliveryLease(client, lease, payload, baseTreeSha) {
   const pullRequestNumber = lease.pullRequestNumber || Number(lease.ref.match(/pr-(\d+)$/)?.[1]);
   const apiPath = lease.apiPath || "/repos/" + client.owner + "/" + client.repo + "/git/ref/heads/" + lease.ref.replace(/^refs\/heads\//, "");
+  const patchPath = apiPath.replace("/git/ref/heads/", "/git/refs/heads/");
+  if (patchPath === apiPath) throw new Error("The delivery lease ref path could not be mapped to the GitHub PATCH endpoint.");
   const blob = await client.request("/repos/" + client.owner + "/" + client.repo + "/git/blobs", {
     method: "POST",
     body: JSON.stringify({ content: JSON.stringify(payload), encoding: "utf-8" }),
@@ -3850,7 +3853,7 @@ async function advanceDeliveryLease(client, lease, payload, baseTreeSha) {
       parents: [lease.sha],
     }),
   });
-  await client.request(apiPath, {
+  await client.request(patchPath, {
     method: "PATCH",
     body: JSON.stringify({ sha: commit.sha, force: false }),
   });
