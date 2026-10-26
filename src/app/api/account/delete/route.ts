@@ -25,8 +25,10 @@ export async function POST(request: Request) {
     const actor = await getCommunityActorForRequest();
     if (!actor) return communityJson({ ok: false, error: "unauthorized", message: "Log in before deleting your account." }, 401);
     if (!actor.emailVerified) return communityJson({ ok: false, error: "email_unverified", message: "Verify your email before deleting your account." }, 403);
-    if (!await consumeCommunityRateLimit("account-deletion", actor.userId, 1, 24 * 60 * 60)) {
-      return communityJson({ ok: false, error: "rate_limited", message: "Account deletion was recently requested. Try again later." }, 429);
+    // Allow bounded retries for transient Auth/provider failures without
+    // stranding an account for a full day after one unsuccessful attempt.
+    if (!await consumeCommunityRateLimit("account-deletion", actor.userId, 3, 15 * 60)) {
+      return communityJson({ ok: false, error: "rate_limited", message: "Please wait up to 15 minutes before trying again." }, 429);
     }
 
     if (getBackendMode() === "local") {

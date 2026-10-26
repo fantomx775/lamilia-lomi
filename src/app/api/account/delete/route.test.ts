@@ -52,9 +52,11 @@ describe("POST /api/account/delete", () => {
     expect(deleteLocalCommunityAccount).not.toHaveBeenCalled();
   });
 
-  it("uses a persistent account limit and clears the local demo session after anonymization", async () => {
+  it("bounds deletion attempts while allowing retries and clears the local demo session after anonymization", async () => {
     state.allowed = false;
-    expect((await POST(request())).status).toBe(429);
+    const limited = await POST(request());
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ message: "Please wait up to 15 minutes before trying again." });
     expect(deleteLocalCommunityAccount).not.toHaveBeenCalled();
     expect(clearDemoSession).not.toHaveBeenCalled();
 
@@ -62,7 +64,7 @@ describe("POST /api/account/delete", () => {
     const response = await POST(request());
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, cleanupQueued: true });
-    expect(consumeCommunityRateLimit).toHaveBeenCalledWith("account-deletion", state.actor!.userId, 1, 86400);
+    expect(consumeCommunityRateLimit).toHaveBeenCalledWith("account-deletion", state.actor!.userId, 3, 900);
     expect(deleteLocalCommunityAccount).toHaveBeenCalledWith(state.actor!.userId);
     expect(clearDemoSession).toHaveBeenCalledOnce();
   });
@@ -76,9 +78,11 @@ describe("POST /api/account/delete", () => {
     expect(await failed.text()).not.toContain("private provider detail");
     expect(mocks.deleteUser).toHaveBeenCalledWith(state.actor.userId);
     expect(clearDemoSession).not.toHaveBeenCalled();
+    expect(consumeCommunityRateLimit).toHaveBeenCalledWith("account-deletion", state.actor.userId, 3, 900);
 
     mocks.deleteUser.mockResolvedValueOnce({ error: null });
     expect((await POST(request())).status).toBe(200);
+    expect(consumeCommunityRateLimit).toHaveBeenCalledTimes(2);
     expect(clearDemoSession).toHaveBeenCalledOnce();
   });
 });
