@@ -37,6 +37,7 @@ alter table public.community_artwork_reports enable row level security;
 alter table public.community_artwork_report_events enable row level security;
 revoke all on public.community_artwork_reports, public.community_artwork_report_events from public, anon, authenticated;
 grant select, insert, update, delete on public.community_artwork_reports to service_role;
+revoke all on public.community_artwork_report_events from service_role;
 grant select, insert on public.community_artwork_report_events to service_role;
 grant usage, select on sequence public.community_artwork_report_events_id_seq to service_role;
 

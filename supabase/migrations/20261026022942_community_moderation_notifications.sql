@@ -29,7 +29,7 @@ create index community_moderation_email_outbox_lease_idx
   where state = 'sending';
 
 alter table public.community_moderation_email_outbox enable row level security;
-revoke all on public.community_moderation_email_outbox from public, anon, authenticated;
+revoke all on public.community_moderation_email_outbox from public, anon, authenticated, service_role;
 grant select, insert, update on public.community_moderation_email_outbox to service_role;
 
 create or replace function private.community_queue_moderation_email()
@@ -130,7 +130,7 @@ begin
   ), claimed as (
     update public.community_moderation_email_outbox outbox
     set state = 'sending', lease_token = p_lease_token, lease_expires_at = now() + interval '3 minutes',
-      attempt_count = attempt_count + 1, updated_at = now()
+      attempt_count = outbox.attempt_count + 1, updated_at = now()
     from candidates
     where outbox.moderation_event_id = candidates.moderation_event_id
     returning outbox.moderation_event_id, outbox.author_user_id, outbox.notification_type,

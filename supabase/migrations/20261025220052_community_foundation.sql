@@ -106,7 +106,7 @@ revoke all on public.community_profiles, public.community_artworks,
   from public, anon, authenticated;
 grant select, insert, update, delete on public.community_profiles,
   public.community_artworks, public.community_rate_limit_buckets to service_role;
-revoke update, delete on public.community_moderation_events from service_role;
+revoke all on public.community_moderation_events from public, anon, authenticated, service_role;
 grant select, insert on public.community_moderation_events to service_role;
 grant usage, select on sequence public.community_moderation_events_id_seq to service_role;
 
