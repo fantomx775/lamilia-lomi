@@ -6,7 +6,7 @@ import { COMMUNITY_RULES_VERSION } from "../../src/lib/community/rules";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
-test("disabled switches block real public images and mutations while preserving private deletion and withdrawal", async ({ page }, testInfo) => {
+test("disabled switches block real public images and mutations while preserving private deletion and withdrawal", async ({ page, browser }, testInfo) => {
   test.skip(process.env.RUN_COMMUNITY_FLAGS_OFF_E2E !== "1" || testInfo.project.name !== "chromium",
     "Requires the isolated Supabase HTTPS application with both community flags OFF.");
   test.setTimeout(90_000);
@@ -32,8 +32,16 @@ test("disabled switches block real public images and mutations while preserving 
     const finalized = await fixtures.service.rpc("community_finalize_upload", { p_actor_user_id: owner.id, p_idempotency_key: key, p_lease_token: lease });
     expect(finalized.error).toBeNull();
     const artworkId = finalized.data as string;
-    expect((await fixtures.service.rpc("community_moderate_artwork", { p_actor_user_id: moderator.id,
-      p_artwork_id: artworkId, p_expected_revision: 1, p_action: "approve", p_reason: null })).error).toBeNull();
+    const adminPage = await fixtures.newPage(browser);
+    await fixtures.login(adminPage, moderator, "/admin/community");
+    await expect(adminPage.getByTestId("community-moderation-page")).toBeVisible();
+    const approved = await adminPage.request.post(`${origin}/api/admin/community/artworks/${artworkId}/moderation`, {
+      headers: { Origin: origin }, data: { action: "approve", revision: 1 },
+    });
+    expect(approved.status()).toBe(200);
+    const adminQueue = await adminPage.request.get(`${origin}/api/admin/community/artworks?status=approved&productId=${book.id}`);
+    expect(adminQueue.status()).toBe(200);
+    expect((await adminQueue.json()).items.map((item: { id: string }) => item.id)).toEqual([artworkId]);
     const mediaUrl = `${origin}/api/community/artworks/${artworkId}/media`;
     expect((await page.request.get(mediaUrl)).status()).toBe(404);
     expect((await page.request.get(`${origin}/en/club/creators/cc_flags_fixture`)).status()).toBe(404);

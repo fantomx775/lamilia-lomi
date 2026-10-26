@@ -1,0 +1,10 @@
+
+Running 1 test using 1 worker
+
+(node:701807) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:701807) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › tests/e2e/community-local.spec.ts:8:5 › local demo persists a private upload and safely edits and deletes its actual file (21.3s)
+
+  1 passed (22.3s)

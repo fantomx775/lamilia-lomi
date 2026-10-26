@@ -5,7 +5,7 @@ import { essentials } from "./helpers/community-fixtures";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
-test("local demo persists a private upload and safely edits and deletes its actual file", async ({ page }, testInfo) => {
+test("local demo persists a private upload and safely edits and deletes its actual file", async ({ page, browser }, testInfo) => {
   test.skip(process.env.RUN_COMMUNITY_LOCAL_E2E !== "1" || testInfo.project.name !== "chromium",
     "Requires an explicitly isolated local-demo server with both community flags ON.");
   test.setTimeout(90_000);
@@ -14,6 +14,8 @@ test("local demo persists a private upload and safely edits and deletes its actu
   }
   const file = path.resolve("data/lamilialomi-community.local.json");
   if (await stat(file).then(() => true, () => false)) throw new Error("Preserve existing local community data; this fixture requires a clean dedicated worktree.");
+  const adminContext = await browser.newContext();
+  const adminPage = await adminContext.newPage();
   try {
     await page.goto("/en/login?returnTo=%2Fen%2Faccount");
     await page.getByLabel("Email", { exact: true }).fill("demo@lamilialomi.test");
@@ -48,11 +50,23 @@ test("local demo persists a private upload and safely edits and deletes its actu
     expect(snapshot.artworks).toHaveLength(1);
     const storedFile = path.resolve("data/.collection-media", snapshot.artworks[0].storagePath);
     expect((await stat(storedFile)).size).toBeGreaterThan(0);
+    await adminPage.goto("http://127.0.0.1:3100/en/login?returnTo=%2Fadmin%2Fcommunity");
+    await adminPage.getByLabel("Email", { exact: true }).fill("admin@lamilialomi.test");
+    await adminPage.getByLabel("Password", { exact: true }).fill("demo-password");
+    await adminPage.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(adminPage).toHaveURL("http://127.0.0.1:3100/admin/community");
+    await expect(adminPage.getByTestId("community-moderation-item")).toHaveCount(1);
+    await adminPage.getByTestId("community-moderation-approve").click();
+    await adminPage.getByTestId("community-moderation-confirm").click();
+    await expect(adminPage.getByTestId("community-count-approved")).toContainText("1");
+    await page.reload();
+    await expect(cards).toContainText("Published");
     await cards.getByTestId("community-artwork-edit-description").click();
     await cards.getByTestId("community-artwork-description").fill("Updated local garden fixture");
     await cards.getByTestId("community-artwork-save-description").click();
     await expect(page.getByRole("status").filter({ hasText: "Your description was saved" })).toBeVisible();
-    await expect(cards).toContainText("Revision 2");
+    await expect(cards).toContainText("Revision 3");
+    await expect(cards).toContainText("Pending review");
     await expect(cards).toContainText("Updated local garden fixture");
     await cards.getByTestId("community-artwork-delete").click();
     await cards.getByRole("button", { name: "Keep artwork", exact: true }).click();
@@ -63,6 +77,7 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await page.reload();
     await expect(cards).toHaveCount(0);
   } finally {
+    await adminContext.close();
     const snapshot = await readFile(file, "utf8").then((text) => JSON.parse(text), () => null);
     if (snapshot) {
       if (snapshot.profiles.length !== 1 || snapshot.profiles[0].username !== "cc_local_demo_artist") {
