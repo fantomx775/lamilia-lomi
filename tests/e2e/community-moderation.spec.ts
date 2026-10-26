@@ -125,17 +125,26 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc04-local-supabase-1";
   const runtimeErrors: string[] = [];
   const consoleErrors: string[] = [];
-  const transportFailures: Array<{ path: string; error: string | undefined }> = [];
+  const transportFailures: Array<{ path: string; error: string | undefined; phase: string }> = [];
+  let observationPhase = "fixture setup";
   const navigationAborts: Array<{ path: string; resource: string }> = [];
+  const activeQueueReads = new Set<object>();
   function observe(target: Page) {
     target.on("pageerror", (error) => runtimeErrors.push(error.message));
     target.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+    target.on("request", (request) => {
+      const url = new URL(request.url());
+      if (request.method() === "GET" && url.pathname === "/api/admin/community/artworks") activeQueueReads.add(request);
+    });
+    const settleQueueRead = (request: object) => { activeQueueReads.delete(request); };
+    target.on("requestfinished", settleQueueRead);
+    target.on("requestfailed", settleQueueRead);
     target.on("requestfailed", (request) => {
       const pathname = new URL(request.url()).pathname;
       if (request.failure()?.errorText === "net::ERR_ABORTED" && (pathname === "/en/login"
         || pathname.startsWith("/__nextjs_font/") || (request.resourceType() === "image" && pathname.startsWith("/api/community/artworks/")))) {
         navigationAborts.push({ path: pathname, resource: request.resourceType() });
-      } else transportFailures.push({ path: pathname, error: request.failure()?.errorText });
+      } else transportFailures.push({ path: pathname, error: request.failure()?.errorText, phase: observationPhase });
     });
   }
   observe(page);
@@ -158,11 +167,35 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await expect(adminPage.getByTestId("community-moderation-page")).toBeVisible();
     await expect(adminPage.getByRole("heading", { name: "Moderacja prac", exact: true })).toBeVisible();
     await expect(adminPage.getByTestId("community-moderation-item")).toHaveCount(3);
-    await adminPage.getByTestId("community-moderation-product-filter").selectOption(book.id);
+    await waitForQueueReadsToSettle();
+    await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-product-filter").selectOption(book.id), "product filter");
     await adminPage.getByTestId("community-moderation-author-filter").fill("@cc_mod_ui_artist");
-    await adminPage.getByRole("button", { name: "Filtruj", exact: true }).click();
+    await waitForQueueFetch(() => adminPage.getByRole("button", { name: "Filtruj", exact: true }).click(), "author filter");
     await expect(adminPage.getByTestId("community-moderation-item")).toHaveCount(3);
     const detail = adminPage.getByTestId("community-moderation-detail");
+    async function waitForQueueFetch(trigger: () => Promise<unknown>, label: string) {
+      observationPhase = `${label}: waiting for request`;
+      // Register before the control action so an older in-flight filter response
+      // cannot satisfy this wait. Await the body as well as the response headers.
+      const requestPromise = adminPage.waitForRequest((request) => {
+        const url = new URL(request.url());
+        return request.method() === "GET" && url.pathname === "/api/admin/community/artworks";
+      });
+      await trigger();
+      const request = await requestPromise;
+      const response = await request.response();
+      if (!response) throw new Error("The moderation queue request ended without a response.");
+      expect(await response.finished()).toBeNull();
+      expect(response.status()).toBe(200);
+      const payload = await response.json();
+      expect(payload).toMatchObject({ ok: true });
+      expect(Array.isArray(payload.items)).toBe(true);
+      await waitForQueueReadsToSettle();
+      observationPhase = `${label}: response body completed`;
+    }
+    async function waitForQueueReadsToSettle() {
+      await expect.poll(() => activeQueueReads.size, { timeout: 12_000 }).toBe(0);
+    }
     async function select(description: string) {
       await adminPage.getByTestId("community-moderation-item").filter({ hasText: description }).click();
       await expect(detail.getByText(description, { exact: true })).toBeVisible();
@@ -173,14 +206,15 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     async function apply(action: string, reason?: string) {
       await adminPage.getByTestId(`community-moderation-${action}`).click();
       if (reason !== undefined) await adminPage.getByTestId("community-moderation-reason").fill(reason);
-      await adminPage.getByTestId("community-moderation-confirm").click();
+      await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-confirm").click(), `moderate ${action}`);
       await expect(adminPage.getByTestId("community-moderation-confirm")).toHaveCount(0);
     }
     await select(rose.description);
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-pending", runId));
     await apply("approve");
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
-    await adminPage.reload();
+    observationPhase = "reload after approval";
+    await waitForQueueFetch(() => adminPage.reload(), "queue after approval reload");
     await expect(adminPage.getByTestId("community-count-approved")).toContainText("1");
     const visitor = await fixtures.newPage(browser);
     expect((await visitor.request.get(`${origin}/api/community/artworks/${rose.id}/media`)).status()).toBe(200);
@@ -192,20 +226,22 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-rejection", runId));
     await adminPage.getByTestId("community-moderation-confirm").click();
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
-    await adminPage.reload();
+    observationPhase = "reload after rejection";
+    await waitForQueueFetch(() => adminPage.reload(), "queue after rejection reload");
     await expect(adminPage.getByTestId("community-count-rejected")).toContainText("1");
     expect((await visitor.request.get(`${origin}/api/community/artworks/${coast.id}/media`)).status()).toBe(404);
     expect((await visitor.request.get(`${origin}/api/community/artworks/${cottage.id}/media`)).status()).toBe(404);
-    await adminPage.getByTestId("community-moderation-status-filter").selectOption("approved");
+    await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-status-filter").selectOption("approved"), "approved status filter");
     await select(rose.description);
     await apply("remove", "Please remove identifying information.");
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
-    await adminPage.reload();
+    await waitForQueueFetch(() => adminPage.reload(), "queue after removal reload");
     expect((await visitor.request.get(`${origin}/api/community/artworks/${rose.id}/media`)).status()).toBe(404);
-    await adminPage.getByTestId("community-moderation-status-filter").selectOption("removed");
+    await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-status-filter").selectOption("removed"), "removed status filter");
     await select(rose.description);
     await expect(adminPage.getByTestId("community-moderation-history")).toContainText("Please remove identifying information.");
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-removal-history", runId));
+    observationPhase = "owner library navigation";
     await page.goto(`${origin}/en/library/creations`);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(3);
     await expect(page.getByText("Please share your own finished colouring.", { exact: true })).toBeVisible();
@@ -216,22 +252,24 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     }
     screenshots.push(...await communityScreenshots(page, "cc04", "author-review-statuses", runId));
     await apply("restore");
-    await adminPage.getByTestId("community-moderation-status-filter").selectOption("pending");
+    await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-status-filter").selectOption("pending"), "pending status filter");
     await select(rose.description);
     expect((await page.request.patch(`${origin}/api/community/artworks/${rose.id}`, { headers: { Origin: origin },
       data: { revision: 4, description: "Revised rose garden afternoon" } })).status()).toBe(200);
     await adminPage.getByTestId("community-moderation-approve").click();
     await adminPage.getByTestId("community-moderation-confirm").click();
     await expect(adminPage.getByRole("alert").filter({ hasText: "zmieniona" })).toBeVisible();
-    await adminPage.getByRole("button", { name: "Odśwież", exact: true }).click();
+    await waitForQueueFetch(() => adminPage.getByRole("button", { name: "Odśwież", exact: true }).click(), "stale decision refresh");
     await expect(detail.getByText("Revised rose garden afternoon", { exact: true })).toBeVisible();
     await apply("approve");
     expect((await visitor.request.get(`${origin}/api/community/artworks/${rose.id}/media`)).status()).toBe(200);
     await adminPage.getByTestId("community-moderation-author-filter").fill("cc_nobody_exists");
-    await adminPage.getByRole("button", { name: "Filtruj", exact: true }).click();
+    await waitForQueueFetch(() => adminPage.getByRole("button", { name: "Filtruj", exact: true }).click(), "empty author filter");
     await expect(adminPage.getByTestId("community-moderation-item")).toHaveCount(0);
     await expect(adminPage.getByText("Brak prac w tej kolejce.", { exact: false })).toBeVisible();
+    observationPhase = "final screenshot and diagnostics";
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-empty", runId));
+    await waitForQueueReadsToSettle();
     expect(runtimeErrors).toEqual([]);
     expect(transportFailures).toEqual([]);
     // The stale-decision HTTP409 is deliberately exercised; it is expected to
