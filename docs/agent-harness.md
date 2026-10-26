@@ -384,7 +384,7 @@ response; the request is illustrative, not an exemption template):
 }
 ```
 
-The only supported expected network cancellation is an observed product-delete
+One supported expected network cancellation is an observed product-delete
 Server Action redirect refusal for curated community artwork. A
 `failedNetworkRequests` item may use `disposition: "navigation-canceled"`
 only when its `outcomeId` binds one item in
@@ -398,12 +398,50 @@ the community delete guidance; the asserted product, curated row, and curated
 image bytes must all remain preserved. The outcome kind is
 `product-deletion-refusal`; it requires `nextServerAction: true`,
 `assertionStatus: "PASS"`, and nonempty details. Matching is one-to-one and
-bounded. Other aborted requests, GETs, API paths, destinations, methods, error
-codes, and failures remain fatal. An ordinary network record containing
+bounded. Other product-delete requests, destinations, methods, error codes,
+and failures remain fatal. An ordinary network record containing
 `net::ERR_ABORTED` in its `error`, `errorText`, or `message` field fails even if
 it is labeled `unrelated`; only the exact validated product-refusal redirect
 above may use that cancellation disposition. Existing browser records may omit
 this array when they contain no `navigation-canceled` entries.
+
+Next.js may cancel an in-flight RSC request while prefetching a link or
+following a real anchor navigation. Record those cases as `next-canceled`
+items matched one-to-one with `expectedNextCancellations`. The browser record
+includes its pinned HTTPS `origin`; each outcome is bound to that origin, the
+current SHA/run, the exact captured request and page IDs, `GET`/`fetch`,
+`rsc: "1"`, and `net::ERR_ABORTED`. A prefetch is accepted only when the actual
+`next-router-prefetch: "1"` or bounded `next-router-segment-prefetch` request
+header was observed. A link cancellation also requires a trusted same-page
+anchor click, matching destination URL, and named passing assertions for the
+rendered destination. Only successful or absent response status is accepted.
+The bound is 1,000 outcomes total (maximum 900 prefetches and 100 link
+navigations). Invalid, stale, duplicate, unmatched, external, API, asset,
+image, non-GET, and HTTP error outcomes fail.
+
+A canceled login Server Action is a separate case recorded as
+`login-redirect-canceled` with one matching `expectedLoginRedirects` outcome.
+It requires the exact same-origin `POST /en/login` request with one safe
+internal `returnTo`, an actual `next-action` header, an observed response status
+of 200 or 303, the browser landing on the expected URL (path and query are
+compared while fragments are ignored), and independent account assertions:
+the fresh fixture identity was absent before submission and appears in a
+cookie-bound authenticated server account response returning 200. Credentials,
+cookies, response HTML, account identifiers, request bodies, and opaque action
+tokens are never written to the evidence. Other login methods, destinations,
+statuses, or cancellations remain fatal. Existing browser records may omit
+these arrays when no matching cancellation occurred.
+
+The Playwright `NextCancellationObserver` captures only filtered routing
+metadata and does not retain raw request headers. Call `assertDestination` and
+`assertLoginRedirect` only after asserting the rendered destination and,
+for login, cookie-bound account identity. `finish()` seals new request capture,
+waits briefly for natural request completion, then closes only its observed
+pages if necessary while retaining response/failure listeners. It fails if
+tracked requests still do not reach a terminal event within the bounded drain.
+The browser context and its request client remain open. Call `finish()` after
+the tested flow and before fixture teardown so later fixture cleanup cannot
+change the frozen evidence.
 
 Example browser evidence fields:
 

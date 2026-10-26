@@ -1788,10 +1788,10 @@ test("accepts only one-to-one current-run expected API HTTP console outcomes", (
     (candidate) => { candidate.expectedHttpOutcomes[0].id = "orphan"; },
     (candidate) => { candidate.failedNetworkRequests.push({ ...structuredClone(candidate.consoleErrors[0]), method: "POST" }); },
   ];
-  for (const mutate of invalidCases) {
+  for (const [index, mutate] of invalidCases.entries()) {
     const invalid = structuredClone(browser);
     mutate(invalid);
-    assert.notEqual(validate(invalid).status, "PASS");
+    assert.notEqual(validate(invalid).status, "PASS", `invalid mutation ${index} was accepted`);
   }
 
   const legacyUnrelated = structuredClone(browser);
@@ -1923,6 +1923,131 @@ test("accepts only the asserted same-origin community product-delete redirect ca
     reason: "The optional third-party widget host is not available in this isolated test environment.",
   });
   assert.equal(validate(unrelatedNetworkFailure).status, "PASS");
+});
+
+test("validates bounded Next RSC prefetch/link and identity-verified login cancellations", () => {
+  const screenshot = "docs/verification/pr-52/next-navigation.png";
+  const runId = "pr-52-next-navigation-run-1";
+  const origin = "https://127.0.0.1:3443";
+  const prefetchUrl = `${origin}/en/club?_rsc=abc`;
+  const linkUrl = `${origin}/en/club/creators/artist?_rsc=def`;
+  const loginUrl = `${origin}/en/login?returnTo=%2Fen%2Fclub%2Fcreators%2Fartist`;
+  const destination = `${origin}/en/club/creators/artist`;
+  const prefetch = {
+    id: "prefetch-1", kind: "next-prefetch", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "page-1", requestId: "request-1", requestUrl: prefetchUrl, requestPath: "/en/club",
+    requestMethod: "GET", resource: "fetch", sourceUrl: `${origin}/en`, rsc: "1",
+    prefetchHeader: "1", observedFailure: "net::ERR_ABORTED", responseStatus: null,
+    phase: "navigation",
+    assertionStatus: "PASS", details: "Explicit Next router prefetch canceled during the page journey.",
+  };
+  const link = {
+    id: "link-1", kind: "next-link-navigation", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "page-1", requestId: "request-2", requestUrl: linkUrl, requestPath: "/en/club/creators/artist",
+    requestMethod: "GET", resource: "fetch", sourceUrl: `${origin}/en/club`, rsc: "1",
+    observedFailure: "net::ERR_ABORTED", responseStatus: 200,
+    phase: "navigation",
+    intentId: "intent-1", trustedClick: true, intentHref: destination,
+    intentPageId: "page-1", intentSourceUrl: `${origin}/en/club`,
+    intentAt: 1_798_000_000_000, requestStartedAt: 1_798_000_000_010,
+    expectedUrl: destination, observedDestinationUrl: destination,
+    assertions: [{ name: "creator page", status: "PASS", details: "The creator heading and approved artwork list rendered." }],
+    assertionStatus: "PASS", details: "The destination rendering was asserted after the trusted link click.",
+  };
+  const login = {
+    id: "login-1", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "page-2", requestId: "request-3", requestUrl: loginUrl, requestPath: "/en/login",
+    requestMethod: "POST", resource: "fetch", nextServerAction: true, nextActionHeader: true,
+    observedFailure: "net::ERR_ABORTED", responseStatus: 303,
+    phase: "navigation",
+    expectedUrl: destination, observedDestinationUrl: destination,
+    freshFixtureIdentity: true, authenticatedServerAccount: true, accountStatus: 200,
+    assertions: [{ name: "fixture account identity", status: "PASS", details: "The current cookie-bound account response contains the new fixture identity." }],
+    assertionStatus: "PASS", details: "The real login action reached the intended destination and authenticated the fixture account.",
+  };
+  const browser = {
+    status: "PASS", tool: "Playwright", testedSha: CURRENT_SHA, runId, origin,
+    flows: ["Next navigation and verified fixture login"],
+    screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId }],
+    responsiveLayouts: ["desktop 1440px"],
+    persistence: { status: "PASS", details: "The signed-in account remained available after navigation." },
+    screenshotReview: { status: "PASS", details: "The destination page is shown in the captured browser state." },
+    retestedAfterFixes: true, consoleErrors: [],
+    failedNetworkRequests: [
+      { url: prefetchUrl, path: "/en/club", method: "GET", resource: "fetch", error: "net::ERR_ABORTED", pageId: "page-1", requestId: "request-1", disposition: "next-canceled", cancellationKind: "next-prefetch", phase: "navigation", outcomeId: prefetch.id, reason: prefetch.details },
+      { url: linkUrl, path: "/en/club/creators/artist", method: "GET", resource: "fetch", error: "net::ERR_ABORTED", pageId: "page-1", requestId: "request-2", disposition: "next-canceled", cancellationKind: "next-link-navigation", phase: "navigation", outcomeId: link.id, reason: link.details },
+      { url: loginUrl, path: "/en/login", method: "POST", resource: "fetch", error: "net::ERR_ABORTED", pageId: "page-2", requestId: "request-3", disposition: "login-redirect-canceled", nextServerAction: true, phase: "navigation", outcomeId: login.id, reason: login.details },
+    ],
+    expectedNextCancellations: [prefetch, link],
+    expectedLoginRedirects: [login],
+  };
+  const validate = (candidate) => validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: candidate }) },
+    files: ["src/app/[locale]/club/page.tsx", screenshot],
+  });
+  assert.equal(validate(browser).status, "PASS");
+
+  const invalidCases = [
+    (candidate) => { candidate.expectedNextCancellations[0].testedSha = "b".repeat(40); },
+    (candidate) => { candidate.expectedNextCancellations[0].runId = "stale-run"; },
+    (candidate) => { candidate.expectedNextCancellations[0].origin = "https://attacker.example"; },
+    (candidate) => { candidate.expectedNextCancellations[0].requestUrl = "https://attacker.example/en/club?_rsc=abc"; candidate.failedNetworkRequests[0].url = candidate.expectedNextCancellations[0].requestUrl; },
+    (candidate) => { candidate.expectedNextCancellations[0].requestPath = "/api/community/artworks"; candidate.failedNetworkRequests[0].path = "/api/community/artworks"; },
+    (candidate) => { candidate.expectedNextCancellations[0].requestMethod = "POST"; candidate.failedNetworkRequests[0].method = "POST"; },
+    (candidate) => { candidate.expectedNextCancellations[0].resource = "image"; candidate.failedNetworkRequests[0].resource = "image"; },
+    (candidate) => { candidate.expectedNextCancellations[0].rsc = "0"; },
+    (candidate) => { candidate.expectedNextCancellations[0].prefetchHeader = "true"; },
+    (candidate) => { candidate.expectedNextCancellations[0].prefetchHeader = undefined; candidate.expectedNextCancellations[0].segmentPrefetch = undefined; },
+    (candidate) => { candidate.expectedNextCancellations[0].responseStatus = 503; },
+    (candidate) => { candidate.expectedNextCancellations[1].trustedClick = false; },
+    (candidate) => { candidate.expectedNextCancellations[1].phase = "cleanup"; },
+    (candidate) => { candidate.expectedNextCancellations[1].intentHref = "https://attacker.example/en/club/creators/artist"; },
+    (candidate) => { candidate.expectedNextCancellations[1].intentId = undefined; },
+    (candidate) => { candidate.expectedNextCancellations[1].intentPageId = "another-page"; },
+    (candidate) => { candidate.expectedNextCancellations[1].intentSourceUrl = `${origin}/en/library`; },
+    (candidate) => { candidate.expectedNextCancellations[1].sourceUrl = `${origin}/en/library`; },
+    (candidate) => { candidate.expectedNextCancellations[1].requestStartedAt = candidate.expectedNextCancellations[1].intentAt + 30_001; },
+    (candidate) => { candidate.expectedNextCancellations[1].requestUrl = `${origin}/en/club/other?_rsc=def`; candidate.expectedNextCancellations[1].requestPath = "/en/club/other"; candidate.failedNetworkRequests[1].url = candidate.expectedNextCancellations[1].requestUrl; candidate.failedNetworkRequests[1].path = "/en/club/other"; },
+    (candidate) => { candidate.expectedNextCancellations[1].assertions = []; },
+    (candidate) => { candidate.expectedNextCancellations[1].observedDestinationUrl = `${origin}/en/club`; },
+    (candidate) => { candidate.expectedNextCancellations.push(structuredClone(candidate.expectedNextCancellations[0])); },
+    (candidate) => {
+      const duplicatePrefetchRequest = structuredClone(candidate.expectedNextCancellations[0]);
+      duplicatePrefetchRequest.id = "prefetch-duplicate-request";
+      candidate.expectedNextCancellations.push(duplicatePrefetchRequest);
+      candidate.failedNetworkRequests.push({ ...structuredClone(candidate.failedNetworkRequests[0]), outcomeId: duplicatePrefetchRequest.id });
+    },
+    (candidate) => {
+      candidate.expectedNextCancellations[1].requestId = "request-1";
+      candidate.failedNetworkRequests[1].requestId = "request-1";
+    },
+    (candidate) => {
+      const duplicateIntent = structuredClone(candidate.expectedNextCancellations[1]);
+      duplicateIntent.id = "link-duplicate-intent";
+      duplicateIntent.requestId = "request-4";
+      candidate.expectedNextCancellations.push(duplicateIntent);
+      candidate.failedNetworkRequests.push({ ...structuredClone(candidate.failedNetworkRequests[1]), requestId: "request-4", outcomeId: duplicateIntent.id });
+    },
+    (candidate) => { candidate.failedNetworkRequests[0].outcomeId = "orphan"; },
+    (candidate) => { delete candidate.expectedNextCancellations; },
+    (candidate) => { candidate.expectedLoginRedirects[0].responseStatus = null; },
+    (candidate) => { candidate.expectedLoginRedirects[0].responseStatus = 500; },
+    (candidate) => { candidate.expectedLoginRedirects[0].requestUrl = `${origin}/en/login?returnTo=https%3A%2F%2Fattacker.example`; candidate.failedNetworkRequests[2].url = candidate.expectedLoginRedirects[0].requestUrl; },
+    (candidate) => { candidate.expectedLoginRedirects[0].requestUrl = `${origin}/en/login?returnTo=%2Fen%2Faccount&returnTo=%2Fen%2Fclub`; candidate.failedNetworkRequests[2].url = candidate.expectedLoginRedirects[0].requestUrl; },
+    (candidate) => { candidate.expectedLoginRedirects[0].nextActionHeader = false; },
+    (candidate) => { candidate.expectedLoginRedirects[0].freshFixtureIdentity = false; },
+    (candidate) => { candidate.expectedLoginRedirects[0].accountStatus = 503; },
+    (candidate) => { candidate.expectedLoginRedirects[0].expectedUrl = `${origin}/en/account`; },
+    (candidate) => { candidate.expectedLoginRedirects[0].assertions[0].status = "FAIL"; },
+    (candidate) => { candidate.expectedLoginRedirects.push(structuredClone(candidate.expectedLoginRedirects[0])); },
+    (candidate) => { candidate.failedNetworkRequests.push({ ...structuredClone(candidate.failedNetworkRequests[0]), requestId: "different-request", url: `${origin}/_next/static/chunk.js` }); },
+  ];
+  for (const [index, mutate] of invalidCases.entries()) {
+    const invalid = structuredClone(browser);
+    mutate(invalid);
+    assert.notEqual(validate(invalid).status, "PASS", `invalid mutation ${index} was accepted`);
+  }
 });
 
 test("keeps migration and dependency release obligations blocking until each is explicit", () => {

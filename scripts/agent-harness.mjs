@@ -1859,6 +1859,198 @@ function inspectExpectedNavigationCancellations(items, cancellations, { testedSh
     : { status: "PASS", details: entries.length + " expected Server Action redirect cancellation(s) matched preserved product and media state." };
 }
 
+function safeEvidenceUrl(value, origin, { allowQuery = true, allowHash = false } = {}) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.origin === origin && !url.username && !url.password &&
+      (allowHash || !url.hash) && (allowQuery || !url.search) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizedNextTarget(value, origin) {
+  const url = safeEvidenceUrl(value, origin, { allowHash: true });
+  if (!url) return null;
+  url.hash = "";
+  url.searchParams.delete("_rsc");
+  return url.pathname + url.search;
+}
+
+function inspectExpectedNextCancellations(items, cancellations, { testedSha, runId, origin }) {
+  const entries = items.filter((item) => item?.disposition === "next-canceled");
+  if (!entries.length && cancellations === undefined) return { status: "PASS", details: "No expected Next request cancellations were recorded." };
+  if (!Array.isArray(cancellations)) return { status: "FAIL", details: "Expected Next cancellations have no structured outcomes." };
+  if (!safeEvidenceUrl(origin + "/", origin, { allowQuery: false })) return { status: "FAIL", details: "The browser evidence origin is missing or invalid." };
+  if (entries.length > 1000 || cancellations.length > 1000) return { status: "FAIL", details: "Expected Next cancellation evidence exceeds the bounded limit." };
+
+  const byId = new Map();
+  const problems = [];
+  const usedIntents = new Set();
+  const usedRequests = new Set();
+  let prefetchCount = 0;
+  let linkCount = 0;
+  for (const outcome of cancellations) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      problems.push("malformed Next cancellation outcome");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    const requestUrl = safeEvidenceUrl(outcome.requestUrl, origin);
+    const sourceUrl = safeEvidenceUrl(outcome.sourceUrl, origin, { allowHash: true });
+    const kind = outcome.kind;
+    const details = typeof outcome.details === "string" ? outcome.details.trim() : "";
+    const prefetchHeader = outcome.prefetchHeader;
+    const segmentPrefetch = outcome.segmentPrefetch;
+    const recognizedPrefetch = prefetchHeader === "1" ||
+      (typeof segmentPrefetch === "string" && segmentPrefetch.length > 0 && segmentPrefetch.length <= 512);
+    const baseValid = id && id.length <= 128 && !byId.has(id) &&
+      !usedRequests.has(outcome.requestId) &&
+      outcome.testedSha === testedSha && outcome.runId === runId && outcome.origin === origin &&
+      typeof outcome.pageId === "string" && outcome.pageId.length > 0 && outcome.pageId.length <= 128 &&
+      typeof outcome.requestId === "string" && outcome.requestId.length > 0 && outcome.requestId.length <= 128 &&
+      typeof outcome.requestUrl === "string" && outcome.requestUrl.length <= 2048 && requestUrl &&
+      typeof outcome.requestPath === "string" && outcome.requestPath === requestUrl.pathname && outcome.requestPath.length <= 512 &&
+      sourceUrl && outcome.assertionStatus === "PASS" &&
+      outcome.requestMethod === "GET" && outcome.resource === "fetch" && outcome.rsc === "1" &&
+      outcome.observedFailure === "net::ERR_ABORTED" &&
+      ["navigation", "teardown"].includes(outcome.phase) &&
+      (outcome.responseStatus === null || (Number.isInteger(outcome.responseStatus) && outcome.responseStatus >= 200 && outcome.responseStatus < 300)) &&
+      !outcome.requestPath.startsWith("/api/") && !outcome.requestPath.startsWith("/_next/image") &&
+      !/\.(?:png|jpe?g|webp|gif|svg|woff2?|css|js|mp4|webm)$/i.test(outcome.requestPath) &&
+      details && details.length <= 1000;
+    let kindValid = false;
+    if (kind === "next-prefetch") {
+      prefetchCount += 1;
+      kindValid = baseValid && recognizedPrefetch &&
+        outcome.intentId === undefined && outcome.expectedUrl === undefined && outcome.assertions === undefined;
+    } else if (kind === "next-link-navigation") {
+      linkCount += 1;
+      const expectedUrl = safeEvidenceUrl(outcome.expectedUrl, origin, { allowHash: true });
+      const observedDestinationUrl = safeEvidenceUrl(outcome.observedDestinationUrl, origin, { allowHash: true });
+      const intentHref = safeEvidenceUrl(outcome.intentHref, origin, { allowHash: true });
+      const intentSourceUrl = safeEvidenceUrl(outcome.intentSourceUrl, origin, { allowHash: true });
+      const requestTarget = normalizedNextTarget(outcome.requestUrl, origin);
+      const intentTarget = normalizedNextTarget(outcome.intentHref, origin);
+      const expectedTarget = normalizedNextTarget(outcome.expectedUrl, origin);
+      const assertions = outcome.assertions;
+      kindValid = baseValid && !recognizedPrefetch && prefetchHeader === undefined && segmentPrefetch === undefined && sourceUrl &&
+        typeof outcome.intentId === "string" && outcome.intentId.length > 0 && outcome.intentId.length <= 128 &&
+        !usedIntents.has(outcome.intentId) &&
+        outcome.intentPageId === outcome.pageId && intentSourceUrl && intentSourceUrl.href === sourceUrl.href &&
+        Number.isFinite(outcome.intentAt) && Number.isFinite(outcome.requestStartedAt) &&
+        outcome.requestStartedAt >= outcome.intentAt - 250 && outcome.requestStartedAt <= outcome.intentAt + 30_000 &&
+        outcome.trustedClick === true && intentHref && expectedUrl && observedDestinationUrl &&
+        expectedUrl.pathname === observedDestinationUrl.pathname && expectedUrl.search === observedDestinationUrl.search &&
+        requestTarget && requestTarget === intentTarget && intentTarget === expectedTarget &&
+        Array.isArray(assertions) && assertions.length > 0 && assertions.length <= 20 &&
+        assertions.every((assertion) => assertion && assertion.status === "PASS" &&
+          typeof assertion.name === "string" && assertion.name.trim() && assertion.name.length <= 200 &&
+          typeof assertion.details === "string" && assertion.details.trim() && assertion.details.length <= 1000) &&
+        outcome.assertionStatus === "PASS";
+      if (kindValid) {
+        if (kind === "next-link-navigation") usedIntents.add(outcome.intentId);
+      }
+    }
+    if (kindValid) usedRequests.add(outcome.requestId);
+    if (!kindValid) problems.push(id && byId.has(id) ? "duplicate Next cancellation outcome id" : "invalid or stale Next cancellation outcome");
+    if (id) byId.set(id, outcome);
+  }
+  if (prefetchCount > 900 || linkCount > 100) problems.push("Next cancellation evidence exceeds the per-kind bound");
+
+  const used = new Set();
+  for (const entry of entries) {
+    const id = typeof entry?.outcomeId === "string" ? entry.outcomeId.trim() : "";
+    const outcome = byId.get(id);
+    if (!id || !outcome || used.has(id) || entry.cancellationKind !== outcome.kind ||
+      entry.url !== outcome.requestUrl || entry.path !== outcome.requestPath || entry.method !== "GET" ||
+      entry.resource !== "fetch" || entry.pageId !== outcome.pageId || entry.requestId !== outcome.requestId ||
+      entry.phase !== outcome.phase ||
+      entry.error !== "net::ERR_ABORTED" || entry.reason !== outcome.details) {
+      problems.push("Next cancellation did not map one-to-one to its exact observed request");
+      continue;
+    }
+    used.add(id);
+  }
+  if (used.size !== byId.size) problems.push("Next cancellation outcomes must map one-to-one to failed requests");
+  return problems.length
+    ? { status: "FAIL", details: problems.length + " invalid expected Next cancellation(s)." }
+    : { status: "PASS", details: entries.length + " typed Next request cancellation(s) matched current-run evidence." };
+}
+
+function inspectExpectedLoginRedirects(items, redirects, { testedSha, runId, origin }) {
+  const entries = items.filter((item) => item?.disposition === "login-redirect-canceled");
+  if (!entries.length && redirects === undefined) return { status: "PASS", details: "No expected login redirect cancellations were recorded." };
+  if (!Array.isArray(redirects)) return { status: "FAIL", details: "Expected login redirects have no structured outcomes." };
+  if (!safeEvidenceUrl(origin + "/", origin, { allowQuery: false })) return { status: "FAIL", details: "The browser evidence origin is missing or invalid." };
+  if (entries.length > 10 || redirects.length > 10) return { status: "FAIL", details: "Expected login redirect evidence exceeds the bounded limit." };
+  const problems = [];
+  const byId = new Map();
+  for (const outcome of redirects) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      problems.push("malformed login redirect outcome");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    const requestUrl = safeEvidenceUrl(outcome.requestUrl, origin);
+    const expectedUrl = safeEvidenceUrl(outcome.expectedUrl, origin, { allowHash: true });
+    const destinationUrl = safeEvidenceUrl(outcome.observedDestinationUrl, origin, { allowHash: true });
+    let returnToUrl;
+    try {
+      const login = requestUrl && new URL(outcome.requestUrl);
+      const returnToValues = login?.searchParams.getAll("returnTo") ?? [];
+      if (login?.pathname === "/en/login" && returnToValues.length === 1 &&
+        ![...login.searchParams.keys()].some((key) => key !== "returnTo")) {
+        const returnTo = returnToValues[0];
+        if (returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.includes("\\")) {
+          returnToUrl = safeEvidenceUrl(new URL(returnTo, origin).href, origin);
+        }
+      }
+    } catch {
+      returnToUrl = null;
+    }
+    const assertions = outcome.assertions;
+    const details = typeof outcome.details === "string" ? outcome.details.trim() : "";
+    const valid = id && id.length <= 128 && !byId.has(id) &&
+      outcome.testedSha === testedSha && outcome.runId === runId && outcome.origin === origin &&
+      typeof outcome.pageId === "string" && outcome.pageId.length > 0 && outcome.pageId.length <= 128 &&
+      typeof outcome.requestId === "string" && outcome.requestId.length > 0 && outcome.requestId.length <= 128 &&
+      typeof outcome.requestUrl === "string" && outcome.requestUrl.length <= 2048 && requestUrl &&
+      requestUrl.pathname === "/en/login" && requestUrl.search && !requestUrl.hash && returnToUrl &&
+      outcome.requestPath === "/en/login" && outcome.requestMethod === "POST" && outcome.resource === "fetch" &&
+      outcome.nextServerAction === true && outcome.observedFailure === "net::ERR_ABORTED" &&
+      ["navigation", "teardown"].includes(outcome.phase) &&
+      [200, 303].includes(outcome.responseStatus) && outcome.nextActionHeader === true &&
+      expectedUrl && destinationUrl && expectedUrl.pathname === destinationUrl.pathname && expectedUrl.search === destinationUrl.search &&
+      returnToUrl.pathname === expectedUrl.pathname && returnToUrl.search === expectedUrl.search &&
+      outcome.freshFixtureIdentity === true && outcome.authenticatedServerAccount === true && outcome.accountStatus === 200 &&
+      outcome.assertionStatus === "PASS" && Array.isArray(assertions) && assertions.length > 0 && assertions.length <= 10 &&
+      assertions.every((assertion) => assertion && assertion.status === "PASS" &&
+        typeof assertion.name === "string" && assertion.name.trim() && assertion.name.length <= 200 &&
+        typeof assertion.details === "string" && assertion.details.trim() && assertion.details.length <= 1000) &&
+      details && details.length <= 1000;
+    if (!valid) problems.push(id && byId.has(id) ? "duplicate login redirect outcome id" : "invalid or stale login redirect outcome");
+    if (id) byId.set(id, outcome);
+  }
+  const used = new Set();
+  for (const entry of entries) {
+    const id = typeof entry?.outcomeId === "string" ? entry.outcomeId.trim() : "";
+    const outcome = byId.get(id);
+    if (!id || !outcome || used.has(id) || entry.url !== outcome.requestUrl || entry.path !== "/en/login" ||
+      entry.method !== "POST" || entry.resource !== "fetch" || entry.pageId !== outcome.pageId ||
+      entry.requestId !== outcome.requestId || entry.phase !== outcome.phase || entry.nextServerAction !== true ||
+      entry.error !== "net::ERR_ABORTED" || entry.reason !== outcome.details) {
+      problems.push("login redirect cancellation did not map one-to-one to its exact observed request");
+      continue;
+    }
+    used.add(id);
+  }
+  if (used.size !== byId.size) problems.push("login redirect outcomes must map one-to-one to failed requests");
+  return problems.length
+    ? { status: "FAIL", details: problems.length + " invalid expected login redirect(s)." }
+    : { status: "PASS", details: entries.length + " asserted login redirect cancellation(s) matched current-run identity evidence." };
+}
+
 function hasAbortedNetworkRequest(item) {
   return item && ["error", "errorText", "message"].some((key) =>
     typeof item[key] === "string" && item[key].toUpperCase().includes("NET::ERR_ABORTED"),
@@ -1913,7 +2105,19 @@ export function validateBrowserVerification({
     record.expectedNavigationCancellations,
     { testedSha, runId },
   );
-  const ordinaryNetwork = failedNetworkRequests?.filter((item) => item?.disposition !== "navigation-canceled") ?? failedNetworkRequests;
+  const expectedNextCancellations = inspectExpectedNextCancellations(
+    failedNetworkRequests ?? [],
+    record.expectedNextCancellations,
+    { testedSha, runId, origin: record.origin },
+  );
+  const expectedLoginRedirects = inspectExpectedLoginRedirects(
+    failedNetworkRequests ?? [],
+    record.expectedLoginRedirects,
+    { testedSha, runId, origin: record.origin },
+  );
+  const ordinaryNetwork = failedNetworkRequests?.filter((item) => ![
+    "navigation-canceled", "next-canceled", "login-redirect-canceled",
+  ].includes(item?.disposition)) ?? failedNetworkRequests;
   const unexpectedAbortCount = Array.isArray(ordinaryNetwork) ? ordinaryNetwork.filter(hasAbortedNetworkRequest).length : 0;
   const network = unexpectedAbortCount
     ? { status: "FAIL", details: unexpectedAbortCount + " unapproved browser network cancellation(s) were found." }
@@ -1938,6 +2142,7 @@ export function validateBrowserVerification({
     record.retestedAfterFixes === true &&
     console.status === "PASS" &&
     network.status === "PASS" && expectedNavigationCancellations.status === "PASS" &&
+    expectedNextCancellations.status === "PASS" && expectedLoginRedirects.status === "PASS" &&
     pageErrorsValid;
   const failures = [];
   if (!screenshotsValid) failures.push("screenshots must be listed in the PR files and bound to the current-SHA browser run ID");
@@ -1948,6 +2153,8 @@ export function validateBrowserVerification({
   if (console.status !== "PASS") failures.push(console.details);
   if (network.status !== "PASS") failures.push(network.details);
   if (expectedNavigationCancellations.status !== "PASS") failures.push(expectedNavigationCancellations.details);
+  if (expectedNextCancellations.status !== "PASS") failures.push(expectedNextCancellations.details);
+  if (expectedLoginRedirects.status !== "PASS") failures.push(expectedLoginRedirects.details);
   if (!pageErrorsValid) failures.push("browser page errors are present or malformed");
   if (record.status !== "PASS" || !record.tool || !record.flows?.length) {
     failures.push("browser tool, affected flow, or PASS result is missing");
@@ -1955,7 +2162,9 @@ export function validateBrowserVerification({
   return {
     status: valid
       ? "PASS"
-      : record.status === "FAIL" || console.status === "FAIL" || network.status === "FAIL"
+      : record.status === "FAIL" || console.status === "FAIL" || network.status === "FAIL" ||
+        expectedNavigationCancellations.status === "FAIL" || expectedNextCancellations.status === "FAIL" ||
+        expectedLoginRedirects.status === "FAIL"
         ? "FAIL"
         : record.status === "NOT RUN"
           ? "NOT RUN"
