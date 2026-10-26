@@ -48,6 +48,20 @@ INSERT INTO public.user_product_unlocks (user_id, product_id) VALUES
   ('85000000-0000-4000-8000-000000000002', '85111111-1111-4111-8111-111111111111'),
   ('85000000-0000-4000-8000-000000000004', '85222222-2222-4222-8222-222222222222'),
   ('85000000-0000-4000-8000-000000000001', '85333333-3333-4333-8333-333333333333');
+-- Keep unrelated durable queues from other disposable-DB journeys out of the
+-- worker claims. The enclosing transaction restores their original schedules.
+UPDATE public.community_moderation_email_outbox
+SET next_attempt_at=now()+interval '1 day'
+WHERE state='pending';
+UPDATE public.community_moderation_email_outbox
+SET lease_expires_at=now()+interval '1 day'
+WHERE state='sending';
+UPDATE public.community_account_media_cleanup_jobs
+SET not_before=greatest(not_before, now()+interval '1 day'), next_attempt_at=now()+interval '1 day'
+WHERE state='pending';
+UPDATE public.community_account_media_cleanup_jobs
+SET lease_expires_at=now()+interval '1 day'
+WHERE state='sending';
 
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='public.community_artwork_reports'::regclass), 'reports have RLS enabled');
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='public.community_artwork_report_events'::regclass), 'report history has RLS enabled');
@@ -60,7 +74,10 @@ SELECT ok(NOT has_table_privilege('anon', 'public.community_moderation_email_out
 SELECT ok(NOT has_table_privilege('anon', 'public.community_account_media_cleanup_jobs', 'SELECT,INSERT,UPDATE,DELETE') AND NOT has_table_privilege('authenticated', 'public.community_account_media_cleanup_jobs', 'SELECT,INSERT,UPDATE,DELETE'), 'account cleanup ledger is inaccessible through the Data API');
 SELECT ok(NOT has_table_privilege('anon', 'public.community_product_deletion_markers', 'SELECT,INSERT,UPDATE,DELETE') AND NOT has_table_privilege('authenticated', 'public.community_product_deletion_markers', 'SELECT,INSERT,UPDATE,DELETE'), 'product deletion markers are inaccessible through the Data API');
 SELECT ok(has_table_privilege('service_role', 'public.community_artwork_reports', 'SELECT,INSERT,UPDATE,DELETE'), 'service role can process private reports');
-SELECT ok(has_table_privilege('service_role', 'public.community_moderation_email_outbox', 'SELECT,INSERT,UPDATE,DELETE'), 'service role can process the outbox');
+SELECT ok(has_table_privilege('service_role', 'public.community_moderation_email_outbox', 'SELECT')
+  AND has_table_privilege('service_role', 'public.community_moderation_email_outbox', 'INSERT')
+  AND has_table_privilege('service_role', 'public.community_moderation_email_outbox', 'UPDATE')
+  AND NOT has_table_privilege('service_role', 'public.community_moderation_email_outbox', 'DELETE'), 'service role can process the outbox without deleting delivery history');
 SELECT ok(has_table_privilege('service_role', 'public.community_account_media_cleanup_jobs', 'SELECT,INSERT,UPDATE,DELETE'), 'service role can process the cleanup ledger');
 SELECT ok(NOT has_function_privilege('anon', 'public.community_create_artwork_report(uuid,uuid,text,text)', 'EXECUTE') AND NOT has_function_privilege('authenticated', 'public.community_create_artwork_report(uuid,uuid,text,text)', 'EXECUTE') AND has_function_privilege('service_role', 'public.community_create_artwork_report(uuid,uuid,text,text)', 'EXECUTE'), 'report mutation is server-only');
 SELECT ok(NOT has_function_privilege('anon', 'public.community_update_artwork_report(uuid,uuid,integer,text)', 'EXECUTE') AND NOT has_function_privilege('authenticated', 'public.community_update_artwork_report(uuid,uuid,integer,text)', 'EXECUTE') AND has_function_privilege('service_role', 'public.community_update_artwork_report(uuid,uuid,integer,text)', 'EXECUTE'), 'report moderation is server-only');
@@ -86,6 +103,10 @@ SELECT 'report_artwork', public.community_create_pending_artwork(
   'community/85000000-0000-4000-8000-000000000001/85100000-0000-4000-8000-000000000001',
   'supabase', 'image/webp', 800, 'A reportable artwork', '85100000-0000-4000-8000-000000000001');
 SELECT is(public.community_moderate_artwork('85000000-0000-4000-8000-000000000003', (SELECT id FROM cc85_ids WHERE key='report_artwork'), 1, 'approve', null), 2, 'moderator publishes the report target');
+UPDATE public.community_moderation_email_outbox
+SET state='sent', provider_message_id='setup-only'
+WHERE moderation_event_id=(SELECT event.id FROM public.community_moderation_events event
+  WHERE event.artwork_id=(SELECT id FROM cc85_ids WHERE key='report_artwork') AND event.to_status='approved');
 
 -- A verified reporter need not join the Club or unlock the book.
 INSERT INTO cc85_ids (key, id)
@@ -107,7 +128,7 @@ DELETE FROM auth.users WHERE id='85000000-0000-4000-8000-000000000005';
 SET LOCAL ROLE service_role;
 SELECT ok((SELECT reporter_user_id IS NULL AND details = '' FROM public.community_artwork_reports WHERE id=(SELECT id FROM cc85_ids WHERE key='report_id')), 'Auth deletion anonymizes a nonmember reporter and clears their report text');
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.community_artwork_report_events WHERE report_id=(SELECT id FROM cc85_ids WHERE key='report_id') AND actor_user_id='85000000-0000-4000-8000-000000000005'), 'Auth deletion removes nonmember reporter event identities');
-SELECT is(public.community_update_artwork_report('85000000-0000-4000-8000-000000000003',(SELECT id FROM cc85_ids WHERE key='report_id'),1,'resolve'), 2, 'administrator can resolve the anonymized report');
+SELECT is(public.community_update_artwork_report('85000000-0000-4000-8000-000000000003',(SELECT id FROM cc85_ids WHERE key='report_id'),2,'resolve'), 3, 'administrator can resolve the anonymized report at its incremented revision');
 UPDATE public.community_artwork_reports SET retention_expires_at=now()-interval '1 minute' WHERE id=(SELECT id FROM cc85_ids WHERE key='report_id');
 SELECT is(public.community_purge_expired_report_details(10), 1, 'retention purge selects pre-anonymized reports with later admin event identities');
 SELECT ok(NOT EXISTS (SELECT 1 FROM public.community_artwork_report_events WHERE report_id=(SELECT id FROM cc85_ids WHERE key='report_id') AND actor_user_id IS NOT NULL), '30-day purge scrubs retained event actor links even when report identity was already null');
