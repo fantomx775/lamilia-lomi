@@ -195,6 +195,20 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await privacyEditor.press("Control+A");
     await page.getByRole("button", { name: "Pogrubienie" }).click();
     await expect(privacyEditor.locator("strong")).toHaveText("Privacy content copied from a normal text editor.");
+    const selectionAfterBold = await privacyEditor.evaluate(async (element) => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const selection = window.getSelection();
+      return {
+        active: document.activeElement === element,
+        selectedText: selection?.toString() ?? "",
+        insideEditor: Boolean(selection?.anchorNode && element.contains(selection.anchorNode)),
+      };
+    });
+    expect(selectionAfterBold).toEqual({
+      active: true,
+      selectedText: "Privacy content copied from a normal text editor.",
+      insideEditor: true,
+    });
     await privacyEditor.press("Control+C");
     const copiedHtml = await page.evaluate(async () => {
       const items = await navigator.clipboard.read();
@@ -202,11 +216,22 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
       return htmlItem ? htmlItem.getType("text/html").then((blob) => blob.text()) : "";
     });
     expect(copiedHtml).toContain("<strong");
+    expect(copiedHtml).toContain("Privacy content copied from a normal text editor.");
     await privacyEditor.press("End");
+    const caretAtEnd = await privacyEditor.evaluate((element) => {
+      const selection = window.getSelection();
+      return {
+        active: document.activeElement === element,
+        collapsed: Boolean(selection?.isCollapsed),
+        insideEditor: Boolean(selection?.anchorNode && element.contains(selection.anchorNode)),
+      };
+    });
+    expect(caretAtEnd).toEqual({ active: true, collapsed: true, insideEditor: true });
     await privacyEditor.press("Enter");
+    await expect(privacyEditor.locator("p")).toHaveCount(2);
     await privacyEditor.press("Control+V");
-    await expect(privacyEditor).toContainText("Privacy content copied from a normal text editor.");
     await expect(privacyEditor.locator("strong")).toHaveCount(2);
+    await expect(privacyEditor.locator("strong").nth(1)).toHaveText("Privacy content copied from a normal text editor.");
     await privacyEditor.press("Control+A");
     await page.getByRole("button", { name: "Kursywa" }).click();
     await expect(privacyEditor.locator("em")).toHaveCount(2);

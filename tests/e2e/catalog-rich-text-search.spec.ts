@@ -37,6 +37,9 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     }>,
     failedResponses: [] as Array<{ method: string; url: string; status: number }>,
   };
+  const readerArtworkRequests = new Set<import("@playwright/test").Request>();
+  const readerArtworkStatuses = new Map<import("@playwright/test").Request, number>();
+  let readerArtworkEndpoint = "";
   fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
 
   page.on("console", (message) => {
@@ -53,8 +56,24 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
       isNavigationRequest: request.isNavigationRequest(),
       hasNextActionHeader: Boolean(request.headers()["next-action"]),
     });
+    if (request.method() === "GET" && new URL(request.url()).pathname === readerArtworkEndpoint) {
+      readerArtworkRequests.delete(request);
+    }
+  });
+  page.on("request", (request) => {
+    if (readerArtworkEndpoint && request.method() === "GET" && new URL(request.url()).pathname === readerArtworkEndpoint) {
+      readerArtworkRequests.add(request);
+    }
+  });
+  page.on("requestfinished", (request) => {
+    if (request.method() === "GET" && new URL(request.url()).pathname === readerArtworkEndpoint) {
+      readerArtworkRequests.delete(request);
+    }
   });
   page.on("response", (response) => {
+    if (response.request().method() === "GET" && new URL(response.url()).pathname === readerArtworkEndpoint) {
+      readerArtworkStatuses.set(response.request(), response.status());
+    }
     if (response.status() >= 400) {
       diagnostics.failedResponses.push({
         method: response.request().method(),
@@ -75,8 +94,13 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     const firstProductLink = page.locator('a[href^="/admin/products/"]:not([href="/admin/products/new"])').first();
     const productPath = await firstProductLink.getAttribute("href");
     if (!productPath) throw new Error("The local product list did not provide an edit link.");
+    readerArtworkEndpoint = `/api/admin/products/${productPath.split("/").at(-1)}/reader-artworks`;
     await page.goto(productPath);
     await waitForDocumentFonts(page);
+    const readerArtworkManager = page.getByTestId("reader-artwork-manager");
+    await expect(readerArtworkManager.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
+    await expect.poll(() => readerArtworkRequests.size).toBe(0);
+    expect([...readerArtworkStatuses.values()].some((status) => status === 200)).toBe(true);
 
     const productSlug = await page.getByLabel("Adres produktu").inputValue();
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
@@ -99,6 +123,9 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await page.getByRole("button", { name: /Zapisz/ }).first().click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
     await saveActionFinished;
+    await expect(readerArtworkManager.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
+    await expect.poll(() => readerArtworkRequests.size).toBe(0);
+    expect([...readerArtworkStatuses.values()].every((status) => status === 200)).toBe(true);
 
     await page.goto(`/en/products?q=${encodeURIComponent("split phrase")}`);
     await waitForDocumentFonts(page);
