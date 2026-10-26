@@ -71,10 +71,12 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await signInAsAdmin(page);
 
     await page.goto("/admin/products");
+    await waitForDocumentFonts(page);
     const firstProductLink = page.locator('a[href^="/admin/products/"]:not([href="/admin/products/new"])').first();
     const productPath = await firstProductLink.getAttribute("href");
     if (!productPath) throw new Error("The local product list did not provide an edit link.");
     await page.goto(productPath);
+    await waitForDocumentFonts(page);
 
     const productSlug = await page.getByLabel("Adres produktu").inputValue();
     const productEditor = page.getByRole("textbox", { name: "Długi opis" });
@@ -92,13 +94,14 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
 
     await page.goto(`/en/products?q=${encodeURIComponent("split phrase")}`);
+    await waitForDocumentFonts(page);
     const grid = page.getByTestId("product-catalog-grid");
     await expect(grid.locator(`a[href="/en/products/${productSlug}"]`)).toBeVisible();
     await expect(page.getByText("No products found", { exact: true })).toHaveCount(0);
-    await page.evaluate(() => document.fonts.ready.then(() => undefined));
     await page.screenshot({ path: screenshotPath, fullPage: true, animations: "disabled" });
 
     await page.goto(`/en/products?q=${encodeURIComponent("metadata-only")}`);
+    await waitForDocumentFonts(page);
     await expect(page.getByText("No products found", { exact: true })).toBeVisible();
 
     console.log(
@@ -133,12 +136,17 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
 
 async function signInAsAdmin(page: Page) {
   await page.goto("/en/login?returnTo=/admin");
+  await waitForDocumentFonts(page);
   await page.getByLabel("Email").fill("admin@lamilialomi.test");
   await page.getByLabel("Password").fill("demo-password");
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
     page.getByRole("button", { name: "Continue" }).click(),
   ]);
+}
+
+async function waitForDocumentFonts(page: Page) {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
 }
 
 function safeUrl(value: string) {

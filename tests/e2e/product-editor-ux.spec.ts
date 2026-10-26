@@ -111,7 +111,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
 
     await withExpectedNavigation(browserDiagnostics, "initial post-create editor hydration", async () => {
       await page.getByRole("button", { name: /Zapisz/ }).click();
-      await expect(page.getByText(/^(Zapisano\. Zmiany są aktualne\.|Zapisano zmiany\.)$/)).toBeVisible();
+      await expect(page.getByText(/^(Zapisano\. Zmiany są aktualne\.|Zapisano zmiany\.|Zmiany produktu zostały zapisane\.)$/)).toBeVisible();
       await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
       productPath = new URL(page.url()).pathname;
       createdProductId = productPath.split("/").at(-1)!;
