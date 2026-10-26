@@ -19,10 +19,10 @@ describe("community artwork reports", () => {
     await user.click(screen.getByTestId("community-artwork-report-open"));
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(document.body.style.overflow).toBe("hidden");
-    await user.click(screen.getByLabelText("Dane osobowe lub prywatność"));
+    await user.click(screen.getByLabelText("Personal information or privacy"));
     await user.type(screen.getByTestId("community-artwork-report-details"), "Please review the background.");
     await user.click(screen.getByTestId("community-artwork-report-submit"));
-    expect(await screen.findByTestId("community-artwork-report-message")).toHaveTextContent("trafiło do zespołu moderacji");
+    expect(await screen.findByTestId("community-artwork-report-message")).toHaveTextContent("sent to the moderation team");
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(document.body.style.overflow).toBe("");
   });
@@ -30,6 +30,6 @@ describe("community artwork reports", () => {
   it("offers sign-in and contact routes to guests without an anonymous report endpoint", () => {
     render(<CommunityArtworkReport artworkId="22222222-2222-4222-8222-222222222222" access="guest" returnTo="/en/club/artworks/22222222-2222-4222-8222-222222222222" />);
     expect(screen.getByTestId("community-artwork-report-login")).toHaveAttribute("href", expect.stringContaining("returnTo="));
-    expect(screen.getByRole("link", { name: "formularz kontaktowy" })).toHaveAttribute("href", "/en/contact");
+    expect(screen.getByRole("link", { name: "contact form" })).toHaveAttribute("href", "/en/contact");
   });
 });

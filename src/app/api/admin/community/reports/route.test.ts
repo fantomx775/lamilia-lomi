@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), update: vi.fn() }));
 vi.mock("@/lib/community/repository", () => ({ listCommunityReports: mocks.list, updateCommunityReport: mocks.update }));
-import { GET, POST } from "./route";
+import { GET } from "./route";
+import { POST } from "./[id]/route";
 
 const id = "22222222-2222-4222-8222-222222222222";
 const context = { params: Promise.resolve({ id }) };
