@@ -89,7 +89,11 @@ describe.skipIf(process.env.RUN_COMMUNITY_SUPABASE_TESTS !== "1")("community rea
         const ids = userIds.map((id) => `'${id}'::uuid`).join(",");
         execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0",
           "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
-          input: `BEGIN; DELETE FROM public.community_moderation_events WHERE artwork_id IN
+          input: `BEGIN;
+            DELETE FROM public.community_moderation_email_outbox WHERE moderation_event_id IN
+              (SELECT id FROM public.community_moderation_events WHERE artwork_id IN
+                (SELECT id FROM public.community_artworks WHERE author_id IN (${ids})));
+            DELETE FROM public.community_moderation_events WHERE artwork_id IN
             (SELECT id FROM public.community_artworks WHERE author_id IN (${ids}));
             DELETE FROM public.community_artworks WHERE author_id IN (${ids}); COMMIT;`,
           stdio: ["pipe", "pipe", "pipe"],
