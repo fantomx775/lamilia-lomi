@@ -25,7 +25,13 @@ export type CommunityPublicArtwork = {
   contentType: CommunityImageContentType;
   description: string;
   publishedAt: string;
+  likesCount: number;
+  likedByMe: boolean;
 };
+
+export type CommunityArtworkSort = "latest" | "popular";
+export type CommunityHeartAccess = "guest" | "verify" | "join" | "member";
+export type CommunityHeartResult = { available: boolean; liked: boolean; likesCount: number };
 
 /** Owner-only projection. It intentionally contains no email, auth ID, or storage path. */
 export type CommunityOwnerArtwork = {

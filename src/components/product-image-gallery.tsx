@@ -5,6 +5,7 @@ import type { PointerEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
+import type { ReactNode } from "react";
 
 export type ProductGalleryImage = {
   id: string;
@@ -13,6 +14,7 @@ export type ProductGalleryImage = {
   caption: string | null;
   unoptimized: boolean;
   captionHref?: string;
+  thumbnailAction?: ReactNode;
 };
 
 export type ProductImageGalleryLabels = {
@@ -136,7 +138,8 @@ export function ProductImageGallery({
       <div className={thumbnailGridClassName} data-testid={layout === "reader-artworks" ? "reader-artwork-grid" : undefined}>
         {visibleImages.map((image, index) => (
           <figure key={image.id} className="group">
-            <button
+            <div className="relative">
+              <button
               type="button"
               aria-label={
                 index === thumbnailLimit - 1 && imageCount > thumbnailLimit
@@ -174,7 +177,9 @@ export function ProductImageGallery({
                   <Maximize2 className="size-4" strokeWidth={1.7} />
                 </span>
               </span>
-            </button>
+              </button>
+              {image.thumbnailAction ? <div className="absolute bottom-3 right-3 z-10">{image.thumbnailAction}</div> : null}
+            </div>
             {image.caption ? (
               <figcaption className={`mt-3 min-w-0 px-1 text-sm leading-6 text-[var(--color-muted)] ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
                 {image.captionHref ? <Link href={image.captionHref} className="font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">{image.caption}</Link> : image.caption}

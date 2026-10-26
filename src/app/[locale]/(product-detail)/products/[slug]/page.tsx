@@ -35,7 +35,7 @@ import {
 import { getLocalizedProductDetailViewForRequest } from "@/lib/products-request";
 import type { LocalizedProductView } from "@/lib/types";
 import { getCommunityFlags } from "@/lib/community-flags";
-import { listCommunityPublicArtworks } from "@/lib/community/repository";
+import { getCommunityHeartContext, listCommunityPublicArtworks } from "@/lib/community/repository";
 import { getDemoSession } from "@/lib/session.server";
 
 type Props = {
@@ -260,8 +260,9 @@ export default async function ProductPage({ params, searchParams }: Props) {
 
   const communityFlags = getCommunityFlags();
   const communitySession = communityFlags.uploadsEnabled ? await getDemoSession() : null;
+  const heartContext = communityFlags.publicEnabled ? await getCommunityHeartContext() : { access: "guest" as const };
   const communityArtworksPage = communityFlags.publicEnabled
-    ? await listCommunityPublicArtworks({ productId: product.id, limit: 5 }).catch(() => ({ items: [], nextCursor: null }))
+    ? await listCommunityPublicArtworks({ productId: product.id, limit: 5, viewer: heartContext.access === "member" ? heartContext.actor : undefined }).catch(() => ({ items: [], nextCursor: null }))
     : { items: [], nextCursor: null };
   const communityArtworks = communityArtworksPage.items.slice(0, 4);
 
@@ -401,7 +402,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
           )}
         </div>
       ) : null}
-      <ReaderArtworkGallery artworks={product.readerArtworks} communityArtworks={communityArtworks} productSlug={product.slug} communityEnabled={communityFlags.publicEnabled} />
+      <ReaderArtworkGallery artworks={product.readerArtworks} communityArtworks={communityArtworks} productSlug={product.slug} communityEnabled={communityFlags.publicEnabled} heartAccess={heartContext.access} />
 
       {product.publicDownloads.length ? (
         <section aria-labelledby="public-downloads-title" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">

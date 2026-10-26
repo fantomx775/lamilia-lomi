@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { CommunityAvatar } from "@/components/community/community-avatar";
-import type { CommunityPage, CommunityPublicArtwork, CommunityPublicProductOption } from "@/lib/community/types";
+import { CommunityHeartControl } from "@/components/community/community-heart-control";
+import type { CommunityHeartAccess, CommunityPage, CommunityPublicArtwork, CommunityPublicProductOption } from "@/lib/community/types";
 
 const PAGE_SIZE = 24;
 
@@ -14,14 +15,19 @@ export function CommunityGallery({
   products,
   initialAudience = "",
   initialProductId = "",
+  initialSort = "latest",
+  heartAccess = "guest",
 }: {
   initialPage: CommunityPage<CommunityPublicArtwork>;
   products: CommunityPublicProductOption[];
   initialAudience?: string;
   initialProductId?: string;
+  initialSort?: "latest" | "popular";
+  heartAccess?: CommunityHeartAccess;
 }) {
   const [audience, setAudience] = useState(initialAudience);
   const [productId, setProductId] = useState(initialProductId);
+  const [sort, setSort] = useState(initialSort);
   const [page, setPage] = useState(initialPage);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -35,7 +41,7 @@ export function CommunityGallery({
     filterController.current?.abort();
     const controller = new AbortController();
     filterController.current = controller;
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE), sort: "latest" });
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), sort });
     if (audience) params.set("audience", audience);
     if (productId) params.set("productId", productId);
     fetch(`/api/community/artworks?${params}`, { signal: controller.signal, cache: "no-store" })
@@ -47,7 +53,7 @@ export function CommunityGallery({
       .catch((cause: unknown) => { if (requestGeneration.current === generation && !(cause instanceof DOMException && cause.name === "AbortError")) setError(true); })
       .finally(() => { if (requestGeneration.current === generation) setLoading(false); });
     return () => controller.abort();
-  }, [filterKey, audience, productId]);
+  }, [filterKey, audience, productId, sort]);
 
   function changeFilters(nextAudience: string, nextProductId: string) {
     requestGeneration.current += 1;
@@ -55,6 +61,7 @@ export function CommunityGallery({
     const params = new URLSearchParams();
     if (nextAudience) params.set("audience", nextAudience);
     if (nextProductId) params.set("productId", nextProductId);
+    if (sort !== "latest") params.set("sort", sort);
     const query = params.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
     setPage({ items: [], nextCursor: null });
@@ -65,19 +72,42 @@ export function CommunityGallery({
     setFilterKey((key) => key + 1);
   }
 
+  function changeSort(nextSort: "latest" | "popular") {
+    if (nextSort === sort) return;
+    requestGeneration.current += 1;
+    filterController.current?.abort();
+    const params = new URLSearchParams();
+    if (audience) params.set("audience", audience);
+    if (productId) params.set("productId", productId);
+    if (nextSort !== "latest") params.set("sort", nextSort);
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    setPage({ items: [], nextCursor: null });
+    setLoading(true);
+    setError(false);
+    setSort(nextSort);
+    setFilterKey((key) => key + 1);
+  }
+
   async function loadMore() {
     if (!page.nextCursor || loading) return;
     const generation = requestGeneration.current;
     setLoading(true);
     setError(false);
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE), sort: "latest", cursor: page.nextCursor });
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), sort, cursor: page.nextCursor });
     if (audience) params.set("audience", audience);
     if (productId) params.set("productId", productId);
     try {
       const response = await fetch(`/api/community/artworks?${params}`, { cache: "no-store" });
       if (!response.ok) throw new Error("Gallery unavailable");
       const nextPage = await response.json() as { ok: true } & CommunityPage<CommunityPublicArtwork>;
-      if (requestGeneration.current === generation) setPage((current) => ({ items: [...current.items, ...nextPage.items], nextCursor: nextPage.nextCursor }));
+      if (requestGeneration.current === generation) setPage((current) => {
+        const knownIds = new Set(current.items.map((item) => item.id));
+        return {
+          items: [...current.items, ...nextPage.items.filter((item) => !knownIds.has(item.id))],
+          nextCursor: nextPage.nextCursor,
+        };
+      });
     } catch {
       if (requestGeneration.current === generation) setError(true);
     } finally {
@@ -101,14 +131,14 @@ export function CommunityGallery({
       </label>
       <label className="grid min-w-36 flex-1 gap-1.5 text-sm font-medium text-[var(--color-ink)]">
         Sort by
-        <select data-testid="community-gallery-sort" className={selectClass} value="latest" disabled>
-          <option value="latest">Newest first</option>
+        <select data-testid="community-gallery-sort" className={selectClass} value={sort} onChange={(event) => changeSort(event.target.value as "latest" | "popular")}>
+          <option value="latest">Newest first</option><option value="popular">Most loved</option>
         </select>
       </label>
     </div>
     {error && page.items.length ? <p className="mb-4 rounded-md bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error)]" role="alert">More artwork could not be loaded. Your current gallery is still here. Try loading more again.</p> : null}
     {loading && !page.items.length ? <p className="py-10 text-center text-sm text-[var(--color-muted)]" aria-live="polite">Loading approved artwork…</p> : error && !page.items.length ? <div className="rounded-xl border border-[var(--color-border)] bg-white/75 px-5 py-9 text-center" role="alert"><h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">The gallery could not be updated</h2><p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Please try again in a moment.</p><button type="button" onClick={() => { setLoading(true); setError(false); setFilterKey((key) => key + 1); }} className="mt-4 min-h-10 rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-semibold">Try again</button></div> : page.items.length ? <ul data-testid="community-artwork-grid" aria-busy={loading} className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">
-      {page.items.map((artwork) => <li key={artwork.id}><CommunityArtworkCard artwork={artwork} /></li>)}
+      {page.items.map((artwork) => <li key={artwork.id}><CommunityArtworkCard artwork={artwork} heartAccess={heartAccess} /></li>)}
     </ul> : <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-white/60 px-5 py-12 text-center" data-testid="community-gallery-empty-state">
       <h2 className="font-serif text-2xl font-semibold text-[var(--color-ink)]">No approved artwork here yet</h2>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[var(--color-muted)]">Try a different book or audience, or come back as more community creations are approved.</p>
@@ -120,12 +150,15 @@ export function CommunityGallery({
   </>;
 }
 
-export function CommunityArtworkCard({ artwork }: { artwork: CommunityPublicArtwork }) {
+export function CommunityArtworkCard({ artwork, heartAccess = "guest" }: { artwork: CommunityPublicArtwork; heartAccess?: CommunityHeartAccess }) {
   const detailHref = `/en/club/artworks/${artwork.id}`;
   return <article data-testid="community-artwork-card" className="h-full overflow-hidden rounded-xl border border-[var(--color-border)] bg-white shadow-sm">
-    <Link href={detailHref} aria-label={`View artwork by @${artwork.creator.username}`} className="group relative block aspect-[4/5] overflow-hidden bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--color-terracotta)]">
-      <Image src={`/api/community/artworks/${artwork.id}/media`} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} fill unoptimized loading="lazy" sizes="(max-width: 639px) 48vw, (max-width: 1023px) 46vw, 24vw" className="object-contain transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transition-none" />
-    </Link>
+    <div className="relative">
+      <Link href={detailHref} aria-label={`View artwork by @${artwork.creator.username}`} className="group relative block aspect-[4/5] overflow-hidden bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--color-terracotta)]">
+        <Image src={`/api/community/artworks/${artwork.id}/media`} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} fill unoptimized loading="lazy" sizes="(max-width: 639px) 48vw, (max-width: 1023px) 46vw, 24vw" className="object-contain transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transition-none" />
+      </Link>
+      <div className="absolute bottom-2 right-2"><CommunityHeartControl artworkId={artwork.id} likesCount={artwork.likesCount} likedByMe={artwork.likedByMe} access={heartAccess} compact /></div>
+    </div>
     <div className="grid gap-2 p-3 sm:gap-3 sm:p-4">
       {artwork.description ? <p className="line-clamp-2 min-h-[2.5rem] break-words text-sm leading-5 text-[var(--color-ink)]">{artwork.description}</p> : <p className="min-h-[2.5rem] text-sm text-[var(--color-muted)]">A coloring-club creation</p>}
       <div className="flex min-w-0 items-center gap-2">

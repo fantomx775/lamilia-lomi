@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 
 import { CommunityGallery } from "@/components/community/community-gallery";
 import { getCommunityFlags } from "@/lib/community-flags";
-import { listCommunityPublicArtworks, listCommunityPublicProductOptions } from "@/lib/community/repository";
+import { getCommunityHeartContext, listCommunityPublicArtworks, listCommunityPublicProductOptions } from "@/lib/community/repository";
 import type { CommunityAudience } from "@/lib/community/types";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +28,9 @@ export default async function ColoringClubPage({ params, searchParams }: Props) 
   if (locale !== "en" || !getCommunityFlags().publicEnabled) notFound();
   const audienceValue = one(query.audience);
   const requestedProductId = one(query.productId);
+  const sortValue = one(query.sort);
+  const sort = sortValue === "popular" ? "popular" : "latest";
+  const heartContext = await getCommunityHeartContext();
   const products = await listCommunityPublicProductOptions();
   const productId = requestedProductId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedProductId)
     && products.some((product) => product.id.toLowerCase() === requestedProductId.toLowerCase())
@@ -36,7 +39,9 @@ export default async function ColoringClubPage({ params, searchParams }: Props) 
   const initialPage = await listCommunityPublicArtworks({
     audience: audienceValue === "kids" || audienceValue === "adults" ? audienceValue as CommunityAudience : undefined,
     productId,
+    sort,
     limit: 24,
+    viewer: heartContext.access === "member" ? heartContext.actor : undefined,
   });
   const uploadsEnabled = getCommunityFlags().uploadsEnabled;
   return <div className="mx-auto min-h-[60vh] max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8" data-testid="community-gallery-page">
@@ -48,7 +53,7 @@ export default async function ColoringClubPage({ params, searchParams }: Props) 
       </div>
       {uploadsEnabled ? <Link data-testid="community-gallery-share" href="/en/library/creations" className="inline-flex min-h-11 items-center justify-center rounded-md bg-[var(--color-terracotta)] px-5 text-sm font-semibold text-white hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">Share your art</Link> : null}
     </div>
-    <CommunityGallery initialPage={initialPage} products={products} initialAudience={audienceValue === "kids" || audienceValue === "adults" ? audienceValue : ""} initialProductId={productId ?? ""} />
+    <CommunityGallery initialPage={initialPage} products={products} initialAudience={audienceValue === "kids" || audienceValue === "adults" ? audienceValue : ""} initialProductId={productId ?? ""} initialSort={sort} heartAccess={heartContext.access} />
   </div>;
 }
 

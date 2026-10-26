@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   store: vi.fn(),
   read: vi.fn(),
   listPublic: vi.fn(),
+  heartContext: vi.fn(),
   order: [] as string[],
 }));
 
@@ -45,6 +46,7 @@ vi.mock("@/lib/community/repository", () => ({
   processCommunityArtworkCleanup: mocks.processCleanup,
   scheduleCommunityArtworkUploadCleanup: mocks.scheduleCleanup,
   listCommunityPublicArtworks: mocks.listPublic,
+  getCommunityHeartContext: mocks.heartContext,
 }));
 vi.mock("@/lib/media-r2-config", () => ({ getMediaUploadProvider: mocks.getMediaUploadProvider }));
 
@@ -186,25 +188,32 @@ describe("community public gallery API", () => {
     vi.clearAllMocks();
     mocks.getCommunityFlags.mockReturnValue({ uploadsEnabled: false, publicEnabled: true });
     mocks.listPublic.mockResolvedValue({ items: [{ id: "safe-artwork" }], nextCursor: null });
+    mocks.heartContext.mockResolvedValue({ access: "guest" });
   });
 
-  it("returns a bounded safe page using only latest, audience, product and timestamp cursor filters", async () => {
+  it("returns a bounded safe page using latest, audience, and product filters", async () => {
     const response = await GET(new Request(`http://localhost/api/community/artworks?audience=kids&productId=${productId}&sort=latest&limit=2`));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(await response.json()).toEqual({ ok: true, items: [{ id: "safe-artwork" }], nextCursor: null });
-    expect(mocks.listPublic).toHaveBeenCalledWith({ audience: "kids", productId, cursor: null, limit: 2 });
+    expect(await response.json()).toEqual({ ok: true, items: [{ id: "safe-artwork" }], nextCursor: null, heartAccess: "guest" });
+    expect(mocks.listPublic).toHaveBeenCalledWith({ audience: "kids", productId, cursor: null, limit: 2, sort: "latest", viewer: undefined });
   });
 
   it("accepts the opaque microsecond-preserving continuation cursor", async () => {
     const cursor = encodeCommunityTimestampCursor("2026-10-25T12:00:00.123456+00:00", "99999999-9999-4999-8999-999999999999");
     const response = await GET(new Request(`http://localhost/api/community/artworks?cursor=${cursor}`));
     expect(response.status).toBe(200);
-    expect(mocks.listPublic).toHaveBeenCalledWith({ audience: undefined, productId: undefined, cursor, limit: 24 });
+    expect(mocks.listPublic).toHaveBeenCalledWith({ audience: undefined, productId: undefined, cursor, limit: 24, sort: "latest", viewer: undefined });
   });
 
-  it("rejects unsupported sorting, duplicated or unknown parameters, malformed cursors and unbounded limits", async () => {
-    for (const query of ["sort=popular", "audience=kids&audience=adults", "debug=true", "limit=49", "cursor=bad"]) {
+  it("accepts popular sorting with a sort-specific cursor and rejects malformed filters", async () => {
+    const { encodeCommunityPopularCursor } = await import("@/lib/community/cursor");
+    const cursor = encodeCommunityPopularCursor(4, "2026-10-25T12:00:00.123456Z", "99999999-9999-4999-8999-999999999999");
+    const popular = await GET(new Request(`http://localhost/api/community/artworks?sort=popular&cursor=${cursor}`));
+    expect(popular.status).toBe(200);
+    expect(mocks.listPublic).toHaveBeenCalledWith({ audience: undefined, productId: undefined, cursor, limit: 24, sort: "popular", viewer: undefined });
+    mocks.listPublic.mockClear();
+    for (const query of ["audience=kids&audience=adults", "debug=true", "limit=49", "cursor=bad", `sort=latest&cursor=${cursor}`]) {
       const response = await GET(new Request(`http://localhost/api/community/artworks?${query}`));
       expect(response.status).toBe(400);
     }

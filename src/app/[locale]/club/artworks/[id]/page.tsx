@@ -4,8 +4,9 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { CommunityAvatar } from "@/components/community/community-avatar";
+import { CommunityHeartControl } from "@/components/community/community-heart-control";
 import { getCommunityFlags } from "@/lib/community-flags";
-import { getCommunityPublicArtwork } from "@/lib/community/repository";
+import { getCommunityHeartContext, getCommunityPublicArtwork } from "@/lib/community/repository";
 import type { Locale } from "@/i18n/routing";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +33,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function CommunityArtworkPage({ params }: Props) {
   const { locale, id } = await params;
   if (locale !== "en" || !getCommunityFlags().publicEnabled) notFound();
-  const artwork = await getCommunityPublicArtwork(id);
+  const heartContext = await getCommunityHeartContext();
+  const artwork = await getCommunityPublicArtwork(id, heartContext.access === "member" ? heartContext.actor : undefined);
   if (!artwork) notFound();
   return <div data-testid="community-artwork-detail" className="mx-auto min-h-[60vh] max-w-7xl px-4 py-7 sm:px-6 sm:py-10 lg:px-8">
     <Link href="/en/club" className="inline-flex min-h-10 items-center rounded-md px-3 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">← Back to Coloring Club</Link>
@@ -48,6 +50,7 @@ export default async function CommunityArtworkPage({ params }: Props) {
           <div><p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">Colored by</p><Link data-testid="community-artwork-creator" href={`/en/club/creators/${encodeURIComponent(artwork.creator.username)}`} className="font-semibold text-[var(--color-ink)] underline underline-offset-4">@{artwork.creator.username}</Link></div>
         </div>
         <time className="mt-5 block text-sm text-[var(--color-muted)]" dateTime={artwork.publishedAt}>Shared {new Intl.DateTimeFormat("en", { dateStyle: "long" }).format(new Date(artwork.publishedAt))}</time>
+        <div className="mt-5"><CommunityHeartControl artworkId={artwork.id} likesCount={artwork.likesCount} likedByMe={artwork.likedByMe} access={heartContext.access} returnTo={`/en/club/artworks/${artwork.id}`} /></div>
         <div className="mt-7 border-t border-[var(--color-border)] pt-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">From this book</p>
           <Link data-testid="community-artwork-book" href={`/en/products/${encodeURIComponent(artwork.product.slug)}`} className="mt-2 block rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-4 hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">

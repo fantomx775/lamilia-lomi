@@ -11,12 +11,15 @@ import {
 } from "./local-store";
 import type { CommunityUploadCleanupCandidate, CommunityUploadReservationInput } from "./local-store";
 import * as supabase from "./supabase-adapter";
-import { CommunityAuthorizationError, CommunityValidationError } from "./errors";
+import { CommunityAuthorizationError, CommunityRateLimitError, CommunityValidationError } from "./errors";
+import { COMMUNITY_RULES_VERSION } from "./rules";
 import type {
   CommunityAudience,
   CommunityAdminProductOption,
   CommunityArtworkStatus,
+  CommunityArtworkSort,
   CommunityCreateArtworkInput,
+  CommunityHeartAccess,
   CommunityPage,
   CommunityProfileInput,
   CommunityPublicArtwork,
@@ -36,19 +39,21 @@ export async function listCommunityPublicArtworks(input: {
   productId?: string;
   limit?: number;
   cursor?: string | null;
+  sort?: CommunityArtworkSort;
+  viewer?: CommunityActor;
 } = {}): Promise<CommunityPage<CommunityPublicArtwork>> {
   if (!getCommunityFlags().publicEnabled) return { items: [], nextCursor: null };
   const limit = boundedLimit(input.limit);
   if (getBackendMode() === "local") {
-    return localStore.listPublicArtworks({ ...input, limit, products: getContentSnapshot().products });
+    return localStore.listPublicArtworks({ ...input, viewerUserId: input.viewer?.userId, limit, products: getContentSnapshot().products });
   }
-  return supabase.listPublicArtworks({ ...input, limit });
+  return supabase.listPublicArtworks({ ...input, viewerUserId: input.viewer?.userId, limit });
 }
 
-export async function getCommunityPublicArtwork(id: string) {
+export async function getCommunityPublicArtwork(id: string, viewer?: CommunityActor) {
   if (!getCommunityFlags().publicEnabled || !isUuid(id)) return null;
-  if (getBackendMode() === "local") return localStore.getPublicArtwork(id, getContentSnapshot().products);
-  return supabase.getPublicArtwork(id);
+  if (getBackendMode() === "local") return localStore.getPublicArtwork(id, getContentSnapshot().products, viewer?.userId);
+  return supabase.getPublicArtwork(id, viewer?.userId);
 }
 
 export async function listCommunityPublicProductOptions(): Promise<CommunityPublicProductOption[]> {
@@ -59,19 +64,42 @@ export async function listCommunityPublicProductOptions(): Promise<CommunityPubl
   return supabase.listPublicProductOptions(200);
 }
 
-export async function getCommunityPublicCreator(username: string) {
+export async function getCommunityPublicCreator(username: string, viewer?: CommunityActor) {
   if (!getCommunityFlags().publicEnabled) return null;
   if (getBackendMode() === "local") {
     try {
-      return await localStore.getPublicCreator(username, getContentSnapshot().products);
+      return await localStore.getPublicCreator(username, getContentSnapshot().products, 24, viewer?.userId);
     } catch {
       return null;
     }
   }
   const normalized = normalizeUsername(username);
   if (!normalized) return null;
-  const result = await supabase.getPublicCreator(normalized, 24);
+  const result = await supabase.getPublicCreator(normalized, 24, viewer?.userId);
   return result ? { username: result.creator.username, avatarSeed: result.creator.avatarSeed, artworks: result.artworks } : null;
+}
+
+/** Resolves safe public interaction state from the verified session and private profile. */
+export async function getCommunityHeartContext(): Promise<{ access: CommunityHeartAccess; actor?: CommunityActor }> {
+  const actor = await getCommunityActorForRequest();
+  if (!actor) return { access: "guest" };
+  if (!actor.emailVerified) return { access: "verify" };
+  const profile = actor.backend === "local" ? await localStore.getProfile(actor) : await supabase.getOwnerProfile(actor);
+  const active = Boolean(profile?.isAdult && profile.adultAttestedAt && profile.optedInAt
+    && !profile.participationRevokedAt && !profile.suspendedAt && profile.rulesVersion === COMMUNITY_RULES_VERSION);
+  return active ? { access: "member", actor } : { access: "join" };
+}
+
+export async function setCommunityArtworkLike(artworkId: string, liked: boolean) {
+  if (!getCommunityFlags().publicEnabled) throw new CommunityAuthorizationError("Coloring Club reactions are unavailable.");
+  const actor = await getCommunityActorForRequest();
+  if (!actor || !actor.emailVerified) throw new CommunityAuthorizationError("A verified account is required.");
+  if (!isUuid(artworkId) || typeof liked !== "boolean") throw new CommunityValidationError();
+  if (!await consumeCommunityRateLimit("artwork-heart", actor.userId, 120, 60 * 60)) {
+    throw new CommunityRateLimitError();
+  }
+  if (actor.backend === "local") return localStore.setArtworkLike(actor, artworkId, liked, getContentSnapshot().products);
+  return supabase.setArtworkLike(actor, artworkId, liked);
 }
 
 export async function getMyCommunityProfile() {

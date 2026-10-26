@@ -5,10 +5,11 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
 import { CommunityAvatar } from "@/components/community/community-avatar";
+import { CommunityHeartControl } from "@/components/community/community-heart-control";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { Locale } from "@/i18n/routing";
 import { getCommunityFlags } from "@/lib/community-flags";
-import { getCommunityPublicCreator } from "@/lib/community/repository";
+import { getCommunityHeartContext, getCommunityPublicCreator } from "@/lib/community/repository";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -38,7 +39,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 export default async function CreatorProfilePage({ params }: PageProps) {
   const { locale, username } = await params;
   if (locale !== "en" || !getCommunityFlags().publicEnabled) notFound();
-  const creator = await getCreatorForRequest(username);
+  const heartContext = await getCommunityHeartContext();
+  const creator = await getCommunityPublicCreator(username, heartContext.access === "member" ? heartContext.actor : undefined);
   if (!creator) notFound();
 
   return (
@@ -61,9 +63,12 @@ export default async function CreatorProfilePage({ params }: PageProps) {
                   <li key={artwork.id}>
                     <Card className="h-full shadow-none">
                       <CardContent className="grid h-full content-start gap-3 p-3 sm:p-4">
-                        <Link href={`/${locale}/club/artworks/${artwork.id}`} className="relative block aspect-[4/5] overflow-hidden rounded-lg bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" aria-label={`View artwork${artwork.description ? `: ${artwork.description}` : ""}`}>
-                          <Image src={`/api/community/artworks/${artwork.id}/media`} alt={artwork.description ? `Coloring by @${creator.username}: ${artwork.description}` : `Coloring by @${creator.username}`} fill unoptimized loading="lazy" sizes="(max-width: 639px) 90vw, (max-width: 1023px) 45vw, 30vw" className="object-cover" />
-                        </Link>
+                        <div className="relative">
+                          <Link href={`/${locale}/club/artworks/${artwork.id}`} className="relative block aspect-[4/5] overflow-hidden rounded-lg bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" aria-label={`View artwork${artwork.description ? `: ${artwork.description}` : ""}`}>
+                            <Image src={`/api/community/artworks/${artwork.id}/media`} alt={artwork.description ? `Coloring by @${creator.username}: ${artwork.description}` : `Coloring by @${creator.username}`} fill unoptimized loading="lazy" sizes="(max-width: 639px) 90vw, (max-width: 1023px) 45vw, 30vw" className="object-cover" />
+                          </Link>
+                          <div className="absolute bottom-2 right-2"><CommunityHeartControl artworkId={artwork.id} likesCount={artwork.likesCount} likedByMe={artwork.likedByMe} access={heartContext.access} returnTo={`/${locale}/club/creators/${encodeURIComponent(creator.username)}`} compact /></div>
+                        </div>
                         <h3 className="line-clamp-2 break-words font-serif text-lg font-semibold text-[var(--color-ink)]">
                           <Link href={`/${locale}/club/artworks/${artwork.id}`} className="hover:underline">{artwork.description || `Artwork for ${artwork.product.title}`}</Link>
                         </h3>

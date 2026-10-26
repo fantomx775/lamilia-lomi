@@ -4,7 +4,7 @@ import { createServiceRoleClient } from "../supabase/admin";
 import { buildCommunityStoragePath, hashCommunityRateLimitKey } from "./local-store";
 import { CommunityAuthorizationError, mapCommunityDatabaseError } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
-import { decodeCommunityTimestampCursor, encodeCommunityTimestampCursor } from "./cursor";
+import { decodeCommunityPopularCursor, decodeCommunityTimestampCursor, encodeCommunityPopularCursor, encodeCommunityTimestampCursor } from "./cursor";
 import type { CommunityActor } from "./session";
 import type {
   CommunityAdminArtwork,
@@ -22,7 +22,7 @@ import type {
 } from "./types";
 import type { CommunityUploadReservationInput } from "./local-store";
 
-const PUBLIC_ARTWORK_SELECT = "id,product_id,content_type,description,published_at,community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username,avatar_seed,is_adult,opted_in_at,participation_revoked_at,suspended_at,rules_version),products!inner(id,slug,audience,status,product_translations!inner(locale,title))";
+const PUBLIC_ARTWORK_SELECT = "id,product_id,content_type,description,published_at,likes_count,community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username,avatar_seed,is_adult,opted_in_at,participation_revoked_at,suspended_at,rules_version),products!inner(id,slug,audience,status,product_translations!inner(locale,title))";
 const OWNER_ARTWORK_SELECT = "id,product_id,content_type,description,status,revision,moderation_reason,created_at,updated_at,products(id,slug,audience,status,product_translations(locale,title))";
 const ADMIN_ARTWORK_SELECT = `${OWNER_ARTWORK_SELECT},community_profiles(username)`;
 
@@ -33,8 +33,12 @@ export async function listPublicArtworks(input: {
   productId?: string;
   limit: number;
   cursor?: string | null;
+  sort?: "latest" | "popular";
+  viewerUserId?: string;
 }): Promise<CommunityPage<CommunityPublicArtwork>> {
-  const cursor = decodeCommunityTimestampCursor(input.cursor);
+  const sort = input.sort ?? "latest";
+  const latestCursor = sort === "latest" ? decodeCommunityTimestampCursor(input.cursor) : null;
+  const popularCursor = sort === "popular" ? decodeCommunityPopularCursor(input.cursor) : null;
   const client = createServiceRoleClient();
   let query = client.from("community_artworks")
     .select(PUBLIC_ARTWORK_SELECT)
@@ -50,18 +54,25 @@ export async function listPublicArtworks(input: {
     .eq("community_profiles.rules_version", COMMUNITY_RULES_VERSION);
   if (input.productId) query = query.eq("product_id", input.productId);
   if (input.audience) query = query.eq("products.audience", input.audience);
-  if (cursor) query = query.or(`published_at.lt.${cursor.timestamp},and(published_at.eq.${cursor.timestamp},id.lt.${cursor.id})`);
-  const { data, error } = await query
-    .order("published_at", { ascending: false })
-    .order("id", { ascending: false })
-    .limit(input.limit + 1);
+  if (latestCursor) query = query.or(`published_at.lt.${latestCursor.timestamp},and(published_at.eq.${latestCursor.timestamp},id.lt.${latestCursor.id})`);
+  if (popularCursor) query = query.or(`likes_count.lt.${popularCursor.likesCount},and(likes_count.eq.${popularCursor.likesCount},published_at.lt.${popularCursor.timestamp}),and(likes_count.eq.${popularCursor.likesCount},published_at.eq.${popularCursor.timestamp},id.lt.${popularCursor.id})`);
+  query = sort === "popular"
+    ? query.order("likes_count", { ascending: false }).order("published_at", { ascending: false }).order("id", { ascending: false })
+    : query.order("published_at", { ascending: false }).order("id", { ascending: false });
+  const { data, error } = await query.limit(input.limit + 1);
   if (error) throw new Error("Community gallery read failed.");
   const rows = (data ?? []) as unknown as Row[];
-  const items = rows.slice(0, input.limit).map(mapPublicArtwork);
+  const pageRows = rows.slice(0, input.limit);
+  const likedIds = await getLikedArtworkIds(input.viewerUserId, pageRows);
+  const items = pageRows.map((row) => mapPublicArtwork(row, likedIds.has(String(row.id))));
   const last = items.at(-1);
   return {
     items,
-    nextCursor: rows.length > input.limit && last ? encodeCommunityTimestampCursor(last.publishedAt, last.id) : null,
+    nextCursor: rows.length > input.limit && last
+      ? sort === "popular"
+        ? encodeCommunityPopularCursor(last.likesCount, last.publishedAt, last.id)
+        : encodeCommunityTimestampCursor(last.publishedAt, last.id)
+      : null,
   };
 }
 
@@ -84,7 +95,7 @@ export async function listPublicProductOptions(limit = 200) {
   });
 }
 
-export async function getPublicArtwork(id: string): Promise<CommunityPublicArtwork | null> {
+export async function getPublicArtwork(id: string, viewerUserId?: string): Promise<CommunityPublicArtwork | null> {
   const client = createServiceRoleClient();
   const { data, error } = await client.from("community_artworks")
     .select(PUBLIC_ARTWORK_SELECT)
@@ -101,10 +112,13 @@ export async function getPublicArtwork(id: string): Promise<CommunityPublicArtwo
     .eq("community_profiles.rules_version", COMMUNITY_RULES_VERSION)
     .maybeSingle();
   if (error) throw new Error("Community artwork read failed.");
-  return data ? mapPublicArtwork(data as unknown as Row) : null;
+  if (!data) return null;
+  const row = data as unknown as Row;
+  const likedIds = await getLikedArtworkIds(viewerUserId, [row]);
+  return mapPublicArtwork(row, likedIds.has(id));
 }
 
-export async function getPublicCreator(username: string, limit: number): Promise<{
+export async function getPublicCreator(username: string, limit: number, viewerUserId?: string): Promise<{
   creator: CommunityPublicCreator;
   artworks: CommunityPublicArtwork[];
 } | null> {
@@ -137,9 +151,11 @@ export async function getPublicCreator(username: string, limit: number): Promise
     .order("id", { ascending: false })
     .limit(limit);
   if (error) throw new Error("Community creator artwork read failed.");
+  const rows = (data ?? []) as unknown as Row[];
+  const likedIds = await getLikedArtworkIds(viewerUserId, rows);
   return {
     creator: { username: String(profile.username), avatarSeed: String(profile.avatar_seed) },
-    artworks: ((data ?? []) as unknown as Row[]).map(mapPublicArtwork),
+    artworks: rows.map((row) => mapPublicArtwork(row, likedIds.has(String(row.id)))),
   };
 }
 
@@ -473,13 +489,39 @@ export async function consumeRateLimit(scope: string, identifier: string, maxHit
   });
 }
 
+export async function setArtworkLike(actor: CommunityActor, artworkId: string, liked: boolean) {
+  const result = await rpc("community_set_artwork_like", {
+    p_actor_user_id: actor.userId,
+    p_artwork_id: artworkId,
+    p_liked: liked,
+  });
+  if (!result || typeof result !== "object") throw new Error("Community operation failed.");
+  const value = result as Record<string, unknown>;
+  if (typeof value.available !== "boolean" || typeof value.liked !== "boolean"
+    || !Number.isSafeInteger(value.likesCount) || Number(value.likesCount) < 0) {
+    throw new Error("Community operation failed.");
+  }
+  return { available: value.available, liked: value.liked, likesCount: Number(value.likesCount) };
+}
+
+async function getLikedArtworkIds(viewerUserId: string | undefined, rows: Row[]) {
+  if (!viewerUserId || rows.length === 0) return new Set<string>();
+  const ids = rows.map((row) => String(row.id));
+  const { data, error } = await createServiceRoleClient().from("community_artwork_likes")
+    .select("artwork_id")
+    .eq("user_id", viewerUserId)
+    .in("artwork_id", ids);
+  if (error) throw new Error("Community reaction state could not be loaded.");
+  return new Set(((data ?? []) as unknown as Row[]).map((row) => String(row.artwork_id)));
+}
+
 async function rpc(name: string, args: Record<string, unknown>) {
   const { data, error } = await createServiceRoleClient().rpc(name, args as never);
   if (error) throw mapCommunityDatabaseError(error.code ?? "");
   return data;
 }
 
-function mapPublicArtwork(row: Row): CommunityPublicArtwork {
+function mapPublicArtwork(row: Row, likedByMe = false): CommunityPublicArtwork {
   const product = one(row.products);
   const profile = one(row.community_profiles);
   const translation = list(product.product_translations).find((candidate) => candidate.locale === "en");
@@ -495,6 +537,8 @@ function mapPublicArtwork(row: Row): CommunityPublicArtwork {
     contentType: row.content_type as CommunityPublicArtwork["contentType"],
     description: String(row.description ?? ""),
     publishedAt: String(row.published_at),
+    likesCount: Number.isSafeInteger(Number(row.likes_count)) ? Math.max(0, Number(row.likes_count)) : 0,
+    likedByMe,
   };
 }
 

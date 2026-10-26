@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({
       contentType: "image/png",
       description: "A quiet garden in bloom",
       publishedAt: "2026-10-25T12:00:00.000Z",
+      likesCount: 4,
+      likedByMe: false,
     }],
   } as null | {
     username: string;
@@ -24,6 +26,8 @@ const state = vi.hoisted(() => ({
       contentType: string;
       description: string;
       publishedAt: string;
+      likesCount: number;
+      likedByMe: boolean;
     }>;
   },
 }));
@@ -37,6 +41,7 @@ vi.mock("@/lib/community-flags", () => ({
 }));
 vi.mock("@/lib/community/repository", () => ({
   getCommunityPublicCreator: vi.fn(async () => state.creator),
+  getCommunityHeartContext: vi.fn(async () => ({ access: "guest" })),
 }));
 
 import CreatorProfilePage, { generateMetadata } from "./page";

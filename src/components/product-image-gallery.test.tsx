@@ -181,6 +181,8 @@ describe("ProductImageGallery", () => {
       contentType: "image/webp",
       description: "A bright spring page",
       publishedAt: "2026-10-25T12:00:00.000Z",
+      likesCount: 3,
+      likedByMe: false,
     };
     render(<ReaderArtworkGallery artworks={[{ id: "curated-id", displayName: "Mira", description: "Blue flowers", sortOrder: 1, src: "/curated.webp" }]} communityArtworks={[communityArtwork]} productSlug="spring-flowers" />);
     expect(screen.getAllByRole("heading", { name: "Colored by Our Readers" })).toHaveLength(1);

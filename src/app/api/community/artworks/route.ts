@@ -26,8 +26,9 @@ import { storeCommunityArtworkImage, readCommunityArtworkImage } from "@/lib/com
 import { CommunityAuthorizationError, CommunityConflictError, CommunityRateLimitError, CommunityValidationError } from "@/lib/community/errors";
 import { getMediaUploadProvider } from "@/lib/media-r2-config";
 import { listCommunityPublicArtworks } from "@/lib/community/repository";
-import { decodeCommunityTimestampCursor } from "@/lib/community/cursor";
+import { decodeCommunityPopularCursor, decodeCommunityTimestampCursor } from "@/lib/community/cursor";
 import type { CommunityAudience } from "@/lib/community/types";
+import { getCommunityHeartContext } from "@/lib/community/repository";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,19 +55,22 @@ export async function GET(request: Request) {
   const limit = limitValue === null ? 24 : /^\d{1,2}$/.test(limitValue) ? Number(limitValue) : Number.NaN;
   if ((audienceValue !== null && audienceValue !== "kids" && audienceValue !== "adults")
     || (productId !== null && !UUID_PATTERN.test(productId))
-    || sort !== "latest"
-    || (cursor !== null && !decodeCommunityTimestampCursor(cursor))
+    || (sort !== "latest" && sort !== "popular")
+    || (cursor !== null && !(sort === "popular" ? decodeCommunityPopularCursor(cursor) : decodeCommunityTimestampCursor(cursor)))
     || !Number.isSafeInteger(limit) || limit < 1 || limit > 48) {
     return communityJson({ ok: false, error: "invalid_input", message: "Check the gallery filters." }, 400);
   }
   try {
+    const context = await getCommunityHeartContext();
     const page = await listCommunityPublicArtworks({
       audience: (audienceValue ?? undefined) as CommunityAudience | undefined,
       productId: productId?.toLowerCase(),
+      sort,
       cursor,
       limit,
+      viewer: context.access === "member" ? context.actor : undefined,
     });
-    return communityJson({ ok: true, ...page });
+    return communityJson({ ok: true, ...page, heartAccess: context.access });
   } catch {
     return communityJson({ ok: false, error: "unavailable", message: "The Coloring Club gallery could not be loaded." }, 503);
   }

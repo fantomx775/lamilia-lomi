@@ -2,11 +2,13 @@ import { ProductImageGallery } from "@/components/product-image-gallery";
 import Link from "next/link";
 import type { PublicReaderArtwork } from "@/lib/types";
 import type { CommunityPublicArtwork } from "@/lib/community/types";
+import { CommunityHeartControl } from "@/components/community/community-heart-control";
+import type { CommunityHeartAccess } from "@/lib/community/types";
 
-export function ReaderArtworkGallery({ artworks, communityArtworks = [], productSlug, communityEnabled = false }: { artworks: PublicReaderArtwork[]; communityArtworks?: CommunityPublicArtwork[]; productSlug?: string; communityEnabled?: boolean }) {
+export function ReaderArtworkGallery({ artworks, communityArtworks = [], productSlug, communityEnabled = false, heartAccess = "guest" }: { artworks: PublicReaderArtwork[]; communityArtworks?: CommunityPublicArtwork[]; productSlug?: string; communityEnabled?: boolean; heartAccess?: CommunityHeartAccess }) {
   if (!artworks.length && !communityArtworks.length && !communityEnabled) return null;
   const curatedImages = artworks.map((item) => ({ id: item.id, path: item.src, alt: item.description || `Colored by ${item.displayName}`, caption: `Colored by ${item.displayName}`, unoptimized: true }));
-  const communityImages = communityArtworks.map((item) => ({ id: `community-${item.id}`, path: `/api/community/artworks/${item.id}/media`, alt: item.description ? `Colored by @${item.creator.username}: ${item.description}` : `Colored by @${item.creator.username}`, caption: `Colored by @${item.creator.username}`, captionHref: `/en/club/creators/${encodeURIComponent(item.creator.username)}`, unoptimized: true }));
+  const communityImages = communityArtworks.map((item) => ({ id: `community-${item.id}`, path: `/api/community/artworks/${item.id}/media`, alt: item.description ? `Colored by @${item.creator.username}: ${item.description}` : `Colored by @${item.creator.username}`, caption: `Colored by @${item.creator.username}`, captionHref: `/en/club/creators/${encodeURIComponent(item.creator.username)}`, thumbnailAction: <CommunityHeartControl artworkId={item.id} likesCount={item.likesCount} likedByMe={item.likedByMe} access={heartAccess} returnTo={`/en/products/${encodeURIComponent(productSlug ?? item.product.slug)}`} compact />, unoptimized: true }));
   const images = [...curatedImages, ...communityImages];
   return <section aria-labelledby="reader-artwork-title" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
     <div className="mx-auto max-w-2xl text-center"><h2 id="reader-artwork-title" className="font-serif text-3xl font-semibold tracking-tight">Colored by Our Readers</h2><p className="mt-3 text-[var(--color-muted)]">A little inspiration from our creative community.</p></div>

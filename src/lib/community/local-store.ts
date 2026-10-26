@@ -8,6 +8,7 @@ import type {
   CommunityAdminArtwork,
   CommunityAdminProductOption,
   CommunityArtworkStatus,
+  CommunityArtworkSort,
   CommunityAudience,
   CommunityCreateArtworkInput,
   CommunityImageContentType,
@@ -18,6 +19,7 @@ import type {
   CommunityPublicArtwork,
   CommunityPublicProduct,
   CommunityPublicProductOption,
+  CommunityHeartResult,
   CommunityStorageProvider,
 } from "./types";
 import type { Product } from "../types";
@@ -28,7 +30,7 @@ import {
   CommunityValidationError,
 } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
-import { decodeCommunityTimestampCursor, encodeCommunityTimestampCursor } from "./cursor";
+import { decodeCommunityPopularCursor, decodeCommunityTimestampCursor, encodeCommunityPopularCursor, encodeCommunityTimestampCursor } from "./cursor";
 
 export {
   CommunityAuthorizationError,
@@ -115,6 +117,8 @@ type LocalModerationEvent = {
   createdAt: string;
 };
 
+type LocalArtworkLike = { artworkId: string; userId: string; createdAt: string };
+
 type LocalRateBucket = { windowStartedAt: number; hitCount: number };
 
 type LocalSnapshot = {
@@ -122,6 +126,7 @@ type LocalSnapshot = {
   profiles: LocalProfile[];
   artworks: LocalArtwork[];
   moderationEvents: LocalModerationEvent[];
+  artworkLikes: LocalArtworkLike[];
   rateLimitBuckets: Record<string, LocalRateBucket>;
   uploadReservations: LocalUploadReservation[];
 };
@@ -235,6 +240,7 @@ export class CommunityLocalStore {
       if (!profile || profile.participationRevokedAt) return false;
       profile.participationRevokedAt = this.now().toISOString();
       profile.updatedAt = profile.participationRevokedAt;
+      snapshot.artworkLikes = snapshot.artworkLikes.filter((like) => like.userId !== actor.userId);
       return true;
     });
   }
@@ -579,25 +585,40 @@ export class CommunityLocalStore {
     productId?: string;
     limit?: number;
     cursor?: string | null;
+    sort?: CommunityArtworkSort;
+    viewerUserId?: string;
   }): Promise<CommunityPage<CommunityPublicArtwork>> {
     const limit = boundedLimit(input.limit);
-    const cursor = decodeCommunityTimestampCursor(input.cursor);
+    const sort = input.sort ?? "latest";
+    const latestCursor = sort === "latest" ? decodeCommunityTimestampCursor(input.cursor) : null;
+    const popularCursor = sort === "popular" ? decodeCommunityPopularCursor(input.cursor) : null;
     return this.read((snapshot) => {
       const productsById = new Map(input.products.map((product) => [product.id, product]));
       const profilesById = new Map(snapshot.profiles.map((profile) => [profile.userId, profile]));
+      const likesByArtwork = countArtworkLikes(snapshot.artworkLikes);
       const eligible = snapshot.artworks
         .filter((artwork) => artwork.status === "approved" && !artwork.deletedAt && artwork.publishedAt)
         .map((artwork) => ({ artwork, product: productsById.get(artwork.productId), profile: artwork.authorId ? profilesById.get(artwork.authorId) : undefined }))
         .filter(({ product, profile }) => product?.status === "published" && profile && isActiveProfile(snapshot, profile.userId))
         .filter(({ product }) => !input.audience || product!.audience === input.audience)
         .filter(({ product }) => !input.productId || product!.id === input.productId)
-        .filter(({ artwork }) => !cursor || artwork.publishedAt! < cursor.timestamp || (artwork.publishedAt === cursor.timestamp && artwork.id < cursor.id))
-        .sort((left, right) => right.artwork.publishedAt!.localeCompare(left.artwork.publishedAt!) || right.artwork.id.localeCompare(left.artwork.id))
+        .map((item) => ({ ...item, likesCount: likesByArtwork.get(item.artwork.id) ?? 0 }))
+        .filter(({ artwork }) => sort !== "latest" || !latestCursor || artwork.publishedAt! < latestCursor.timestamp || (artwork.publishedAt === latestCursor.timestamp && artwork.id < latestCursor.id))
+        .filter(({ artwork, likesCount }) => sort !== "popular" || !popularCursor || likesCount < popularCursor.likesCount
+          || (likesCount === popularCursor.likesCount && artwork.publishedAt! < popularCursor.timestamp)
+          || (likesCount === popularCursor.likesCount && artwork.publishedAt === popularCursor.timestamp && artwork.id < popularCursor.id))
+        .sort((left, right) => sort === "popular"
+          ? right.likesCount - left.likesCount || right.artwork.publishedAt!.localeCompare(left.artwork.publishedAt!) || right.artwork.id.localeCompare(left.artwork.id)
+          : right.artwork.publishedAt!.localeCompare(left.artwork.publishedAt!) || right.artwork.id.localeCompare(left.artwork.id))
         .slice(0, limit + 1);
       const pageItems = eligible.slice(0, limit);
-      const items = pageItems.map(({ artwork, product, profile }) => toPublicArtwork(artwork, product!, profile!));
-      const last = pageItems.at(-1)?.artwork;
-      return { items, nextCursor: eligible.length > limit && last?.publishedAt ? encodeCommunityTimestampCursor(last.publishedAt, last.id) : null };
+      const items = pageItems.map(({ artwork, product, profile, likesCount }) => toPublicArtwork(artwork, product!, profile!, likesCount, input.viewerUserId ? snapshot.artworkLikes.some((like) => like.artworkId === artwork.id && like.userId === input.viewerUserId) : false));
+      const last = pageItems.at(-1);
+      return { items, nextCursor: eligible.length > limit && last?.artwork.publishedAt
+        ? sort === "popular"
+          ? encodeCommunityPopularCursor(last.likesCount, last.artwork.publishedAt, last.artwork.id)
+          : encodeCommunityTimestampCursor(last.artwork.publishedAt, last.artwork.id)
+        : null };
     });
   }
 
@@ -608,29 +629,53 @@ export class CommunityLocalStore {
       .slice(0, boundedLimit(limit));
   }
 
-  async getPublicArtwork(artworkId: string, products: Product[]): Promise<CommunityPublicArtwork | null> {
+  async getPublicArtwork(artworkId: string, products: Product[], viewerUserId?: string): Promise<CommunityPublicArtwork | null> {
     return this.read((snapshot) => {
       const artwork = snapshot.artworks.find((candidate) => candidate.id === artworkId && candidate.status === "approved" && !candidate.deletedAt);
       if (!artwork?.authorId || !artwork.publishedAt) return null;
       const product = products.find((candidate) => candidate.id === artwork.productId && candidate.status === "published");
       const profile = snapshot.profiles.find((candidate) => candidate.userId === artwork.authorId);
-      return product && profile && isActiveProfile(snapshot, profile.userId) ? toPublicArtwork(artwork, product, profile) : null;
+      return product && profile && isActiveProfile(snapshot, profile.userId) ? toPublicArtwork(
+        artwork, product, profile,
+        snapshot.artworkLikes.filter((like) => like.artworkId === artwork.id).length,
+        Boolean(viewerUserId && snapshot.artworkLikes.some((like) => like.artworkId === artwork.id && like.userId === viewerUserId)),
+      ) : null;
     });
   }
 
-  async getPublicCreator(usernameInput: string, products: Product[], limit = 24): Promise<{ username: string; avatarSeed: string; artworks: CommunityPublicArtwork[] } | null> {
+  async getPublicCreator(usernameInput: string, products: Product[], limit = 24, viewerUserId?: string): Promise<{ username: string; avatarSeed: string; artworks: CommunityPublicArtwork[] } | null> {
     const username = normalizeUsername(usernameInput);
     return this.read((snapshot) => {
       const profile = snapshot.profiles.find((candidate) => candidate.username === username && isActiveProfile(snapshot, candidate.userId));
       if (!profile) return null;
       const productsById = new Map(products.filter((product) => product.status === "published").map((product) => [product.id, product]));
+      const likesByArtwork = countArtworkLikes(snapshot.artworkLikes);
       const artworks = snapshot.artworks.filter((artwork) => artwork.authorId === profile.userId && artwork.status === "approved" && !artwork.deletedAt && artwork.publishedAt)
         .map((artwork) => ({ artwork, product: productsById.get(artwork.productId) }))
         .filter(({ product }) => Boolean(product))
         .sort((a, b) => b.artwork.publishedAt!.localeCompare(a.artwork.publishedAt!))
         .slice(0, boundedLimit(limit))
-        .map(({ artwork, product }) => toPublicArtwork(artwork, product!, profile));
+        .map(({ artwork, product }) => toPublicArtwork(
+          artwork, product!, profile, likesByArtwork.get(artwork.id) ?? 0,
+          Boolean(viewerUserId && snapshot.artworkLikes.some((like) => like.artworkId === artwork.id && like.userId === viewerUserId)),
+        ));
       return { username: profile.username, avatarSeed: profile.avatarSeed, artworks };
+    });
+  }
+
+  async setArtworkLike(actor: LocalCommunityActor, artworkId: string, liked: boolean, products: Product[]): Promise<CommunityHeartResult> {
+    assertVerified(actor);
+    return this.transact((snapshot) => {
+      getActiveProfile(snapshot, actor.userId);
+      const artwork = snapshot.artworks.find((candidate) => candidate.id === artworkId && candidate.status === "approved" && !candidate.deletedAt && candidate.publishedAt);
+      const product = artwork && products.find((candidate) => candidate.id === artwork.productId && candidate.status === "published");
+      const author = artwork?.authorId && snapshot.profiles.find((profile) => profile.userId === artwork.authorId);
+      if (!artwork || !product || !author || !isActiveProfile(snapshot, author.userId)) return { available: false, liked: false, likesCount: 0 };
+      const existingIndex = snapshot.artworkLikes.findIndex((entry) => entry.artworkId === artworkId && entry.userId === actor.userId);
+      if (liked && existingIndex < 0) snapshot.artworkLikes.push({ artworkId, userId: actor.userId, createdAt: this.now().toISOString() });
+      if (!liked && existingIndex >= 0) snapshot.artworkLikes.splice(existingIndex, 1);
+      const current = snapshot.artworkLikes.some((entry) => entry.artworkId === artworkId && entry.userId === actor.userId);
+      return { available: true, liked: current, likesCount: snapshot.artworkLikes.filter((entry) => entry.artworkId === artworkId).length };
     });
   }
 
@@ -782,7 +827,7 @@ export function buildCommunityStoragePath(actorId: string, idempotencyKey: strin
 }
 
 function initialSnapshot(): LocalSnapshot {
-  return { version: 1, profiles: [], artworks: [], moderationEvents: [], rateLimitBuckets: {}, uploadReservations: [] };
+  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], rateLimitBuckets: {}, uploadReservations: [] };
 }
 
 function readSnapshot(filePath: string): LocalSnapshot {
@@ -791,10 +836,11 @@ function readSnapshot(filePath: string): LocalSnapshot {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Partial<LocalSnapshot>;
     if (parsed.version !== 1 || !Array.isArray(parsed.profiles) || !Array.isArray(parsed.artworks)
       || !Array.isArray(parsed.moderationEvents) || typeof parsed.rateLimitBuckets !== "object" || !parsed.rateLimitBuckets
-      || (parsed.uploadReservations !== undefined && !Array.isArray(parsed.uploadReservations))) {
+      || (parsed.uploadReservations !== undefined && !Array.isArray(parsed.uploadReservations))
+      || (parsed.artworkLikes !== undefined && !Array.isArray(parsed.artworkLikes))) {
       throw new Error("Unexpected community local-store structure.");
     }
-    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [] } as LocalSnapshot;
+    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [] } as LocalSnapshot;
   } catch (error) {
     throw new Error(`Community local store is unreadable: ${error instanceof Error ? error.message : "invalid JSON"}`);
   }
@@ -960,7 +1006,7 @@ function publicProduct(product: Product): CommunityPublicProduct {
   };
 }
 
-function toPublicArtwork(artwork: LocalArtwork, product: Product, profile: LocalProfile): CommunityPublicArtwork {
+function toPublicArtwork(artwork: LocalArtwork, product: Product, profile: LocalProfile, likesCount = 0, likedByMe = false): CommunityPublicArtwork {
   return {
     id: artwork.id,
     product: publicProduct(product),
@@ -968,7 +1014,15 @@ function toPublicArtwork(artwork: LocalArtwork, product: Product, profile: Local
     contentType: artwork.contentType,
     description: artwork.description,
     publishedAt: artwork.publishedAt!,
+    likesCount,
+    likedByMe,
   };
+}
+
+function countArtworkLikes(likes: LocalArtworkLike[]) {
+  const counts = new Map<string, number>();
+  for (const like of likes) counts.set(like.artworkId, (counts.get(like.artworkId) ?? 0) + 1);
+  return counts;
 }
 
 function toOwnerArtwork(artwork: LocalArtwork, product: Product): CommunityOwnerArtwork {

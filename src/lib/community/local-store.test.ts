@@ -106,7 +106,7 @@ describe("Coloring Club local adapter", () => {
       product: { id: product.id, slug: product.slug },
     });
     expect(Object.keys(publicArtwork ?? {}).sort()).toEqual([
-      "contentType", "creator", "description", "id", "product", "publishedAt",
+      "contentType", "creator", "description", "id", "likedByMe", "likesCount", "product", "publishedAt",
     ]);
     expect(JSON.stringify(publicArtwork)).not.toMatch(/authorId|userId|email|storagePath|reason/i);
 
@@ -125,6 +125,32 @@ describe("Coloring Club local adapter", () => {
     await expect(store.moderate(admin, artworkId, 5, "restore", undefined, [product])).rejects.toBeInstanceOf(CommunityConflictError);
     await store.deleteArtwork(unlockedMember, artworkId, 6);
     expect(await store.listMyArtworks(unlockedMember, [product])).toEqual([]);
+  });
+
+  it("sets hearts idempotently, paginates popular work, and clears a member's reactions on withdrawal", async () => {
+    const store = makeStore();
+    const product = getPublishedProduct();
+    const unlockedMember = { ...member, unlockedProductIds: [product.id] };
+    const unlockedOther = { ...otherMember, unlockedProductIds: [product.id] };
+    await store.join(unlockedMember, { username: "Garden_User", adultAttested: true });
+    await store.join(unlockedOther, { username: "Other_Garden", adultAttested: true });
+    const firstId = await store.createPendingArtwork(unlockedMember, input(product.id), [product]);
+    const secondId = await store.createPendingArtwork(unlockedOther, { ...input(product.id), idempotencyKey: "55555555-5555-4555-8555-555555555556" }, [product]);
+    await store.moderate(admin, firstId, 1, "approve", undefined, [product]);
+    await store.moderate(admin, secondId, 1, "approve", undefined, [product]);
+
+    expect(await store.setArtworkLike(member, secondId, true, [product])).toMatchObject({ available: true, liked: true, likesCount: 1 });
+    expect(await store.setArtworkLike(member, secondId, true, [product])).toMatchObject({ available: true, liked: true, likesCount: 1 });
+    expect(await store.setArtworkLike(otherMember, firstId, true, [product])).toMatchObject({ available: true, liked: true, likesCount: 1 });
+    const popular = await store.listPublicArtworks({ products: [product], sort: "popular", limit: 1, viewerUserId: USER_A });
+    expect(popular.items[0]).toMatchObject({ id: secondId, likesCount: 1, likedByMe: true });
+    expect(popular.nextCursor).toBeTruthy();
+    const next = await store.listPublicArtworks({ products: [product], sort: "popular", limit: 1, cursor: popular.nextCursor });
+    expect(next.items[0]).toMatchObject({ id: firstId, likesCount: 1, likedByMe: false });
+
+    await store.leave(member);
+    expect(await store.getPublicArtwork(secondId, [product], USER_A)).toMatchObject({ likesCount: 0, likedByMe: false });
+    await expect(store.setArtworkLike(member, firstId, false, [product])).rejects.toBeInstanceOf(CommunityAuthorizationError);
   });
 
   it("filters and paginates the admin queue with safe status history", async () => {

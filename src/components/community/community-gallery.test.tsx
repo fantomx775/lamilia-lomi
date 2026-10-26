@@ -20,6 +20,8 @@ const artwork: CommunityPublicArtwork = {
   contentType: "image/webp",
   description: "A spring garden",
   publishedAt: "2026-10-25T12:00:00.000Z",
+  likesCount: 2,
+  likedByMe: false,
 };
 
 describe("public Coloring Club gallery", () => {
@@ -50,6 +52,23 @@ describe("public Coloring Club gallery", () => {
     await user.selectOptions(screen.getByTestId("community-gallery-product-filter"), product.id);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(new URL(requestedUrls[1], "http://localhost").searchParams.get("productId")).toBe(product.id);
+  });
+
+  it("requests popular ordering and removes duplicates when live counts shift across pages", async () => {
+    const repeatedArtwork = { ...artwork, description: "Repeated item" };
+    const newArtwork = { ...artwork, id: "33333333-3333-4333-8333-333333333333", description: "New item" };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      void input;
+      return new Response(JSON.stringify({ ok: true, items: [repeatedArtwork, newArtwork], nextCursor: null }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CommunityGallery initialPage={{ items: [artwork], nextCursor: "continuation" }} products={[product]} initialSort="popular" />);
+    expect(screen.getByTestId("community-gallery-sort")).toHaveValue("popular");
+    await user.click(screen.getByTestId("community-gallery-load-more"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(new URL(String(fetchMock.mock.calls[0][0]), "http://localhost").searchParams.get("sort")).toBe("popular");
+    expect(await screen.findByText("New item")).toBeVisible();
   });
 
   it("ignores a late load-more response after filters change", async () => {

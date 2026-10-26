@@ -23,6 +23,31 @@ export function decodeCommunityTimestampCursor(cursor: string | null | undefined
   }
 }
 
+/** Popular cursors include the aggregate score and retain timestamp microseconds. */
+export function encodeCommunityPopularCursor(likesCount: number, timestamp: string, id: string) {
+  if (!Number.isSafeInteger(likesCount) || likesCount < 0 || likesCount > 2_147_483_647) {
+    throw new Error("Invalid community popularity cursor count.");
+  }
+  const parsed = decodeCommunityTimestampCursor(encodeCommunityTimestampCursor(timestamp, id));
+  if (!parsed) throw new Error("Invalid community popularity cursor values.");
+  return Buffer.from(`p|${likesCount}|${parsed.timestamp}|${parsed.id}`).toString("base64url");
+}
+
+export function decodeCommunityPopularCursor(cursor: string | null | undefined) {
+  if (!cursor || cursor.length > 320 || !/^[A-Za-z0-9_-]+$/.test(cursor)) return null;
+  try {
+    const [prefix, countText, timestampText, id, ...rest] = Buffer.from(cursor, "base64url").toString("utf8").split("|");
+    if (rest.length || prefix !== "p" || !/^(0|[1-9]\d{0,9})$/.test(countText)) return null;
+    const likesCount = Number(countText);
+    if (!Number.isSafeInteger(likesCount) || likesCount > 2_147_483_647) return null;
+    const parsed = decodeCommunityTimestampCursor(encodeCommunityTimestampCursor(timestampText, id));
+    if (!parsed) return null;
+    return { likesCount, timestamp: parsed.timestamp, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
 function normalizeUtcTimestamp(timestamp: string) {
   const match = timestamp.match(UTC_CURSOR_TIMESTAMP);
   if (!match) return null;
