@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Info, Library, Menu, X } from "lucide-react";
+import { BookOpen, Info, Library, Menu, Palette, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -10,9 +10,10 @@ import type { Locale } from "@/i18n/routing";
 type MobileNavigationProps = {
   locale: Locale;
   children: ReactNode;
+  communityEnabled?: boolean;
 };
 
-export function MobileNavigation({ locale, children }: MobileNavigationProps) {
+export function MobileNavigation({ locale, children, communityEnabled = false }: MobileNavigationProps) {
   const [openOnPathname, setOpenOnPathname] = useState<string | null>(null);
   const pathname = usePathname();
   const isOpen = openOnPathname === pathname;
@@ -48,7 +49,7 @@ export function MobileNavigation({ locale, children }: MobileNavigationProps) {
   const closeMenu = () => setOpenOnPathname(null);
 
   return (
-    <div ref={rootRef} className="relative md:hidden">
+    <div ref={rootRef} className="relative lg:hidden">
       <button
         ref={buttonRef}
         type="button"
@@ -86,6 +87,7 @@ export function MobileNavigation({ locale, children }: MobileNavigationProps) {
           <Info className="size-4" aria-hidden />
           About
         </NavigationLink>
+        {communityEnabled && locale === "en" ? <NavigationLink href="/en/club" pendingLabel="Opening Coloring Club" onClick={closeMenu} className="flex min-h-11 items-center gap-3 rounded-lg px-3 font-medium hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"><Palette className="size-4" aria-hidden />Coloring Club</NavigationLink> : null}
         <NavigationLink
           href={`/${locale}/library`}
           pendingLabel="Opening library"

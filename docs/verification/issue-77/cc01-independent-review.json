@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "reviewType": "ai-subagent",
+  "reviewerAgent": "/root/preflight_review",
+  "independentlyTasked": true,
+  "taskGoalProvided": true,
+  "actualDiffRead": true,
+  "reviewedBaseSha": "aca69f97b46a0294d92c297a833bae832071caa0",
+  "reviewedSha": "a445db6ef5d34f8475a093a85fb559f5f445720e",
+  "reviewScope": [
+    "correctness",
+    "regressions",
+    "testing",
+    "scope",
+    "authorization",
+    "RLS",
+    "concurrency",
+    "privacy"
+  ],
+  "findings": {
+    "Critical": [],
+    "High": [],
+    "Medium": [],
+    "Low": []
+  },
+  "unresolvedFindings": {
+    "Critical": [],
+    "High": [],
+    "Medium": [],
+    "Low": []
+  },
+  "fixesApplied": [
+    "Service-only narrow Auth helper and FOR SHARE verification lock",
+    "Named PostgREST author-profile relation",
+    "Current role/product/author eligibility and revision moderation preconditions",
+    "Revoked/stale-rules username checks and local approval parity",
+    "Removed description edits preserve removed status and reason",
+    "SQL description edits now require current rules acceptance; real pgTAP regression"
+  ],
+  "checkpointOnly": true,
+  "note": "Historical CC01 checkpoint review, not final integrated PR verification. Full base-to-head code was reviewed at 5102490 and the actual fix diff reviewed through a445db6. No fabricated formal GitHub approval."
+}

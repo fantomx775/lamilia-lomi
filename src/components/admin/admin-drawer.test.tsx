@@ -9,14 +9,14 @@ import { AdminDrawer } from "./admin-drawer";
 
 afterEach(() => cleanup());
 
-function DrawerHarness() {
+function DrawerHarness({ closeLabel }: { closeLabel?: string } = {}) {
   const [open, setOpen] = useState(false);
   const [trigger, setTrigger] = useState<HTMLButtonElement | null>(null);
 
   return (
     <>
       <button type="button" onClick={(event) => { setTrigger(event.currentTarget); setOpen(true); }}>Otwórz drawer</button>
-      <AdminDrawer open={open} onClose={() => setOpen(false)} title="Szczegóły" restoreFocusElement={trigger}>
+      <AdminDrawer open={open} onClose={() => setOpen(false)} closeLabel={closeLabel} title="Szczegóły" restoreFocusElement={trigger}>
         <input autoFocus aria-label="Pole" />
         <button type="button">Akcja</button>
       </AdminDrawer>
@@ -25,6 +25,18 @@ function DrawerHarness() {
 }
 
 describe("AdminDrawer", () => {
+  it("locks page scrolling while open and accepts a localized close label", async () => {
+    const user = userEvent.setup();
+    const view = render(<DrawerHarness closeLabel="Close upload" />);
+    await user.click(view.getByRole("button", { name: "Otwórz drawer" }));
+
+    expect(document.body.style.overflow).toBe("hidden");
+    const closeButton = within(screen.getByRole("dialog")).getByRole("button", { name: "Close upload" });
+    expect(closeButton).toBeInTheDocument();
+    await user.click(closeButton);
+    expect(document.body.style.overflow).toBe("");
+  });
+
   it("restores focus to the trigger after Escape and contains Tab focus", async () => {
     const user = userEvent.setup();
     const view = render(<DrawerHarness />);

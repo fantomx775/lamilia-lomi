@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -22,10 +22,11 @@ test("public pages use English only and retired locale links reach English", asy
 
   await page.goto("/");
   await expect(page).toHaveURL(/\/en$/);
-  await page.goto("/en");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   const header = page.getByRole("banner");
-  await expect(header.getByRole("link", { name: "Catalog" })).toBeVisible();
+  const menu = header.getByRole("button", { name: "Open navigation menu", exact: true });
+  if (await menu.isVisible()) await menu.click();
+  await expect(header.getByRole("link", { name: "Catalog", exact: true })).toBeVisible();
   await expect(header.getByRole("link", { name: "My Library" })).toBeVisible();
   await expect(header.getByText("Dzieci", { exact: true })).toHaveCount(0);
   await expect(header.getByText("PL", { exact: true })).toHaveCount(0);
@@ -33,6 +34,10 @@ test("public pages use English only and retired locale links reach English", asy
   await expect(header.getByText("ES", { exact: true })).toHaveCount(0);
   await expect(header.locator('[aria-label^="Language:"]')).toHaveCount(0);
   await expect(page.getByText("Kids", { exact: true }).first()).toBeVisible();
+
+  // Complete image requests from the redirected home document before the next
+  // full-page navigation, which would otherwise cancel in-flight optimizer reads.
+  await waitForPageImages(page);
 
   for (const locale of ["pl", "de", "es"]) {
     const response = await page.request.get(`/${locale}/products?q=moon`, {
@@ -88,33 +93,7 @@ test("public pages use English only and retired locale links reach English", asy
   // Full-page screenshots do not always trigger native lazy loading for images
   // below the viewport. Load each image before capturing the evidence so the
   // committed screenshot shows the same cover cards as the tested page.
-  await page.locator("img").evaluateAll(async (images) => {
-    const imageElements = images.filter(
-      (image): image is HTMLImageElement => image instanceof HTMLImageElement,
-    );
-    for (const image of imageElements) {
-      image.scrollIntoView({ block: "center" });
-      if (!image.complete) {
-        await new Promise<void>((resolve, reject) => {
-          const timeout = window.setTimeout(
-            () => reject(new Error(`Timed out loading screenshot image: ${image.currentSrc}`)),
-            15_000,
-          );
-          image.addEventListener("load", () => {
-            window.clearTimeout(timeout);
-            resolve();
-          }, { once: true });
-          image.addEventListener("error", () => {
-            window.clearTimeout(timeout);
-            reject(new Error(`Failed to load screenshot image: ${image.currentSrc}`));
-          }, { once: true });
-        });
-      }
-      if (image.naturalWidth === 0) {
-        throw new Error(`Screenshot image has no natural width: ${image.currentSrc}`);
-      }
-    }
-  });
+  await waitForPageImages(page);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const screenshotName = testInfo.project.name === "mobile"
@@ -148,3 +127,34 @@ test("public pages use English only and retired locale links reach English", asy
     })}`,
   );
 });
+
+async function waitForPageImages(page: Page) {
+  await page.locator("img").evaluateAll(async (images) => {
+    const imageElements = images.filter(
+      (image): image is HTMLImageElement => image instanceof HTMLImageElement,
+    );
+    for (const image of imageElements) {
+      image.scrollIntoView({ block: "center" });
+      if (!image.complete) {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = window.setTimeout(
+            () => reject(new Error(`Timed out loading screenshot image: ${image.currentSrc}`)),
+            15_000,
+          );
+          image.addEventListener("load", () => {
+            window.clearTimeout(timeout);
+            resolve();
+          }, { once: true });
+          image.addEventListener("error", () => {
+            window.clearTimeout(timeout);
+            reject(new Error(`Failed to load screenshot image: ${image.currentSrc}`));
+          }, { once: true });
+        });
+      }
+      if (image.naturalWidth === 0) {
+        throw new Error(`Screenshot image has no natural width: ${image.currentSrc}`);
+      }
+    }
+  });
+  await page.evaluate(() => window.scrollTo(0, 0));
+}

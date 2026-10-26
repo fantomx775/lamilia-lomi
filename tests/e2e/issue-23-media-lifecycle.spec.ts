@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
@@ -38,9 +38,10 @@ test("replacing a synthetic product cover keeps one active image and retires the
   const diagnostics = {
     consoleErrors: [] as Array<{ message: string; disposition: string; reason?: string }>,
     pageErrors: [] as string[],
-    failedRequests: [] as Array<{ method: string; url: string; error: string | null; disposition: string; reason?: string }>,
+    failedRequests: [] as Array<{ method: string; url: string; error: string | null; disposition: string; phase?: string; reason?: string }>,
     failedResponses: [] as Array<{ method: string; url: string; status: number; disposition: string; reason?: string }>,
   };
+  const failedRequestEntries = new WeakMap<Request, (typeof diagnostics.failedRequests)[number]>();
   page.on("console", (message) => {
     if (message.type() !== "error") return;
     const text = message.text();
@@ -58,7 +59,7 @@ test("replacing a synthetic product cover keeps one active image and retires the
     const deletedProductNavigation = error === "net::ERR_ABORTED" && /^\/admin\/products\/[0-9a-f-]+$/i.test(url.pathname);
     const completedCreateAction = error === "net::ERR_ABORTED" && request.method() === "POST" &&
       url.pathname === "/admin/products/new" && Boolean(request.headers()["next-action"]);
-    diagnostics.failedRequests.push({
+    const entry = {
       method: request.method(),
       url: safeUrl(request.url()),
       error,
@@ -74,7 +75,9 @@ test("replacing a synthetic product cover keeps one active image and retires the
               : completedCreateAction
                 ? { reason: "Next canceled the create Server Action request while opening the saved editor; the persisted product and replacement were verified after reload." }
                 : {}),
-    });
+    };
+    diagnostics.failedRequests.push(entry);
+    failedRequestEntries.set(request, entry);
   });
   page.on("response", (response) => {
     if (response.status() < 400) return;
@@ -92,7 +95,7 @@ test("replacing a synthetic product cover keeps one active image and retires the
   let productId: string | undefined;
 
   try {
-    await signInAsAdmin(page);
+    await signInAsAdmin(page, failedRequestEntries);
     cleanupPreviousSyntheticProducts();
     await page.goto("/admin/products/new");
     productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
@@ -194,14 +197,88 @@ function cleanupSyntheticProduct(productId: string) {
   if (fs.existsSync(uploadDirectory)) fs.rmSync(uploadDirectory, { recursive: true, force: true });
 }
 
-async function signInAsAdmin(page: Page) {
+async function signInAsAdmin(
+  page: Page,
+  failedRequestEntries: WeakMap<Request, { method: string; url: string; error: string | null; disposition: string; phase?: string; reason?: string }>,
+) {
   await page.goto("/en/login?redirectTo=/admin");
   await page.getByLabel("Email").fill("admin@lamilialomi.test");
   await page.getByLabel("Password").fill("demo-password");
-  await Promise.all([
+  const loginActionTerminal = waitForLoginActionTerminal(page);
+  const [, , terminal] = await Promise.all([
     page.waitForURL((url) => url.pathname === "/admin"),
     page.getByRole("button", { name: "Continue" }).click(),
+    loginActionTerminal,
   ]);
+
+  // /admin only renders for the authenticated admin. A streamed Next redirect
+  // can cancel the action fetch, so accept that exact terminal event only after
+  // the destination's admin-only surface has rendered.
+  await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation").getByRole("link", { name: "Produkty", exact: true })).toBeVisible();
+  if (terminal.kind === "failed") {
+    const actionUrl = new URL(terminal.request.url());
+    const currentOrigin = new URL(page.url()).origin;
+    expect(terminal.request.method()).toBe("POST");
+    expect(actionUrl.origin).toBe(currentOrigin);
+    expect(actionUrl.pathname).toBe("/en/login");
+    expect(terminal.request.headers()["next-action"]).toBeTruthy();
+    expect(terminal.error).toBe("net::ERR_ABORTED");
+
+    const diagnostic = failedRequestEntries.get(terminal.request);
+    expect(diagnostic).toBeDefined();
+    diagnostic!.phase = "admin login action redirect";
+    diagnostic!.disposition = "expected";
+    diagnostic!.reason = "The exact same-origin login Server Action was canceled during its asserted redirect, and the admin-only dashboard and product navigation rendered successfully.";
+  }
+}
+
+function waitForLoginActionTerminal(page: Page) {
+  const origin = new URL(page.url()).origin;
+  return new Promise<
+    | { kind: "finished"; request: Request }
+    | { kind: "failed"; request: Request; error: string | null }
+  >((resolve, reject) => {
+    let actionRequest: Request | undefined;
+    const timer = setTimeout(() => finishError(new Error("Timed out waiting for the login action to finish or fail.")), 20_000);
+    const onRequest = (request: Request) => {
+      const url = new URL(request.url());
+      if (
+        !actionRequest &&
+        request.method() === "POST" &&
+        url.origin === origin &&
+        url.pathname === "/en/login" &&
+        (Boolean(request.headers()["next-action"]) || request.isNavigationRequest())
+      ) {
+        actionRequest = request;
+      }
+    };
+    const onFinished = (request: Request) => {
+      if (request === actionRequest) finish({ kind: "finished", request });
+    };
+    const onFailed = (request: Request) => {
+      if (request === actionRequest) {
+        finish({ kind: "failed", request, error: request.failure()?.errorText ?? null });
+      }
+    };
+    const finish = (value: { kind: "finished"; request: Request } | { kind: "failed"; request: Request; error: string | null }) => {
+      clearTimeout(timer);
+      page.off("request", onRequest);
+      page.off("requestfinished", onFinished);
+      page.off("requestfailed", onFailed);
+      resolve(value);
+    };
+    const finishError = (error: Error) => {
+      clearTimeout(timer);
+      page.off("request", onRequest);
+      page.off("requestfinished", onFinished);
+      page.off("requestfailed", onFailed);
+      reject(error);
+    };
+    page.on("request", onRequest);
+    page.on("requestfinished", onFinished);
+    page.on("requestfailed", onFailed);
+  });
 }
 
 function cleanupPreviousSyntheticProducts() {

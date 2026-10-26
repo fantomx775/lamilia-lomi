@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
+import Link from "next/link";
 
 import { AmazonLink } from "@/components/amazon-link";
 import { ImageWithFallback } from "@/components/image-with-fallback";
@@ -33,6 +34,9 @@ import {
 } from "@/lib/products";
 import { getLocalizedProductDetailViewForRequest } from "@/lib/products-request";
 import type { LocalizedProductView } from "@/lib/types";
+import { getCommunityFlags } from "@/lib/community-flags";
+import { getCommunityHeartContext, listCommunityPublicArtworks } from "@/lib/community/repository";
+import { getDemoSession } from "@/lib/session.server";
 
 type Props = {
   params: Promise<{ locale: Locale; slug: string }>;
@@ -254,6 +258,14 @@ export default async function ProductPage({ params, searchParams }: Props) {
     notFound();
   }
 
+  const communityFlags = getCommunityFlags();
+  const communitySession = communityFlags.uploadsEnabled ? await getDemoSession() : null;
+  const heartContext = communityFlags.publicEnabled ? await getCommunityHeartContext() : { access: "guest" as const };
+  const communityArtworksPage = communityFlags.publicEnabled
+    ? await listCommunityPublicArtworks({ productId: product.id, limit: 5, viewer: heartContext.access === "member" ? heartContext.actor : undefined }).catch(() => ({ items: [], nextCursor: null }))
+    : { items: [], nextCursor: null };
+  const communityArtworks = communityArtworksPage.items.slice(0, 4);
+
   if (code?.trim()) {
     const unlockParams = new URLSearchParams({ code });
     const step = stringParam(query.step);
@@ -377,7 +389,20 @@ export default async function ProductPage({ params, searchParams }: Props) {
         video={product.video}
         poster={product.cover.path}
       />
-      <ReaderArtworkGallery artworks={product.readerArtworks} />
+      {communityFlags.uploadsEnabled ? (
+        <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8" data-testid="product-share-art-cta">
+          {!communitySession ? (
+            <Link data-testid="community-share-guest" className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/library/creations?productId=${product.id}`)}`}>Log in to share your art</Link>
+          ) : !communitySession.emailVerified ? (
+            <Link data-testid="community-share-verify" className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)]" href={`/${locale}/account`}>Verify your email to share</Link>
+          ) : !communitySession.unlockedProductIds.includes(product.id) ? (
+            <a data-testid="community-share-locked" className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)]" href="#premium">Unlock this book to share your art</a>
+          ) : (
+            <Link data-testid="community-share-eligible" className="inline-flex min-h-10 items-center rounded-md bg-[var(--color-terracotta)] px-4 text-sm font-semibold text-white hover:brightness-95" href={`/${locale}/library/creations?productId=${encodeURIComponent(product.id)}`}>Share your art</Link>
+          )}
+        </div>
+      ) : null}
+      <ReaderArtworkGallery artworks={product.readerArtworks} communityArtworks={communityArtworks} productSlug={product.slug} communityEnabled={communityFlags.publicEnabled} heartAccess={heartContext.access} />
 
       {product.publicDownloads.length ? (
         <section aria-labelledby="public-downloads-title" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">

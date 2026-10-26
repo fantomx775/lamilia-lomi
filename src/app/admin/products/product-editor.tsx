@@ -4,7 +4,7 @@ import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, Rot
 import { startTransition, useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { registerProductEditorPopStateGuard } from "@/app/admin/admin-product-editor-history-guard";
+import { registerProductEditorPopStateGuard, shouldUseProductEditorNavigationApi } from "@/app/admin/admin-product-editor-history-guard";
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
 import { AdminDisclosure } from "@/components/admin/admin-disclosure";
 import { Badge } from "@/components/ui/badge";
@@ -238,7 +238,10 @@ export function ProductEditor({
   const markDirty = useCallback(() => {
     if (!isDirtyRef.current) {
       const owner = window.location.href;
-      const hasNavigationApi = Boolean((window as ProductEditorWindow).navigation);
+      const hasNavigationApi = shouldUseProductEditorNavigationApi(
+        navigator.userAgent,
+        Boolean((window as ProductEditorWindow).navigation),
+      );
       navigationApiAvailableRef.current = hasNavigationApi;
       currentEditorUrlRef.current = owner;
       let currentGuard = readProductEditorHistoryGuard(window.history.state);
@@ -275,7 +278,11 @@ export function ProductEditor({
     const form = formRef.current;
     if (!form) return;
     currentEditorUrlRef.current = window.location.href;
-    const navigationApi = (window as ProductEditorWindow).navigation;
+    const availableNavigationApi = (window as ProductEditorWindow).navigation;
+    const navigationApi = shouldUseProductEditorNavigationApi(
+      navigator.userAgent,
+      Boolean(availableNavigationApi),
+    ) ? availableNavigationApi : undefined;
     navigationApiAvailableRef.current = Boolean(navigationApi);
     let currentGuard = readProductEditorHistoryGuard(window.history.state);
     if (!navigationApi && currentGuard?.owner !== window.location.href) {
@@ -424,7 +431,11 @@ export function ProductEditor({
       else window.history.forward();
     };
 
-    const navigationApi = (window as ProductEditorWindow).navigation;
+    const availableNavigationApi = (window as ProductEditorWindow).navigation;
+    const navigationApi = shouldUseProductEditorNavigationApi(
+      navigator.userAgent,
+      Boolean(availableNavigationApi),
+    ) ? availableNavigationApi : undefined;
     const confirmHistoryApiNavigation = (event: ProductEditorNavigateEvent) => {
       if (event.navigationType !== "traverse" || !isDirtyRef.current) return;
 

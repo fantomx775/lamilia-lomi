@@ -8,6 +8,7 @@ let lastPage: string | undefined;
 let currentPageReferrer: string | undefined;
 let deniedInMemory = false;
 const denialCookie = "ll_analytics_denied";
+const communityEvents = new Set(["artwork_submitted", "artwork_approved", "artwork_rejected", "gallery_view", "like_created"]);
 
 function hasDenialCookie() {
   return document.cookie.split(";").some(value => value.trim() === `${denialCookie}=1`);
@@ -44,8 +45,8 @@ export function trackEvent(name: string, values: Record<string, string | number>
   const target = window as AnalyticsWindow;
   if (target[`ga-disable-${ga4Id}`]) return;
   target.gtag?.("event", name, {
-    ...values,
-    page_location: location.origin + location.pathname,
+    ...(communityEvents.has(name) ? {} : values),
+    page_location: location.origin + sanitizeAnalyticsPath(location.pathname),
     page_referrer: currentPageReferrer ?? initialPageReferrer(),
     send_to: ga4Id,
   });
@@ -64,7 +65,7 @@ export function startAnalytics() {
   target.gtag("consent", "default", { analytics_storage: "denied", ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied" });
   target.gtag("consent", "update", { analytics_storage: "granted" });
   target.gtag("js", new Date());
-  const initialLocation = location.origin + location.pathname;
+  const initialLocation = location.origin + sanitizeAnalyticsPath(location.pathname);
   currentPageReferrer = initialPageReferrer();
   target.gtag("set", { page_location: initialLocation, page_referrer: currentPageReferrer });
   target.gtag("config", ga4Id, {
@@ -75,13 +76,21 @@ export function startAnalytics() {
 }
 
 export function trackPage(path: string) {
-  if (readConsent()?.analytics !== true || path === lastPage) return;
+  const safePath = sanitizeAnalyticsPath(path);
+  if (readConsent()?.analytics !== true || safePath === lastPage) return;
   const pageReferrer = lastPage ? location.origin + lastPage : initialPageReferrer();
-  lastPage = path;
+  lastPage = safePath;
   currentPageReferrer = pageReferrer;
   // Keep the current location and sanitized referrer current for later events too.
-  (window as AnalyticsWindow).gtag?.("set", { page_location: location.origin + path, page_referrer: pageReferrer });
-  trackEvent("page_view", { page_location: location.origin + path, page_path: path, page_referrer: pageReferrer });
+  (window as AnalyticsWindow).gtag?.("set", { page_location: location.origin + safePath, page_referrer: pageReferrer });
+  trackEvent("page_view", { page_location: location.origin + safePath, page_path: safePath, page_referrer: pageReferrer });
+}
+
+function sanitizeAnalyticsPath(path: string) {
+  const pathname = path.split(/[?#]/, 1)[0] || "/";
+  return pathname
+    .replace(/(^|\/)club\/creators\/[^/]+/g, "$1club/creators/:creator")
+    .replace(/(^|\/)club\/artworks\/[^/]+/g, "$1club/artworks/:artwork");
 }
 
 export function stopAnalytics() {

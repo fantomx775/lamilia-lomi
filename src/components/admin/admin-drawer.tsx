@@ -21,6 +21,7 @@ export function AdminDrawer({
   title,
   description,
   onClose,
+  closeLabel = "Zamknij panel",
   children,
   className,
   bodyClassName,
@@ -30,6 +31,7 @@ export function AdminDrawer({
   title: string;
   description?: React.ReactNode;
   onClose: () => void;
+  closeLabel?: string;
   children: React.ReactNode;
   className?: string;
   bodyClassName?: string;
@@ -120,6 +122,10 @@ export function AdminDrawer({
       return;
     }
 
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const restoreBodyOverflow = () => { document.body.style.overflow = previousBodyOverflow; };
+
     if (!previousActiveElementRef.current) {
       previousActiveElementRef.current = restoreFocusElement ?? (document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -164,6 +170,7 @@ export function AdminDrawer({
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      restoreBodyOverflow();
     };
   }, [isRendered, open, restoreFocusElement]);
 
@@ -182,7 +189,7 @@ export function AdminDrawer({
     >
       <button
         type="button"
-        aria-label="Zamknij panel"
+        aria-label={closeLabel}
         tabIndex={isExitActive ? -1 : undefined}
         className="absolute inset-0 h-full w-full cursor-default bg-[rgb(62_52_47_/_0.28)]"
         onClick={onClose}
@@ -216,7 +223,7 @@ export function AdminDrawer({
             className="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--color-border)] bg-white text-[var(--color-ink)] transition hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
           >
             <X className="size-4" aria-hidden />
-            <span className="sr-only">Zamknij panel</span>
+            <span className="sr-only">{closeLabel}</span>
           </button>
         </div>
         <div className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-pb-8 px-4 py-5 sm:px-6", bodyClassName)}>{children}</div>

@@ -12,6 +12,7 @@ vi.mock("next/image", () => ({
 
 import { ProductImageGallery } from "@/components/product-image-gallery";
 import { ReaderArtworkGallery } from "@/components/reader-artwork-gallery";
+import type { CommunityPublicArtwork } from "@/lib/community/types";
 
 const images = [
   {
@@ -129,12 +130,16 @@ describe("ProductImageGallery", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     const frame = within(dialog).getByTestId("product-gallery-preview-frame");
+    const previewImage = within(dialog).getByRole("img", { name: "Stars and little houses" });
     fireEvent.pointerDown(frame, { pointerType: "touch", clientX: 280 });
     fireEvent.pointerUp(frame, { pointerType: "touch", clientX: 80 });
 
     expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBeVisible();
+    expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBe(previewImage);
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
     expect(within(dialog).getByRole("img", { name: "Stars and little houses" })).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Close image preview" }));
+    await waitFor(() => expect(dialog).not.toHaveAttribute("open"));
   });
 
   it("renders no gallery for an empty image list", () => {
@@ -166,6 +171,26 @@ describe("ProductImageGallery", () => {
     await user.click(within(dialog).getByRole("button", { name: "Next artwork" }));
     expect(within(dialog).getByRole("img", { name: "Colorful page 2" })).toBeVisible();
     expect(within(dialog).getByText("2 of 3")).toBeVisible();
+  });
+
+  it("mixes curated and approved community work under one heading while preserving each source credit", () => {
+    const communityArtwork: CommunityPublicArtwork = {
+      id: "community-work-id",
+      product: { id: "product-id", slug: "spring-flowers", title: "Spring Flowers", audience: "kids" },
+      creator: { username: "garden_artist", avatarSeed: "seed" },
+      contentType: "image/webp",
+      description: "A bright spring page",
+      publishedAt: "2026-10-25T12:00:00.000Z",
+      likesCount: 3,
+      likedByMe: false,
+    };
+    render(<ReaderArtworkGallery artworks={[{ id: "curated-id", displayName: "Mira", description: "Blue flowers", sortOrder: 1, src: "/curated.webp" }]} communityArtworks={[communityArtwork]} productSlug="spring-flowers" />);
+    expect(screen.getAllByRole("heading", { name: "Colored by Our Readers" })).toHaveLength(1);
+    expect(screen.getByText("Colored by Mira")).toBeVisible();
+    expect(screen.getByText("Colored by @garden_artist")).toBeVisible();
+    expect(screen.getByRole("img", { name: "Blue flowers" })).toHaveAttribute("src", "/curated.webp");
+    expect(screen.getByRole("img", { name: "Colored by @garden_artist: A bright spring page" })).toHaveAttribute("src", "/api/community/artworks/community-work-id/media");
+    expect(screen.getByTestId("colored-by-our-readers-view-all")).toHaveAttribute("href", "/en/club?productId=product-id");
   });
 
   it("keeps a single image usable without carousel controls", async () => {

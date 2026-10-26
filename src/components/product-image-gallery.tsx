@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
+import type { ReactNode } from "react";
 
 export type ProductGalleryImage = {
   id: string;
@@ -11,6 +13,8 @@ export type ProductGalleryImage = {
   alt: string;
   caption: string | null;
   unoptimized: boolean;
+  captionHref?: string;
+  thumbnailAction?: ReactNode;
 };
 
 export type ProductImageGalleryLabels = {
@@ -134,7 +138,8 @@ export function ProductImageGallery({
       <div className={thumbnailGridClassName} data-testid={layout === "reader-artworks" ? "reader-artwork-grid" : undefined}>
         {visibleImages.map((image, index) => (
           <figure key={image.id} className="group">
-            <button
+            <div className="relative">
+              <button
               type="button"
               aria-label={
                 index === thumbnailLimit - 1 && imageCount > thumbnailLimit
@@ -172,10 +177,12 @@ export function ProductImageGallery({
                   <Maximize2 className="size-4" strokeWidth={1.7} />
                 </span>
               </span>
-            </button>
+              </button>
+              {image.thumbnailAction ? <div className="absolute bottom-3 right-3 z-10">{image.thumbnailAction}</div> : null}
+            </div>
             {image.caption ? (
               <figcaption className={`mt-3 min-w-0 px-1 text-sm leading-6 text-[var(--color-muted)] ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
-                {image.caption}
+                {image.captionHref ? <Link href={image.captionHref} className="font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">{image.caption}</Link> : image.caption}
               </figcaption>
             ) : null}
           </figure>
@@ -258,7 +265,6 @@ export function ProductImageGallery({
                 className="relative col-span-2 row-start-1 mx-auto flex h-[min(76dvh,calc(100dvh-11rem))] max-h-full w-[min(90vw,calc((100dvh-11rem)*0.773))] max-w-full min-h-0 shrink touch-pan-y items-center justify-center overflow-hidden rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] md:col-span-1 md:col-start-2 md:h-[min(86dvh,calc(100dvh-8rem))] md:w-[min(75vw,calc((100dvh-8rem)*0.773))]"
               >
                 <Image
-                  key={activeImage.id}
                   src={activeImage.path}
                   alt={activeImage.alt}
                   fill

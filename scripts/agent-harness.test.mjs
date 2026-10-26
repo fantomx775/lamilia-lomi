@@ -46,6 +46,294 @@ const AI_REVIEW_MARKER = "<!-- agent-harness-ai-review:v1 -->";
 const ISSUE_DELIVERY_MARKER = "<!-- agent-harness-issue-delivery:v1 -->";
 const VERIFICATION_MARKER = "<!-- agent-harness-verification:v1 -->";
 
+const GATED_PAGE_TEXT = "This page could not be found.";
+const GATED_PAGE_PATHS = [
+  "/en/club",
+  "/en/club/artworks/11111111-1111-4111-8111-111111111111",
+  "/en/club/creators/release_artist",
+];
+
+function gatedPageProof() {
+  const run = (enabled) => ({
+    status: "PASS", testedSha: CURRENT_SHA, runId: enabled ? "browser-on" : "browser-off",
+    command: enabled ? "Playwright public ON journey" : "Playwright public OFF guards",
+    publicEnabled: enabled,
+    checks: GATED_PAGE_PATHS.map((path) => ({ path, statusCode: enabled ? 200 : 404,
+      contentType: "text/html; charset=utf-8", expectedText: enabled ? "Approved community content" : GATED_PAGE_TEXT,
+      expectedTextMatched: true, sameOrigin: true, finalPathUnchanged: true })),
+  });
+  return { status: "PASS", testedSha: CURRENT_SHA, publicOn: run(true), publicOff: {
+    ...run(false), approvedFixture: { artworkPath: GATED_PAGE_PATHS[1],
+      mediaPath: "/api/community/artworks/11111111-1111-4111-8111-111111111111/media",
+      artworkStatus: "approved", ownerMediaStatus: 200,
+      anonymousMediaStatus: 404, publicListingStatus: 404, mutationsBlocked: true },
+  } };
+}
+
+function gatedPageRecord() {
+  const files = ["src/app/[locale]/club/page.tsx", "src/app/[locale]/club/artworks/[id]/page.tsx",
+    "src/app/[locale]/club/creators/[username]/page.tsx"];
+  return { files, record: cleanVerificationRecord({
+    uiBehavior: true,
+    browser: { status: "PASS", testedSha: CURRENT_SHA, runId: "browser-on", featureFlags: { publicEnabled: true } },
+    productionSmokePlan: { status: "PASS", gatedPublicPageVerification: gatedPageProof(),
+      flows: files.map((file, index) => ({ name: `gated community page ${index}`, affectedFiles: [file],
+        paths: [{ path: GATED_PAGE_PATHS[index], expectedStatus: 404, expectedText: GATED_PAGE_TEXT,
+          expectedContentType: "text/html" }] })),
+    },
+  }) };
+}
+
+function smokeResponse(url, { status = 403, text = "request denied", contentType = "application/json", finalUrl } = {}) {
+  return { ok: status >= 200 && status < 300, status, url: finalUrl ?? url.href,
+    headers: { get: () => contentType }, text: async () => text };
+}
+
+test("gated community HTML404 plans require mapped current-SHA positive and negative browser proof", () => {
+  const { files, record } = gatedPageRecord();
+  const result = validateProductionSmokePlan({ files, localVerification: { record } });
+  assert.equal(result.status, "PASS", result.details);
+  assert.deepEqual(result.paths, GATED_PAGE_PATHS);
+  for (const mutate of [
+    (copy) => { delete copy.productionSmokePlan.gatedPublicPageVerification; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.testedSha = "c".repeat(40); },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.testedSha = "c".repeat(40); },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.publicEnabled = true; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.runId = "browser-on"; },
+    (copy) => { copy.browser.runId = "different-run"; },
+    (copy) => { copy.browser.featureFlags.publicEnabled = false; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOn.checks[1].statusCode = 404; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.checks.pop(); },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.checks[0].sameOrigin = false; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.approvedFixture.ownerMediaStatus = 404; },
+    (copy) => { copy.productionSmokePlan.gatedPublicPageVerification.publicOff.approvedFixture.artworkStatus = "pending"; },
+  ]) {
+    const copy = structuredClone(record);
+    mutate(copy);
+    assert.equal(validateProductionSmokePlan({ files, localVerification: { record: copy } }).status, "BLOCKED");
+  }
+});
+
+test("community HTML404 exception rejects every unsupported page, status, text and MIME contract", () => {
+  for (const path of ["/products", "/en/club/", "/pl/club", "/EN/club", "/en/club?sort=latest",
+    "/en/club#gallery", "/en/club/artworks/not-a-uuid", "/en/club/artworks/11111111-1111-4111-8111-111111111111/",
+    "/en/club/artworks/AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+    "/en/club/creators/ABCD", "/en/club/creators/ab", "/en/club/creators/unsafe%2fpath",
+    "/en/club//creators/release_artist"]) {
+    const { record } = gatedPageRecord();
+    const file = path === "/products" ? "src/app/products/page.tsx"
+      : path.includes("/artworks/") ? "src/app/[locale]/club/artworks/[id]/page.tsx"
+      : path.includes("/creators/") ? "src/app/[locale]/club/creators/[username]/page.tsx"
+      : "src/app/[locale]/club/page.tsx";
+    record.productionSmokePlan.flows = [{ name: "wrong HTML path", affectedFiles: [file],
+      paths: [{ path, expectedStatus: 404, expectedText: GATED_PAGE_TEXT, expectedContentType: "text/html" }] }];
+    assert.equal(validateProductionSmokePlan({ files: [file], localVerification: { record } }).status, "BLOCKED", path);
+  }
+  for (const change of [{ expectedText: "generic not found" }, { expectedText: "" }, { expectedContentType: undefined },
+    { expectedContentType: "application/json" }, { expectedStatus: 401 }, { expectedStatus: 500 },
+    { expectedFinalOrigin: "https://elsewhere.example.test" }, { method: "POST" }]) {
+    const { files, record } = gatedPageRecord();
+    Object.assign(record.productionSmokePlan.flows[0].paths[0], change);
+    assert.equal(validateProductionSmokePlan({ files, localVerification: { record } }).status, "BLOCKED", JSON.stringify(change));
+  }
+});
+
+test("gated HTML smoke enforces exact status, sentinel, MIME, origin and path without redirects", async () => {
+  const path = GATED_PAGE_PATHS[0];
+  const options = { paths: [path], expectations: [{ path, expectedStatus: 404,
+    expectedText: GATED_PAGE_TEXT, expectedContentType: "text/html" }], gatedPublicPageVerification: gatedPageProof(),
+    productionSmokeCookie: "", vercelProtectionBypass: "" };
+  const pass = await runProductionSmoke("https://production.example.test", { ...options, fetchImpl: async (url, init) => {
+    assert.equal(init.method, "GET");
+    assert.equal(init.redirect, "manual");
+    return smokeResponse(url, { status: 404, text: GATED_PAGE_TEXT, contentType: "text/html" });
+  } });
+  assert.equal(pass.status, "PASS");
+  assert.equal(pass.checks[0].gatedPublicPage, true);
+  for (const override of [{ status: 200 }, { status: 401 }, { status: 500 }, { status: 307 },
+    { text: "404 generic fallback" }, { text: "" }, { contentType: "application/json" },
+    { finalUrl: "https://elsewhere.example.test/en/club" }, { finalUrl: "https://production.example.test/404" },
+    { finalUrl: "https://production.example.test/en/club?unexpected=1" }]) {
+    const result = await runProductionSmoke("https://production.example.test", { ...options,
+      fetchImpl: async (url) => smokeResponse(url, { status: 404, text: GATED_PAGE_TEXT, contentType: "text/html", ...override }) });
+    assert.equal(result.status, "FAIL", JSON.stringify(override));
+  }
+  let fetched = false;
+  const blocked = await runProductionSmoke("https://production.example.test", { ...options,
+    gatedPublicPageVerification: null, fetchImpl: async () => { fetched = true; } });
+  assert.equal(blocked.status, "BLOCKED");
+  assert.equal(fetched, false);
+});
+
+test("POST smoke plans permit only bodyless API denial probes and reject method conflicts", () => {
+  const file = "src/app/api/community/join/route.ts";
+  const expectation = { path: "/api/community/join", method: "POST", expectedStatus: 403, expectedText: "request denied" };
+  const record = (paths) => ({ productionSmokePlan: { status: "PASS", flows: [{ name: "guest mutation guard", affectedFiles: [file], paths }] } });
+  const plan = validateProductionSmokePlan({ files: [file], localVerification: { record: record([expectation]) } });
+  assert.equal(plan.status, "PASS", plan.details);
+  assert.equal(plan.expectations[0].method, "POST");
+  for (const change of [{ method: "PUT" }, { method: "post" }, { expectedStatus: 200 }, { expectedStatus: 405 },
+    { expectedText: "" }, { body: "{}" }, { headers: { Origin: "https://production.example.test" } },
+    { credentials: "include" }, { origin: "https://production.example.test" },
+    { path: "/api/community/join?token=opaque" }, { path: "/api/community/join#hash" },
+    { path: "/en/club" }, { expectedFinalOrigin: "https://elsewhere.example.test" }]) {
+    const invalid = validateProductionSmokePlan({ files: [file], localVerification: { record: record([{ ...expectation, ...change }]) } });
+    assert.equal(invalid.status, "BLOCKED", JSON.stringify(change));
+  }
+  const conflict = validateProductionSmokePlan({ files: [file], localVerification: { record: record([
+    expectation, { ...expectation, method: "GET" },
+  ]) } });
+  assert.equal(conflict.status, "BLOCKED");
+  assert.match(conflict.details, /mix different HTTP methods/);
+});
+
+test("POST denial smoke strips application sessions and retains only deployment protection", async () => {
+  const path = "/api/community/join";
+  const host = "https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app";
+  const options = { paths: [path], expectations: [{ path, method: "POST", expectedStatus: 403, expectedText: "request denied" }],
+    productionSmokeCookie: "sb-project-auth-token=application-session; _vercel_jwt=deployment-token; lamilialomi_demo_session=demo-session",
+    vercelProtectionBypass: "" };
+  const result = await runProductionSmoke(host, { ...options, fetchImpl: async (url, init) => {
+    assert.equal(init.method, "POST");
+    assert.equal(init.redirect, "manual");
+    assert.equal(Object.hasOwn(init, "body"), false);
+    assert.equal(Object.hasOwn(init, "credentials"), false);
+    assert.deepEqual(init.headers, { Cookie: "_vercel_jwt=deployment-token" });
+    return smokeResponse(url);
+  } });
+  assert.equal(result.status, "PASS");
+  assert.equal(result.checks[0].method, "POST");
+  assert.doesNotMatch(JSON.stringify(result), /application-session|demo-session|deployment-token/);
+  for (const cookie of ["", "sb-project-auth-token=application-session", "_vercel_jwt=", "_vercel_jwt=one; _vercel_jwt=two", "_vercel_jwt=invalid value"]) {
+    let fetched = false;
+    const blocked = await runProductionSmoke(host, { ...options, productionSmokeCookie: cookie,
+      fetchImpl: async () => { fetched = true; } });
+    assert.equal(blocked.status, "BLOCKED");
+    assert.equal(fetched, false);
+  }
+  for (const override of [{ status: 405 }, { status: 307 }, { finalUrl: host + "/api/unrelated" }]) {
+    const failure = await runProductionSmoke(host, { ...options, fetchImpl: async (url) => smokeResponse(url, override) });
+    assert.equal(failure.status, "FAIL");
+  }
+  const conflicting = await runProductionSmoke(host, { ...options,
+    expectations: [...options.expectations, { ...options.expectations[0], method: "GET" }] });
+  assert.equal(conflicting.status, "BLOCKED");
+});
+
+test("POST denial smoke uses newly minted protection without forwarding auth or caller input", async () => {
+  const path = "/api/account/delete";
+  let calls = 0;
+  const result = await runProductionSmoke("https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app", {
+    paths: [path], expectations: [{ path, method: "POST", expectedStatus: 401, expectedText: "guest" }],
+    productionSmokeCookie: "sb-project-auth-token=application-session", vercelProtectionBypass: "mint-token",
+    fetchImpl: async (url, init) => {
+      calls += 1;
+      if (calls === 1) {
+        assert.equal(init.method, "GET");
+        assert.equal(init.headers["x-vercel-protection-bypass"], "mint-token");
+        return { ok: false, status: 307, headers: { getSetCookie: () => ["_vercel_jwt=minted-token; Path=/; Secure; HttpOnly"] } };
+      }
+      assert.deepEqual(init.headers, { Cookie: "_vercel_jwt=minted-token" });
+      assert.equal(init.method, "POST");
+      return smokeResponse(url, { status: 401, text: "guest" });
+    },
+  });
+  assert.equal(result.status, "PASS");
+  assert.equal(calls, 2);
+});
+
+test("mutation-only artwork deletion probes are canonical, bodyless, protected and denied before deletion", async () => {
+  const path = "/api/community/artworks/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const file = "src/app/api/community/artworks/[id]/route.ts";
+  const expectation = { path, method: "DELETE", expectedStatus: 403,
+    expectedText: "Refresh the page and try again.", expectedContentType: "application/json" };
+  const record = { productionSmokePlan: { status: "PASS", flows: [{ name: "private artwork deletion", affectedFiles: [file], paths: [expectation] }] } };
+  assert.equal(validateProductionSmokePlan({ files: [file], localVerification: { record } }).status, "PASS");
+  for (const change of [{ path: path + "?probe=1" }, { path: path.replace("aaaaaaaa", "AAAAAAAA") },
+    { path: "/api/account/delete" }, { method: "PATCH" }, { method: "PUT" }, { expectedStatus: 200 },
+    { expectedStatus: 401 }, { expectedStatus: 404 }, { expectedText: "Forbidden" },
+    { expectedContentType: undefined }, { body: {} }, { headers: { Origin: "https://example.test" } }]) {
+    const invalid = structuredClone(record);
+    Object.assign(invalid.productionSmokePlan.flows[0].paths[0], change);
+    assert.equal(validateProductionSmokePlan({ files: [file], localVerification: { record: invalid } }).status, "BLOCKED", JSON.stringify(change));
+  }
+  const host = "https://lamilia-lomi-abc123def-fantomxs-projects.vercel.app";
+  let called = false;
+  assert.equal((await runProductionSmoke(host, { paths: [path], expectations: [expectation],
+    productionSmokeCookie: "", vercelProtectionBypass: "", fetchImpl: async () => { called = true; } })).status, "BLOCKED");
+  assert.equal(called, false);
+  const options = { paths: [path], expectations: [expectation], vercelProtectionBypass: "",
+    productionSmokeCookie: "sb-project-auth-token=app-secret; _vercel_jwt=deployment-token" };
+  const result = await runProductionSmoke(host, { ...options, fetchImpl: async (url, init) => {
+    assert.equal(init.method, "DELETE");
+    assert.equal(init.redirect, "manual");
+    assert.equal(Object.hasOwn(init, "body"), false);
+    assert.deepEqual(init.headers, { Cookie: "_vercel_jwt=deployment-token" });
+    return smokeResponse(url, { status: 403, text: expectation.expectedText, contentType: "application/json" });
+  } });
+  assert.equal(result.status, "PASS");
+  assert.equal(result.checks[0].method, "DELETE");
+  for (const override of [{ status: 405 }, { status: 307 }, { text: "Forbidden" }, { contentType: "text/html" }, { finalUrl: host + "/api/elsewhere" }]) {
+    assert.equal((await runProductionSmoke(host, { ...options, fetchImpl: async (url) => smokeResponse(url, {
+      status: 403, text: expectation.expectedText, contentType: "application/json", ...override,
+    }) })).status, "FAIL");
+  }
+});
+
+test("gated proof does not replace the existing complete browser verification gate", () => {
+  const { files, record } = gatedPageRecord();
+  const assessed = assessPullRequestVerification({ pullRequest: cleanPullRequest(), files,
+    comments: [structuredComment(VERIFICATION_MARKER, record), ...cleanAiReviewComments()], mergePolicy: cleanMergePolicy() });
+  assert.equal(assessed.productionSmokePlan.status, "PASS");
+  assert.notEqual(assessed.browserVerification.status, "PASS");
+  assert.equal(assessed.decision, "BLOCKED");
+});
+
+test("delivery carries validated OFF proof and POST method into exact-deployment smoke", async () => {
+  const fixture = createDeliveryClient();
+  const { files, record } = gatedPageRecord();
+  const apiFile = "src/app/api/community/join/route.ts";
+  files.push(apiFile);
+  record.productionSmokePlan.flows.push({ name: "join authorization denial", affectedFiles: [apiFile],
+    paths: [{ path: "/api/community/join", method: "POST", expectedStatus: 403, expectedText: "request denied" }] });
+  const plan = validateProductionSmokePlan({ files, localVerification: { record } });
+  let checked = false;
+  const result = await deliverPullRequest(fixture.client, 52, { issueNumber: 7,
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA,
+      pullRequest: { baseSha: CURRENT_BASE_SHA }, fileScope: { files }, productionSmokePlan: plan, reasons: [] }),
+    waitForDeployment: async (_client, mergeSha) => ({ status: "PASS", deployment: { id: 14, sha: mergeSha,
+      environmentUrl: "https://production.example.test" }, details: "Exact-SHA deployment passed." }),
+    smoke: async (_url, options) => {
+      checked = true;
+      assert.equal(options.gatedPublicPageVerification.testedSha, CURRENT_SHA);
+      assert.equal(options.expectations.find((item) => item.path === "/api/community/join").method, "POST");
+      return { status: "PASS", checks: [], details: "Expected OFF pages and API guard passed." };
+    },
+  });
+  assert.equal(checked, true);
+  assert.equal(result.completed, true);
+});
+
+test("delivery blocks a self-consistent gated proof from another candidate before merge", async () => {
+  const fixture = createDeliveryClient();
+  const { files, record } = gatedPageRecord();
+  const stale = "d".repeat(40);
+  record.headSha = stale;
+  record.browser.testedSha = stale;
+  record.productionSmokePlan.gatedPublicPageVerification.testedSha = stale;
+  record.productionSmokePlan.gatedPublicPageVerification.publicOn.testedSha = stale;
+  record.productionSmokePlan.gatedPublicPageVerification.publicOff.testedSha = stale;
+  const plan = validateProductionSmokePlan({ files, localVerification: { record } });
+  assert.equal(plan.status, "PASS");
+  const result = await deliverPullRequest(fixture.client, 52, {
+    verify: async () => ({ decision: "READY_FOR_MERGE", currentSha: CURRENT_SHA,
+      pullRequest: { baseSha: CURRENT_BASE_SHA }, fileScope: { files }, productionSmokePlan: plan, reasons: [] }),
+  });
+  assert.equal(result.status, "BLOCKED");
+  assert.equal(result.merged, false);
+  assert.equal(fixture.calls.some(({ path }) => path.endsWith("/pulls/52/merge")), false);
+});
+
 function structuredComment(marker, record, user = "author", createdAt = "2026-10-08T12:00:00Z") {
   return {
     user: { login: user },
@@ -1421,6 +1709,371 @@ test("requires committed browser evidence for UI changes and keeps non-UI change
   });
   assert.equal(nonUi.status, "NOT RUN");
   assert.equal(nonUi.required, false);
+});
+
+test("accepts only one-to-one current-run expected API HTTP console outcomes", () => {
+  const screenshot = "docs/verification/pr-52/community-report.png";
+  const path = "/api/community/artworks/11111111-1111-4111-8111-111111111111/report";
+  const runId = "pr-52-community-report-run-1";
+  const status = 409;
+  const expectedError = "HTTP 409 Conflict";
+  const outcome = {
+    id: "report-conflict-1",
+    testedSha: CURRENT_SHA,
+    runId,
+    path,
+    url: "http://127.0.0.1:3100" + path,
+    method: "POST",
+    expectedStatus: status,
+    observedStatus: status,
+    expectedError,
+    observedError: expectedError,
+    assertionStatus: "PASS",
+    details: "The duplicate report was rejected and the visible conflict message was asserted.",
+  };
+  const consoleError = {
+    message: "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    url: "http://127.0.0.1:3100" + path,
+    path,
+    method: "POST",
+    statusCode: status,
+    disposition: "expected",
+    outcomeId: outcome.id,
+    reason: "The app reports the API conflict while the asserted UI shows the duplicate-report message.",
+  };
+  const browser = {
+    status: "PASS",
+    tool: "Playwright",
+    testedSha: CURRENT_SHA,
+    runId,
+    flows: ["duplicate community report shows a conflict"],
+    screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId }],
+    responsiveLayouts: ["desktop 1440px"],
+    persistence: { status: "NOT APPLICABLE", details: "The duplicate report does not mutate data." },
+    screenshotReview: { status: "PASS", details: "The conflict message is visible in the captured report form." },
+    retestedAfterFixes: true,
+    consoleErrors: [consoleError],
+    failedNetworkRequests: [],
+    expectedHttpOutcomes: [outcome],
+  };
+  const validate = (candidate) => validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: candidate }) },
+    files: ["src/app/community/report.tsx", screenshot],
+  });
+
+  assert.equal(validate(browser).status, "PASS");
+
+  const invalidCases = [
+    (candidate) => { delete candidate.expectedHttpOutcomes; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].testedSha = "b".repeat(40); },
+    (candidate) => { candidate.expectedHttpOutcomes[0].runId = "older-run"; },
+    (candidate) => { candidate.consoleErrors[0].outcomeId = "unknown-outcome"; },
+    (candidate) => { candidate.consoleErrors[0].statusCode = 403; },
+    (candidate) => { candidate.consoleErrors[0].path = "/api/community/other"; },
+    (candidate) => { candidate.consoleErrors[0].url = "http://127.0.0.1:3100/api/community/other"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].url = "https://attacker.example" + path; },
+    (candidate) => { candidate.consoleErrors[0].message = "Uncaught TypeError: failed"; },
+    (candidate) => { candidate.consoleErrors[0].message += "\nUncaught TypeError: leaked"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].observedStatus = 500; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].expectedStatus = 500; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].path = "/admin/community/reports"; candidate.consoleErrors[0].path = "/admin/community/reports"; candidate.consoleErrors[0].url = "http://127.0.0.1:3100/admin/community/reports"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].path += "?token=secret"; candidate.consoleErrors[0].path += "?token=secret"; candidate.consoleErrors[0].url += "?token=secret"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].observedError = "HTTP 403 Forbidden"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].assertionStatus = "FAIL"; },
+    (candidate) => { candidate.pageErrors = ["Uncaught TypeError: failed"]; },
+    (candidate) => { candidate.expectedHttpOutcomes.push(structuredClone(candidate.expectedHttpOutcomes[0])); },
+    (candidate) => { candidate.consoleErrors.push(structuredClone(candidate.consoleErrors[0])); },
+    (candidate) => { candidate.consoleErrors = []; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].id = "orphan"; },
+    (candidate) => { candidate.failedNetworkRequests.push({ ...structuredClone(candidate.consoleErrors[0]), method: "POST" }); },
+  ];
+  for (const [index, mutate] of invalidCases.entries()) {
+    const invalid = structuredClone(browser);
+    mutate(invalid);
+    assert.notEqual(validate(invalid).status, "PASS", `invalid mutation ${index} was accepted`);
+  }
+
+  const legacyUnrelated = structuredClone(browser);
+  legacyUnrelated.consoleErrors = [{ message: "Known unrelated error", disposition: "unrelated", reason: "Documented legacy case." }];
+  delete legacyUnrelated.expectedHttpOutcomes;
+  assert.equal(validate(legacyUnrelated).status, "PASS");
+});
+
+test("accepts only the asserted same-origin community product-delete redirect cancellation", () => {
+  const screenshot = "docs/verification/pr-52/community-product-delete.png";
+  const runId = "pr-52-community-product-delete-run-1";
+  const requestPath = "/admin/products/11111111-1111-4111-8111-111111111111";
+  const requestUrl = "http://127.0.0.1:3100" + requestPath;
+  const destinationUrl = "http://127.0.0.1:3100/admin/products?error=admin.conflict.community_artwork&toast=22222222-2222-4222-8222-222222222222";
+  const refusalText = "Ta książka ma prace lub zapis przesyłania z Klubu Kolorowania. Zarchiwizuj ją zamiast usuwać.";
+  const outcome = {
+    id: "product-delete-refusal-1",
+    kind: "product-deletion-refusal",
+    testedSha: CURRENT_SHA,
+    runId,
+    requestUrl,
+    requestPath,
+    requestMethod: "POST",
+    nextServerAction: true,
+    observedFailure: "net::ERR_ABORTED",
+    destinationUrl,
+    observedDestinationUrl: destinationUrl,
+    expectedText: refusalText,
+    observedText: refusalText,
+    assertionStatus: "PASS",
+    productPreserved: true,
+    curatedRowPreserved: true,
+    curatedBytesPreserved: true,
+    details: "The refusal text is visible and the product, curated row, and image bytes remain intact.",
+  };
+  const failedRequest = {
+    url: requestUrl,
+    method: "POST",
+    resource: "fetch",
+    phase: "product deletion refusal",
+    error: "net::ERR_ABORTED",
+    disposition: "navigation-canceled",
+    outcomeId: outcome.id,
+    nextServerAction: true,
+    reason: "The browser canceled the redirected Server Action after the refusal UI and preservation checks passed.",
+  };
+  const browser = {
+    status: "PASS",
+    tool: "Playwright",
+    testedSha: CURRENT_SHA,
+    runId,
+    flows: ["refuse deletion of a product with curated community artwork"],
+    screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId }],
+    responsiveLayouts: ["desktop 1440px"],
+    persistence: { status: "PASS", details: "Product and curated artwork remain after the redirect." },
+    screenshotReview: { status: "PASS", details: "The refusal is visible in the final product list." },
+    retestedAfterFixes: true,
+    consoleErrors: [],
+    failedNetworkRequests: [failedRequest],
+    expectedNavigationCancellations: [outcome],
+  };
+  const validate = (candidate) => validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: candidate }) },
+    files: ["src/app/admin/products/product-editor.tsx", screenshot],
+  });
+
+  assert.equal(validate(browser).status, "PASS");
+
+  const invalidCases = [
+    (candidate) => { delete candidate.expectedNavigationCancellations; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].testedSha = "b".repeat(40); },
+    (candidate) => { candidate.expectedNavigationCancellations[0].runId = "stale-run"; },
+    (candidate) => { candidate.failedNetworkRequests[0].outcomeId = "unknown"; },
+    (candidate) => { candidate.failedNetworkRequests[0].url = "http://attacker.example" + requestPath; candidate.expectedNavigationCancellations[0].requestUrl = candidate.failedNetworkRequests[0].url; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].requestUrl += "?token=secret"; candidate.failedNetworkRequests[0].url += "?token=secret"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].requestPath = "/api/admin/products/11111111-1111-4111-8111-111111111111"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].requestPath = "/admin/products/not-a-uuid"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].requestMethod = "GET"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].nextServerAction = false; },
+    (candidate) => { candidate.failedNetworkRequests[0].nextServerAction = false; },
+    (candidate) => { candidate.failedNetworkRequests[0].resource = "document"; },
+    (candidate) => { candidate.failedNetworkRequests[0].phase = "other navigation"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].observedFailure = "net::ERR_FAILED"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl = "https://attacker.example/admin/products?error=admin.conflict.community_artwork&toast=22222222-2222-4222-8222-222222222222"; candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl = "http://127.0.0.1:3100/admin?error=admin.conflict.community_artwork&toast=22222222-2222-4222-8222-222222222222"; candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl.replace("admin.conflict.community_artwork", "admin.conflict.other"); candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl = "http://127.0.0.1:3100/admin/products?toast=22222222-2222-4222-8222-222222222222"; candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl += "&extra=1"; candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].observedDestinationUrl = requestUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].expectedText = "Wrong refusal"; candidate.expectedNavigationCancellations[0].observedText = "Wrong refusal"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].observedText = "Missing refusal"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].productPreserved = false; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].curatedRowPreserved = false; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].curatedBytesPreserved = false; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].assertionStatus = "FAIL"; },
+    (candidate) => { candidate.expectedNavigationCancellations.push(structuredClone(candidate.expectedNavigationCancellations[0])); },
+    (candidate) => { candidate.failedNetworkRequests.push(structuredClone(candidate.failedNetworkRequests[0])); },
+    (candidate) => { candidate.failedNetworkRequests = []; },
+  ];
+  for (const mutate of invalidCases) {
+    const invalid = structuredClone(browser);
+    mutate(invalid);
+    assert.notEqual(validate(invalid).status, "PASS");
+  }
+
+  for (const abortRecord of [
+    { error: "net::ERR_ABORTED" },
+    { errorText: "net::ERR_ABORTED" },
+    { message: "Request canceled: net::ERR_ABORTED" },
+  ]) {
+    const unrelatedAbort = structuredClone(browser);
+    unrelatedAbort.failedNetworkRequests.push({
+      url: "http://127.0.0.1:3100/_next/static/chunk.js",
+      method: "GET",
+      ...abortRecord,
+      disposition: "unrelated",
+      reason: "This label cannot waive an unapproved browser cancellation.",
+    });
+    assert.notEqual(validate(unrelatedAbort).status, "PASS");
+  }
+
+  const unrelatedNetworkFailure = structuredClone(browser);
+  unrelatedNetworkFailure.failedNetworkRequests.push({
+    url: "http://127.0.0.1:3100/third-party/widget.js",
+    method: "GET",
+    error: "net::ERR_NAME_NOT_RESOLVED",
+    disposition: "unrelated",
+    reason: "The optional third-party widget host is not available in this isolated test environment.",
+  });
+  assert.equal(validate(unrelatedNetworkFailure).status, "PASS");
+});
+
+test("validates bounded Next RSC prefetch/link and identity-verified login cancellations", () => {
+  const screenshot = "docs/verification/pr-52/next-navigation.png";
+  const runId = "pr-52-next-navigation-run-1";
+  const origin = "https://127.0.0.1:3443";
+  const prefetchUrl = `${origin}/en/club?_rsc=abc`;
+  const linkUrl = `${origin}/en/club/creators/artist?_rsc=def`;
+  const loginUrl = `${origin}/en/login?returnTo=%2Fen%2Fclub%2Fcreators%2Fartist`;
+  const destination = `${origin}/en/club/creators/artist`;
+  const prefetch = {
+    id: "prefetch-1", kind: "next-prefetch", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "page-1", requestId: "request-1", requestUrl: prefetchUrl, requestPath: "/en/club",
+    requestMethod: "GET", resource: "fetch", sourceUrl: `${origin}/en`, rsc: "1",
+    prefetchHeader: "1", observedFailure: "net::ERR_ABORTED", responseStatus: null,
+    phase: "navigation",
+    assertionStatus: "PASS", details: "Explicit Next router prefetch canceled during the page journey.",
+  };
+  const link = {
+    id: "link-1", kind: "next-link-navigation", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "page-1", requestId: "request-2", requestUrl: linkUrl, requestPath: "/en/club/creators/artist",
+    requestMethod: "GET", resource: "fetch", sourceUrl: `${origin}/en/club`, rsc: "1",
+    observedFailure: "net::ERR_ABORTED", responseStatus: 200,
+    phase: "navigation",
+    intentId: "intent-1", trustedClick: true, intentHref: destination,
+    intentPageId: "page-1", intentSourceUrl: `${origin}/en/club`,
+    intentAt: 1_798_000_000_000, requestStartedAt: 1_798_000_000_010,
+    expectedUrl: destination, observedDestinationUrl: destination,
+    assertions: [{ name: "creator page", status: "PASS", details: "The creator heading and approved artwork list rendered." }],
+    assertionStatus: "PASS", details: "The destination rendering was asserted after the trusted link click.",
+  };
+  const login = {
+    id: "login-1", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "page-2", requestId: "request-3", requestUrl: loginUrl, requestPath: "/en/login",
+    requestMethod: "POST", resource: "fetch", nextServerAction: true, nextActionHeader: true,
+    observedFailure: "net::ERR_ABORTED", responseStatus: 303,
+    phase: "navigation",
+    expectedUrl: destination, observedDestinationUrl: destination,
+    freshFixtureIdentity: true, authenticatedServerAccount: true, accountStatus: 200,
+    assertions: [{ name: "fixture account identity", status: "PASS", details: "The current cookie-bound account response contains the new fixture identity." }],
+    assertionStatus: "PASS", details: "The real login action reached the intended destination and authenticated the fixture account.",
+  };
+  const closedPrefetch = {
+    id: "closed-prefetch-1", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "page-3", requestId: "request-4", requestUrl: `${origin}/en/club?audience=adults&_rsc=ghi`,
+    requestPath: "/en/club", requestMethod: "GET", resource: "fetch", rsc: "1",
+    prefetchHeader: "1", segmentPrefetch: undefined, responseStatus: null,
+    phase: "teardown", pageClosed: true, closedByObserver: true, completionObserved: false,
+    terminalObservation: "page-closed-without-request-terminal-event",
+  };
+  const browser = {
+    status: "PASS", tool: "Playwright", testedSha: CURRENT_SHA, runId, origin,
+    flows: ["Next navigation and verified fixture login"],
+    screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId }],
+    responsiveLayouts: ["desktop 1440px"],
+    persistence: { status: "PASS", details: "The signed-in account remained available after navigation." },
+    screenshotReview: { status: "PASS", details: "The destination page is shown in the captured browser state." },
+    retestedAfterFixes: true, consoleErrors: [],
+    failedNetworkRequests: [
+      { url: prefetchUrl, path: "/en/club", method: "GET", resource: "fetch", error: "net::ERR_ABORTED", pageId: "page-1", requestId: "request-1", disposition: "next-canceled", cancellationKind: "next-prefetch", phase: "navigation", outcomeId: prefetch.id, reason: prefetch.details },
+      { url: linkUrl, path: "/en/club/creators/artist", method: "GET", resource: "fetch", error: "net::ERR_ABORTED", pageId: "page-1", requestId: "request-2", disposition: "next-canceled", cancellationKind: "next-link-navigation", phase: "navigation", outcomeId: link.id, reason: link.details },
+      { url: loginUrl, path: "/en/login", method: "POST", resource: "fetch", error: "net::ERR_ABORTED", pageId: "page-2", requestId: "request-3", disposition: "login-redirect-canceled", nextServerAction: true, phase: "navigation", outcomeId: login.id, reason: login.details },
+    ],
+    expectedNextCancellations: [prefetch, link],
+    closedPrefetches: [closedPrefetch],
+    expectedLoginRedirects: [login],
+  };
+  const validate = (candidate) => validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: candidate }) },
+    files: ["src/app/[locale]/club/page.tsx", screenshot],
+  });
+  assert.equal(validate(browser).status, "PASS");
+
+  const invalidCases = [
+    (candidate) => { candidate.expectedNextCancellations[0].testedSha = "b".repeat(40); },
+    (candidate) => { candidate.expectedNextCancellations[0].runId = "stale-run"; },
+    (candidate) => { candidate.expectedNextCancellations[0].origin = "https://attacker.example"; },
+    (candidate) => { candidate.expectedNextCancellations[0].requestUrl = "https://attacker.example/en/club?_rsc=abc"; candidate.failedNetworkRequests[0].url = candidate.expectedNextCancellations[0].requestUrl; },
+    (candidate) => { candidate.expectedNextCancellations[0].requestPath = "/api/community/artworks"; candidate.failedNetworkRequests[0].path = "/api/community/artworks"; },
+    (candidate) => { candidate.expectedNextCancellations[0].requestMethod = "POST"; candidate.failedNetworkRequests[0].method = "POST"; },
+    (candidate) => { candidate.expectedNextCancellations[0].resource = "image"; candidate.failedNetworkRequests[0].resource = "image"; },
+    (candidate) => { candidate.expectedNextCancellations[0].rsc = "0"; },
+    (candidate) => { candidate.expectedNextCancellations[0].prefetchHeader = "true"; },
+    (candidate) => { candidate.expectedNextCancellations[0].prefetchHeader = undefined; candidate.expectedNextCancellations[0].segmentPrefetch = undefined; },
+    (candidate) => { candidate.expectedNextCancellations[0].responseStatus = 503; },
+    (candidate) => { candidate.expectedNextCancellations[1].trustedClick = false; },
+    (candidate) => { candidate.expectedNextCancellations[1].phase = "cleanup"; },
+    (candidate) => { candidate.expectedNextCancellations[1].intentHref = "https://attacker.example/en/club/creators/artist"; },
+    (candidate) => { candidate.expectedNextCancellations[1].intentId = undefined; },
+    (candidate) => { candidate.expectedNextCancellations[1].intentPageId = "another-page"; },
+    (candidate) => { candidate.expectedNextCancellations[1].intentSourceUrl = `${origin}/en/library`; },
+    (candidate) => { candidate.expectedNextCancellations[1].sourceUrl = `${origin}/en/library`; },
+    (candidate) => { candidate.expectedNextCancellations[1].requestStartedAt = candidate.expectedNextCancellations[1].intentAt + 30_001; },
+    (candidate) => { candidate.expectedNextCancellations[1].requestUrl = `${origin}/en/club/other?_rsc=def`; candidate.expectedNextCancellations[1].requestPath = "/en/club/other"; candidate.failedNetworkRequests[1].url = candidate.expectedNextCancellations[1].requestUrl; candidate.failedNetworkRequests[1].path = "/en/club/other"; },
+    (candidate) => { candidate.expectedNextCancellations[1].assertions = []; },
+    (candidate) => { candidate.expectedNextCancellations[1].observedDestinationUrl = `${origin}/en/club`; },
+    (candidate) => { candidate.expectedNextCancellations.push(structuredClone(candidate.expectedNextCancellations[0])); },
+    (candidate) => {
+      const duplicatePrefetchRequest = structuredClone(candidate.expectedNextCancellations[0]);
+      duplicatePrefetchRequest.id = "prefetch-duplicate-request";
+      candidate.expectedNextCancellations.push(duplicatePrefetchRequest);
+      candidate.failedNetworkRequests.push({ ...structuredClone(candidate.failedNetworkRequests[0]), outcomeId: duplicatePrefetchRequest.id });
+    },
+    (candidate) => {
+      candidate.expectedNextCancellations[1].requestId = "request-1";
+      candidate.failedNetworkRequests[1].requestId = "request-1";
+    },
+    (candidate) => {
+      const duplicateIntent = structuredClone(candidate.expectedNextCancellations[1]);
+      duplicateIntent.id = "link-duplicate-intent";
+      duplicateIntent.requestId = "request-4";
+      candidate.expectedNextCancellations.push(duplicateIntent);
+      candidate.failedNetworkRequests.push({ ...structuredClone(candidate.failedNetworkRequests[1]), requestId: "request-4", outcomeId: duplicateIntent.id });
+    },
+    (candidate) => { candidate.failedNetworkRequests[0].outcomeId = "orphan"; },
+    (candidate) => { delete candidate.expectedNextCancellations; },
+    (candidate) => { candidate.expectedLoginRedirects[0].responseStatus = null; },
+    (candidate) => { candidate.expectedLoginRedirects[0].responseStatus = 500; },
+    (candidate) => { candidate.expectedLoginRedirects[0].requestUrl = `${origin}/en/login?returnTo=https%3A%2F%2Fattacker.example`; candidate.failedNetworkRequests[2].url = candidate.expectedLoginRedirects[0].requestUrl; },
+    (candidate) => { candidate.expectedLoginRedirects[0].requestUrl = `${origin}/en/login?returnTo=%2Fen%2Faccount&returnTo=%2Fen%2Fclub`; candidate.failedNetworkRequests[2].url = candidate.expectedLoginRedirects[0].requestUrl; },
+    (candidate) => { candidate.expectedLoginRedirects[0].nextActionHeader = false; },
+    (candidate) => { candidate.expectedLoginRedirects[0].freshFixtureIdentity = false; },
+    (candidate) => { candidate.expectedLoginRedirects[0].accountStatus = 503; },
+    (candidate) => { candidate.expectedLoginRedirects[0].expectedUrl = `${origin}/en/account`; },
+    (candidate) => { candidate.expectedLoginRedirects[0].assertions[0].status = "FAIL"; },
+    (candidate) => { candidate.expectedLoginRedirects.push(structuredClone(candidate.expectedLoginRedirects[0])); },
+    (candidate) => { candidate.failedNetworkRequests.push({ ...structuredClone(candidate.failedNetworkRequests[0]), requestId: "different-request", url: `${origin}/_next/static/chunk.js` }); },
+    (candidate) => { candidate.closedPrefetches[0].requestMethod = "POST"; },
+    (candidate) => { candidate.closedPrefetches[0].resource = "image"; },
+    (candidate) => { candidate.closedPrefetches[0].requestUrl = `${origin}/api/community/artworks?_rsc=ghi`; candidate.closedPrefetches[0].requestPath = "/api/community/artworks"; },
+    (candidate) => { candidate.closedPrefetches[0].requestUrl = "https://attacker.example/en/club?_rsc=ghi"; },
+    (candidate) => { candidate.closedPrefetches[0].responseStatus = 404; },
+    (candidate) => { candidate.closedPrefetches[0].responseStatus = 500; },
+    (candidate) => { candidate.closedPrefetches[0].prefetchHeader = undefined; candidate.closedPrefetches[0].segmentPrefetch = undefined; },
+    (candidate) => { candidate.closedPrefetches[0].pageClosed = false; },
+    (candidate) => { candidate.closedPrefetches[0].closedByObserver = false; },
+    (candidate) => { candidate.closedPrefetches[0].completionObserved = true; },
+    (candidate) => { candidate.closedPrefetches[0].terminalObservation = "requestfinished"; },
+    (candidate) => { candidate.closedPrefetches[0].error = "net::ERR_ABORTED"; },
+    (candidate) => { candidate.closedPrefetches[0].requestId = "request-1"; },
+    (candidate) => { candidate.closedPrefetches[0].requestId = "x".repeat(129); },
+    (candidate) => { candidate.expectedNextCancellations = { unexpected: "shape" }; },
+    (candidate) => { candidate.failedNetworkRequests.push({ url: `${origin}/cdn/widget.js`, path: "/cdn/widget.js", method: "GET", resource: "script", error: "net::ERR_FAILED", requestId: "request-4", disposition: "unrelated", reason: "A previously documented optional third-party script failure." }); },
+    (candidate) => { candidate.closedPrefetches.push(structuredClone(candidate.closedPrefetches[0])); },
+  ];
+  for (const [index, mutate] of invalidCases.entries()) {
+    const invalid = structuredClone(browser);
+    mutate(invalid);
+    assert.notEqual(validate(invalid).status, "PASS", `invalid mutation ${index} was accepted`);
+  }
 });
 
 test("keeps migration and dependency release obligations blocking until each is explicit", () => {

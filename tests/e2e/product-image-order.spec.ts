@@ -123,7 +123,11 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       Boolean(request.headers()["next-action"]);
     const nextFlightFetch = request.method() === "GET" && request.resourceType() === "fetch" &&
       failedUrl.searchParams.has("_rsc");
-    const expectedCreateSaveCancellation = createSaveNavigationPending && (createActionPost || nextFlightFetch);
+    const exactCreatedProductFetch = request.method() === "GET" && request.resourceType() === "fetch" &&
+      productId !== "" && failedUrl.origin === new URL(page.url()).origin &&
+      failedUrl.pathname === `/admin/products/${productId}`;
+    const expectedCreateSaveCancellation = createSaveNavigationPending &&
+      (createActionPost || nextFlightFetch || exactCreatedProductFetch);
     const productMutationAction = request.method() === "POST" && failedUrl.pathname === `/admin/products/${productId}` &&
       Boolean(request.headers()["next-action"]);
     const expectedVerifiedUpdateSaveCancellation = productUpdateSavePending && productMutationAction;
@@ -262,20 +266,18 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
 
     createSaveNavigationPending = true;
     try {
-      await Promise.all([
-        page.getByRole("button", { name: /Zapisz/ }).click(),
-      ]);
+      await page.getByRole("button", { name: /Zapisz/ }).click();
+      await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
+      await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
+      productPath = new URL(page.url()).pathname;
+      await expect(page.getByTestId("product-save-bar").getByRole("status"))
+        .toHaveText("Wszystkie zmiany są zapisane");
+      await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
+      await assertSubmittedGalleryOrder(page, expectedOrder.map((fixture) => fixture.name));
+      await capture(page, testInfo, "05-saved-product");
     } finally {
       createSaveNavigationPending = false;
     }
-    await expect(page.getByRole("status").filter({ hasText: "Zmiany produktu zostały zapisane." })).toBeVisible();
-    await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
-    productPath = new URL(page.url()).pathname;
-    await expect(page.getByTestId("product-save-bar").getByRole("status"))
-      .toHaveText("Wszystkie zmiany są zapisane");
-    await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
-    await assertSubmittedGalleryOrder(page, expectedOrder.map((fixture) => fixture.name));
-    await capture(page, testInfo, "05-saved-product");
 
     await page.reload();
     await expect(page.getByRole("heading", { name: /Edycja: E2E Image Order/ })).toBeVisible();
@@ -346,7 +348,12 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
         const acceptDialogs = (dialog: import("@playwright/test").Dialog) => void dialog.accept();
         page.on("dialog", acceptDialogs);
         try {
+          const editorReady = page.waitForResponse(response => response.request().method() === "GET"
+            && new URL(response.url()).pathname === `/api/admin/products/${productId}/reader-artworks`
+            && response.status() === 200);
           await page.goto(productPath);
+          await editorReady;
+          await expect(page.getByText("Wczytywanie prac…", { exact: true })).toHaveCount(0);
           const deleteProduct = page.getByRole("button", { name: "Usuń produkt", exact: true });
           await expect(deleteProduct).toBeVisible();
           await expect(deleteProduct).toBeEnabled();

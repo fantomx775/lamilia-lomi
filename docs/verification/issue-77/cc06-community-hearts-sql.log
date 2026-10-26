@@ -1,0 +1,251 @@
+BEGIN
+SET
+ no_plan
+---------
+(0 rows)
+
+             ok
+----------------------------
+ ok 1 - heart rows have RLS
+(1 row)
+
+                         ok
+----------------------------------------------------
+ ok 2 - anonymous raw heart table access is revoked
+(1 row)
+
+                           ok
+--------------------------------------------------------
+ ok 3 - authenticated raw heart table access is revoked
+(1 row)
+
+                              ok
+--------------------------------------------------------------
+ ok 4 - anonymous cannot spoof an actor through the heart RPC
+(1 row)
+
+                              ok
+---------------------------------------------------------------
+ ok 5 - authenticated cannot invoke the service-only heart RPC
+(1 row)
+
+                       ok
+-------------------------------------------------
+ ok 6 - only trusted server execution is granted
+(1 row)
+
+INSERT 0 6
+INSERT 0 1
+INSERT 0 1
+SET
+            community_join
+--------------------------------------
+ 61000000-0000-4000-8000-000000000001
+(1 row)
+
+            community_join
+--------------------------------------
+ 61000000-0000-4000-8000-000000000002
+(1 row)
+
+            community_join
+--------------------------------------
+ 61000000-0000-4000-8000-000000000003
+(1 row)
+
+            community_join
+--------------------------------------
+ 61000000-0000-4000-8000-000000000005
+(1 row)
+
+            community_join
+--------------------------------------
+ 61000000-0000-4000-8000-000000000006
+(1 row)
+
+RESET
+UPDATE 1
+UPDATE 1
+INSERT 0 5
+SELECT 1
+GRANT
+SET
+                     throws_ok
+----------------------------------------------------
+ ok 7 - anonymous REST cannot list liker identities
+(1 row)
+
+                      throws_ok
+-----------------------------------------------------
+ ok 8 - anonymous cannot choose a forged heart actor
+(1 row)
+
+RESET
+SET
+                      throws_ok
+------------------------------------------------------
+ ok 9 - authenticated REST cannot read raw liker rows
+(1 row)
+
+                          throws_ok
+-------------------------------------------------------------
+ ok 10 - direct REST cannot insert a heart or spoof its user
+(1 row)
+
+RESET
+SET
+                      is
+----------------------------------------------
+ ok 11 - eligible liker has no product unlock
+(1 row)
+
+                                  is
+----------------------------------------------------------------------
+ ok 12 - verified opted-in adult can heart without unlocking the book
+(1 row)
+
+                     is
+---------------------------------------------
+ ok 13 - first heart increments exactly once
+(1 row)
+
+                  is
+--------------------------------------
+ ok 14 - duplicate like is idempotent
+(1 row)
+
+                            is
+----------------------------------------------------------
+ ok 15 - unique actor/artwork key prevents duplicate rows
+(1 row)
+
+                            is
+-----------------------------------------------------------
+ ok 16 - a different eligible member contributes one heart
+(1 row)
+
+                   is
+----------------------------------------
+ ok 17 - unlike decrements exactly once
+(1 row)
+
+                  is
+---------------------------------------
+ ok 18 - repeated unlike is idempotent
+(1 row)
+
+                      is
+-----------------------------------------------
+ ok 19 - hearts do not change content revision
+(1 row)
+
+                           is
+---------------------------------------------------------
+ ok 20 - hearts do not rewrite content modification time
+(1 row)
+
+                      throws_ok
+-----------------------------------------------------
+ ok 21 - current Auth email verification is required
+(1 row)
+
+                throws_ok
+-----------------------------------------
+ ok 22 - verified nonmember cannot heart
+(1 row)
+
+               throws_ok
+---------------------------------------
+ ok 23 - suspended member cannot heart
+(1 row)
+
+                       throws_ok
+-------------------------------------------------------
+ ok 24 - null intent cannot accidentally act as unlike
+(1 row)
+
+                     is
+--------------------------------------------
+ ok 25 - pending work cannot receive hearts
+(1 row)
+
+                     is
+---------------------------------------------
+ ok 26 - rejected work cannot receive hearts
+(1 row)
+
+                     is
+--------------------------------------------
+ ok 27 - removed work cannot receive hearts
+(1 row)
+
+                     is
+--------------------------------------------
+ ok 28 - deleted work cannot receive hearts
+(1 row)
+
+RESET
+DELETE 1
+                                  is
+----------------------------------------------------------------------
+ ok 29 - Auth deletion cascades the like and repairs its cached count
+(1 row)
+
+SET
+             community_set_artwork_like
+-----------------------------------------------------
+ {"liked": true, "available": true, "likesCount": 1}
+(1 row)
+
+UPDATE 1
+                         is
+-----------------------------------------------------
+ ok 30 - withdrawal removes existing personal hearts
+(1 row)
+
+                          is
+-------------------------------------------------------
+ ok 31 - withdrawal leaves no personal engagement rows
+(1 row)
+
+               throws_ok
+---------------------------------------
+ ok 32 - withdrawn member cannot heart
+(1 row)
+
+            community_join
+--------------------------------------
+ 61000000-0000-4000-8000-000000000002
+(1 row)
+
+             community_set_artwork_like
+-----------------------------------------------------
+ {"liked": true, "available": true, "likesCount": 1}
+(1 row)
+
+UPDATE 1
+                        is
+---------------------------------------------------
+ ok 33 - suspension removes existing member hearts
+(1 row)
+
+UPDATE 1
+UPDATE 1
+                      is
+----------------------------------------------
+ ok 34 - archived books cannot receive hearts
+(1 row)
+
+UPDATE 1
+UPDATE 1
+                          is
+------------------------------------------------------
+ ok 35 - a suspended creator cannot receive reactions
+(1 row)
+
+ finish
+--------
+ 1..35
+(1 row)
+
+ROLLBACK

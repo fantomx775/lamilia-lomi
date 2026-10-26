@@ -1,0 +1,51 @@
+-- SQL/RPC state security only; real image/storage behavior is covered by the isolated browser suite.
+-- Run ONLY in supabase_db_lamilia-coloring-club-p0. All fixtures roll back.
+BEGIN;
+SET LOCAL search_path=public,extensions;
+SELECT plan(28);
+SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='public.community_upload_reservations'::regclass),'upload reservations enforce RLS');
+SELECT ok(NOT has_table_privilege('anon','public.community_upload_reservations','SELECT,INSERT,UPDATE,DELETE'),'anon has no reservation grants');
+SELECT ok(NOT has_table_privilege('authenticated','public.community_upload_reservations','SELECT,INSERT,UPDATE,DELETE'),'authenticated has no reservation grants');
+INSERT INTO auth.users(id,email,email_confirmed_at,raw_app_meta_data,raw_user_meta_data) VALUES
+ ('20000000-0000-4000-8000-000000000001','cc-sql-upload-owner@example.test',now(),'{}','{"role":"admin"}'),
+ ('20000000-0000-4000-8000-000000000002','cc-sql-upload-other@example.test',now(),'{}','{"role":"admin"}');
+INSERT INTO public.user_product_unlocks(user_id,product_id) VALUES('20000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111');
+CREATE TEMP TABLE cc_upload_result(id uuid);
+CREATE TEMP TABLE cc_cleanup_result(author_id uuid,idempotency_key uuid,storage_path text,storage_provider text,cleanup_token uuid);
+GRANT ALL ON cc_upload_result,cc_cleanup_result TO service_role;
+SET LOCAL ROLE anon;
+SELECT throws_ok($$SELECT * FROM public.community_upload_reservations$$,'42501','permission denied for table community_upload_reservations','anon cannot read upload identities');
+SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture')$$,'42501','permission denied for function community_reserve_upload','anon cannot acquire an upload lease');
+SELECT throws_ok($$SELECT * FROM public.community_claim_upload_cleanup(10)$$,'42501','permission denied for function community_claim_upload_cleanup','anon cannot trigger raw cleanup');
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+SELECT throws_ok($$SELECT * FROM public.community_upload_reservations$$,'42501','permission denied for table community_upload_reservations','authenticated cannot read upload identities');
+SELECT throws_ok($$SELECT public.community_mark_upload_stored('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001')$$,'42501','permission denied for function community_mark_upload_stored','authenticated role spoof cannot mark bytes stored');
+RESET ROLE;
+SET LOCAL ROLE service_role;
+SELECT is(public.community_join('20000000-0000-4000-8000-000000000001','sql_upload_owner',true,'2026-10-25-v1'),'20000000-0000-4000-8000-000000000001'::uuid,'confirmed adult owner joins');
+SELECT is(public.community_join('20000000-0000-4000-8000-000000000002','sql_upload_other',true,'2026-10-25-v1'),'20000000-0000-4000-8000-000000000002'::uuid,'other confirmed adult joins');
+SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture')$$,'42501','published unlocked product required','an active member without unlock cannot reserve');
+SELECT is((public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture'))->>'state','reserved','first request reserves private upload');
+SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture')$$,'40001','upload is already processing','simultaneous request cannot steal a live writer lease');
+SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('b',64),'supabase',200,120,'image/webp','State fixture')$$,'40001','idempotency key was reused with different artwork','same key with changed bytes conflicts');
+SELECT throws_ok($$SELECT public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001')$$,'40001','upload reservation changed','unverified stored state cannot finalize');
+SELECT throws_ok($$SELECT public.community_mark_upload_stored('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002')$$,'40001','upload reservation changed','wrong writer token cannot mark stored');
+SELECT is(public.community_mark_upload_stored('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001'),true,'own writer marks durable stored state');
+SELECT is((public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture'))->>'state','stored','same payload retry resumes stored bytes without another PUT');
+SELECT is((public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture'))->>'leaseToken','30000000-0000-4000-8000-000000000001','stored retry preserves original finalization fence');
+INSERT INTO cc_upload_result SELECT public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001');
+SELECT ok((SELECT a.status='pending' AND a.revision=1 FROM public.community_artworks a JOIN cc_upload_result r ON r.id=a.id),'finalization creates exactly a private pending artwork');
+SELECT is(public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001'),(SELECT id FROM cc_upload_result),'finalization retries return the same artwork');
+SELECT is(public.community_schedule_upload_cleanup('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001'),false,'completed artwork cannot be cleaned as failed upload');
+SELECT is(public.community_delete_artwork('20000000-0000-4000-8000-000000000001',(SELECT id FROM cc_upload_result),1),true,'owner deletion tombstones before physical cleanup');
+SELECT ok((SELECT deleted_at IS NOT NULL FROM public.community_artworks WHERE id=(SELECT id FROM cc_upload_result)),'deleted artwork is already inaccessible in data');
+UPDATE public.community_upload_reservations SET cleanup_expires_at=now()-interval '1 second' WHERE author_id='20000000-0000-4000-8000-000000000001' AND idempotency_key='40000000-0000-4000-8000-000000000001';
+INSERT INTO cc_cleanup_result SELECT * FROM public.community_claim_upload_cleanup(10) WHERE author_id='20000000-0000-4000-8000-000000000001';
+SELECT is((SELECT count(*) FROM cc_cleanup_result),1::bigint,'scheduler claims the queued owned object');
+SELECT is(public.community_finish_upload_cleanup('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002'),false,'stale cleanup token cannot finish newer work');
+SELECT is(public.community_finish_upload_cleanup('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001',(SELECT cleanup_token FROM cc_cleanup_result)),true,'current cleanup token can acknowledge deletion');
+SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture')$$,'40001','deleted artwork cannot reuse its upload key','deleted key cannot recreate a removed artwork');
+RESET ROLE;
+SELECT * FROM finish();
+ROLLBACK;

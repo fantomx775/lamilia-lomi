@@ -29,6 +29,7 @@ import {
 } from "./admin-content";
 import { getContentSnapshot, saveContentSnapshot } from "./content-store";
 import { getAdminContentSnapshot } from "./content-repository";
+import { beginLocalCommunityProductDeletion, withLocalCommunityProductSave, CommunityConflictError } from "./community/repository";
 import { assertCollectionImageExists, removeCollectionImage } from "./collection-image-storage";
 import { deleteReaderArtwork, listReaderArtworks } from "./reader-artworks";
 import {
@@ -90,19 +91,20 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
         return { ok: false, errors: [...errors, ...assetErrors], ...(mediaCleanupFailures.length ? { mediaCleanupFailures } : {}) };
       }
 
-      const result = saveProductFromFormData(formData);
-      if (!result.ok) {
-        const mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
-        if (mediaCleanupFailures.length) {
-          return { ...result, mediaCleanupFailures };
-        }
-      } else {
-        await cleanupPersistedMedia({
-          previous: existing?.assets ?? [],
-          next: product.assets,
+      try {
+        return await withLocalCommunityProductSave(product.id, async () => {
+          const result = saveProductFromFormData(formData);
+          if (!result.ok) {
+            const mediaCleanupFailures = await cleanupNewMediaFromFormData(formData, storageAuthorizationToken);
+            return mediaCleanupFailures.length ? { ...result, mediaCleanupFailures } : result;
+          }
+          await cleanupPersistedMedia({ previous: existing?.assets ?? [], next: product.assets });
+          return result;
         });
+      } catch (error) {
+        if (error instanceof CommunityConflictError) return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK] };
+        throw error;
       }
-      return result;
     }
 
     const snapshot = await getAdminContentSnapshot();
@@ -287,6 +289,10 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
   return runAdminMutation("product deletion", async () => {
     if (getBackendMode() === "local") {
       const previous = getContentSnapshot().products.find((product) => product.id === productId);
+      if (!previous) return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
+      if (!await beginLocalCommunityProductDeletion(productId)) {
+        return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK] };
+      }
       for (const artwork of previous?.readerArtworks ?? []) {
         await removeCollectionImage({ collectionId: productId, storagePath: artwork.storagePath, provider: artwork.storageProvider });
       }
@@ -298,10 +304,30 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
     }
 
     const snapshot = await getAdminContentSnapshot();
-    const previous = snapshot.products.find((product) => product.id === productId);
+    let previous = snapshot.products.find((product) => product.id === productId);
     if (!previous) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
     }
+
+    const supabase = await createClient();
+    const { data: deletionStart, error: deletionStartError } = await supabase.rpc("community_begin_product_deletion", {
+      requested_product_id: productId,
+    });
+    if (deletionStartError) throw new AdminDatabaseError("product deletion preflight", deletionStartError);
+    const deletionState = typeof deletionStart === "object" && deletionStart !== null && "state" in deletionStart
+      ? String(deletionStart.state)
+      : "";
+    if (deletionState === "community_references") {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK] };
+    }
+    if (deletionState === "not_found") {
+      return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
+    }
+    if (deletionState !== "deleting") throw new Error("Product deletion could not be prepared.");
+
+    const fencedSnapshot = await getAdminContentSnapshot();
+    previous = fencedSnapshot.products.find((product) => product.id === productId);
+    if (!previous) return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
 
     const previousReaderArtworks = await listReaderArtworks(productId, true);
     for (const artwork of previousReaderArtworks) {
@@ -311,23 +337,19 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
       }
     }
 
-    const supabase = await createClient();
     await revokeR2PublicAssetsBeforeMutation({
       previousAssets: previous.assets,
       nextAssets: [],
       status: "archived",
     });
-    const { data, error } = await supabase.rpc("delete_product", {
+    await cleanupPersistedMedia({ previous: previous.assets, next: [] });
+    const { data, error } = await supabase.rpc("community_finalize_product_deletion", {
       requested_product_id: productId,
     });
     if (error) throw new AdminDatabaseError("product deletion", error);
     if (data !== true) {
       return { ok: false, errors: [ADMIN_ERROR_CODES.NOT_FOUND_PRODUCT] };
     }
-    await cleanupPersistedMedia({
-      previous: previous.assets,
-      next: [],
-    });
     return { ok: true, id: productId };
   });
 }
@@ -335,7 +357,12 @@ export async function deleteProductForRequest(productId: string): Promise<AdminM
 export async function archiveProductForRequest(productId: string): Promise<AdminMutationResult> {
   return runAdminMutation("product archive", async () => {
     if (getBackendMode() === "local") {
-      return archiveProduct(productId);
+      try {
+        return await withLocalCommunityProductSave(productId, () => archiveProduct(productId));
+      } catch (error) {
+        if (error instanceof CommunityConflictError) return { ok: false, errors: [ADMIN_ERROR_CODES.CONFLICT_COMMUNITY_ARTWORK] };
+        throw error;
+      }
     }
 
     const snapshot = await getAdminContentSnapshot();

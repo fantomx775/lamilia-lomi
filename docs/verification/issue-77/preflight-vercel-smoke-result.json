@@ -1,0 +1,39 @@
+{
+  "status": "PASS",
+  "checks": [
+    {
+      "path": "/en",
+      "statusCode": 200,
+      "contentType": "text/html; charset=utf-8",
+      "responseBytes": 105166,
+      "finalUrl": "https://lamilia-lomi-cyemf7gvx-fantomxs-projects.vercel.app/en",
+      "expectedText": [
+        "LamiliaLomi"
+      ],
+      "expectedTextMatched": true
+    },
+    {
+      "path": "/en/products",
+      "statusCode": 200,
+      "contentType": "text/html; charset=utf-8",
+      "responseBytes": 166363,
+      "finalUrl": "https://lamilia-lomi-cyemf7gvx-fantomxs-projects.vercel.app/en/products",
+      "expectedText": [
+        "Browse LamiliaLomi books"
+      ],
+      "expectedTextMatched": true
+    },
+    {
+      "path": "/en/login",
+      "statusCode": 200,
+      "contentType": "text/html; charset=utf-8",
+      "responseBytes": 55329,
+      "finalUrl": "https://lamilia-lomi-cyemf7gvx-fantomxs-projects.vercel.app/en/login",
+      "expectedText": [
+        "Email"
+      ],
+      "expectedTextMatched": true
+    }
+  ],
+  "details": "3 focused Production smoke path(s) returned the expected status and content."
+}

@@ -1,0 +1,351 @@
+BEGIN
+SET
+ plan
+-------
+ 1..56
+(1 row)
+
+                     ok
+--------------------------------------------
+ ok 1 - community profiles have RLS enabled
+(1 row)
+
+                     ok
+--------------------------------------------
+ ok 2 - community artworks have RLS enabled
+(1 row)
+
+                    ok
+-------------------------------------------
+ ok 3 - moderation events have RLS enabled
+(1 row)
+
+                       ok
+------------------------------------------------
+ ok 4 - anon cannot read raw community profiles
+(1 row)
+
+                           ok
+---------------------------------------------------------
+ ok 5 - authenticated cannot read raw community profiles
+(1 row)
+
+                        ok
+--------------------------------------------------
+ ok 6 - anon cannot access raw community artworks
+(1 row)
+
+                            ok
+-----------------------------------------------------------
+ ok 7 - authenticated cannot access raw community artworks
+(1 row)
+
+                     ok
+---------------------------------------------
+ ok 8 - anon cannot access moderation events
+(1 row)
+
+                          ok
+------------------------------------------------------
+ ok 9 - authenticated cannot access moderation events
+(1 row)
+
+                       ok
+------------------------------------------------
+ ok 10 - service role can access community data
+(1 row)
+
+                  ok
+---------------------------------------
+ ok 11 - anon cannot call mutation RPC
+(1 row)
+
+                       ok
+------------------------------------------------
+ ok 12 - authenticated cannot call mutation RPC
+(1 row)
+
+                     ok
+--------------------------------------------
+ ok 13 - service role can call mutation RPC
+(1 row)
+
+                        ok
+---------------------------------------------------
+ ok 14 - auth lookup helper is not client-callable
+(1 row)
+
+                           ok
+--------------------------------------------------------
+ ok 15 - service role can use narrow auth lookup helper
+(1 row)
+
+                            ok
+-----------------------------------------------------------
+ ok 16 - service role has no direct auth user table access
+(1 row)
+
+INSERT 0 5
+INSERT 0 5
+INSERT 0 1
+CREATE TABLE
+GRANT
+CREATE TABLE
+GRANT
+SET
+                   throws_ok
+------------------------------------------------
+ ok 17 - anonymous raw artwork SELECT is denied
+(1 row)
+
+                throws_ok
+------------------------------------------
+ ok 18 - anonymous cannot invoke join RPC
+(1 row)
+
+RESET
+SET
+                     throws_ok
+----------------------------------------------------
+ ok 19 - authenticated raw profile SELECT is denied
+(1 row)
+
+                           throws_ok
+---------------------------------------------------------------
+ ok 20 - direct PostgREST insert cannot spoof author or status
+(1 row)
+
+RESET
+SET
+                            is
+----------------------------------------------------------
+ ok 21 - verified actor can join with normalized username
+(1 row)
+
+INSERT 0 1
+                           is
+--------------------------------------------------------
+ ok 22 - repeated join with same username is idempotent
+(1 row)
+
+                              is
+---------------------------------------------------------------
+ ok 23 - idempotent join does not rewrite acceptance timestamp
+(1 row)
+
+                     throws_ok
+----------------------------------------------------
+ ok 24 - join cannot bypass username-change limiter
+(1 row)
+
+                         is
+-----------------------------------------------------
+ ok 25 - separate username-change operation succeeds
+(1 row)
+
+                               is
+----------------------------------------------------------------
+ ok 26 - username change limiter allows second change in window
+(1 row)
+
+                            is
+-----------------------------------------------------------
+ ok 27 - username change limiter allows configured maximum
+(1 row)
+
+                    throws_ok
+--------------------------------------------------
+ ok 28 - username changes are limited per account
+(1 row)
+
+                throws_ok
+------------------------------------------
+ ok 29 - unverified auth user cannot join
+(1 row)
+
+               throws_ok
+---------------------------------------
+ ok 30 - reserved username is rejected
+(1 row)
+
+INSERT 0 1
+                                 is
+---------------------------------------------------------------------
+ ok 31 - eligible verified unlocked user can create pending metadata
+(1 row)
+
+                             is
+------------------------------------------------------------
+ ok 32 - matching idempotent retry returns existing artwork
+(1 row)
+
+                           throws_ok
+---------------------------------------------------------------
+ ok 33 - same idempotency key with changed payload is rejected
+(1 row)
+
+                 throws_ok
+-------------------------------------------
+ ok 34 - locked user cannot submit artwork
+(1 row)
+
+                            throws_ok
+------------------------------------------------------------------
+ ok 35 - unlock for another product does not authorize submission
+(1 row)
+
+                       throws_ok
+-------------------------------------------------------
+ ok 36 - member cannot spoof admin role for moderation
+(1 row)
+
+                           is
+---------------------------------------------------------
+ ok 37 - admin can approve the expected pending revision
+(1 row)
+
+UPDATE 1
+                           throws_ok
+----------------------------------------------------------------
+ ok 38 - stale rules acceptance cannot edit or resubmit artwork
+(1 row)
+
+UPDATE 1
+                                 is
+--------------------------------------------------------------------
+ ok 39 - owner edit returns approved work to a new pending revision
+(1 row)
+
+                                 is
+--------------------------------------------------------------------
+ ok 40 - approved revision disappears from public state during edit
+(1 row)
+
+                      is
+-----------------------------------------------
+ ok 41 - admin can approve the edited revision
+(1 row)
+
+                          is
+------------------------------------------------------
+ ok 42 - admin can remove approved work with a reason
+(1 row)
+
+                          is
+------------------------------------------------------
+ ok 43 - author edit does not restore removed content
+(1 row)
+
+                        is
+--------------------------------------------------
+ ok 44 - removed state persists after author edit
+(1 row)
+
+                     is
+--------------------------------------------
+ ok 45 - owner can soft delete their record
+(1 row)
+
+                         ok
+-----------------------------------------------------
+ ok 46 - soft-deleted artwork has terminal timestamp
+(1 row)
+
+                    throws_ok
+-------------------------------------------------
+ ok 47 - soft-deleted artwork cannot be restored
+(1 row)
+
+   community_create_pending_artwork
+--------------------------------------
+ 31398388-b20b-431c-968c-26a5b980807d
+(1 row)
+
+UPDATE 1
+                         throws_ok
+------------------------------------------------------------
+ ok 48 - admin cannot approve artwork from suspended author
+(1 row)
+
+UPDATE 1
+   community_create_pending_artwork
+--------------------------------------
+ 19b1d754-0409-4afd-a14a-f17874b7a268
+(1 row)
+
+UPDATE 1
+                         throws_ok
+-----------------------------------------------------------
+ ok 49 - admin cannot approve artwork for archived product
+(1 row)
+
+UPDATE 1
+   community_create_pending_artwork
+--------------------------------------
+ 135fb0c2-5e76-4ac4-a706-b65d669eca29
+(1 row)
+
+UPDATE 1
+                              throws_ok
+---------------------------------------------------------------------
+ ok 50 - admin cannot approve artwork after participation revocation
+(1 row)
+
+DELETE 1
+                     throws_ok
+----------------------------------------------------
+ ok 51 - revoked participant cannot rename username
+(1 row)
+
+UPDATE 1
+                             throws_ok
+-------------------------------------------------------------------
+ ok 52 - admin cannot approve artwork under stale rules acceptance
+(1 row)
+
+UPDATE 1
+   community_create_pending_artwork
+--------------------------------------
+ fe0d8e5e-eb56-4e21-8bdf-92d273a9f190
+(1 row)
+
+RESET
+DELETE 1
+SET
+                          throws_ok
+--------------------------------------------------------------
+ ok 53 - admin cannot approve after product unlock is revoked
+(1 row)
+
+RESET
+INSERT 0 1
+SET
+   community_create_pending_artwork
+--------------------------------------
+ ecd40b66-76c0-42e8-b8c1-92ae8e166c62
+(1 row)
+
+RESET
+DELETE 1
+SET
+                         throws_ok
+------------------------------------------------------------
+ ok 54 - admin cannot approve artwork after author deletion
+(1 row)
+
+RESET
+                              ok
+---------------------------------------------------------------
+ ok 55 - admin moderation decisions are append-only audit rows
+(1 row)
+
+                                 ok
+--------------------------------------------------------------------
+ ok 56 - service role cannot update or delete moderation audit rows
+(1 row)
+
+ finish
+--------
+(0 rows)
+
+ROLLBACK

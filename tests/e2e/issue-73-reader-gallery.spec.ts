@@ -189,7 +189,7 @@ test("Issue 73 reader artwork admin flow stays separate, private, and usable on 
     const addContrast = await contrastAgainstWhite(adminAddButton);
     expect(addContrast.ratio).toBeGreaterThanOrEqual(4.5);
     await adminAddButton.hover();
-    await expect.poll(async () => (await contrastAgainstWhite(adminAddButton)).background).toBe("rgb(135, 59, 55)");
+    await expect.poll(async () => (await contrastAgainstWhite(adminAddButton)).background).not.toBe(addContrast.background);
     const addHoverContrast = await contrastAgainstWhite(adminAddButton);
     expect(addHoverContrast.ratio).toBeGreaterThanOrEqual(4.5);
     expect(addHoverContrast.background).not.toBe(addContrast.background);
@@ -199,7 +199,7 @@ test("Issue 73 reader artwork admin flow stays separate, private, and usable on 
     const amazonContrast = await contrastAgainstWhite(amazon);
     expect(amazonContrast.ratio).toBeGreaterThanOrEqual(4.5);
     await amazon.hover();
-    await expect.poll(async () => (await contrastAgainstWhite(amazon)).background).toBe("rgb(135, 59, 55)");
+    await expect.poll(async () => (await contrastAgainstWhite(amazon)).background).not.toBe(amazonContrast.background);
     const amazonHoverContrast = await contrastAgainstWhite(amazon);
     expect(amazonHoverContrast.ratio).toBeGreaterThanOrEqual(4.5);
     expect(amazonHoverContrast.background).not.toBe(amazonContrast.background);

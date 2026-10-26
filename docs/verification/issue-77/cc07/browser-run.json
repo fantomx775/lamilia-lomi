@@ -1,0 +1,56 @@
+{
+  "status": "PASS",
+  "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+  "runId": "cc07-local-lifecycle-6",
+  "screenshots": [
+    {
+      "path": "docs/verification/issue-77/cc07/report-dialog-390.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc07/report-dialog-768.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc07/report-dialog-1440.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc07/admin-reports-390.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc07/admin-reports-768.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc07/admin-reports-1440.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc07/delete-account-390.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc07/delete-account-768.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    },
+    {
+      "path": "docs/verification/issue-77/cc07/delete-account-1440.png",
+      "testedSha": "6fd0c7956e510e6cbbb540cfac2f56d0471ef14f",
+      "runId": "cc07-local-lifecycle-6"
+    }
+  ],
+  "runtimeErrors": [],
+  "mailProvider": "NOT RUN: local launcher intentionally has no Resend key",
+  "checkpointOnly": true,
+  "sourceNote": "Run at recorded HEAD plus root-owned pending product-list error formatter, lifecycle E2E and fixture/screenshot helper changes. Not final exact-SHA release evidence."
+}

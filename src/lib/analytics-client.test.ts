@@ -98,4 +98,24 @@ describe("consented GA4", () => {
     expect(document.cookie).not.toContain("_ga=");
     expect(document.cookie).toContain("essential=yes");
   });
+
+  it("scrubs community object identifiers and ignores community event dimensions", async () => {
+    localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: true }));
+    const { startAnalytics, trackEvent, trackPage } = await import("./analytics-client");
+    startAnalytics();
+    window.history.replaceState(null, "", "/en/club/creators/private_handle?email=hidden");
+    trackPage("/en/club/creators/private_handle?email=hidden");
+    window.history.replaceState(null, "", "/en/club/artworks/22222222-2222-4222-8222-222222222222?token=secret");
+    trackEvent("like_created", { artwork_id: "22222222-2222-4222-8222-222222222222", creator: "private_handle" });
+    const commands = (window as unknown as { dataLayer: ArrayLike<unknown>[] }).dataLayer.map(item => Array.from(item));
+    const page = commands.find(item => item[0] === "event" && item[1] === "page_view");
+    expect(page?.[2]).toMatchObject({
+      page_location: `${location.origin}/en/club/creators/:creator`,
+      page_path: "/en/club/creators/:creator",
+    });
+    const reaction = commands.find(item => item[0] === "event" && item[1] === "like_created");
+    expect(reaction?.[2]).not.toHaveProperty("artwork_id");
+    expect(reaction?.[2]).not.toHaveProperty("creator");
+    expect(JSON.stringify(commands)).not.toMatch(/private_handle|22222222|token=secret|email=hidden/);
+  });
 });

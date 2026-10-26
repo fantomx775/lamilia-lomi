@@ -1,0 +1,32 @@
+{
+  "kind": "historical-checkpoint-review",
+  "implementationAgent": "/root/cc00_spec_flags",
+  "independentReviewerAgent": "/root/preflight_review",
+  "baseSha": "442f56d051cc0adf3943f3ce0b66dd38f4e61dc9",
+  "headSha": "7235601678e0ecb98f612bd615f9b3e8008ee39d",
+  "critical": [],
+  "high": [],
+  "mediumResolved": [
+    "Preserve PostgreSQL timestamp microseconds in keyset cursors; actual pagination proves each row once."
+  ],
+  "lowResolved": [
+    "Mobile admin navigation label fits existing navigation."
+  ],
+  "unresolvedMaterialFindingsInModerationSlice": [],
+  "separateReleaseFinding": "High: pre-existing product deletion removes curated media before new community FK refusal. Accepted for mandatory #85 lifecycle remediation; see CC85-LIFECYCLE-PLAN.md. Release is not cleared.",
+  "visualReview": {
+    "allScreenshotsReviewed": 15,
+    "viewports": [
+      390,
+      768,
+      1440
+    ],
+    "runId": "cc04-local-supabase-3",
+    "testedSha": "7235601678e0ecb98f612bd615f9b3e8008ee39d"
+  },
+  "incrementalReview": "Independent reviewer inspected test-only OFF/admin and local-demo approval additions; no findings. Parent ran them successfully.",
+  "limitations": [
+    "Historical checkpoint, not final integrated PR evidence.",
+    "No cloud migration or deployment performed."
+  ]
+}

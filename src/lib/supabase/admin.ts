@@ -10,6 +10,7 @@ import {
 
 export function createServiceRoleClient(options?: {
   storageAuthorizationToken?: string;
+  storageRequestTimeoutMs?: number;
 }) {
   if (getBackendMode() !== "supabase") {
     throw new Error("The Supabase service-role client is unavailable in local mode.");
@@ -18,30 +19,35 @@ export function createServiceRoleClient(options?: {
   const env = getRequiredSupabaseEnv();
   const serviceRoleKey = getServiceRoleKey();
   const usesLegacyJwt = serviceRoleKey.startsWith("eyJ");
-
   return createSupabaseClient(env.url, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
     },
-    ...(!usesLegacyJwt
+    ...(!usesLegacyJwt || options?.storageRequestTimeoutMs
       ? {
           global: {
-            headers: {
+            ...(!usesLegacyJwt ? { headers: {
               apikey: serviceRoleKey,
               ...(options?.storageAuthorizationToken
                 ? { Authorization: `Bearer ${options.storageAuthorizationToken}` }
                 : {}),
-            },
+            } } : {}),
             fetch: (input: RequestInfo | URL, init?: RequestInit) => {
               const headers = new Headers(init?.headers);
-              headers.set("apikey", serviceRoleKey);
-              if (options?.storageAuthorizationToken) {
-                headers.set("authorization", `Bearer ${options.storageAuthorizationToken}`);
-              } else {
-                headers.delete("authorization");
+              if (!usesLegacyJwt) {
+                headers.set("apikey", serviceRoleKey);
+                if (options?.storageAuthorizationToken) {
+                  headers.set("authorization", `Bearer ${options.storageAuthorizationToken}`);
+                } else {
+                  headers.delete("authorization");
+                }
               }
-              return fetch(input, { ...init, headers });
+              const timeout = options?.storageRequestTimeoutMs
+                ? AbortSignal.timeout(options.storageRequestTimeoutMs)
+                : undefined;
+              const signal = timeout && init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout ?? init?.signal;
+              return fetch(input, { ...init, headers, ...(signal ? { signal } : {}) });
             },
           },
         }

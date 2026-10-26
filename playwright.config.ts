@@ -9,6 +9,8 @@ export default defineConfig({
     timeout: 8_000,
   },
   use: {
+    // Fail a missing control promptly even in flows with long fixture-lock timeouts.
+    actionTimeout: 20_000,
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",

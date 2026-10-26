@@ -7,6 +7,7 @@ import {
   Library,
   LayoutDashboard,
   Settings,
+  ShieldCheck,
   Tags,
   UserRound,
   Users,
@@ -36,6 +37,7 @@ const dashboardNavIcons = {
   users: Users,
   pages: FileText,
   settings: Settings,
+  community: ShieldCheck,
 } satisfies Record<string, LucideIcon>;
 
 export type DashboardNavIcon = keyof typeof dashboardNavIcons;

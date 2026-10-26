@@ -1,6 +1,9 @@
+import { primaryNavigation } from "./helpers/navigation";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
+import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
 
@@ -92,7 +95,7 @@ test("desktop primary navigation journey reaches Catalog, Product Detail, Librar
   await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   timings.push({ transition: "Catalog → Product Detail", clickToContentMs: Date.now() - started });
 
-  const primaryNav = page.locator('nav[aria-label="Primary navigation"]:visible');
+  const primaryNav = await primaryNavigation(page);
   started = Date.now();
   await primaryNav.getByRole("link", { name: "Catalog" }).click();
   await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
@@ -123,9 +126,12 @@ test("tablet header navigation is visible and fits the viewport", async ({ page 
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.goto("/en/products");
 
-  const nav = page.locator('nav[aria-label="Primary navigation"]:visible');
-  await expect(nav.getByRole("link", { name: "Catalog" })).toBeVisible();
-  await expect(nav.getByRole("link", { name: "My Library" })).toBeVisible();
+  const toggle = page.getByRole("button", { name: "Open navigation menu", exact: true });
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+  const nav = page.getByRole("navigation", { name: "Mobile primary navigation", exact: true });
+  await expect(nav.getByRole("link", { name: "Catalog", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "My Library", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("tablet-catalog-navigation.png"), fullPage: true });
 });
@@ -311,7 +317,7 @@ async function expectPublicProductContentBeforeAccess(
   await expect(page.getByRole("link", { name: "View on Amazon" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Inside the book" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Stars and little houses" })).toBeVisible();
-  await expect(page.getByText("Flip-through · 8 sec")).toBeVisible();
+  await expect(page.locator("video")).toHaveCount(0);
   await expect(page.getByRole("link", { name: /Moon Garden free guide/ })).toBeVisible();
 
   const cover = page.getByRole("img", { name: "Moon Garden cover" });
@@ -360,19 +366,28 @@ test("logged-in locked Product Detail streams before personalized access", async
 
 test("logged-in unlocked Product Detail streams before personalized access", async ({ page }, testInfo) => {
   skipWithoutDelayedLocalDemo();
-  const diagnostics = collectBrowserDiagnostics(page);
-  await page.goto(`/en/unlock/${productSlug}`);
-  await page.getByRole("button", { name: "Log in" }).click();
-  await page.getByLabel("Email").fill("locked@example.com");
-  await page.getByLabel("Password").fill("demo-password");
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByLabel("Premium code").fill("LOMI-BOOK-2026");
-  await page.getByRole("button", { name: "Unlock premium content" }).click();
-  await expect(page.getByTestId("unlock-success-state")).toBeVisible();
+  test.skip(
+    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
+    "Uses the single-use demo premium code and requires the verified loopback demo backend.",
+  );
+  const restorePremiumCodeFixture = await resetLocalPremiumCodeFixture(testInfo.project.use.baseURL);
+  try {
+    const diagnostics = collectBrowserDiagnostics(page);
+    await page.goto(`/en/unlock/${productSlug}`);
+    await page.getByRole("button", { name: "Log in" }).click();
+    await page.getByLabel("Email").fill("locked@example.com");
+    await page.getByLabel("Password").fill("demo-password");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("Premium code").fill("LOMI-BOOK-2026");
+    await page.getByRole("button", { name: "Unlock premium content" }).click();
+    await expect(page.getByTestId("unlock-success-state")).toBeVisible();
 
-  await expectPublicProductContentBeforeAccess(page, testInfo, "unlocked");
-  await expectAccessContentAfterDelay(page, "premium-download-links");
-  await attachBrowserDiagnostics(testInfo, diagnostics);
+    await expectPublicProductContentBeforeAccess(page, testInfo, "unlocked");
+    await expectAccessContentAfterDelay(page, "premium-download-links");
+    await attachBrowserDiagnostics(testInfo, diagnostics);
+  } finally {
+    restorePremiumCodeFixture();
+  }
 });
 
 test("mobile primary navigation exposes Catalog and Library without horizontal overflow", async ({ page }, testInfo) => {
@@ -423,7 +438,7 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/en");
   appOrigin = new URL(page.url()).origin;
-  const nav = page.locator('nav[aria-label="Primary navigation"]:visible');
+  const nav = await primaryNavigation(page);
   await expect(nav).toBeVisible();
   await expect(nav.getByRole("link", { name: "Catalog" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "My Library" })).toBeVisible();
@@ -435,7 +450,7 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
   completedAndLeftRscRoutes.add("/en/library");
 
-  await nav.getByRole("link", { name: "Catalog", exact: true }).tap();
+  await (await primaryNavigation(page)).getByRole("link", { name: "Catalog", exact: true }).tap();
   await expect(page).toHaveURL(/\/en\/products$/);
   await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

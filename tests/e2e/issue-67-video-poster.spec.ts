@@ -17,7 +17,7 @@ type BrowserDiagnostics = {
   consoleErrors: string[];
   pageErrors: string[];
   failedResponses: Array<{ url: string; status: number }>;
-  failedRequests: Array<{ url: string; error: string | null }>;
+  failedRequests: Array<{ method: string; url: string; error: string | null; range: string | null }>;
 };
 
 test("Issue 67 shows a native cover poster and plays the real flip-through video", async ({ page }, testInfo) => {
@@ -32,6 +32,7 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
   const diagnostics: BrowserDiagnostics[] = [];
   let videoServer: Server | undefined;
   let webkitBrowser: Awaited<ReturnType<typeof webkit.launch>> | undefined;
+  let webkitPlaybackVerified = false;
 
   const recordDiagnostics = (target: Page, engine: string) => {
     const result: BrowserDiagnostics = {
@@ -56,8 +57,10 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     });
     target.on("requestfailed", (request) => {
       result.failedRequests.push({
+        method: request.method(),
         url: new URL(request.url()).origin + new URL(request.url()).pathname,
         error: request.failure()?.errorText ?? null,
+        range: request.headers()["range"] ?? null,
       });
     });
     return result;
@@ -312,6 +315,9 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
         await (element as HTMLVideoElement).play();
       });
       await expect.poll(() => webkitVideo.evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 20_000 }).toBeGreaterThan(0.2);
+      expect(await webkitVideo.evaluate((element) => (element as HTMLVideoElement).error)).toBeNull();
+      expect(await webkitVideo.evaluate((element) => (element as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(2);
+      webkitPlaybackVerified = true;
       await saveScreenshot(webkitPage, "video-playing-webkit-iphone");
       await webkitVideo.evaluate((element) => (element as HTMLVideoElement).pause());
       expect(await webkitPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -319,7 +325,14 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
       expect(webkitDiagnostics.consoleErrors).toEqual([]);
       expect(webkitDiagnostics.pageErrors).toEqual([]);
       expect(webkitDiagnostics.failedResponses).toEqual([]);
-      expect(webkitDiagnostics.failedRequests.filter((item) => !item.error?.includes("ERR_ABORTED"))).toEqual([]);
+      // WebKit cancels and replaces native media reads while probing and
+      // starting playback. Successful time progression above is still required;
+      // only GETs for this owned video server are classified, with a valid
+      // byte-range header when present (the first native probe can omit it).
+      const expectedVideoFetchCancellation = (item: BrowserDiagnostics["failedRequests"][number]) =>
+        webkitPlaybackVerified && item.method === "GET" && item.url === videoAsset.path &&
+        item.error === "Load request cancelled" && (item.range === null || /^bytes=\d+-\d*$/.test(item.range));
+      expect(webkitDiagnostics.failedRequests.filter((item) => !expectedVideoFetchCancellation(item))).toEqual([]);
     }
 
     expect(desktopOrPixelDiagnostics.consoleErrors).toEqual([]);

@@ -1397,12 +1397,97 @@ function isSupportedProductionSmokeStatus(status, path) {
   if (!Number.isInteger(status)) return false;
   if (status >= 200 && status < 300) return true;
   if (![401, 403, 404].includes(status) || !isValidProductionSmokePath(path)) return false;
-  return new URL(path, "https://agent-harness.invalid").pathname.startsWith("/api/");
+  return new URL(path, "https://agent-harness.invalid").pathname.startsWith("/api/") ||
+    (status === 404 && isGatedCommunityPagePath(path));
+}
+
+const GATED_COMMUNITY_PAGE_SENTINEL = "This page could not be found.";
+
+function isGatedCommunityPagePath(path) {
+  return typeof path === "string" && (
+    /^\/en\/club$/.test(path) ||
+    /^\/en\/club\/artworks\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(path) ||
+    /^\/en\/club\/creators\/[a-z0-9_]{3,24}$/.test(path)
+  );
+}
+
+function isGatedCommunityPageExpectation(expectation) {
+  return expectation?.expectedStatus === 404 && isGatedCommunityPagePath(expectation.path);
+}
+
+function isValidGatedCommunityPageProof(proof) {
+  if (proof?.status !== "PASS" || !validSha(proof.testedSha)) return false;
+  const validRun = (run, enabled) => run?.status === "PASS" &&
+    run.publicEnabled === enabled && typeof run.runId === "string" && Boolean(run.runId.trim()) &&
+    typeof run.command === "string" && Boolean(run.command.trim()) &&
+    run.testedSha?.toLowerCase?.() === proof.testedSha.toLowerCase() &&
+    Array.isArray(run.checks) && run.checks.length > 0 && run.checks.every((check) =>
+      isGatedCommunityPagePath(check?.path) && check.sameOrigin === true && check.finalPathUnchanged === true &&
+      check.expectedTextMatched === true && typeof check.expectedText === "string" && Boolean(check.expectedText.trim()) &&
+      check.contentType?.split?.(";", 1)[0].trim().toLowerCase() === "text/html" &&
+      check.statusCode === (enabled ? 200 : 404) &&
+      (enabled || check.expectedText === GATED_COMMUNITY_PAGE_SENTINEL));
+  return validRun(proof.publicOn, true) && validRun(proof.publicOff, false) &&
+    proof.publicOn.runId !== proof.publicOff.runId &&
+    gatedCommunityPageKind(proof.publicOff.approvedFixture?.artworkPath) === "artwork" &&
+    proof.publicOff.checks.some((check) => check.path === proof.publicOff.approvedFixture.artworkPath) &&
+    proof.publicOff.approvedFixture?.mediaPath === proof.publicOff.approvedFixture.artworkPath.replace("/en/club/artworks/", "/api/community/artworks/") + "/media" &&
+    proof.publicOff.approvedFixture?.artworkStatus === "approved" &&
+    proof.publicOff.approvedFixture?.ownerMediaStatus === 200 &&
+    proof.publicOff.approvedFixture?.anonymousMediaStatus === 404 &&
+    proof.publicOff.approvedFixture?.publicListingStatus === 404 &&
+    proof.publicOff.approvedFixture?.mutationsBlocked === true;
+}
+
+function hasMatchingGatedCommunityPageProof(record) {
+  const proof = record?.productionSmokePlan?.gatedPublicPageVerification;
+  return isValidGatedCommunityPageProof(proof) && validSha(record.headSha) &&
+    proof.testedSha.toLowerCase() === record.headSha.toLowerCase() &&
+    record.browser?.status === "PASS" &&
+    record.browser.featureFlags?.publicEnabled === true &&
+    record.browser.testedSha?.toLowerCase?.() === record.headSha.toLowerCase() &&
+    record.browser.runId === proof.publicOn.runId;
+}
+
+function gatedCommunityPageKind(path) {
+  if (!isGatedCommunityPagePath(path)) return null;
+  return path === "/en/club" ? "gallery" : path.startsWith("/en/club/artworks/") ? "artwork" : "creator";
+}
+
+function gatedCommunityProofCoversExpectations(proof, expectations) {
+  if (!isValidGatedCommunityPageProof(proof)) return false;
+  const kinds = new Set(expectations.filter(isGatedCommunityPageExpectation).map((item) => gatedCommunityPageKind(item.path)));
+  return [...kinds].every((kind) => [proof.publicOn, proof.publicOff].every((run) =>
+    run.checks.some((check) => gatedCommunityPageKind(check.path) === kind)));
 }
 
 function isValidProductionSmokeExpectationStatus(expectation) {
+  const method = expectation?.method ?? "GET";
+  if (!["GET", "POST", "DELETE"].includes(method)) return false;
+  // This mutation-only route cannot be probed with GET. Its first guard rejects
+  // every request without Origin, before identity, body parsing or deletion.
+  if (method === "DELETE" && (
+    !/^\/api\/community\/artworks\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(expectation.path) ||
+    expectation.expectedStatus !== 403 ||
+    expectation.expectedText !== "Refresh the page and try again." ||
+    expectation.expectedContentType !== "application/json"
+  )) return false;
+  if (method !== "GET" && (
+    !isValidProductionSmokePath(expectation.path) ||
+    !new URL(expectation.path, "https://agent-harness.invalid").pathname.startsWith("/api/") ||
+    new URL(expectation.path, "https://agent-harness.invalid").pathname !== expectation.path ||
+    ![401, 403, 404].includes(expectation.expectedStatus) ||
+    typeof expectation.expectedText !== "string" || !expectation.expectedText.trim() ||
+    expectation.expectedFinalOrigin !== undefined ||
+    ["body", "headers", "origin", "credentials"].some((key) => Object.hasOwn(expectation, key))
+  )) return false;
   if (expectation?.expectedStatus === undefined) return true;
   if (!isSupportedProductionSmokeStatus(expectation.expectedStatus, expectation.path)) return false;
+  if (isGatedCommunityPageExpectation(expectation)) {
+    return method === "GET" && expectation.expectedText === GATED_COMMUNITY_PAGE_SENTINEL &&
+      expectation.expectedContentType?.toLowerCase?.() === "text/html" &&
+      expectation.expectedFinalOrigin === undefined;
+  }
   if (expectation.expectedStatus === 404) {
     return typeof expectation.expectedText === "string" && Boolean(expectation.expectedText.trim());
   }
@@ -1517,6 +1602,7 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
       paths.push(expectation.path);
       expectations.push({
         path: expectation.path,
+        ...(expectation.method !== undefined ? { method: expectation.method } : {}),
         ...(hasExpectedText ? { expectedText: expectation.expectedText.trim() } : {}),
         ...(expectation.expectedContentType !== undefined ? { expectedContentType: expectation.expectedContentType } : {}),
         ...(expectation.expectedFinalOrigin !== undefined ? { expectedFinalOrigin: expectation.expectedFinalOrigin } : {}),
@@ -1554,18 +1640,30 @@ export function validateProductionSmokePlan({ files = [], localVerification }) {
     return contentTypes.size > 1;
   });
   if (conflictingContentTypes) failures.push("Smoke plan has conflicting expected content types for one path.");
+  const conflictingMethods = uniquePaths.some((path) => new Set(expectations
+    .filter((expectation) => expectation.path === path)
+    .map((expectation) => expectation.method ?? "GET")).size > 1);
+  if (conflictingMethods) failures.push("Smoke plan cannot mix different HTTP methods for one path.");
+  const requiresGatedPageProof = expectations.some(isGatedCommunityPageExpectation);
+  const gatedPublicPageVerification = plan.gatedPublicPageVerification;
+  if (requiresGatedPageProof && (!hasMatchingGatedCommunityPageProof(rawRecord) ||
+    !gatedCommunityProofCoversExpectations(gatedPublicPageVerification, expectations))) {
+    failures.push("Gated community HTML404 probes require current-SHA positive ON browser evidence and a distinct OFF run proving mapped routes and retained approved private media.");
+  }
   return attachPrivateValue(redactPersistedData({
     status: failures.length ? "BLOCKED" : "PASS",
     required: true,
     paths: uniquePaths,
     expectations,
     flows: plan.flows,
+    ...(requiresGatedPageProof ? { gatedPublicPageVerification } : {}),
     details: failures.length
       ? failures.join(" ")
       : affectedFiles.length + " changed application-flow file(s) map to " + uniquePaths.length + " Production route(s) with expected response content.",
   }), PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN, {
     paths: uniquePaths,
     expectations,
+    ...(requiresGatedPageProof ? { gatedPublicPageVerification } : {}),
   });
 }
 
@@ -1573,17 +1671,435 @@ function isVerificationScreenshot(filename) {
   return /^docs\/verification\/(?:issue-\d+|pr-\d+)\/.+\.(?:png|jpe?g|webp)$/i.test(filename);
 }
 
-function inspectBrowserProblems(items) {
+function safeExpectedHttpPath(value) {
+  if (typeof value !== "string" || !value.startsWith("/api/") || value.includes("\\") || /[?#\u0000-\u001f\u007f]/.test(value)) return false;
+  try {
+    const parsed = new URL(value, "https://agent-harness.invalid");
+    return parsed.origin === "https://agent-harness.invalid" && parsed.pathname === value && !parsed.search && !parsed.hash;
+  } catch {
+    return false;
+  }
+}
+
+function inspectExpectedHttpConsoleOutcomes(items, outcomes, { testedSha, runId }) {
+  const expectedErrors = items.filter((item) => item?.disposition === "expected");
+  if (!expectedErrors.length && outcomes === undefined) return { status: "PASS", details: "No expected HTTP console outcomes were recorded." };
+  if (!Array.isArray(outcomes)) return { status: "FAIL", details: "Expected HTTP console errors have no structured browser response outcomes." };
+  if (outcomes.length > 25 || expectedErrors.length > 25) return { status: "FAIL", details: "Expected HTTP console outcome evidence exceeds the bounded limit." };
+
+  const allowedMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+  const allowedStatuses = new Set([400, 403, 409]);
+  const byId = new Map();
+  const outcomeProblems = [];
+  for (const outcome of outcomes) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      outcomeProblems.push("malformed expected HTTP outcome");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    const expectedError = typeof outcome.expectedError === "string" ? outcome.expectedError.trim() : "";
+    const observedError = typeof outcome.observedError === "string" ? outcome.observedError.trim() : "";
+    const details = typeof outcome.details === "string" ? outcome.details.trim() : "";
+    let outcomeUrl;
+    try {
+      outcomeUrl = new URL(outcome.url);
+    } catch {
+      outcomeUrl = null;
+    }
+    const valid = id && id.length <= 128 && !byId.has(id) &&
+      outcome.testedSha === testedSha && outcome.runId === runId &&
+      typeof outcome.path === "string" && outcome.path.length <= 512 && safeExpectedHttpPath(outcome.path) && allowedMethods.has(outcome.method) &&
+      typeof outcome.url === "string" && outcome.url.length <= 2048 && outcomeUrl &&
+      (outcomeUrl.protocol === "http:" || outcomeUrl.protocol === "https:") && !outcomeUrl.username && !outcomeUrl.password &&
+      outcomeUrl.pathname === outcome.path && !outcomeUrl.search && !outcomeUrl.hash &&
+      allowedStatuses.has(outcome.expectedStatus) && outcome.observedStatus === outcome.expectedStatus &&
+      expectedError && expectedError.length <= 500 && observedError.length <= 500 && observedError === expectedError &&
+      outcome.assertionStatus === "PASS" && details && details.length <= 1000;
+    if (!valid) outcomeProblems.push(id && byId.has(id) ? "duplicate expected HTTP outcome id" : "invalid or stale expected HTTP outcome");
+    if (id) byId.set(id, outcome);
+  }
+
+  const used = new Set();
+  for (const item of expectedErrors) {
+    const id = typeof item?.outcomeId === "string" ? item.outcomeId.trim() : "";
+    const outcome = byId.get(id);
+    const message = typeof item?.message === "string" ? item.message : "";
+    const statusCode = item?.statusCode;
+    let consolePath = "";
+    let safeUrl = false;
+    try {
+      const parsed = new URL(item?.url);
+      consolePath = parsed.pathname;
+      safeUrl = (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+        !parsed.username && !parsed.password && !parsed.search && !parsed.hash;
+    } catch {
+      safeUrl = false;
+    }
+    const genericHttpError = /^Failed to load resource: the server responded with a status of (400 \(Bad Request\)|403 \(Forbidden\)|409 \(Conflict\))$/.exec(message);
+    if (!id || id.length > 128 || !outcome || used.has(id) || item.url !== outcome.url ||
+      typeof item.path !== "string" || item.path.length > 512 || !safeExpectedHttpPath(item.path) || !safeUrl || consolePath !== item.path ||
+      item.method !== outcome.method || item.path !== outcome.path || statusCode !== outcome.observedStatus ||
+      message.length > 1000 || !genericHttpError || Number(genericHttpError[1].slice(0, 3)) !== statusCode ||
+      typeof item.reason !== "string" || !item.reason.trim() || item.reason.length > 1000) {
+      outcomeProblems.push("expected console error did not match one current, asserted HTTP response outcome");
+      continue;
+    }
+    used.add(id);
+  }
+
+  if (used.size !== byId.size) outcomeProblems.push("expected HTTP outcomes must map one-to-one to expected console errors");
+  return outcomeProblems.length
+    ? { status: "FAIL", details: outcomeProblems.length + " invalid expected HTTP console outcome(s)." }
+    : { status: "PASS", details: expectedErrors.length + " expected HTTP console error(s) matched asserted current-run API responses." };
+}
+
+function inspectBrowserProblems(items, expectedHttpOutcomes, context) {
   if (!Array.isArray(items)) return { status: "BLOCKED", details: "Browser error/network inspection evidence is missing." };
   const unresolved = items.filter((item) =>
-    !item || item.disposition !== "unrelated" ||
+    !item || !["unrelated", "expected"].includes(item.disposition) ||
     typeof item.reason !== "string" || !item.reason.trim(),
   );
-  return unresolved.length
-    ? { status: "FAIL", details: unresolved.length + " unresolved browser error or failed network request(s)." }
-    : { status: "PASS", details: items.length
+  if (unresolved.length) return { status: "FAIL", details: unresolved.length + " unresolved browser error or failed network request(s)." };
+  const expected = items.filter((item) => item.disposition === "expected");
+  if (!expected.length) {
+    if (expectedHttpOutcomes === undefined) return { status: "PASS", details: items.length
       ? items.length + " known unrelated browser issue(s) were inspected and classified."
       : "No browser errors or failed network requests were found." };
+    if (!Array.isArray(expectedHttpOutcomes)) return { status: "FAIL", details: "Expected HTTP outcome records must be an array." };
+    if (expectedHttpOutcomes.length) return { status: "FAIL", details: "Expected HTTP outcome records must map one-to-one to expected console errors." };
+    return { status: "PASS", details: items.length
+      ? items.length + " known unrelated browser issue(s) were inspected and classified."
+      : "No browser errors or failed network requests were found." };
+  }
+  if (!expectedHttpOutcomes || !context) return { status: "FAIL", details: "Expected browser errors are only supported for correlated HTTP console outcomes." };
+  const unrelatedCount = items.length - expected.length;
+  const correlated = inspectExpectedHttpConsoleOutcomes(items, expectedHttpOutcomes, context);
+  return correlated.status === "PASS"
+    ? { status: "PASS", details: [unrelatedCount ? unrelatedCount + " known unrelated browser issue(s) were inspected and classified." : "", correlated.details].filter(Boolean).join(" ") }
+    : correlated;
+}
+
+function inspectExpectedNavigationCancellations(items, cancellations, { testedSha, runId }) {
+  const entries = items.filter((item) => item?.disposition === "navigation-canceled");
+  if (!entries.length && cancellations === undefined) return { status: "PASS", details: "No expected navigation cancellations were recorded." };
+  if (!Array.isArray(cancellations)) return { status: "FAIL", details: "Expected navigation cancellations have no structured redirect outcomes." };
+  if (entries.length > 5 || cancellations.length > 5) return { status: "FAIL", details: "Expected navigation cancellation evidence exceeds the bounded limit." };
+
+  const refusalText = "Ta książka ma prace lub zapis przesyłania z Klubu Kolorowania. Zarchiwizuj ją zamiast usuwać.";
+  const byId = new Map();
+  const problems = [];
+  for (const outcome of cancellations) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      problems.push("malformed navigation cancellation outcome");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    let requestUrl;
+    let destinationUrl;
+    try {
+      requestUrl = new URL(outcome.requestUrl);
+      destinationUrl = new URL(outcome.destinationUrl);
+    } catch {
+      requestUrl = null;
+      destinationUrl = null;
+    }
+    const uuidPath = typeof outcome.requestPath === "string" &&
+      /^\/admin\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(outcome.requestPath);
+    const validRequestUrl = requestUrl &&
+      (requestUrl.protocol === "http:" || requestUrl.protocol === "https:") &&
+      !requestUrl.username && !requestUrl.password && requestUrl.pathname === outcome.requestPath &&
+      !requestUrl.search && !requestUrl.hash;
+    const validDestination = destinationUrl &&
+      (destinationUrl.protocol === "http:" || destinationUrl.protocol === "https:") &&
+      !destinationUrl.username && !destinationUrl.password && destinationUrl.origin === requestUrl?.origin &&
+      destinationUrl.pathname === "/admin/products" && !destinationUrl.hash &&
+      [1, 2].includes(destinationUrl.searchParams.size) &&
+      destinationUrl.searchParams.getAll("error").length === 1 &&
+      destinationUrl.searchParams.get("error") === "admin.conflict.community_artwork" &&
+      (destinationUrl.searchParams.has("toast") ?
+        destinationUrl.searchParams.getAll("toast").length === 1 &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(destinationUrl.searchParams.get("toast") ?? "") : true) &&
+      [...destinationUrl.searchParams.keys()].every((key) => key === "error" || key === "toast");
+    const details = typeof outcome.details === "string" ? outcome.details.trim() : "";
+    const valid = id && id.length <= 128 && !byId.has(id) &&
+      outcome.testedSha === testedSha && outcome.runId === runId &&
+      typeof outcome.requestUrl === "string" && outcome.requestUrl.length <= 2048 &&
+      typeof outcome.destinationUrl === "string" && outcome.destinationUrl.length <= 2048 &&
+      uuidPath && validRequestUrl && validDestination &&
+      outcome.kind === "product-deletion-refusal" &&
+      outcome.requestMethod === "POST" && outcome.nextServerAction === true &&
+      outcome.observedFailure === "net::ERR_ABORTED" &&
+      outcome.observedDestinationUrl === outcome.destinationUrl &&
+      outcome.expectedText === refusalText && outcome.observedText === refusalText &&
+      outcome.assertionStatus === "PASS" && outcome.productPreserved === true &&
+      outcome.curatedRowPreserved === true && outcome.curatedBytesPreserved === true &&
+      details && details.length <= 1000;
+    if (!valid) problems.push(id && byId.has(id) ? "duplicate navigation cancellation outcome id" : "invalid or stale navigation cancellation outcome");
+    if (id) byId.set(id, outcome);
+  }
+
+  const used = new Set();
+  for (const entry of entries) {
+    const id = typeof entry?.outcomeId === "string" ? entry.outcomeId.trim() : "";
+    const outcome = byId.get(id);
+    if (!id || id.length > 128 || !outcome || used.has(id) ||
+      entry.url !== outcome.requestUrl || entry.method !== "POST" || outcome.requestMethod !== entry.method ||
+      entry.resource !== "fetch" || entry.phase !== "product deletion refusal" || entry.nextServerAction !== true ||
+      entry.error !== "net::ERR_ABORTED" || outcome.observedFailure !== entry.error ||
+      typeof entry.reason !== "string" || !entry.reason.trim() || entry.reason.length > 1000) {
+      problems.push("navigation cancellation did not match one current, asserted Server Action redirect outcome");
+      continue;
+    }
+    used.add(id);
+  }
+
+  if (used.size !== byId.size) problems.push("navigation cancellation outcomes must map one-to-one to failed requests");
+  return problems.length
+    ? { status: "FAIL", details: problems.length + " invalid expected navigation cancellation(s)." }
+    : { status: "PASS", details: entries.length + " expected Server Action redirect cancellation(s) matched preserved product and media state." };
+}
+
+function safeEvidenceUrl(value, origin, { allowQuery = true, allowHash = false } = {}) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.origin === origin && !url.username && !url.password &&
+      (allowHash || !url.hash) && (allowQuery || !url.search) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizedNextTarget(value, origin) {
+  const url = safeEvidenceUrl(value, origin, { allowHash: true });
+  if (!url) return null;
+  url.hash = "";
+  url.searchParams.delete("_rsc");
+  return url.pathname + url.search;
+}
+
+function inspectExpectedNextCancellations(items, cancellations, { testedSha, runId, origin }) {
+  const entries = items.filter((item) => item?.disposition === "next-canceled");
+  if (!entries.length && cancellations === undefined) return { status: "PASS", details: "No expected Next request cancellations were recorded." };
+  if (!Array.isArray(cancellations)) return { status: "FAIL", details: "Expected Next cancellations have no structured outcomes." };
+  if (!safeEvidenceUrl(origin + "/", origin, { allowQuery: false })) return { status: "FAIL", details: "The browser evidence origin is missing or invalid." };
+  if (entries.length > 1000 || cancellations.length > 1000) return { status: "FAIL", details: "Expected Next cancellation evidence exceeds the bounded limit." };
+
+  const byId = new Map();
+  const problems = [];
+  const usedIntents = new Set();
+  const usedRequests = new Set();
+  let prefetchCount = 0;
+  let linkCount = 0;
+  for (const outcome of cancellations) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      problems.push("malformed Next cancellation outcome");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    const requestUrl = safeEvidenceUrl(outcome.requestUrl, origin);
+    const sourceUrl = safeEvidenceUrl(outcome.sourceUrl, origin, { allowHash: true });
+    const kind = outcome.kind;
+    const details = typeof outcome.details === "string" ? outcome.details.trim() : "";
+    const prefetchHeader = outcome.prefetchHeader;
+    const segmentPrefetch = outcome.segmentPrefetch;
+    const recognizedPrefetch = prefetchHeader === "1" ||
+      (typeof segmentPrefetch === "string" && segmentPrefetch.length > 0 && segmentPrefetch.length <= 512);
+    const baseValid = id && id.length <= 128 && !byId.has(id) &&
+      !usedRequests.has(outcome.requestId) &&
+      outcome.testedSha === testedSha && outcome.runId === runId && outcome.origin === origin &&
+      typeof outcome.pageId === "string" && outcome.pageId.length > 0 && outcome.pageId.length <= 128 &&
+      typeof outcome.requestId === "string" && outcome.requestId.length > 0 && outcome.requestId.length <= 128 &&
+      typeof outcome.requestUrl === "string" && outcome.requestUrl.length <= 2048 && requestUrl &&
+      typeof outcome.requestPath === "string" && outcome.requestPath === requestUrl.pathname && outcome.requestPath.length <= 512 &&
+      sourceUrl && outcome.assertionStatus === "PASS" &&
+      outcome.requestMethod === "GET" && outcome.resource === "fetch" && outcome.rsc === "1" &&
+      outcome.observedFailure === "net::ERR_ABORTED" &&
+      ["navigation", "teardown"].includes(outcome.phase) &&
+      (outcome.responseStatus === null || (Number.isInteger(outcome.responseStatus) && outcome.responseStatus >= 200 && outcome.responseStatus < 300)) &&
+      !outcome.requestPath.startsWith("/api/") && !outcome.requestPath.startsWith("/_next/image") &&
+      !/\.(?:png|jpe?g|webp|gif|svg|woff2?|css|js|mp4|webm)$/i.test(outcome.requestPath) &&
+      details && details.length <= 1000;
+    let kindValid = false;
+    if (kind === "next-prefetch") {
+      prefetchCount += 1;
+      kindValid = baseValid && recognizedPrefetch &&
+        outcome.intentId === undefined && outcome.expectedUrl === undefined && outcome.assertions === undefined;
+    } else if (kind === "next-link-navigation") {
+      linkCount += 1;
+      const expectedUrl = safeEvidenceUrl(outcome.expectedUrl, origin, { allowHash: true });
+      const observedDestinationUrl = safeEvidenceUrl(outcome.observedDestinationUrl, origin, { allowHash: true });
+      const intentHref = safeEvidenceUrl(outcome.intentHref, origin, { allowHash: true });
+      const intentSourceUrl = safeEvidenceUrl(outcome.intentSourceUrl, origin, { allowHash: true });
+      const requestTarget = normalizedNextTarget(outcome.requestUrl, origin);
+      const intentTarget = normalizedNextTarget(outcome.intentHref, origin);
+      const expectedTarget = normalizedNextTarget(outcome.expectedUrl, origin);
+      const assertions = outcome.assertions;
+      kindValid = baseValid && !recognizedPrefetch && prefetchHeader === undefined && segmentPrefetch === undefined && sourceUrl &&
+        typeof outcome.intentId === "string" && outcome.intentId.length > 0 && outcome.intentId.length <= 128 &&
+        !usedIntents.has(outcome.intentId) &&
+        outcome.intentPageId === outcome.pageId && intentSourceUrl && intentSourceUrl.href === sourceUrl.href &&
+        Number.isFinite(outcome.intentAt) && Number.isFinite(outcome.requestStartedAt) &&
+        outcome.requestStartedAt >= outcome.intentAt - 250 && outcome.requestStartedAt <= outcome.intentAt + 30_000 &&
+        outcome.trustedClick === true && intentHref && expectedUrl && observedDestinationUrl &&
+        expectedUrl.pathname === observedDestinationUrl.pathname && expectedUrl.search === observedDestinationUrl.search &&
+        requestTarget && requestTarget === intentTarget && intentTarget === expectedTarget &&
+        Array.isArray(assertions) && assertions.length > 0 && assertions.length <= 20 &&
+        assertions.every((assertion) => assertion && assertion.status === "PASS" &&
+          typeof assertion.name === "string" && assertion.name.trim() && assertion.name.length <= 200 &&
+          typeof assertion.details === "string" && assertion.details.trim() && assertion.details.length <= 1000) &&
+        outcome.assertionStatus === "PASS";
+      if (kindValid) {
+        if (kind === "next-link-navigation") usedIntents.add(outcome.intentId);
+      }
+    }
+    if (kindValid) usedRequests.add(outcome.requestId);
+    if (!kindValid) problems.push(id && byId.has(id) ? "duplicate Next cancellation outcome id" : "invalid or stale Next cancellation outcome");
+    if (id) byId.set(id, outcome);
+  }
+  if (prefetchCount > 900 || linkCount > 100) problems.push("Next cancellation evidence exceeds the per-kind bound");
+
+  const used = new Set();
+  for (const entry of entries) {
+    const id = typeof entry?.outcomeId === "string" ? entry.outcomeId.trim() : "";
+    const outcome = byId.get(id);
+    if (!id || !outcome || used.has(id) || entry.cancellationKind !== outcome.kind ||
+      entry.url !== outcome.requestUrl || entry.path !== outcome.requestPath || entry.method !== "GET" ||
+      entry.resource !== "fetch" || entry.pageId !== outcome.pageId || entry.requestId !== outcome.requestId ||
+      entry.phase !== outcome.phase ||
+      entry.error !== "net::ERR_ABORTED" || entry.reason !== outcome.details) {
+      problems.push("Next cancellation did not map one-to-one to its exact observed request");
+      continue;
+    }
+    used.add(id);
+  }
+  if (used.size !== byId.size) problems.push("Next cancellation outcomes must map one-to-one to failed requests");
+  return problems.length
+    ? { status: "FAIL", details: problems.length + " invalid expected Next cancellation(s)." }
+    : { status: "PASS", details: entries.length + " typed Next request cancellation(s) matched current-run evidence." };
+}
+
+function inspectExpectedLoginRedirects(items, redirects, { testedSha, runId, origin }) {
+  const entries = items.filter((item) => item?.disposition === "login-redirect-canceled");
+  if (!entries.length && redirects === undefined) return { status: "PASS", details: "No expected login redirect cancellations were recorded." };
+  if (!Array.isArray(redirects)) return { status: "FAIL", details: "Expected login redirects have no structured outcomes." };
+  if (!safeEvidenceUrl(origin + "/", origin, { allowQuery: false })) return { status: "FAIL", details: "The browser evidence origin is missing or invalid." };
+  if (entries.length > 10 || redirects.length > 10) return { status: "FAIL", details: "Expected login redirect evidence exceeds the bounded limit." };
+  const problems = [];
+  const byId = new Map();
+  for (const outcome of redirects) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      problems.push("malformed login redirect outcome");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    const requestUrl = safeEvidenceUrl(outcome.requestUrl, origin);
+    const expectedUrl = safeEvidenceUrl(outcome.expectedUrl, origin, { allowHash: true });
+    const destinationUrl = safeEvidenceUrl(outcome.observedDestinationUrl, origin, { allowHash: true });
+    let returnToUrl;
+    try {
+      const login = requestUrl && new URL(outcome.requestUrl);
+      const returnToValues = login?.searchParams.getAll("returnTo") ?? [];
+      if (login?.pathname === "/en/login" && returnToValues.length === 1 &&
+        ![...login.searchParams.keys()].some((key) => key !== "returnTo")) {
+        const returnTo = returnToValues[0];
+        if (returnTo.startsWith("/") && !returnTo.startsWith("//") && !returnTo.includes("\\")) {
+          returnToUrl = safeEvidenceUrl(new URL(returnTo, origin).href, origin);
+        }
+      }
+    } catch {
+      returnToUrl = null;
+    }
+    const assertions = outcome.assertions;
+    const details = typeof outcome.details === "string" ? outcome.details.trim() : "";
+    const valid = id && id.length <= 128 && !byId.has(id) &&
+      outcome.testedSha === testedSha && outcome.runId === runId && outcome.origin === origin &&
+      typeof outcome.pageId === "string" && outcome.pageId.length > 0 && outcome.pageId.length <= 128 &&
+      typeof outcome.requestId === "string" && outcome.requestId.length > 0 && outcome.requestId.length <= 128 &&
+      typeof outcome.requestUrl === "string" && outcome.requestUrl.length <= 2048 && requestUrl &&
+      requestUrl.pathname === "/en/login" && requestUrl.search && !requestUrl.hash && returnToUrl &&
+      outcome.requestPath === "/en/login" && outcome.requestMethod === "POST" && outcome.resource === "fetch" &&
+      outcome.nextServerAction === true && outcome.observedFailure === "net::ERR_ABORTED" &&
+      ["navigation", "teardown"].includes(outcome.phase) &&
+      [200, 303].includes(outcome.responseStatus) && outcome.nextActionHeader === true &&
+      expectedUrl && destinationUrl && expectedUrl.pathname === destinationUrl.pathname && expectedUrl.search === destinationUrl.search &&
+      returnToUrl.pathname === expectedUrl.pathname && returnToUrl.search === expectedUrl.search &&
+      outcome.freshFixtureIdentity === true && outcome.authenticatedServerAccount === true && outcome.accountStatus === 200 &&
+      outcome.assertionStatus === "PASS" && Array.isArray(assertions) && assertions.length > 0 && assertions.length <= 10 &&
+      assertions.every((assertion) => assertion && assertion.status === "PASS" &&
+        typeof assertion.name === "string" && assertion.name.trim() && assertion.name.length <= 200 &&
+        typeof assertion.details === "string" && assertion.details.trim() && assertion.details.length <= 1000) &&
+      details && details.length <= 1000;
+    if (!valid) problems.push(id && byId.has(id) ? "duplicate login redirect outcome id" : "invalid or stale login redirect outcome");
+    if (id) byId.set(id, outcome);
+  }
+  const used = new Set();
+  for (const entry of entries) {
+    const id = typeof entry?.outcomeId === "string" ? entry.outcomeId.trim() : "";
+    const outcome = byId.get(id);
+    if (!id || !outcome || used.has(id) || entry.url !== outcome.requestUrl || entry.path !== "/en/login" ||
+      entry.method !== "POST" || entry.resource !== "fetch" || entry.pageId !== outcome.pageId ||
+      entry.requestId !== outcome.requestId || entry.phase !== outcome.phase || entry.nextServerAction !== true ||
+      entry.error !== "net::ERR_ABORTED" || entry.reason !== outcome.details) {
+      problems.push("login redirect cancellation did not map one-to-one to its exact observed request");
+      continue;
+    }
+    used.add(id);
+  }
+  if (used.size !== byId.size) problems.push("login redirect outcomes must map one-to-one to failed requests");
+  return problems.length
+    ? { status: "FAIL", details: problems.length + " invalid expected login redirect(s)." }
+    : { status: "PASS", details: entries.length + " asserted login redirect cancellation(s) matched current-run identity evidence." };
+}
+
+function inspectClosedPrefetches(closedPrefetches, { testedSha, runId, origin, failedRequests, expectedNext }) {
+  if (closedPrefetches === undefined) return { status: "PASS", details: "No page-close prefetch observations were recorded." };
+  if (!Array.isArray(closedPrefetches)) return { status: "FAIL", details: "Closed prefetch observations must be an array." };
+  if (closedPrefetches.length > 900) return { status: "FAIL", details: "Closed prefetch observations exceed the bounded limit." };
+  const nextOutcomes = Array.isArray(expectedNext) ? expectedNext : [];
+  const closedPlusNext = closedPrefetches.length + nextOutcomes.length;
+  const closedPlusPrefetch = closedPrefetches.length + nextOutcomes.filter((outcome) => outcome?.kind === "next-prefetch").length;
+  if (closedPlusNext > 1000 || closedPlusPrefetch > 900) return { status: "FAIL", details: "Closed and canceled prefetch observations exceed the shared Next evidence bounds." };
+  if (!safeEvidenceUrl(origin + "/", origin, { allowQuery: false })) return { status: "FAIL", details: "The browser evidence origin is missing or invalid." };
+  const problems = [];
+  const ids = new Set();
+  const requestIds = new Set(nextOutcomes.map((outcome) => outcome?.requestId).filter((id) => typeof id === "string"));
+  const failedRequestIds = new Set((failedRequests ?? []).map((entry) => entry?.requestId).filter((id) => typeof id === "string"));
+  for (const outcome of closedPrefetches) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      problems.push("malformed closed prefetch observation");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    const url = safeEvidenceUrl(outcome.requestUrl, origin);
+    const prefetchHeader = outcome.prefetchHeader;
+    const segmentPrefetch = outcome.segmentPrefetch;
+    const recognizedPrefetch = prefetchHeader === "1" ||
+      (typeof segmentPrefetch === "string" && segmentPrefetch.length > 0 && segmentPrefetch.length <= 512);
+    const requestId = typeof outcome.requestId === "string" ? outcome.requestId : "";
+    const valid = id && id.length <= 128 && !ids.has(id) && requestId && requestId.length <= 128 && !requestIds.has(requestId) &&
+      !failedRequestIds.has(requestId) && outcome.testedSha === testedSha && outcome.runId === runId && outcome.origin === origin &&
+      typeof outcome.pageId === "string" && outcome.pageId.length > 0 && outcome.pageId.length <= 128 &&
+      typeof outcome.requestUrl === "string" && outcome.requestUrl.length <= 2048 && url &&
+      outcome.requestPath === url.pathname && typeof outcome.requestPath === "string" && outcome.requestPath.length <= 512 &&
+      outcome.requestMethod === "GET" && outcome.resource === "fetch" && outcome.rsc === "1" && recognizedPrefetch &&
+      (outcome.responseStatus === null || (Number.isInteger(outcome.responseStatus) && outcome.responseStatus >= 200 && outcome.responseStatus < 300)) &&
+      outcome.phase === "teardown" && outcome.pageClosed === true && outcome.closedByObserver === true &&
+      outcome.completionObserved === false && outcome.terminalObservation === "page-closed-without-request-terminal-event" &&
+      !("error" in outcome) && !("observedFailure" in outcome) &&
+      !outcome.requestPath.startsWith("/api/") && outcome.requestPath !== "/api" && !outcome.requestPath.startsWith("/_next/image") &&
+      !/\.(?:png|jpe?g|webp|gif|svg|woff2?|css|js|mp4|webm)$/i.test(outcome.requestPath);
+    if (!valid) problems.push(id && ids.has(id) ? "duplicate closed prefetch outcome id" : "invalid or colliding closed prefetch observation");
+    if (id) ids.add(id);
+    if (requestId) requestIds.add(requestId);
+  }
+  if (problems.length) return { status: "FAIL", details: problems.length + " invalid closed prefetch observation(s)." };
+  return { status: "PASS", details: closedPrefetches.length + " prefetch request(s) were still open only after an observer-owned page close." };
+}
+
+function hasAbortedNetworkRequest(item) {
+  return item && ["error", "errorText", "message"].some((key) =>
+    typeof item[key] === "string" && item[key].toUpperCase().includes("NET::ERR_ABORTED"),
+  );
 }
 
 export function validateBrowserVerification({
@@ -1624,8 +2140,40 @@ export function validateBrowserVerification({
       screenshot.testedSha?.toLowerCase?.() === testedSha.toLowerCase() &&
       screenshot.runId === runId,
     );
-  const console = inspectBrowserProblems(record.consoleErrors);
-  const network = inspectBrowserProblems(record.failedNetworkRequests);
+  const console = inspectBrowserProblems(record.consoleErrors, record.expectedHttpOutcomes, {
+    testedSha,
+    runId,
+  });
+  const failedNetworkRequests = Array.isArray(record.failedNetworkRequests) ? record.failedNetworkRequests : null;
+  const expectedNavigationCancellations = inspectExpectedNavigationCancellations(
+    failedNetworkRequests ?? [],
+    record.expectedNavigationCancellations,
+    { testedSha, runId },
+  );
+  const expectedNextCancellations = inspectExpectedNextCancellations(
+    failedNetworkRequests ?? [],
+    record.expectedNextCancellations,
+    { testedSha, runId, origin: record.origin },
+  );
+  const expectedLoginRedirects = inspectExpectedLoginRedirects(
+    failedNetworkRequests ?? [],
+    record.expectedLoginRedirects,
+    { testedSha, runId, origin: record.origin },
+  );
+  const closedPrefetches = inspectClosedPrefetches(record.closedPrefetches, {
+    testedSha, runId, origin: record.origin,
+    failedRequests: failedNetworkRequests ?? [],
+    expectedNext: record.expectedNextCancellations,
+  });
+  const ordinaryNetwork = failedNetworkRequests?.filter((item) => ![
+    "navigation-canceled", "next-canceled", "login-redirect-canceled",
+  ].includes(item?.disposition)) ?? failedNetworkRequests;
+  const unexpectedAbortCount = Array.isArray(ordinaryNetwork) ? ordinaryNetwork.filter(hasAbortedNetworkRequest).length : 0;
+  const network = unexpectedAbortCount
+    ? { status: "FAIL", details: unexpectedAbortCount + " unapproved browser network cancellation(s) were found." }
+    : inspectBrowserProblems(ordinaryNetwork, undefined, undefined);
+  const pageErrorsValid = record.pageErrors === undefined ||
+    (Array.isArray(record.pageErrors) && record.pageErrors.length === 0);
   const responsiveValid =
     (Array.isArray(record.responsiveLayouts) && record.responsiveLayouts.some((layout) => typeof layout === "string" && layout.trim())) ||
     (typeof record.responsiveNotApplicable === "string" && record.responsiveNotApplicable.trim());
@@ -1643,7 +2191,10 @@ export function validateBrowserVerification({
     screenshotReviewValid &&
     record.retestedAfterFixes === true &&
     console.status === "PASS" &&
-    network.status === "PASS";
+    network.status === "PASS" && expectedNavigationCancellations.status === "PASS" &&
+    expectedNextCancellations.status === "PASS" && expectedLoginRedirects.status === "PASS" &&
+    closedPrefetches.status === "PASS" &&
+    pageErrorsValid;
   const failures = [];
   if (!screenshotsValid) failures.push("screenshots must be listed in the PR files and bound to the current-SHA browser run ID");
   if (!responsiveValid) failures.push("responsive layouts or a not-applicable reason must be recorded");
@@ -1652,13 +2203,20 @@ export function validateBrowserVerification({
   if (record.retestedAfterFixes !== true) failures.push("final browser verification after fixes is not confirmed");
   if (console.status !== "PASS") failures.push(console.details);
   if (network.status !== "PASS") failures.push(network.details);
+  if (expectedNavigationCancellations.status !== "PASS") failures.push(expectedNavigationCancellations.details);
+  if (expectedNextCancellations.status !== "PASS") failures.push(expectedNextCancellations.details);
+  if (expectedLoginRedirects.status !== "PASS") failures.push(expectedLoginRedirects.details);
+  if (closedPrefetches.status !== "PASS") failures.push(closedPrefetches.details);
+  if (!pageErrorsValid) failures.push("browser page errors are present or malformed");
   if (record.status !== "PASS" || !record.tool || !record.flows?.length) {
     failures.push("browser tool, affected flow, or PASS result is missing");
   }
   return {
     status: valid
       ? "PASS"
-      : record.status === "FAIL" || console.status === "FAIL" || network.status === "FAIL"
+      : record.status === "FAIL" || console.status === "FAIL" || network.status === "FAIL" ||
+        expectedNavigationCancellations.status === "FAIL" || expectedNextCancellations.status === "FAIL" ||
+        expectedLoginRedirects.status === "FAIL" || closedPrefetches.status === "FAIL"
         ? "FAIL"
         : record.status === "NOT RUN"
           ? "NOT RUN"
@@ -2827,6 +3385,7 @@ async function runProductionSmokeInternal(environmentUrl, {
   paths = (process.env.AGENT_HARNESS_PRODUCTION_SMOKE_PATHS || "/")
     .split(",").map((path) => path.trim()).filter(Boolean),
   expectations = [],
+  gatedPublicPageVerification = null,
   fetchImpl = fetch,
   timeoutMs = 15_000,
   vercelProtectionBypass = process.env.AGENT_HARNESS_VERCEL_PROTECTION_BYPASS,
@@ -2864,6 +3423,15 @@ async function runProductionSmokeInternal(environmentUrl, {
     !isValidProductionSmokeExpectationStatus(expectation),
   )) {
     return { status: "BLOCKED", checks: [], details: "Production smoke expectations must name an included path, expected text or exact MIME content type, and a valid HTTPS final origin." };
+  }
+  if (expectations.some(isGatedCommunityPageExpectation) &&
+    !gatedCommunityProofCoversExpectations(gatedPublicPageVerification, expectations)) {
+    return { status: "BLOCKED", checks: [], details: "Gated community HTML404 smoke requires validated same-SHA ON/OFF route and private-media evidence." };
+  }
+  if (paths.some((path) => new Set(expectations
+    .filter((expectation) => expectation.path === path)
+    .map((expectation) => expectation.method ?? "GET")).size > 1)) {
+    return { status: "BLOCKED", checks: [], details: "Production smoke cannot mix different HTTP methods for one path." };
   }
   const conflictingFinalOrigins = paths.some((path) => {
     const origins = new Set(expectations
@@ -2918,21 +3486,33 @@ async function runProductionSmokeInternal(environmentUrl, {
     }
   }
   const smokeCookieHeader = [protectionCookie, hasSmokeCookie ? productionSmokeCookie : ""].filter(Boolean).join("; ");
+  const suppliedProtectionCookies = hasSmokeCookie
+    ? productionSmokeCookie.split(";").map((pair) => pair.trim()).filter((pair) => pair.startsWith("_vercel_jwt="))
+    : [];
+  const hasMutationProbe = expectations.some((expectation) => expectation.method !== undefined && expectation.method !== "GET");
+  if (hasMutationProbe && !protectionCookie && (suppliedProtectionCookies.length !== 1 ||
+    (suppliedProtectionCookies.length === 1 && !/^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/.test(suppliedProtectionCookies[0].slice("_vercel_jwt=".length))))) {
+    return { status: "BLOCKED", checks: [], details: "Bodyless API denial probes require one valid deployment-protection cookie, without application authentication." };
+  }
+  const denialCookieHeader = protectionCookie || suppliedProtectionCookies[0] || "";
   for (const path of paths) {
     const url = new URL(path, baseUrl);
     if (url.origin !== baseUrl.origin) {
       return { status: "BLOCKED", checks, details: "Production smoke paths must stay on the deployed environment origin." };
     }
     try {
+      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
+      const method = expectedForPath[0]?.method ?? "GET";
+      const gatedPage = expectedForPath.some(isGatedCommunityPageExpectation);
+      const cookieHeader = method !== "GET" ? denialCookieHeader : smokeCookieHeader;
       const response = await fetchImpl(url, {
-        method: "GET",
+        method,
         cache: "no-store",
-        redirect: "follow",
+        redirect: method !== "GET" || gatedPage ? "manual" : "follow",
         signal: AbortSignal.timeout(timeoutMs),
-        ...(smokeCookieHeader ? { headers: { Cookie: smokeCookieHeader } } : {}),
+        ...(cookieHeader ? { headers: { Cookie: cookieHeader } } : {}),
       });
       const finalUrl = new URL(response.url || url.href);
-      const expectedForPath = expectations.filter((expectation) => expectation.path === path);
       const expectedFinalOrigin = expectedForPath[0]?.expectedFinalOrigin ?? baseUrl.origin;
       const expectedContentType = expectedForPath.find((expectation) => expectation.expectedContentType !== undefined)?.expectedContentType;
       const responseContentType = response.headers?.get?.("content-type") || null;
@@ -2953,6 +3533,8 @@ async function runProductionSmokeInternal(environmentUrl, {
         mediaType === expectedContentType.toLowerCase();
       const check = {
         path,
+        ...(method !== "GET" ? { method } : {}),
+        ...(gatedPage ? { gatedPublicPage: true } : {}),
         statusCode: response.status,
         contentType: responseContentType,
         responseBytes: responseBody.length,
@@ -2961,6 +3543,8 @@ async function runProductionSmokeInternal(environmentUrl, {
       const expectedStatus = expectedForPath.find((expectation) => expectation.expectedStatus !== undefined)?.expectedStatus;
       const expectedStatusMatched = expectedStatus === undefined || response.status === expectedStatus;
       const responseStatusPassed = expectedStatus === undefined ? response.ok : expectedStatusMatched;
+      const finalPathMatched = !(gatedPage || method !== "GET") ||
+        (finalUrl.pathname === url.pathname && !finalUrl.search && !finalUrl.hash);
       if (expectedTextValues.length) {
         check.expectedText = expectedTextValues;
         check.expectedTextMatched = expectedTextMatched;
@@ -2977,7 +3561,7 @@ async function runProductionSmokeInternal(environmentUrl, {
         check.expectedStatusMatched = expectedStatusMatched;
       }
       checks.push(check);
-      if (!responseStatusPassed || finalUrl.origin !== expectedFinalOrigin || responseBodyEmpty ||
+      if (!responseStatusPassed || finalUrl.origin !== expectedFinalOrigin || !finalPathMatched || responseBodyEmpty ||
         !expectedTextMatched || !expectedContentTypeMatched) {
         return {
           status: "FAIL",
@@ -2985,6 +3569,7 @@ async function runProductionSmokeInternal(environmentUrl, {
           details: "Production smoke failed (HTTP " + response.status +
             (expectedStatus !== undefined && !expectedStatusMatched ? ", expected HTTP " + expectedStatus : "") +
             (finalUrl.origin !== expectedFinalOrigin ? ", final origin did not match the expected origin" : "") +
+            (!finalPathMatched ? ", denial probe redirected away from the expected path" : "") +
             (responseBodyEmpty ? ", empty response body" : "") +
             (!expectedTextMatched ? ", expected content was not present" : "") +
             (!expectedContentTypeMatched ? ", expected content type was not present" : "") + ").",
@@ -3871,6 +4456,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
         .flatMap((value) => String(value).split(",")).map((path) => path.trim()).filter(Boolean);
   let effectiveSmokePaths = ["/"];
   let effectiveSmokeExpectations = [];
+  let effectiveGatedPublicPageVerification = null;
   const resolveSmokePlan = (verification) => {
     const changedFiles = verification?.fileScope?.files || [];
     const plan = verification?.productionSmokePlan || verification?.fileScope?.productionSmokePlan ||
@@ -3882,6 +4468,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     const executionPlan = PRIVATE_PRODUCTION_SMOKE_EXECUTION_PLAN.get(plan);
     const paths = plan.required ? executionPlan?.paths ?? plan.paths : configuredSmokePaths.length ? configuredSmokePaths : ["/"];
     const expectations = plan.required ? executionPlan?.expectations ?? plan.expectations : [];
+    const gatedPublicPageVerification = executionPlan?.gatedPublicPageVerification ?? plan.gatedPublicPageVerification ?? null;
     if (!Array.isArray(paths) || !paths.length || paths.some((path) => !isValidProductionSmokePath(path))) {
       return { status: "BLOCKED", details: "Production smoke plan contains an invalid same-origin absolute path." };
     }
@@ -3904,6 +4491,16 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     )) {
       return { status: "BLOCKED", details: "Production smoke expectations must name an included path, expected text or exact MIME content type, HTTPS final origin, and a supported HTTP status." };
     }
+    if (paths.some((path) => new Set(expectations
+      .filter((expectation) => expectation.path === path)
+      .map((expectation) => expectation.method ?? "GET")).size > 1)) {
+      return { status: "BLOCKED", details: "Production smoke cannot mix different HTTP methods for one path." };
+    }
+    if (expectations.some(isGatedCommunityPageExpectation) && (
+      !gatedCommunityProofCoversExpectations(gatedPublicPageVerification, expectations) ||
+      gatedPublicPageVerification.testedSha.toLowerCase() !== candidateSha?.toLowerCase())) {
+      return { status: "BLOCKED", details: "Gated community pages require ON/OFF proof for this exact candidate SHA." };
+    }
     const conflictingFinalOrigins = paths.some((path) => {
       const origins = new Set(expectations
         .filter((expectation) => expectation.path === path)
@@ -3922,7 +4519,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     if (conflictingContentTypes) {
       return { status: "BLOCKED", details: "Production smoke expectations cannot require conflicting content types for one path." };
     }
-    return { status: "PASS", paths, expectations, details: redactPersistedData(plan.details) };
+    return { status: "PASS", paths, expectations, gatedPublicPageVerification, details: redactPersistedData(plan.details) };
   };
   const pullRequestPath = "/repos/" + client.owner + "/" + client.repo + "/pulls/" + number;
   let pullRequest = await client.request(pullRequestPath);
@@ -4038,6 +4635,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     }
     effectiveSmokePaths = smokePlan.paths;
     effectiveSmokeExpectations = smokePlan.expectations;
+    effectiveGatedPublicPageVerification = smokePlan.gatedPublicPageVerification;
     pullRequest = await client.request(pullRequestPath);
     if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft ||
       pullRequest.base?.ref !== "main" || pullRequest.base?.sha?.toLowerCase() !== verifiedBaseSha ||
@@ -4225,6 +4823,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
     if (smokePlan.status === "PASS") {
       effectiveSmokePaths = smokePlan.paths;
       effectiveSmokeExpectations = smokePlan.expectations;
+      effectiveGatedPublicPageVerification = smokePlan.gatedPublicPageVerification;
     }
     const confirmedMerge = await resolveConfirmedMerge(client, number, candidateSha);
     if (confirmedMerge.status === "PASS") {
@@ -4365,6 +4964,7 @@ async function deliverPullRequestInternal(client, pullRequestNumber, {
       productionSmoke = redactPersistedData(await smoke(productionDeployment.deployment.environmentUrl, {
         paths: effectiveSmokePaths,
         expectations: effectiveSmokeExpectations,
+        ...(effectiveGatedPublicPageVerification ? { gatedPublicPageVerification: effectiveGatedPublicPageVerification } : {}),
       }));
       if (productionSmoke.status === "PASS") {
         try {

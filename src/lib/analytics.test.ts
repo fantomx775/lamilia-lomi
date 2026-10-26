@@ -13,5 +13,6 @@ describe("analytics consent", () => {
     expect(businessEvents).toContain("unlock_success");
     expect(businessEvents).toContain("premium_file_download");
     expect(businessEvents).toContain("amazon_link_click");
+    expect(businessEvents).toEqual(expect.arrayContaining(["artwork_submitted", "artwork_approved", "artwork_rejected", "gallery_view", "like_created"]));
   });
 });

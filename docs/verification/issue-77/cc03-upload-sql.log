@@ -1,0 +1,166 @@
+BEGIN
+SET
+ plan  
+-------
+ 1..28
+(1 row)
+
+                   ok                   
+----------------------------------------
+ ok 1 - upload reservations enforce RLS
+(1 row)
+
+                  ok                   
+---------------------------------------
+ ok 2 - anon has no reservation grants
+(1 row)
+
+                       ok                       
+------------------------------------------------
+ ok 3 - authenticated has no reservation grants
+(1 row)
+
+INSERT 0 2
+INSERT 0 1
+CREATE TABLE
+CREATE TABLE
+GRANT
+SET
+                 throws_ok                 
+-------------------------------------------
+ ok 4 - anon cannot read upload identities
+(1 row)
+
+                 throws_ok                  
+--------------------------------------------
+ ok 5 - anon cannot acquire an upload lease
+(1 row)
+
+               throws_ok                
+----------------------------------------
+ ok 6 - anon cannot trigger raw cleanup
+(1 row)
+
+RESET
+SET
+                     throws_ok                      
+----------------------------------------------------
+ ok 7 - authenticated cannot read upload identities
+(1 row)
+
+                        throws_ok                         
+----------------------------------------------------------
+ ok 8 - authenticated role spoof cannot mark bytes stored
+(1 row)
+
+RESET
+SET
+                 is                 
+------------------------------------
+ ok 9 - confirmed adult owner joins
+(1 row)
+
+                 is                  
+-------------------------------------
+ ok 10 - other confirmed adult joins
+(1 row)
+
+                       throws_ok                        
+--------------------------------------------------------
+ ok 11 - an active member without unlock cannot reserve
+(1 row)
+
+                      is                       
+-----------------------------------------------
+ ok 12 - first request reserves private upload
+(1 row)
+
+                           throws_ok                           
+---------------------------------------------------------------
+ ok 13 - simultaneous request cannot steal a live writer lease
+(1 row)
+
+                   throws_ok                   
+-----------------------------------------------
+ ok 14 - same key with changed bytes conflicts
+(1 row)
+
+                    throws_ok                    
+-------------------------------------------------
+ ok 15 - unverified stored state cannot finalize
+(1 row)
+
+                   throws_ok                   
+-----------------------------------------------
+ ok 16 - wrong writer token cannot mark stored
+(1 row)
+
+                      is                       
+-----------------------------------------------
+ ok 17 - own writer marks durable stored state
+(1 row)
+
+                                 is                                  
+---------------------------------------------------------------------
+ ok 18 - same payload retry resumes stored bytes without another PUT
+(1 row)
+
+                             is                             
+------------------------------------------------------------
+ ok 19 - stored retry preserves original finalization fence
+(1 row)
+
+INSERT 0 1
+                               ok                               
+----------------------------------------------------------------
+ ok 20 - finalization creates exactly a private pending artwork
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 21 - finalization retries return the same artwork
+(1 row)
+
+                              is                              
+--------------------------------------------------------------
+ ok 22 - completed artwork cannot be cleaned as failed upload
+(1 row)
+
+                            is                             
+-----------------------------------------------------------
+ ok 23 - owner deletion tombstones before physical cleanup
+(1 row)
+
+                           ok                            
+---------------------------------------------------------
+ ok 24 - deleted artwork is already inaccessible in data
+(1 row)
+
+UPDATE 1
+INSERT 0 1
+                        is                        
+--------------------------------------------------
+ ok 25 - scheduler claims the queued owned object
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 26 - stale cleanup token cannot finish newer work
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 27 - current cleanup token can acknowledge deletion
+(1 row)
+
+                       throws_ok                       
+-------------------------------------------------------
+ ok 28 - deleted key cannot recreate a removed artwork
+(1 row)
+
+RESET
+ finish 
+--------
+(0 rows)
+
+ROLLBACK

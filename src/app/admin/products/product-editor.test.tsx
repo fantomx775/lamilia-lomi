@@ -35,7 +35,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { ProductEditor, productEditorFormSignature, replaceCreatedProductRoute } from "./product-editor";
-import { AdminProductEditorHistoryGuard } from "@/app/admin/admin-product-editor-history-guard";
+import { AdminProductEditorHistoryGuard, shouldUseProductEditorNavigationApi } from "@/app/admin/admin-product-editor-history-guard";
 import { buildProductFromFormData } from "@/lib/admin-content";
 import { ADMIN_ERROR_CODES } from "@/lib/admin-errors";
 import { getSeedContentSnapshot } from "@/lib/content-store";
@@ -44,6 +44,27 @@ import {
   PRODUCT_TITLE_MAX_LENGTH,
 } from "@/lib/product-text";
 import type { Product, ProductAsset } from "@/lib/types";
+
+describe("product editor navigation API compatibility", () => {
+  it.each([
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0.6723.69 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/132.0 Mobile/15E148 Safari/605.1",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/130.0.2849.80 Mobile/15E148 Safari/605.1",
+  ])("uses popstate compatibility for WebKit UA %s", (userAgent) => {
+    expect(shouldUseProductEditorNavigationApi(userAgent, true)).toBe(false);
+  });
+
+  it("uses Navigation API for Chromium and other supported engines only when available", () => {
+    const chromium = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+    const firefox = "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0";
+
+    expect(shouldUseProductEditorNavigationApi(chromium, true)).toBe(true);
+    expect(shouldUseProductEditorNavigationApi(firefox, true)).toBe(true);
+    expect(shouldUseProductEditorNavigationApi(chromium, false)).toBe(false);
+  });
+});
 
 function productWithGalleryAssets(product: Product, filenames: string[], reverseStateOrder = false): Product {
   const template = product.assets.find((asset) => asset.kind === "gallery");
@@ -468,9 +489,14 @@ describe("ProductEditor V2", () => {
 
   it("submits the single product content fields through the provided server action", async () => {
     const originalNavigation = Object.getOwnPropertyDescriptor(window, "navigation");
+    const originalUserAgent = Object.getOwnPropertyDescriptor(navigator, "userAgent");
     Object.defineProperty(window, "navigation", {
       configurable: true,
       value: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    });
+    Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     });
 
     try {
@@ -500,6 +526,8 @@ describe("ProductEditor V2", () => {
     } finally {
       if (originalNavigation) Object.defineProperty(window, "navigation", originalNavigation);
       else Reflect.deleteProperty(window, "navigation");
+      if (originalUserAgent) Object.defineProperty(navigator, "userAgent", originalUserAgent);
+      else Reflect.deleteProperty(navigator, "userAgent");
     }
   });
 

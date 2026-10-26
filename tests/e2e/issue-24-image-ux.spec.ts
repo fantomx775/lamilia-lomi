@@ -98,12 +98,22 @@ test("category image upload, replace, storefront display, and removal work on de
     await page.goto("/en/products");
     const categoryCard = page.getByRole("link", { name: new RegExp(categoryName) });
     await expect(categoryCard).toBeVisible();
-    const storefrontImage = categoryCard.getByRole("img", { name: categoryName });
+    const storefrontImage = categoryCard.locator("img");
+    const storefrontViewport = page.viewportSize()!;
+    const compactCategories = storefrontViewport.width < 640;
+    if (compactCategories) {
+      // The current compact phone pills intentionally hide decorative artwork.
+      await expect(storefrontImage).toBeHidden();
+      await page.setViewportSize({ width: 768, height: storefrontViewport.height });
+    }
     await expect(storefrontImage).toBeVisible();
+    // Category art is decorative; the surrounding link supplies its accessible name.
+    await expect(storefrontImage).toHaveAttribute("alt", "");
     await expect.poll(() => storefrontImage.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
     expect(await storefrontImage.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeLessThanOrEqual(640);
     await expect(categoryCard.locator("span.relative")).toHaveCSS("aspect-ratio", "1 / 1");
     await capture(page, "category-storefront", testInfo);
+    if (compactCategories) await page.setViewportSize(storefrontViewport);
 
     await page.goto("/admin/products");
     const firstProductLink = page
@@ -124,7 +134,9 @@ test("category image upload, replace, storefront display, and removal work on de
     await expect(cleanupDialog.getByText("Obraz kategorii został usunięty.")).toBeVisible();
     await page.goto("/en/products");
     const emptyCategoryCard = page.getByRole("link", { name: new RegExp(categoryName) });
-    await expect(emptyCategoryCard.getByRole("img", { name: `${categoryName} — brak obrazu` })).toBeVisible();
+    await expect(emptyCategoryCard.getByTestId("category-image-fallback")).toHaveCount(1);
+    if (compactCategories) await expect(emptyCategoryCard.getByTestId("category-image-fallback")).toBeHidden();
+    else await expect(emptyCategoryCard.getByTestId("category-image-fallback")).toBeVisible();
 
     await page.goto("/admin/categories");
     await page.getByRole("button", { name: `Edytuj kategorię ${categoryName}` }).click();
