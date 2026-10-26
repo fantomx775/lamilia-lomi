@@ -156,7 +156,10 @@ begin
     select report.id from public.community_artwork_reports report
     where report.status in ('resolved', 'dismissed')
       and report.retention_expires_at <= now()
-      and (report.reporter_user_id is not null or report.details <> '')
+      and (report.reporter_user_id is not null or report.details <> '' or exists (
+        select 1 from public.community_artwork_report_events event
+        where event.report_id = report.id and event.actor_user_id is not null
+      ))
     order by report.retention_expires_at, report.id
     limit p_limit for update skip locked
   ) expired;

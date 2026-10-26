@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import { CommunityValidationError } from "@/lib/community/errors";
 import {
   bodyErrorResponse,
@@ -9,9 +11,11 @@ import {
 import { getCommunityModerationArtwork, moderateCommunityArtwork } from "@/lib/community/repository";
 import { getCommunityAdminAccess } from "@/lib/community/admin-http";
 import type { CommunityModerationAction } from "@/lib/community/types";
+import { processCommunityModerationNotifications } from "@/lib/community/notifications";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 60;
 type Context = { params: Promise<{ id: string }> };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const actions = new Set<CommunityModerationAction>(["approve", "reject", "remove", "restore"]);
@@ -30,6 +34,12 @@ export async function POST(request: Request, { params }: Context) {
     const { id } = await params;
     if (!uuid.test(id)) throw new CommunityValidationError("Invalid artwork ID.");
     await moderateCommunityArtwork(id, body.value.revision, body.value.action, body.value.reason);
+    if (body.value.action === "approve" || body.value.action === "reject") {
+      after(async () => {
+        try { await processCommunityModerationNotifications(1); }
+        catch { console.error("[community-notification] Moderation email remains queued for a later retry."); }
+      });
+    }
     const result = await getCommunityModerationArtwork(id);
     return result
       ? communityJson({ ok: true, ...result })

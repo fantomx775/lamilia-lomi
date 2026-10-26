@@ -127,6 +127,7 @@ type LocalReport = {
   resolvedAt: string | null; retentionExpiresAt: string | null;
 };
 type LocalReportEvent = { id: string; reportId: string; actorUserId: string | null; action: "submitted" | "reviewed" | "resolve" | "dismiss" | "retention_scrubbed"; fromStatus: CommunityReportStatus | null; toStatus: CommunityReportStatus; createdAt: string };
+type LocalNotificationOutbox = { moderationEventId: string; authorId: string; notificationType: "approved" | "rejected"; state: "queued"; createdAt: string };
 
 type LocalRateBucket = { windowStartedAt: number; hitCount: number };
 
@@ -138,6 +139,7 @@ type LocalSnapshot = {
   artworkLikes: LocalArtworkLike[];
   reports: LocalReport[];
   reportEvents: LocalReportEvent[];
+  notificationOutbox: LocalNotificationOutbox[];
   rateLimitBuckets: Record<string, LocalRateBucket>;
   uploadReservations: LocalUploadReservation[];
 };
@@ -581,11 +583,15 @@ export class CommunityLocalStore {
       artwork.publishedAt = action === "approve" ? now : null;
       artwork.revision += 1;
       artwork.updatedAt = now;
+      const eventId = this.uuid();
       snapshot.moderationEvents.push({
-        id: this.uuid(), artworkId, actorUserId: actor.userId,
+        id: eventId, artworkId, actorUserId: actor.userId,
         revision: artwork.revision, fromStatus, toStatus,
         reason: artwork.moderationReason, createdAt: now,
       });
+      if ((toStatus === "approved" || toStatus === "rejected") && artwork.authorId) {
+        snapshot.notificationOutbox.push({ moderationEventId: eventId, authorId: artwork.authorId, notificationType: toStatus, state: "queued", createdAt: now });
+      }
       return artwork.revision;
     });
   }
@@ -855,7 +861,8 @@ export class CommunityLocalStore {
       const now = this.now();
       let count = 0;
       for (const report of snapshot.reports) {
-        if (!report.retentionExpiresAt || new Date(report.retentionExpiresAt) > now || (!report.details && !report.reporterUserId)) continue;
+        if (!report.retentionExpiresAt || new Date(report.retentionExpiresAt) > now
+          || (!report.details && !report.reporterUserId && !snapshot.reportEvents.some((event) => event.reportId === report.id && event.actorUserId !== null))) continue;
         const previous = report.status;
         for (const event of snapshot.reportEvents) if (event.reportId === report.id) event.actorUserId = null;
         report.reporterUserId = null;
@@ -918,7 +925,7 @@ export function buildCommunityStoragePath(actorId: string, idempotencyKey: strin
 }
 
 function initialSnapshot(): LocalSnapshot {
-  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], reports: [], reportEvents: [], rateLimitBuckets: {}, uploadReservations: [] };
+  return { version: 1, profiles: [], artworks: [], moderationEvents: [], artworkLikes: [], reports: [], reportEvents: [], notificationOutbox: [], rateLimitBuckets: {}, uploadReservations: [] };
 }
 
 function readSnapshot(filePath: string): LocalSnapshot {
@@ -931,7 +938,7 @@ function readSnapshot(filePath: string): LocalSnapshot {
       || (parsed.artworkLikes !== undefined && !Array.isArray(parsed.artworkLikes))) {
       throw new Error("Unexpected community local-store structure.");
     }
-    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [], reports: parsed.reports ?? [], reportEvents: parsed.reportEvents ?? [] } as LocalSnapshot;
+    return { ...parsed, uploadReservations: parsed.uploadReservations ?? [], artworkLikes: parsed.artworkLikes ?? [], reports: parsed.reports ?? [], reportEvents: parsed.reportEvents ?? [], notificationOutbox: parsed.notificationOutbox ?? [] } as LocalSnapshot;
   } catch (error) {
     throw new Error(`Community local store is unreadable: ${error instanceof Error ? error.message : "invalid JSON"}`);
   }

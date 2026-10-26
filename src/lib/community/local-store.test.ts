@@ -185,8 +185,21 @@ describe("Coloring Club local adapter", () => {
     await store.submitArtworkReport(otherMember, artworkId, "privacy", "Private report text.", [product]);
     const report = (await store.listAdminReports(admin, [product], { limit: 10 })).items[0]!;
     await store.updateReport(admin, report.id, report.revision, "resolve");
+    // Account deletion may already have anonymized the report row before the
+    // moderator resolves it. The later retention run must still scrub event actors.
+    const snapshotPath = path.join(tempDirs.at(-1)!, "community.json");
+    const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8")) as {
+      reports: Array<{ reporterUserId: string | null; details: string }>;
+    };
+    snapshot.reports[0]!.reporterUserId = null;
+    snapshot.reports[0]!.details = "";
+    fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));
     current = new Date(current.getTime() + 31 * 24 * 60 * 60 * 1000);
     expect(await store.purgeExpiredReportDetails()).toBe(1);
+    const scrubbedSnapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8")) as {
+      reportEvents: Array<{ actorUserId: string | null }>;
+    };
+    expect(scrubbedSnapshot.reportEvents.every((event) => event.actorUserId === null)).toBe(true);
     const after = (await store.listAdminReports(admin, [product], { limit: 10 })).items[0];
     expect(after).toMatchObject({ details: "", status: "resolved", revision: 3 });
   });

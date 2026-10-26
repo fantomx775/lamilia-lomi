@@ -326,8 +326,11 @@ export async function processCommunityArtworkCleanup(actor?: CommunityActor) {
     ? await localStore.claimUploadCleanup(actor?.backend === "local" ? actor : undefined, 10)
     : await supabase.claimArtworkUploadCleanup(10);
   for (const candidate of candidates) await removeAndFinishArtworkCleanup(candidate);
-  if (getBackendMode() === "local") await localStore.purgeExpiredReportDetails();
-  else await supabase.purgeExpiredReportDetails();
+}
+
+export async function processCommunityReportRetention() {
+  if (getBackendMode() === "local") return localStore.purgeExpiredReportDetails();
+  return supabase.purgeExpiredReportDetails();
 }
 
 export async function cleanupCommunityUploadCandidate(candidate: CommunityUploadCleanupCandidate) {

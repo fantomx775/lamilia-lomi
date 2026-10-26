@@ -578,6 +578,57 @@ export async function purgeExpiredReportDetails() {
   return rpc("community_purge_expired_report_details", { p_limit: 100 });
 }
 
+export type CommunityNotificationClaim = {
+  moderation_event_id: number;
+  author_user_id: string;
+  notification_type: "approved" | "rejected";
+  attempt_count: number;
+  first_attempt_at: string | null;
+  payload_fingerprint: string | null;
+  template_version: string | null;
+};
+
+export async function claimModerationEmailOutbox(leaseToken: string, limit: number) {
+  const result = await rpc("community_claim_moderation_email_outbox", { p_lease_token: leaseToken, p_limit: limit });
+  if (!Array.isArray(result)) throw new Error("Community notification queue could not be read.");
+  return result as CommunityNotificationClaim[];
+}
+
+export async function getModerationEmailRecipient(userId: string) {
+  const client = createServiceRoleClient();
+  const { data: authResult, error: authError } = await client.auth.admin.getUserById(userId);
+  if (authError) {
+    if (authError.status === 404) return null;
+    throw new Error("Community notification account lookup failed.");
+  }
+  const user = authResult.user;
+  if (!user?.email || !user.email_confirmed_at) return null;
+  const { data: profile, error: profileError } = await client.from("community_profiles")
+    .select("is_adult,adult_attested_at,opted_in_at,participation_revoked_at,suspended_at,rules_version")
+    .eq("user_id", userId).maybeSingle();
+  if (profileError) throw new Error("Community notification membership lookup failed.");
+  if (!profile?.is_adult || !profile.adult_attested_at || !profile.opted_in_at
+    || profile.participation_revoked_at || profile.suspended_at || profile.rules_version !== COMMUNITY_RULES_VERSION) return null;
+  return user.email;
+}
+
+export async function prepareModerationEmailSend(eventId: number, leaseToken: string, fingerprint: string, templateVersion: string) {
+  return (await rpc("community_prepare_moderation_email_send", {
+    p_moderation_event_id: eventId, p_lease_token: leaseToken,
+    p_payload_fingerprint: fingerprint, p_template_version: templateVersion,
+  })) === true;
+}
+
+export async function finishModerationEmailSend(input: {
+  eventId: number; leaseToken: string; result: "sent" | "suppressed" | "retry";
+  providerMessageId?: string; errorCode?: "provider_error" | "network_error";
+}) {
+  return (await rpc("community_finish_moderation_email_send", {
+    p_moderation_event_id: input.eventId, p_lease_token: input.leaseToken,
+    p_result: input.result, p_provider_message_id: input.providerMessageId ?? null, p_error_code: input.errorCode ?? null,
+  })) === true;
+}
+
 async function getLikedArtworkIds(viewerUserId: string | undefined, rows: Row[]) {
   if (!viewerUserId || rows.length === 0) return new Set<string>();
   const ids = rows.map((row) => String(row.id));
