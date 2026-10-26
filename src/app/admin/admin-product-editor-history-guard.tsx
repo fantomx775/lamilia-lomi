@@ -6,6 +6,11 @@ type ProductEditorPopStateGuard = (event: PopStateEvent) => void;
 
 const productEditorPopStateGuards = new Map<symbol, ProductEditorPopStateGuard>();
 
+export function shouldUseProductEditorNavigationApi(userAgent: string, navigationApiAvailable: boolean) {
+  const webKitBrowser = /AppleWebKit\//.test(userAgent) && !/(?:Chrome|Chromium)\//.test(userAgent);
+  return navigationApiAvailable && !webKitBrowser;
+}
+
 export function registerProductEditorPopStateGuard(guard: (event: PopStateEvent) => void) {
   // Next may unmount the editor before the persistent layout listener receives this traversal.
   const registration = Symbol("product-editor-popstate-guard");
