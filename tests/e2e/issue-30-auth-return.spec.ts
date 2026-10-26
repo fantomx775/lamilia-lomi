@@ -2,9 +2,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
+let restorePremiumCodeFixture: (() => void) | undefined;
 
 // This suite asserts local demo behavior and uses fixed synthetic demo emails.
 // It must never submit those forms to a hosted Supabase project via baseURL.
@@ -14,6 +16,14 @@ test.describe("Issue 30 local demo auth-return coverage", () => {
       !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
       "Issue 30 auth-return browser coverage uses fixed demo data and requires a loopback app running the local demo backend.",
     );
+    if (testInfo.title.includes("premium code intent")) {
+      restorePremiumCodeFixture = await resetLocalPremiumCodeFixture(testInfo.project.use.baseURL);
+    }
+  });
+
+  test.afterEach(() => {
+    restorePremiumCodeFixture?.();
+    restorePremiumCodeFixture = undefined;
   });
 
 test("auth pages explain errors and preserve a product return path", async ({ page }, testInfo) => {
@@ -374,7 +384,7 @@ async function saveEvidenceScreenshot(
 ) {
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
   const essentialConsent = page.getByRole("button", {
-    name: "Essential",
+    name: "Essential only",
     exact: true,
   });
   const consentIsUnset = await page.evaluate(

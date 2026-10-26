@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
+import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
@@ -7,6 +8,7 @@ const premiumAssetId = "asset-moon-premium-pdf";
 const secondProductSlug = "bedtime-forest-picture-book";
 const browserRunId = process.env.LAMILIA_BROWSER_RUN_ID ?? `pr-45-unlock-${Date.now()}`;
 const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+let restorePremiumCodeFixture: (() => void) | undefined;
 const diagnosticsByPage = new WeakMap<Page, {
   startedAt: number;
   consoleErrors: string[];
@@ -89,6 +91,17 @@ test.describe("Local demo unlock funnel", () => {
     );
   });
 
+  test.beforeEach(async ({ page }, testInfo) => {
+    if (await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)) {
+      restorePremiumCodeFixture = await resetLocalPremiumCodeFixture(testInfo.project.use.baseURL);
+    }
+  });
+
+  test.afterEach(() => {
+    restorePremiumCodeFixture?.();
+    restorePremiumCodeFixture = undefined;
+  });
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     window.localStorage.setItem(
@@ -155,7 +168,7 @@ test("generic login opens account creation without unlock context", async ({ pag
   await page.getByRole("button", { name: "Create account" }).click();
 
   await expect(page).toHaveURL(/\/en\/account$/);
-  await expect(page.getByRole("heading", { name: "Account" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Account", exact: true })).toBeVisible();
 });
 
 test("registration and verification resume the unlock journey", async ({ page }) => {
@@ -228,7 +241,7 @@ test("invalid code is recoverable and already unlocked is a positive state", asy
   await page.getByLabel("Premium code").fill("NOT-REAL");
   await expect(page.getByRole("link", { name: /Download premium file/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Unlock premium content" }).click();
-  await expect(page.locator("#premium-code-error")).toHaveText(/could not unlock/i);
+  await expect(page.locator("#premium-code-error")).toHaveText(/couldn't find a valid code/i);
 });
 
 test("empty Library state is actionable for an authenticated locked reader", async ({ page }) => {

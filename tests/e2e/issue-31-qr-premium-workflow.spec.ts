@@ -1,9 +1,8 @@
-import fs from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
-import { acquireLocalContentStoreLock } from "./local-content-store-lock";
+import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
@@ -19,21 +18,7 @@ test.describe("Issue 31 local QR and premium workflow", () => {
       !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
       "Issue 31 local QR coverage requires a loopback app running the local demo backend.",
     );
-    const releaseContentStoreLock = await acquireLocalContentStoreLock();
-    const contentStorePath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
-    const hadContentStore = fs.existsSync(contentStorePath);
-    const originalContentStore = hadContentStore ? fs.readFileSync(contentStorePath) : undefined;
-    restoreLocalContentStore = () => {
-      try {
-        if (hadContentStore && originalContentStore) {
-          fs.writeFileSync(contentStorePath, originalContentStore);
-        } else if (!hadContentStore && fs.existsSync(contentStorePath)) {
-          fs.rmSync(contentStorePath);
-        }
-      } finally {
-        releaseContentStoreLock();
-      }
-    };
+    restoreLocalContentStore = await resetLocalPremiumCodeFixture(testInfo.project.use.baseURL);
     await page.addInitScript(() => {
       if (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost") {
         window.localStorage.setItem(
@@ -71,7 +56,7 @@ test.describe("Issue 31 local QR and premium workflow", () => {
       `/api/unlock/en/${productSlug}?productId=${productId}&code=${encodeURIComponent(premiumCode)}`,
     );
     await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
-    await expect(page.getByRole("button", { name: "Essential", exact: true })).toBeHidden();
+    await expect(page.getByRole("button", { name: "Essential only", exact: true })).toBeHidden();
     await expect(page).not.toHaveURL(/LOMI-BOOK-2026|premiumCode|[?&]code=/i);
 
     const unlockSection = page.getByTestId("product-unlock-section");

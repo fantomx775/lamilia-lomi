@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { readFile, rm, stat, unlink } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { essentials } from "./helpers/community-fixtures";
 
@@ -13,7 +13,20 @@ test("local demo persists a private upload and safely edits and deletes its actu
     throw new Error("Unexpected local-demo test target.");
   }
   const file = path.resolve("data/lamilialomi-community.local.json");
-  if (await stat(file).then(() => true, () => false)) throw new Error("Preserve existing local community data; this fixture requires a clean dedicated worktree.");
+  const originalStore = await readFile(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  if (originalStore) {
+    const existing = JSON.parse(originalStore.toString("utf8")) as {
+      profiles?: unknown[];
+      artworks?: unknown[];
+      uploadReservations?: unknown[];
+    };
+    if (existing.profiles?.length || existing.artworks?.length || existing.uploadReservations?.length) {
+      throw new Error("Preserve existing local community data; this fixture requires empty profiles, artworks, and upload reservations.");
+    }
+  }
   const adminContext = await browser.newContext();
   const adminPage = await adminContext.newPage();
   try {
@@ -100,7 +113,7 @@ test("local demo persists a private upload and safely edits and deletes its actu
   } finally {
     await adminContext.close();
     const snapshot = await readFile(file, "utf8").then((text) => JSON.parse(text), () => null);
-    if (snapshot) {
+    if (snapshot && (snapshot.profiles.length || snapshot.artworks.length)) {
       if (snapshot.profiles.length !== 1 || snapshot.profiles[0].username !== "cc_local_demo_artist") {
         throw new Error("Local fixture cleanup refused: unexpected community records.");
       }
@@ -111,7 +124,8 @@ test("local demo persists a private upload and safely edits and deletes its actu
         }
         await rm(path.resolve("data/.collection-media", artwork.storagePath), { force: true });
       }
-      await unlink(file);
     }
+    if (originalStore) await writeFile(file, originalStore);
+    else await rm(file, { force: true });
   }
 });
