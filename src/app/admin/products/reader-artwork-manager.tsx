@@ -76,8 +76,7 @@ export function ReaderArtworkManager({ productId }: { productId?: string }) {
   useEffect(() => {
     if (!endpoint) return;
     const generation = ++requestGeneration.current;
-    const controller = new AbortController();
-    fetch(endpoint, { cache: "no-store", signal: controller.signal }).then(async (response) => {
+    fetch(endpoint, { cache: "no-store" }).then(async (response) => {
       if (!response.ok) throw new Error("Nie udało się wczytać prac.");
       const result: unknown = await response.json().catch(() => null);
       if (!result || typeof result !== "object" || !Array.isArray((result as { artworks?: unknown }).artworks)
@@ -86,15 +85,9 @@ export function ReaderArtworkManager({ productId }: { productId?: string }) {
       }
       const fetched = (result as { artworks: Artwork[] }).artworks;
       if (generation === requestGeneration.current) { setItems(fetched); setLoadedEndpoint(endpoint); }
-    }).catch((reason: unknown) => {
-      if (generation !== requestGeneration.current || controller.signal.aborted) return;
-      setError(reason instanceof Error && reason.message.startsWith("Nie udało się wczytać") ? reason.message : "Nie udało się wczytać prac. Sprawdź połączenie i ponów próbę.");
-    })
+    }).catch((reason: unknown) => { if (generation === requestGeneration.current) setError(reason instanceof Error && reason.message.startsWith("Nie udało się wczytać") ? reason.message : "Nie udało się wczytać prac. Sprawdź połączenie i ponów próbę."); })
       .finally(() => { if (generation === requestGeneration.current) setLoading(false); });
-    return () => {
-      requestGeneration.current += 1;
-      controller.abort();
-    };
+    return () => { requestGeneration.current += 1; };
   }, [endpoint, reloadCount]);
 
   async function request(method: string, body?: unknown, form?: FormData) {

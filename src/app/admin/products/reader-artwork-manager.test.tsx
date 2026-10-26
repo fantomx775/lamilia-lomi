@@ -128,24 +128,6 @@ describe("ReaderArtworkManager", () => {
     expect(screen.getByRole("button", { name: "Wybierz pliki prac czytelniczek" })).toBeEnabled();
   });
 
-  it("aborts the in-flight artwork read when the manager unmounts", async () => {
-    let requestSignal: AbortSignal | undefined;
-    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
-      requestSignal = init?.signal ?? undefined;
-      return new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
-      });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const view = render(<ReaderArtworkManager productId="product-1" />);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(requestSignal?.aborted).toBe(false);
-    view.unmount();
-
-    expect(requestSignal?.aborted).toBe(true);
-  });
-
   it("queues dropped previews with independent attribution before any upload and releases removed previews", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ artworks: [] }) });
     vi.stubGlobal("fetch", fetchMock);
