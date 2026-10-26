@@ -32,7 +32,10 @@ describe("public Coloring Club gallery", () => {
     expect(html).toContain('data-testid="community-gallery-sort" class="');
     expect(html).toMatch(/data-testid="community-gallery-sort"[^>]*disabled/);
 
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, items: [], nextCursor: null }), { status: 200 }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      void input;
+      return new Response(JSON.stringify({ ok: true, items: [], nextCursor: null }), { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
     render(<CommunityGallery {...props} />);
     const sort = screen.getByTestId("community-gallery-sort");
