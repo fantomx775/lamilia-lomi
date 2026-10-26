@@ -13,10 +13,37 @@ test("real private reports, admin decisions, notification intent and account med
   test.setTimeout(180_000);
   page.setDefaultTimeout(12_000);
   const fixtures = await communityFixtures(testInfo);
+  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc07-local-lifecycle-1";
   const screenshots: { path: string; testedSha: string; runId: string }[] = [];
   const runtimeErrors: string[] = [];
-  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  const consoleErrors: { message: string; url: string }[] = [];
+  const failedNetworkRequests: { path: string; url: string; method: string; resource: string; phase: string;
+    nextServerAction: boolean; error: string | undefined; disposition?: string; outcomeId?: string; reason?: string }[] = [];
+  const failedRequestsByIdentity = new Map<object, (typeof failedNetworkRequests)[number]>();
+  const expectedNavigationCancellations: Record<string, unknown>[] = [];
+  let observationPhase = "fixture setup";
+  const terminals = new Map<object, Promise<void>>();
+  function observe(target: typeof page) {
+    const settle = new Map<object, () => void>();
+    target.on("request", (request) => terminals.set(request, new Promise<void>((resolve) => settle.set(request, resolve))));
+    const finished = (request: object) => { settle.get(request)?.(); settle.delete(request); };
+    target.on("requestfinished", finished);
+    target.on("requestfailed", finished);
+    target.on("pageerror", (error) => runtimeErrors.push(error.message));
+    target.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push({ message: message.text(), url: message.location().url });
+    });
+    target.on("requestfailed", (request) => {
+      const failure = { path: new URL(request.url()).pathname, url: request.url(), method: request.method(),
+        resource: request.resourceType(), phase: observationPhase,
+        nextServerAction: Boolean(request.headers()["next-action"]), error: request.failure()?.errorText };
+      failedNetworkRequests.push(failure);
+      failedRequestsByIdentity.set(request, failure);
+    });
+  }
+  observe(page);
+  let passed = false;
   try {
     const owner = await fixtures.actor("lifecycle-owner", { username: "cc_lifecycle_artist", stableEmail: true });
     const reporter = await fixtures.actor("lifecycle-reporter"); // No club membership or unlock.
@@ -24,6 +51,7 @@ test("real private reports, admin decisions, notification intent and account med
     const book = await fixtures.product("A Garden Worth Sharing");
     await fixtures.unlock(owner.id, book.id);
     const ownerPage = await fixtures.newPage(browser);
+    observe(ownerPage);
     await fixtures.login(ownerPage, owner);
     const uploaded = await ownerPage.request.post(`${origin}/api/community/artworks`, {
       headers: { Origin: origin }, multipart: {
@@ -34,6 +62,7 @@ test("real private reports, admin decisions, notification intent and account med
     expect([200, 201]).toContain(uploaded.status());
     const artwork = (await uploaded.json()).artwork as { id: string; revision: number };
     const adminPage = await fixtures.newPage(browser);
+    observe(adminPage);
     await fixtures.login(adminPage, moderator, "/admin/community");
     const approved = await adminPage.request.post(`${origin}/api/admin/community/artworks/${artwork.id}/moderation`, {
       headers: { Origin: origin }, data: { action: "approve", revision: artwork.revision },
@@ -47,13 +76,49 @@ test("real private reports, admin decisions, notification intent and account med
     const curated = await fixtures.readerArtwork(book.id, "A Reader's Garden", 0, "cottage.webp");
     await adminPage.goto(`${origin}/admin/products/${book.id}`);
     await expect(adminPage.getByRole("button", { name: "Usuń produkt", exact: true })).toBeEnabled();
+    observationPhase = "product deletion refusal";
+    const productDestinations: string[] = [];
+    adminPage.on("framenavigated", (frame) => {
+      if (frame === adminPage.mainFrame()) productDestinations.push(frame.url());
+    });
     adminPage.once("dialog", (dialog) => dialog.accept());
+    const productDeletionRequest = adminPage.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === `/admin/products/${book.id}`);
     await adminPage.getByRole("button", { name: "Usuń produkt", exact: true }).click();
     await expect(adminPage).toHaveURL(/\/admin\/products(?:\?|$)/);
     await expect(adminPage.getByText("Ta książka ma prace lub zapis przesyłania z Klubu Kolorowania. Zarchiwizuj ją zamiast usuwać.", { exact: true })).toBeVisible();
+    const deletionRequest = await productDeletionRequest;
+    await terminals.get(deletionRequest);
     expect((await fixtures.service.from("products").select("id").eq("id", book.id).single()).error).toBeNull();
     expect((await fixtures.service.from("product_reader_artworks").select("id").eq("id", curated.id).single()).error).toBeNull();
     expect((await fixtures.service.storage.from("collection-media").download(curated.storagePath)).error).toBeNull();
+    const canceledDeletion = failedRequestsByIdentity.get(deletionRequest);
+    if (canceledDeletion) {
+      // A Next Server Action redirect can cancel its own source fetch. Bind this
+      // one exact request to its rendered refusal and actual preservation checks.
+      expect(canceledDeletion.error).toBe("net::ERR_ABORTED");
+      expect(canceledDeletion.resource).toBe("fetch");
+      expect(canceledDeletion.nextServerAction).toBe(true);
+      // The toast consumes error/toast parameters after rendering. Preserve
+      // the actual redirect frame URL as well as the final clean address.
+      const observedDestinationUrl = productDestinations.find((url) => new URL(url).searchParams.get("error") === "admin.conflict.community_artwork");
+      expect(observedDestinationUrl).toBeTruthy();
+      const destination = new URL(observedDestinationUrl!);
+      expect(destination.origin).toBe(origin);
+      expect(destination.pathname).toBe("/admin/products");
+      expect(destination.searchParams.get("error")).toBe("admin.conflict.community_artwork");
+      const expectedText = "Ta książka ma prace lub zapis przesyłania z Klubu Kolorowania. Zarchiwizuj ją zamiast usuwać.";
+      const observedText = await adminPage.getByText(expectedText, { exact: true }).innerText();
+      expect(observedText).toBe(expectedText);
+      const details = "The exact owned-book Next Server Action redirected to the community-reference refusal. Its source fetch was canceled after the refusal rendered; the product, curated row and curated bytes were all verified intact.";
+      expectedNavigationCancellations.push({ id: "product-deletion-refusal", kind: "product-deletion-refusal",
+        testedSha, runId, requestUrl: deletionRequest.url(), requestPath: `/admin/products/${book.id}`,
+        requestMethod: deletionRequest.method(), nextServerAction: canceledDeletion.nextServerAction,
+        observedFailure: canceledDeletion.error, destinationUrl: destination.href, observedDestinationUrl, finalUrl: adminPage.url(),
+        expectedText, observedText, assertionStatus: "PASS", productPreserved: true, curatedRowPreserved: true,
+        curatedBytesPreserved: true, details });
+      Object.assign(canceledDeletion, { disposition: "navigation-canceled", outcomeId: "product-deletion-refusal", reason: details });
+    }
+    observationPhase = "reports and notifications";
     // Local launcher has no Resend key: a committed decision succeeds and its
     // durable intent stays pending, rather than claiming an email was sent.
     const reportUrl = `${origin}/api/community/artworks/${artwork.id}/report`;
@@ -119,13 +184,24 @@ test("real private reports, admin decisions, notification intent and account med
     expect(anonymousReport.data).toEqual({ reporter_user_id: null, details: "" });
     expect((await fixtures.service.from("community_artwork_report_events").select("id").eq("actor_user_id", reporter.id)).data).toEqual([]);
 
+    observationPhase = "open owner account";
     await ownerPage.goto(`${origin}/en/account`);
     await expect(ownerPage.getByTestId("account-deletion-submit")).toBeDisabled();
     await ownerPage.getByTestId("account-deletion-confirmation").fill("DELETE");
     screenshots.push(...await communityScreenshots(ownerPage, "cc07", "delete-account", runId));
+    observationPhase = "delete owner account";
+    const refreshedAccount = ownerPage.waitForRequest((request) => request.method() === "GET" && new URL(request.url()).pathname === "/en/account");
     const erased = ownerPage.waitForResponse((response) => response.url() === `${origin}/api/account/delete` && response.request().method() === "POST");
     await ownerPage.getByTestId("account-deletion-submit").click();
-    expect((await erased).status()).toBe(200);
+    const deletionResponse = await erased;
+    expect(deletionResponse.status()).toBe(200);
+    expect(await deletionResponse.finished()).toBeNull();
+    await expect(ownerPage.getByText("Log in to view account details.", { exact: true })).toBeVisible();
+    await expect(ownerPage.getByTestId("account-deletion-submit")).toHaveCount(0);
+    await expect(ownerPage.getByRole("link", { name: "Log in to join Coloring Club", exact: true })).toBeVisible();
+    const refreshRequest = await refreshedAccount;
+    await terminals.get(refreshRequest);
+    observationPhase = "guest account rendered; verify erasure";
     await expect.poll(async () => (await fixtures.service.auth.admin.getUserById(owner.id)).error?.code).toBe("user_not_found");
     const tombstone = await fixtures.service.from("community_artworks").select("author_id,status,storage_path,description,deleted_at").eq("id", artwork.id).single();
     expect(tombstone.error).toBeNull();
@@ -149,15 +225,25 @@ test("real private reports, admin decisions, notification intent and account med
     expect((await fixtures.service.from("community_account_media_cleanup_jobs").select("id").eq("id", jobs.data![0].id)).data).toEqual([]);
     expect((await fixtures.service.storage.from("collection-media").download(objectPath)).error).not.toBeNull();
     expect(runtimeErrors).toEqual([]);
-    await writeFile(await communityArtifactPath("cc07"), JSON.stringify({
-      status: "PASS", testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-      runId, screenshots, runtimeErrors, mailProvider: "NOT RUN: local launcher intentionally has no Resend key",
-    }, null, 2));
+    expect(consoleErrors).toEqual([]);
+    expect(failedNetworkRequests.filter((failure) => failure.disposition !== "navigation-canceled")).toEqual([]);
+    passed = true;
   } finally {
     try {
       const scopes = ["artwork-report-account", "account-deletion"];
       const keys = fixtures.users.flatMap((id) => scopes.map((scope) => createHash("sha256").update(`${scope}:${id}`).digest("hex")));
       if (keys.length) expect((await fixtures.service.from("community_rate_limit_buckets").delete().in("bucket_key", keys)).error).toBeNull();
-    } finally { await fixtures.cleanup(); }
+    } finally {
+      let fixtureCleanup = false;
+      try { await fixtures.cleanup(); fixtureCleanup = true; }
+      finally {
+        await writeFile(await communityArtifactPath("cc07"), JSON.stringify({
+          status: passed && fixtureCleanup ? "PASS" : "FAIL",
+          testedSha,
+          runId, screenshots, runtimeErrors, consoleErrors, failedNetworkRequests, expectedNavigationCancellations, fixtureCleanup,
+          mailProvider: "NOT RUN: local launcher intentionally has no Resend key",
+        }, null, 2));
+      }
+    }
   }
 });

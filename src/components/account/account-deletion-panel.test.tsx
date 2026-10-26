@@ -4,9 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn() }));
-vi.mock("next/navigation", () => ({ useRouter: () => router }));
-
 import { AccountDeletionPanel } from "./account-deletion-panel";
 
 afterEach(() => {
@@ -18,6 +15,8 @@ afterEach(() => {
 describe("AccountDeletionPanel", () => {
   it("explains unlock and consumed-code consequences and requires exact confirmation", async () => {
     const user = userEvent.setup();
+    const replaceDocument = vi.fn();
+    vi.stubGlobal("location", { replace: replaceDocument });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void input;
       void init;
@@ -42,7 +41,21 @@ describe("AccountDeletionPanel", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ confirmation: "DELETE" }),
     });
-    expect(router.replace).toHaveBeenCalledWith("/en/account");
-    expect(router.refresh).toHaveBeenCalled();
+    expect(replaceDocument).toHaveBeenCalledExactlyOnceWith("/en/account");
+  });
+
+  it("keeps the current account document when deletion fails", async () => {
+    const user = userEvent.setup();
+    const replaceDocument = vi.fn();
+    vi.stubGlobal("location", { replace: replaceDocument });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ok: false, message: "We could not delete the account right now. Try again later.",
+    }), { status: 503 })));
+    render(<AccountDeletionPanel locale="en" />);
+    await user.type(screen.getByLabelText("Type DELETE to confirm"), "DELETE");
+    await user.click(screen.getByTestId("account-deletion-submit"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("We could not delete the account right now.");
+    expect(replaceDocument).not.toHaveBeenCalled();
+    expect(screen.getByTestId("account-deletion-submit")).toBeEnabled();
   });
 });

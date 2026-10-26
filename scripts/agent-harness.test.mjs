@@ -1711,6 +1711,220 @@ test("requires committed browser evidence for UI changes and keeps non-UI change
   assert.equal(nonUi.required, false);
 });
 
+test("accepts only one-to-one current-run expected API HTTP console outcomes", () => {
+  const screenshot = "docs/verification/pr-52/community-report.png";
+  const path = "/api/community/artworks/11111111-1111-4111-8111-111111111111/report";
+  const runId = "pr-52-community-report-run-1";
+  const status = 409;
+  const expectedError = "HTTP 409 Conflict";
+  const outcome = {
+    id: "report-conflict-1",
+    testedSha: CURRENT_SHA,
+    runId,
+    path,
+    url: "http://127.0.0.1:3100" + path,
+    method: "POST",
+    expectedStatus: status,
+    observedStatus: status,
+    expectedError,
+    observedError: expectedError,
+    assertionStatus: "PASS",
+    details: "The duplicate report was rejected and the visible conflict message was asserted.",
+  };
+  const consoleError = {
+    message: "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    url: "http://127.0.0.1:3100" + path,
+    path,
+    method: "POST",
+    statusCode: status,
+    disposition: "expected",
+    outcomeId: outcome.id,
+    reason: "The app reports the API conflict while the asserted UI shows the duplicate-report message.",
+  };
+  const browser = {
+    status: "PASS",
+    tool: "Playwright",
+    testedSha: CURRENT_SHA,
+    runId,
+    flows: ["duplicate community report shows a conflict"],
+    screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId }],
+    responsiveLayouts: ["desktop 1440px"],
+    persistence: { status: "NOT APPLICABLE", details: "The duplicate report does not mutate data." },
+    screenshotReview: { status: "PASS", details: "The conflict message is visible in the captured report form." },
+    retestedAfterFixes: true,
+    consoleErrors: [consoleError],
+    failedNetworkRequests: [],
+    expectedHttpOutcomes: [outcome],
+  };
+  const validate = (candidate) => validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: candidate }) },
+    files: ["src/app/community/report.tsx", screenshot],
+  });
+
+  assert.equal(validate(browser).status, "PASS");
+
+  const invalidCases = [
+    (candidate) => { delete candidate.expectedHttpOutcomes; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].testedSha = "b".repeat(40); },
+    (candidate) => { candidate.expectedHttpOutcomes[0].runId = "older-run"; },
+    (candidate) => { candidate.consoleErrors[0].outcomeId = "unknown-outcome"; },
+    (candidate) => { candidate.consoleErrors[0].statusCode = 403; },
+    (candidate) => { candidate.consoleErrors[0].path = "/api/community/other"; },
+    (candidate) => { candidate.consoleErrors[0].url = "http://127.0.0.1:3100/api/community/other"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].url = "https://attacker.example" + path; },
+    (candidate) => { candidate.consoleErrors[0].message = "Uncaught TypeError: failed"; },
+    (candidate) => { candidate.consoleErrors[0].message += "\nUncaught TypeError: leaked"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].observedStatus = 500; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].expectedStatus = 500; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].path = "/admin/community/reports"; candidate.consoleErrors[0].path = "/admin/community/reports"; candidate.consoleErrors[0].url = "http://127.0.0.1:3100/admin/community/reports"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].path += "?token=secret"; candidate.consoleErrors[0].path += "?token=secret"; candidate.consoleErrors[0].url += "?token=secret"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].observedError = "HTTP 403 Forbidden"; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].assertionStatus = "FAIL"; },
+    (candidate) => { candidate.pageErrors = ["Uncaught TypeError: failed"]; },
+    (candidate) => { candidate.expectedHttpOutcomes.push(structuredClone(candidate.expectedHttpOutcomes[0])); },
+    (candidate) => { candidate.consoleErrors.push(structuredClone(candidate.consoleErrors[0])); },
+    (candidate) => { candidate.consoleErrors = []; },
+    (candidate) => { candidate.expectedHttpOutcomes[0].id = "orphan"; },
+    (candidate) => { candidate.failedNetworkRequests.push({ ...structuredClone(candidate.consoleErrors[0]), method: "POST" }); },
+  ];
+  for (const mutate of invalidCases) {
+    const invalid = structuredClone(browser);
+    mutate(invalid);
+    assert.notEqual(validate(invalid).status, "PASS");
+  }
+
+  const legacyUnrelated = structuredClone(browser);
+  legacyUnrelated.consoleErrors = [{ message: "Known unrelated error", disposition: "unrelated", reason: "Documented legacy case." }];
+  delete legacyUnrelated.expectedHttpOutcomes;
+  assert.equal(validate(legacyUnrelated).status, "PASS");
+});
+
+test("accepts only the asserted same-origin community product-delete redirect cancellation", () => {
+  const screenshot = "docs/verification/pr-52/community-product-delete.png";
+  const runId = "pr-52-community-product-delete-run-1";
+  const requestPath = "/admin/products/11111111-1111-4111-8111-111111111111";
+  const requestUrl = "http://127.0.0.1:3100" + requestPath;
+  const destinationUrl = "http://127.0.0.1:3100/admin/products?error=admin.conflict.community_artwork&toast=22222222-2222-4222-8222-222222222222";
+  const refusalText = "Ta książka ma prace lub zapis przesyłania z Klubu Kolorowania. Zarchiwizuj ją zamiast usuwać.";
+  const outcome = {
+    id: "product-delete-refusal-1",
+    kind: "product-deletion-refusal",
+    testedSha: CURRENT_SHA,
+    runId,
+    requestUrl,
+    requestPath,
+    requestMethod: "POST",
+    nextServerAction: true,
+    observedFailure: "net::ERR_ABORTED",
+    destinationUrl,
+    observedDestinationUrl: destinationUrl,
+    expectedText: refusalText,
+    observedText: refusalText,
+    assertionStatus: "PASS",
+    productPreserved: true,
+    curatedRowPreserved: true,
+    curatedBytesPreserved: true,
+    details: "The refusal text is visible and the product, curated row, and image bytes remain intact.",
+  };
+  const failedRequest = {
+    url: requestUrl,
+    method: "POST",
+    resource: "fetch",
+    phase: "product deletion refusal",
+    error: "net::ERR_ABORTED",
+    disposition: "navigation-canceled",
+    outcomeId: outcome.id,
+    nextServerAction: true,
+    reason: "The browser canceled the redirected Server Action after the refusal UI and preservation checks passed.",
+  };
+  const browser = {
+    status: "PASS",
+    tool: "Playwright",
+    testedSha: CURRENT_SHA,
+    runId,
+    flows: ["refuse deletion of a product with curated community artwork"],
+    screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId }],
+    responsiveLayouts: ["desktop 1440px"],
+    persistence: { status: "PASS", details: "Product and curated artwork remain after the redirect." },
+    screenshotReview: { status: "PASS", details: "The refusal is visible in the final product list." },
+    retestedAfterFixes: true,
+    consoleErrors: [],
+    failedNetworkRequests: [failedRequest],
+    expectedNavigationCancellations: [outcome],
+  };
+  const validate = (candidate) => validateBrowserVerification({
+    uiRequired: true,
+    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: candidate }) },
+    files: ["src/app/admin/products/product-editor.tsx", screenshot],
+  });
+
+  assert.equal(validate(browser).status, "PASS");
+
+  const invalidCases = [
+    (candidate) => { delete candidate.expectedNavigationCancellations; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].testedSha = "b".repeat(40); },
+    (candidate) => { candidate.expectedNavigationCancellations[0].runId = "stale-run"; },
+    (candidate) => { candidate.failedNetworkRequests[0].outcomeId = "unknown"; },
+    (candidate) => { candidate.failedNetworkRequests[0].url = "http://attacker.example" + requestPath; candidate.expectedNavigationCancellations[0].requestUrl = candidate.failedNetworkRequests[0].url; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].requestUrl += "?token=secret"; candidate.failedNetworkRequests[0].url += "?token=secret"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].requestPath = "/api/admin/products/11111111-1111-4111-8111-111111111111"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].requestPath = "/admin/products/not-a-uuid"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].requestMethod = "GET"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].nextServerAction = false; },
+    (candidate) => { candidate.failedNetworkRequests[0].nextServerAction = false; },
+    (candidate) => { candidate.failedNetworkRequests[0].resource = "document"; },
+    (candidate) => { candidate.failedNetworkRequests[0].phase = "other navigation"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].observedFailure = "net::ERR_FAILED"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl = "https://attacker.example/admin/products?error=admin.conflict.community_artwork&toast=22222222-2222-4222-8222-222222222222"; candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl = "http://127.0.0.1:3100/admin?error=admin.conflict.community_artwork&toast=22222222-2222-4222-8222-222222222222"; candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl.replace("admin.conflict.community_artwork", "admin.conflict.other"); candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl = "http://127.0.0.1:3100/admin/products?toast=22222222-2222-4222-8222-222222222222"; candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].destinationUrl += "&extra=1"; candidate.expectedNavigationCancellations[0].observedDestinationUrl = candidate.expectedNavigationCancellations[0].destinationUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].observedDestinationUrl = requestUrl; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].expectedText = "Wrong refusal"; candidate.expectedNavigationCancellations[0].observedText = "Wrong refusal"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].observedText = "Missing refusal"; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].productPreserved = false; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].curatedRowPreserved = false; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].curatedBytesPreserved = false; },
+    (candidate) => { candidate.expectedNavigationCancellations[0].assertionStatus = "FAIL"; },
+    (candidate) => { candidate.expectedNavigationCancellations.push(structuredClone(candidate.expectedNavigationCancellations[0])); },
+    (candidate) => { candidate.failedNetworkRequests.push(structuredClone(candidate.failedNetworkRequests[0])); },
+    (candidate) => { candidate.failedNetworkRequests = []; },
+  ];
+  for (const mutate of invalidCases) {
+    const invalid = structuredClone(browser);
+    mutate(invalid);
+    assert.notEqual(validate(invalid).status, "PASS");
+  }
+
+  for (const abortRecord of [
+    { error: "net::ERR_ABORTED" },
+    { errorText: "net::ERR_ABORTED" },
+    { message: "Request canceled: net::ERR_ABORTED" },
+  ]) {
+    const unrelatedAbort = structuredClone(browser);
+    unrelatedAbort.failedNetworkRequests.push({
+      url: "http://127.0.0.1:3100/_next/static/chunk.js",
+      method: "GET",
+      ...abortRecord,
+      disposition: "unrelated",
+      reason: "This label cannot waive an unapproved browser cancellation.",
+    });
+    assert.notEqual(validate(unrelatedAbort).status, "PASS");
+  }
+
+  const unrelatedNetworkFailure = structuredClone(browser);
+  unrelatedNetworkFailure.failedNetworkRequests.push({
+    url: "http://127.0.0.1:3100/third-party/widget.js",
+    method: "GET",
+    error: "net::ERR_NAME_NOT_RESOLVED",
+    disposition: "unrelated",
+    reason: "The optional third-party widget host is not available in this isolated test environment.",
+  });
+  assert.equal(validate(unrelatedNetworkFailure).status, "PASS");
+});
+
 test("keeps migration and dependency release obligations blocking until each is explicit", () => {
   const files = [
     "supabase/migrations/20261008170639_catalog.sql",

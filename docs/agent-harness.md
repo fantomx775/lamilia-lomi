@@ -333,6 +333,78 @@ treats application source under `src/`, plus root `app/`, `components/`,
 `tailwind.config.*`, `postcss.config.*`, and `next.config.*` files as
 potentially UI-affecting. Test and spec files are excluded.
 
+An intentional API rejection may produce a generic browser console error such
+as “Failed to load resource: the server responded with a status of 409”. Do not
+label it unrelated. For that narrow case, record the console entry with
+`disposition: "expected"` and an `outcomeId`, and include one matching item in
+`expectedHttpOutcomes`. The outcome binds the exact current `testedSha` and
+`runId`, actual absolute HTTP(S) response `url`, API-relative `path`, HTTP
+`method`, expected and observed status, exact expected and observed error
+description, `assertionStatus: "PASS"`, and nonempty assertion `details`. The
+console item must repeat the outcome ID, exact response URL, method, path, and
+observed `statusCode`; the URL must resolve to the same path with no query or
+fragment. The harness accepts only generic
+HTTP resource errors for API paths with status 400, 403, or 409, and requires a
+one-to-one mapping: missing, stale, duplicate, reused, mismatched, failed, or
+orphan outcomes fail validation. Keep `failedNetworkRequests` strict: transport
+errors and aborted requests cannot use expected HTTP outcomes. JavaScript
+exceptions, other console errors, non-API paths, and other status codes remain
+unresolved. Existing records with no expected console errors may omit
+`expectedHttpOutcomes`; if present, it must be an array with no orphan records.
+
+Example (all three records must describe one observed and asserted browser
+response; the request is illustrative, not an exemption template):
+
+```json
+{
+  "consoleErrors": [{
+    "message": "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    "url": "https://example.test/api/community/artworks/11111111-1111-4111-8111-111111111111/report",
+    "path": "/api/community/artworks/11111111-1111-4111-8111-111111111111/report",
+    "method": "POST",
+    "statusCode": 409,
+    "disposition": "expected",
+    "outcomeId": "duplicate-report-1",
+    "reason": "The duplicate-report conflict is visible and asserted in the UI."
+  }],
+  "expectedHttpOutcomes": [{
+    "id": "duplicate-report-1",
+    "testedSha": "<same full SHA as browser.testedSha>",
+    "runId": "<same run ID as browser.runId>",
+    "url": "https://example.test/api/community/artworks/11111111-1111-4111-8111-111111111111/report",
+    "path": "/api/community/artworks/11111111-1111-4111-8111-111111111111/report",
+    "method": "POST",
+    "expectedStatus": 409,
+    "observedStatus": 409,
+    "expectedError": "HTTP 409 Conflict",
+    "observedError": "HTTP 409 Conflict",
+    "assertionStatus": "PASS",
+    "details": "The duplicate report was rejected and the conflict message was asserted."
+  }]
+}
+```
+
+The only supported expected network cancellation is an observed product-delete
+Server Action redirect refusal for curated community artwork. A
+`failedNetworkRequests` item may use `disposition: "navigation-canceled"`
+only when its `outcomeId` binds one item in
+`expectedNavigationCancellations`. The outcome must match the current browser
+SHA and run, the exact failed same-origin `POST /admin/products/<canonical
+UUID>` fetch in the `product deletion refusal` phase, an observed
+`net::ERR_ABORTED`, and a same-origin redirect to
+`/admin/products` carrying only `error=admin.conflict.community_artwork` and,
+optionally, a UUID `toast` token. The observed refusal text must exactly match
+the community delete guidance; the asserted product, curated row, and curated
+image bytes must all remain preserved. The outcome kind is
+`product-deletion-refusal`; it requires `nextServerAction: true`,
+`assertionStatus: "PASS"`, and nonempty details. Matching is one-to-one and
+bounded. Other aborted requests, GETs, API paths, destinations, methods, error
+codes, and failures remain fatal. An ordinary network record containing
+`net::ERR_ABORTED` in its `error`, `errorText`, or `message` field fails even if
+it is labeled `unrelated`; only the exact validated product-refusal redirect
+above may use that cancellation disposition. Existing browser records may omit
+this array when they contain no `navigation-canceled` entries.
+
 Example browser evidence fields:
 
 ```json

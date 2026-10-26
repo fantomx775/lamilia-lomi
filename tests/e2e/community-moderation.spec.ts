@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { communityHttpEvidence } from "./helpers/community-http-evidence";
 import { expect, test, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -124,14 +126,15 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
   const screenshots: Array<{ path: string; testedSha: string; runId: string }> = [];
   const runId = process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc04-local-supabase-1";
   const runtimeErrors: string[] = [];
-  const consoleErrors: string[] = [];
+  const httpEvidence = communityHttpEvidence(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId);
+  let httpDiagnostics: ReturnType<typeof httpEvidence.finish> | undefined;
   const transportFailures: Array<{ path: string; error: string | undefined; phase: string }> = [];
   let observationPhase = "fixture setup";
   const navigationAborts: Array<{ path: string; resource: string }> = [];
   const activeQueueReads = new Set<object>();
   function observe(target: Page) {
     target.on("pageerror", (error) => runtimeErrors.push(error.message));
-    target.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+    httpEvidence.observe(target);
     target.on("request", (request) => {
       const url = new URL(request.url());
       if (request.method() === "GET" && url.pathname === "/api/admin/community/artworks") activeQueueReads.add(request);
@@ -257,8 +260,12 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     expect((await page.request.patch(`${origin}/api/community/artworks/${rose.id}`, { headers: { Origin: origin },
       data: { revision: 4, description: "Revised rose garden afternoon" } })).status()).toBe(200);
     await adminPage.getByTestId("community-moderation-approve").click();
+    const conflictPath = `/api/admin/community/artworks/${rose.id}/moderation`;
+    const conflictResponse = adminPage.waitForResponse((response) => new URL(response.url()).pathname === conflictPath && response.request().method() === "POST");
     await adminPage.getByTestId("community-moderation-confirm").click();
     await expect(adminPage.getByRole("alert").filter({ hasText: "zmieniona" })).toBeVisible();
+    await httpEvidence.assertOutcome(await conflictResponse, { id: "stale-moderation-decision", path: conflictPath,
+      method: "POST", status: 409, error: "conflict", details: "An author edit invalidated the displayed revision; the actual stale moderation POST returned conflict and the Polish stale-review alert appeared. Refresh and approval recovery are asserted in the same test." });
     await waitForQueueFetch(() => adminPage.getByRole("button", { name: "Odśwież", exact: true }).click(), "stale decision refresh");
     await expect(detail.getByText("Revised rose garden afternoon", { exact: true })).toBeVisible();
     await apply("approve");
@@ -272,9 +279,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await waitForQueueReadsToSettle();
     expect(runtimeErrors).toEqual([]);
     expect(transportFailures).toEqual([]);
-    // The stale-decision HTTP409 is deliberately exercised; it is expected to
-    // appear as a resource diagnostic, while JS/runtime errors remain fatal.
-    expect(consoleErrors.filter((message) => !message.includes("409 (Conflict)"))).toEqual([]);
+    httpDiagnostics = httpEvidence.finish();
   } finally {
     try {
       await fixtures.cleanup();
@@ -283,7 +288,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
       await mkdir("docs/verification/issue-77/cc04", { recursive: true });
       await writeFile(await communityArtifactPath("cc04"), `${JSON.stringify({ runId, screenshots,
         viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/Storage", runtimeErrors,
-        transportFailures, navigationAborts, consoleErrors, fixtureCleanup: cleaned }, null, 2)}\n`);
+        transportFailures, navigationAborts, ...httpDiagnostics, fixtureCleanup: cleaned }, null, 2)}\n`);
     }
   }
 });

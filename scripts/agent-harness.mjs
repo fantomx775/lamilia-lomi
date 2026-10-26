@@ -1671,17 +1671,198 @@ function isVerificationScreenshot(filename) {
   return /^docs\/verification\/(?:issue-\d+|pr-\d+)\/.+\.(?:png|jpe?g|webp)$/i.test(filename);
 }
 
-function inspectBrowserProblems(items) {
+function safeExpectedHttpPath(value) {
+  if (typeof value !== "string" || !value.startsWith("/api/") || value.includes("\\") || /[?#\u0000-\u001f\u007f]/.test(value)) return false;
+  try {
+    const parsed = new URL(value, "https://agent-harness.invalid");
+    return parsed.origin === "https://agent-harness.invalid" && parsed.pathname === value && !parsed.search && !parsed.hash;
+  } catch {
+    return false;
+  }
+}
+
+function inspectExpectedHttpConsoleOutcomes(items, outcomes, { testedSha, runId }) {
+  const expectedErrors = items.filter((item) => item?.disposition === "expected");
+  if (!expectedErrors.length && outcomes === undefined) return { status: "PASS", details: "No expected HTTP console outcomes were recorded." };
+  if (!Array.isArray(outcomes)) return { status: "FAIL", details: "Expected HTTP console errors have no structured browser response outcomes." };
+  if (outcomes.length > 25 || expectedErrors.length > 25) return { status: "FAIL", details: "Expected HTTP console outcome evidence exceeds the bounded limit." };
+
+  const allowedMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+  const allowedStatuses = new Set([400, 403, 409]);
+  const byId = new Map();
+  const outcomeProblems = [];
+  for (const outcome of outcomes) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      outcomeProblems.push("malformed expected HTTP outcome");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    const expectedError = typeof outcome.expectedError === "string" ? outcome.expectedError.trim() : "";
+    const observedError = typeof outcome.observedError === "string" ? outcome.observedError.trim() : "";
+    const details = typeof outcome.details === "string" ? outcome.details.trim() : "";
+    let outcomeUrl;
+    try {
+      outcomeUrl = new URL(outcome.url);
+    } catch {
+      outcomeUrl = null;
+    }
+    const valid = id && id.length <= 128 && !byId.has(id) &&
+      outcome.testedSha === testedSha && outcome.runId === runId &&
+      typeof outcome.path === "string" && outcome.path.length <= 512 && safeExpectedHttpPath(outcome.path) && allowedMethods.has(outcome.method) &&
+      typeof outcome.url === "string" && outcome.url.length <= 2048 && outcomeUrl &&
+      (outcomeUrl.protocol === "http:" || outcomeUrl.protocol === "https:") && !outcomeUrl.username && !outcomeUrl.password &&
+      outcomeUrl.pathname === outcome.path && !outcomeUrl.search && !outcomeUrl.hash &&
+      allowedStatuses.has(outcome.expectedStatus) && outcome.observedStatus === outcome.expectedStatus &&
+      expectedError && expectedError.length <= 500 && observedError.length <= 500 && observedError === expectedError &&
+      outcome.assertionStatus === "PASS" && details && details.length <= 1000;
+    if (!valid) outcomeProblems.push(id && byId.has(id) ? "duplicate expected HTTP outcome id" : "invalid or stale expected HTTP outcome");
+    if (id) byId.set(id, outcome);
+  }
+
+  const used = new Set();
+  for (const item of expectedErrors) {
+    const id = typeof item?.outcomeId === "string" ? item.outcomeId.trim() : "";
+    const outcome = byId.get(id);
+    const message = typeof item?.message === "string" ? item.message : "";
+    const statusCode = item?.statusCode;
+    let consolePath = "";
+    let safeUrl = false;
+    try {
+      const parsed = new URL(item?.url);
+      consolePath = parsed.pathname;
+      safeUrl = (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+        !parsed.username && !parsed.password && !parsed.search && !parsed.hash;
+    } catch {
+      safeUrl = false;
+    }
+    const genericHttpError = /^Failed to load resource: the server responded with a status of (400 \(Bad Request\)|403 \(Forbidden\)|409 \(Conflict\))$/.exec(message);
+    if (!id || id.length > 128 || !outcome || used.has(id) || item.url !== outcome.url ||
+      typeof item.path !== "string" || item.path.length > 512 || !safeExpectedHttpPath(item.path) || !safeUrl || consolePath !== item.path ||
+      item.method !== outcome.method || item.path !== outcome.path || statusCode !== outcome.observedStatus ||
+      message.length > 1000 || !genericHttpError || Number(genericHttpError[1].slice(0, 3)) !== statusCode ||
+      typeof item.reason !== "string" || !item.reason.trim() || item.reason.length > 1000) {
+      outcomeProblems.push("expected console error did not match one current, asserted HTTP response outcome");
+      continue;
+    }
+    used.add(id);
+  }
+
+  if (used.size !== byId.size) outcomeProblems.push("expected HTTP outcomes must map one-to-one to expected console errors");
+  return outcomeProblems.length
+    ? { status: "FAIL", details: outcomeProblems.length + " invalid expected HTTP console outcome(s)." }
+    : { status: "PASS", details: expectedErrors.length + " expected HTTP console error(s) matched asserted current-run API responses." };
+}
+
+function inspectBrowserProblems(items, expectedHttpOutcomes, context) {
   if (!Array.isArray(items)) return { status: "BLOCKED", details: "Browser error/network inspection evidence is missing." };
   const unresolved = items.filter((item) =>
-    !item || item.disposition !== "unrelated" ||
+    !item || !["unrelated", "expected"].includes(item.disposition) ||
     typeof item.reason !== "string" || !item.reason.trim(),
   );
-  return unresolved.length
-    ? { status: "FAIL", details: unresolved.length + " unresolved browser error or failed network request(s)." }
-    : { status: "PASS", details: items.length
+  if (unresolved.length) return { status: "FAIL", details: unresolved.length + " unresolved browser error or failed network request(s)." };
+  const expected = items.filter((item) => item.disposition === "expected");
+  if (!expected.length) {
+    if (expectedHttpOutcomes === undefined) return { status: "PASS", details: items.length
       ? items.length + " known unrelated browser issue(s) were inspected and classified."
       : "No browser errors or failed network requests were found." };
+    if (!Array.isArray(expectedHttpOutcomes)) return { status: "FAIL", details: "Expected HTTP outcome records must be an array." };
+    if (expectedHttpOutcomes.length) return { status: "FAIL", details: "Expected HTTP outcome records must map one-to-one to expected console errors." };
+    return { status: "PASS", details: items.length
+      ? items.length + " known unrelated browser issue(s) were inspected and classified."
+      : "No browser errors or failed network requests were found." };
+  }
+  if (!expectedHttpOutcomes || !context) return { status: "FAIL", details: "Expected browser errors are only supported for correlated HTTP console outcomes." };
+  const unrelatedCount = items.length - expected.length;
+  const correlated = inspectExpectedHttpConsoleOutcomes(items, expectedHttpOutcomes, context);
+  return correlated.status === "PASS"
+    ? { status: "PASS", details: [unrelatedCount ? unrelatedCount + " known unrelated browser issue(s) were inspected and classified." : "", correlated.details].filter(Boolean).join(" ") }
+    : correlated;
+}
+
+function inspectExpectedNavigationCancellations(items, cancellations, { testedSha, runId }) {
+  const entries = items.filter((item) => item?.disposition === "navigation-canceled");
+  if (!entries.length && cancellations === undefined) return { status: "PASS", details: "No expected navigation cancellations were recorded." };
+  if (!Array.isArray(cancellations)) return { status: "FAIL", details: "Expected navigation cancellations have no structured redirect outcomes." };
+  if (entries.length > 5 || cancellations.length > 5) return { status: "FAIL", details: "Expected navigation cancellation evidence exceeds the bounded limit." };
+
+  const refusalText = "Ta książka ma prace lub zapis przesyłania z Klubu Kolorowania. Zarchiwizuj ją zamiast usuwać.";
+  const byId = new Map();
+  const problems = [];
+  for (const outcome of cancellations) {
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      problems.push("malformed navigation cancellation outcome");
+      continue;
+    }
+    const id = typeof outcome.id === "string" ? outcome.id.trim() : "";
+    let requestUrl;
+    let destinationUrl;
+    try {
+      requestUrl = new URL(outcome.requestUrl);
+      destinationUrl = new URL(outcome.destinationUrl);
+    } catch {
+      requestUrl = null;
+      destinationUrl = null;
+    }
+    const uuidPath = typeof outcome.requestPath === "string" &&
+      /^\/admin\/products\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(outcome.requestPath);
+    const validRequestUrl = requestUrl &&
+      (requestUrl.protocol === "http:" || requestUrl.protocol === "https:") &&
+      !requestUrl.username && !requestUrl.password && requestUrl.pathname === outcome.requestPath &&
+      !requestUrl.search && !requestUrl.hash;
+    const validDestination = destinationUrl &&
+      (destinationUrl.protocol === "http:" || destinationUrl.protocol === "https:") &&
+      !destinationUrl.username && !destinationUrl.password && destinationUrl.origin === requestUrl?.origin &&
+      destinationUrl.pathname === "/admin/products" && !destinationUrl.hash &&
+      [1, 2].includes(destinationUrl.searchParams.size) &&
+      destinationUrl.searchParams.getAll("error").length === 1 &&
+      destinationUrl.searchParams.get("error") === "admin.conflict.community_artwork" &&
+      (destinationUrl.searchParams.has("toast") ?
+        destinationUrl.searchParams.getAll("toast").length === 1 &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(destinationUrl.searchParams.get("toast") ?? "") : true) &&
+      [...destinationUrl.searchParams.keys()].every((key) => key === "error" || key === "toast");
+    const details = typeof outcome.details === "string" ? outcome.details.trim() : "";
+    const valid = id && id.length <= 128 && !byId.has(id) &&
+      outcome.testedSha === testedSha && outcome.runId === runId &&
+      typeof outcome.requestUrl === "string" && outcome.requestUrl.length <= 2048 &&
+      typeof outcome.destinationUrl === "string" && outcome.destinationUrl.length <= 2048 &&
+      uuidPath && validRequestUrl && validDestination &&
+      outcome.kind === "product-deletion-refusal" &&
+      outcome.requestMethod === "POST" && outcome.nextServerAction === true &&
+      outcome.observedFailure === "net::ERR_ABORTED" &&
+      outcome.observedDestinationUrl === outcome.destinationUrl &&
+      outcome.expectedText === refusalText && outcome.observedText === refusalText &&
+      outcome.assertionStatus === "PASS" && outcome.productPreserved === true &&
+      outcome.curatedRowPreserved === true && outcome.curatedBytesPreserved === true &&
+      details && details.length <= 1000;
+    if (!valid) problems.push(id && byId.has(id) ? "duplicate navigation cancellation outcome id" : "invalid or stale navigation cancellation outcome");
+    if (id) byId.set(id, outcome);
+  }
+
+  const used = new Set();
+  for (const entry of entries) {
+    const id = typeof entry?.outcomeId === "string" ? entry.outcomeId.trim() : "";
+    const outcome = byId.get(id);
+    if (!id || id.length > 128 || !outcome || used.has(id) ||
+      entry.url !== outcome.requestUrl || entry.method !== "POST" || outcome.requestMethod !== entry.method ||
+      entry.resource !== "fetch" || entry.phase !== "product deletion refusal" || entry.nextServerAction !== true ||
+      entry.error !== "net::ERR_ABORTED" || outcome.observedFailure !== entry.error ||
+      typeof entry.reason !== "string" || !entry.reason.trim() || entry.reason.length > 1000) {
+      problems.push("navigation cancellation did not match one current, asserted Server Action redirect outcome");
+      continue;
+    }
+    used.add(id);
+  }
+
+  if (used.size !== byId.size) problems.push("navigation cancellation outcomes must map one-to-one to failed requests");
+  return problems.length
+    ? { status: "FAIL", details: problems.length + " invalid expected navigation cancellation(s)." }
+    : { status: "PASS", details: entries.length + " expected Server Action redirect cancellation(s) matched preserved product and media state." };
+}
+
+function hasAbortedNetworkRequest(item) {
+  return item && ["error", "errorText", "message"].some((key) =>
+    typeof item[key] === "string" && item[key].toUpperCase().includes("NET::ERR_ABORTED"),
+  );
 }
 
 export function validateBrowserVerification({
@@ -1722,8 +1903,23 @@ export function validateBrowserVerification({
       screenshot.testedSha?.toLowerCase?.() === testedSha.toLowerCase() &&
       screenshot.runId === runId,
     );
-  const console = inspectBrowserProblems(record.consoleErrors);
-  const network = inspectBrowserProblems(record.failedNetworkRequests);
+  const console = inspectBrowserProblems(record.consoleErrors, record.expectedHttpOutcomes, {
+    testedSha,
+    runId,
+  });
+  const failedNetworkRequests = Array.isArray(record.failedNetworkRequests) ? record.failedNetworkRequests : null;
+  const expectedNavigationCancellations = inspectExpectedNavigationCancellations(
+    failedNetworkRequests ?? [],
+    record.expectedNavigationCancellations,
+    { testedSha, runId },
+  );
+  const ordinaryNetwork = failedNetworkRequests?.filter((item) => item?.disposition !== "navigation-canceled") ?? failedNetworkRequests;
+  const unexpectedAbortCount = Array.isArray(ordinaryNetwork) ? ordinaryNetwork.filter(hasAbortedNetworkRequest).length : 0;
+  const network = unexpectedAbortCount
+    ? { status: "FAIL", details: unexpectedAbortCount + " unapproved browser network cancellation(s) were found." }
+    : inspectBrowserProblems(ordinaryNetwork, undefined, undefined);
+  const pageErrorsValid = record.pageErrors === undefined ||
+    (Array.isArray(record.pageErrors) && record.pageErrors.length === 0);
   const responsiveValid =
     (Array.isArray(record.responsiveLayouts) && record.responsiveLayouts.some((layout) => typeof layout === "string" && layout.trim())) ||
     (typeof record.responsiveNotApplicable === "string" && record.responsiveNotApplicable.trim());
@@ -1741,7 +1937,8 @@ export function validateBrowserVerification({
     screenshotReviewValid &&
     record.retestedAfterFixes === true &&
     console.status === "PASS" &&
-    network.status === "PASS";
+    network.status === "PASS" && expectedNavigationCancellations.status === "PASS" &&
+    pageErrorsValid;
   const failures = [];
   if (!screenshotsValid) failures.push("screenshots must be listed in the PR files and bound to the current-SHA browser run ID");
   if (!responsiveValid) failures.push("responsive layouts or a not-applicable reason must be recorded");
@@ -1750,6 +1947,8 @@ export function validateBrowserVerification({
   if (record.retestedAfterFixes !== true) failures.push("final browser verification after fixes is not confirmed");
   if (console.status !== "PASS") failures.push(console.details);
   if (network.status !== "PASS") failures.push(network.details);
+  if (expectedNavigationCancellations.status !== "PASS") failures.push(expectedNavigationCancellations.details);
+  if (!pageErrorsValid) failures.push("browser page errors are present or malformed");
   if (record.status !== "PASS" || !record.tool || !record.flows?.length) {
     failures.push("browser tool, affected flow, or PASS result is missing");
   }

@@ -1,12 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 
 export function AccountDeletionPanel({ locale }: { locale: string }) {
-  const router = useRouter();
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -28,8 +26,9 @@ export function AccountDeletionPanel({ locale }: { locale: string }) {
         return;
       }
       setMessage(result.message ?? "Your account was deleted.");
-      router.replace(`/${locale}/account`);
-      router.refresh();
+      // Drop the document and its client/router identity cache after deleting
+      // the account; the next document reads the cleared session cookie.
+      globalThis.location.replace(`/${locale}/account`);
     } catch {
       setError("We could not reach the account service. Try again.");
     } finally {

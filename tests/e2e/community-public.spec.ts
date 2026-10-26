@@ -145,13 +145,28 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
   const screenshots: { path: string; testedSha: string; runId: string }[] = [];
   const runtimeErrors: string[] = [];
   const consoleErrors: string[] = [];
-  const transportFailures: string[] = [];
+  const transportFailures: { url: string; pageUrl: string; resource: string; error: string | undefined; rsc: string | undefined; prefetch: string | undefined }[] = [];
   let touchEvidence: { type: string; at: number; target?: string; open: boolean }[] = [];
-  page.on("pageerror", (error) => runtimeErrors.push(error.message));
-  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-  page.on("requestfailed", (request) => {
-    if (request.failure()?.errorText !== "net::ERR_ABORTED") transportFailures.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText}`);
-  });
+  const activeReads = new Map<Page, Set<object>>();
+  async function settled(target: Page) {
+    await expect.poll(() => activeReads.get(target)?.size ?? 0).toBe(0);
+  }
+  function observe(target: Page) {
+    const reads = new Set<object>();
+    activeReads.set(target, reads);
+    target.on("request", (request) => {
+      if (request.method() === "GET" && request.resourceType() === "fetch") reads.add(request);
+    });
+    target.on("requestfinished", (request) => reads.delete(request));
+    target.on("requestfailed", (request) => reads.delete(request));
+    target.on("pageerror", (error) => runtimeErrors.push(error.message));
+    target.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+    target.on("requestfailed", (request) => {
+      transportFailures.push({ url: request.url(), pageUrl: target.url(), resource: request.resourceType(), error: request.failure()?.errorText,
+        rsc: request.headers()["rsc"], prefetch: request.headers()["next-router-prefetch"] });
+    });
+  }
+  observe(page);
   try {
     const owner = await fixtures.actor("gallery-artist", { username: "cc_gallery_artist" });
     const second = await fixtures.actor("gallery-pages", { username: "cc_gallery_pages" });
@@ -182,6 +197,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
       title: `Original uncolored page ${index + 1}`,
     })))).error).toBeNull();
 
+    await settled(page);
     await page.goto(`${origin}/en/club?productId=${book.id}`);
     await essentials(page);
     await expect(page.getByTestId("community-gallery-product-filter")).toHaveValue(book.id);
@@ -189,27 +205,38 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await loadedImages(page, '[data-testid="community-artwork-grid"] img');
     screenshots.push(...await communityScreenshots(page, "cc05", "gallery-filtered", runId));
 
+    await settled(page);
     await page.getByTestId("community-gallery-product-filter").selectOption(paged.id);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(24);
+    await loadedImages(page, '[data-testid="community-artwork-grid"] img');
+    await settled(page);
     await page.getByTestId("community-gallery-load-more").click();
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(25);
+    await loadedImages(page, '[data-testid="community-artwork-grid"] img');
     await expect(page.getByTestId("community-gallery-load-more")).toHaveCount(0);
     const uniqueLinks = await page.locator('[data-testid="community-artwork-card"] a[href^="/en/club/artworks/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href")));
     expect(new Set(uniqueLinks).size).toBe(25);
+    await settled(page);
     await page.getByTestId("community-gallery-audience-filter").selectOption("adults");
     await expect(page.getByTestId("community-gallery-empty-state")).toBeVisible();
+    await settled(page);
     await page.getByTestId("community-gallery-audience-filter").selectOption("");
+    await settled(page);
     await page.getByTestId("community-gallery-product-filter").selectOption(empty.id);
     await expect(page.getByTestId("community-gallery-empty-state")).toBeVisible();
     screenshots.push(...await communityScreenshots(page, "cc05", "gallery-empty", runId));
+    await settled(page);
     await page.getByTestId("community-gallery-product-filter").selectOption(book.id);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(3);
+    await loadedImages(page, '[data-testid="community-artwork-grid"] img');
+    await settled(page);
     await page.locator(`[data-testid="community-artwork-card"] a[href="/en/club/artworks/${gallery[0].id}"]`).click();
     await expect(page.getByTestId("community-artwork-detail")).toBeVisible();
     await loadedImages(page, '[data-testid="community-artwork-media"]');
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", `${origin}/en/club/artworks/${gallery[0].id}`);
     await expect(page.getByTestId("community-artwork-book")).toContainText(book.title);
     screenshots.push(...await communityScreenshots(page, "cc05", "artwork-detail", runId));
+    await settled(page);
     await page.getByTestId("community-artwork-creator").click();
     await expect(page.getByRole("heading", { name: "@cc_gallery_artist", exact: true })).toBeVisible();
     await expect(page.getByTestId("community-creator-page").locator("ul > li")).toHaveCount(3);
@@ -217,12 +244,14 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     expect(await page.getByTestId("community-creator-page").innerText()).not.toContain(owner.email);
     screenshots.push(...await communityScreenshots(page, "cc05", "creator-photos", runId));
 
+    await settled(page);
     await page.goto(`${origin}/en/products/${empty.slug}`);
     await expect(page.getByRole("heading", { name: "Colored by Our Readers", exact: true })).toHaveCount(1);
     await expect(page.getByTestId("colored-by-our-readers-empty")).toBeVisible();
     await expect(page.getByTestId("reader-artwork-grid")).toHaveCount(0);
     screenshots.push(...await communityScreenshots(page, "cc05", "product-empty-gallery", runId));
 
+    await settled(page);
     await page.goto(`${origin}/en/products/${book.slug}`);
     await expect(page.getByRole("heading", { name: "Colored by Our Readers", exact: true })).toHaveCount(1);
     const readerGrid = page.getByTestId("reader-artwork-grid");
@@ -250,6 +279,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await expect(dialog).not.toBeVisible();
     await expect(originalButton).toBeFocused();
     screenshots.push(...await communityScreenshots(page, "cc05", "product-mixed-gallery", runId));
+    await settled(page);
     await page.getByTestId("community-share-guest").click();
     await expect(page).toHaveURL(/\/en\/login\?returnTo=/);
     const returnTo = new URL(page.url()).searchParams.get("returnTo");
@@ -257,34 +287,39 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
 
     // Public browsing never depends on the visitor's unlocks. Submission does.
     const lockedPage = await fixtures.newPage(browser);
+    observe(lockedPage);
     await fixtures.login(lockedPage, locked, `/en/products/${book.slug}`, `/en/products/${book.slug}#premium`);
     await expect(lockedPage.getByTestId("community-share-locked")).toBeVisible();
     await expect(lockedPage.getByTestId("reader-artwork-grid")).toBeVisible();
     const ownerPage = await fixtures.newPage(browser);
+    observe(ownerPage);
     await fixtures.login(ownerPage, owner, `/en/products/${book.slug}`, `/en/products/${book.slug}#premium`);
     await expect(ownerPage.getByRole("link", { name: "Share your art", exact: true })).toBeVisible();
+    await settled(ownerPage);
     await ownerPage.getByRole("link", { name: "Share your art", exact: true }).click();
     await expect(ownerPage).toHaveURL(/\/en\/library\/creations/);
     const phone = await fixtures.newPage(browser, { ...devices["Pixel 7"] });
-    phone.on("pageerror", (error) => runtimeErrors.push(error.message));
-    phone.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    phone.on("requestfailed", (request) => {
-      if (request.failure()?.errorText !== "net::ERR_ABORTED") transportFailures.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText}`);
-    });
+    observe(phone);
+    await settled(phone);
     await phone.goto(`${origin}/en/club?productId=${book.id}`);
     await essentials(phone);
     await expect(phone.getByTestId("community-artwork-card")).toHaveCount(3);
+    await settled(phone);
     await phone.locator('[data-testid="community-artwork-card"] a[href^="/en/club/artworks/"]').first().tap();
     await expect(phone.getByTestId("community-artwork-detail")).toBeVisible();
+    await settled(phone);
     await phone.getByTestId("community-artwork-creator").tap();
     await expect(phone.getByTestId("community-creator-page")).toBeVisible();
+    await settled(phone);
     await phone.goto(`${origin}/en/products/${book.slug}`);
+    await settled(phone);
     await phone.getByTestId("reader-artwork-grid").locator("button").first().tap();
     const phonePreview = phone.getByRole("dialog", { name: "Reader artwork preview", exact: true });
     await expect(phonePreview).toBeVisible();
     await expect(phonePreview).toContainText("Reader Garden");
     await phonePreview.getByRole("button", { name: "Close preview", exact: true }).tap();
     await expect(phonePreview).not.toBeVisible();
+    await settled(phone);
     await phone.getByTestId("reader-artwork-grid").locator("button").first().tap();
     await expect(phonePreview).toBeVisible();
     const touch = await phone.context().newCDPSession(phone);
@@ -314,6 +349,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     expect(touchEvidence.filter((event) => event.type === "touchend")).toHaveLength(2);
     expect(touchEvidence.some((event) => event.type === "click")).toBe(true);
     await touch.detach();
+    await writeFile(await communityArtifactPath("cc05", "diagnostics.json"), JSON.stringify({ runtimeErrors, consoleErrors, transportFailures }, null, 2));
     expect(runtimeErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
     expect(transportFailures).toEqual([]);

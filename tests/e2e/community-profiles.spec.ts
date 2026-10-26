@@ -110,11 +110,13 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     }
   }
   async function postJoin(target: Page, username: string, extra: Record<string, unknown> = {}) {
-    return target.evaluate(async ({ username, extra, version }) => {
-      const response = await fetch("/api/community/join", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, adultAttested: true, rulesAccepted: true, rulesVersion: version, ...extra }) });
-      return { status: response.status, body: await response.json() };
-    }, { username, extra, version: COMMUNITY_RULES_VERSION });
+    // These are backend validation/concurrency probes. APIRequestContext shares
+    // the real browser cookies without creating resource errors in its console.
+    const response = await target.request.post(`${appOrigin}/api/community/join`, {
+      headers: { Origin: appOrigin },
+      data: { username, adultAttested: true, rulesAccepted: true, rulesVersion: COMMUNITY_RULES_VERSION, ...extra },
+    });
+    return { status: response.status(), body: await response.json() };
   }
   let fixtureCleanup = false;
   try {
@@ -276,6 +278,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await expect(panel.getByLabel("Public username", { exact: true })).toHaveValue(longUsername);
     expect(runtimeErrors).toEqual([]);
     expect(networkFailures).toEqual([]);
+    expect(consoleDiagnostics).toEqual([]);
   } finally {
     // Remove exactly these controlled local accounts/artwork audit rows; nothing
     // is deleted from a cloud project or another local project's infrastructure.

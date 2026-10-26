@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { communityHttpEvidence } from "./helpers/community-http-evidence";
 import { devices, expect, test, type Page } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -166,12 +168,16 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
   const screenshots: { path: string; testedSha: string; runId: string }[] = [];
   const runtimeErrors: string[] = [];
   const transportFailures: string[] = [];
-  const consoleErrors: string[] = [];
-  page.on("pageerror", (error) => runtimeErrors.push(error.message));
-  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-  page.on("requestfailed", (request) => {
-    if (request.failure()?.errorText !== "net::ERR_ABORTED") transportFailures.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText}`);
-  });
+  const httpEvidence = communityHttpEvidence(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId);
+  let httpDiagnostics: ReturnType<typeof httpEvidence.finish> | undefined;
+  function observe(target: Page) {
+    target.on("pageerror", (error) => runtimeErrors.push(error.message));
+    httpEvidence.observe(target);
+    target.on("requestfailed", (request) => {
+      transportFailures.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText}`);
+    });
+  }
+  observe(page);
   let release = () => {};
   try {
     const owner = await fixtures.actor("hearts-ui-owner", { username: "cc_heart_ui_artist" });
@@ -181,6 +187,7 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     const book = await fixtures.product("Hearts in the Garden");
     await fixtures.unlock(owner.id, book.id);
     const ownerPage = await fixtures.newPage(browser);
+    observe(ownerPage);
     await fixtures.login(ownerPage, owner);
     const artworks = [];
     for (let index = 0; index < 3; index++) {
@@ -225,11 +232,15 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     // The actual server rejects the held request after current Auth verification
     // changes. No fabricated browser failure response is used for rollback.
     fixtures.setEmailVerified(member.id, false);
+    const denialPath = new URL(endpoint(first.id)).pathname;
+    const denialResponse = page.waitForResponse((response) => new URL(response.url()).pathname === denialPath && response.request().method() === "PUT");
     release();
     await expect(button).toBeEnabled();
     await expect(button).toHaveAttribute("aria-pressed", "false");
     await expect(count).toHaveText("0");
     await expect(control.getByRole("status")).toContainText("Your reaction was not saved");
+    await httpEvidence.assertOutcome(await denialResponse, { id: "current-verification-heart-denial", path: denialPath,
+      method: "PUT", status: 403, error: "forbidden", details: "Current Auth verification was revoked during the held real PUT. The server returned forbidden; the optimistic heart reverted to unpressed/count zero and displayed the unsaved-reaction status. A successful retry is asserted after restoring verification." });
     screenshots.push(...await communityScreenshots(page, "cc06", "heart-denial-rollback", runId));
     fixtures.setEmailVerified(member.id, true);
     await control.getByRole("button", { name: "Retry saving your reaction", exact: true }).click();
@@ -240,6 +251,7 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     screenshots.push(...await communityScreenshots(page, "cc06", "artwork-hearted", runId));
 
     const secondTab = await fixtures.newPage(browser);
+    observe(secondTab);
     await fixtures.login(secondTab, member, detailPath);
     const secondControl = secondTab.locator(selector);
     await expect(secondControl.getByTestId("community-heart-toggle")).toHaveAttribute("aria-pressed", "true");
@@ -294,6 +306,7 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     screenshots.push(...await communityScreenshots(page, "cc06", "product-community-hearts", runId));
 
     const phone = await fixtures.newPage(browser, { ...devices["Pixel 7"] });
+    observe(phone);
     await fixtures.login(phone, member, detailPath);
     await phone.locator(selector).getByTestId("community-heart-toggle").tap();
     await expect(phone.locator(selector).getByTestId("community-heart-toggle")).toBeEnabled();
@@ -303,7 +316,7 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     await expect(phone.locator(selector).getByTestId("community-heart-count")).toHaveText("1");
     expect(runtimeErrors).toEqual([]);
     expect(transportFailures).toEqual([]);
-    expect(consoleErrors.filter((message) => !/403 \(Forbidden\)/.test(message))).toEqual([]);
+    httpDiagnostics = httpEvidence.finish();
   } finally {
     release();
     try {
@@ -315,7 +328,7 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
   await mkdir(path.resolve("docs/verification/issue-77/cc06"), { recursive: true });
   await writeFile(await communityArtifactPath("cc06"), JSON.stringify({
     runId, screenshots, viewports: [390, 768, 1440], backend: "isolated real Supabase/Auth/Storage",
-    runtimeErrors, transportFailures, consoleErrors, expectedHttpErrors: ["403 current Auth verification intentionally revoked during held optimistic request"],
+    runtimeErrors, transportFailures, ...httpDiagnostics,
     fixtureCleanup: true, mobileTouch: "emulated Pixel7 real tap unlike and reload",
   }, null, 2) + "\n");
 });
