@@ -80,6 +80,9 @@ begin
     update public.community_moderation_events event
     set reason = null
     where event.artwork_id = any(v_artwork_ids) and event.reason is not null;
+    insert into public.community_moderation_events (artwork_id, actor_user_id, revision, from_status, to_status, reason)
+    select artwork.id, null, artwork.revision + 1, artwork.status, 'removed', null
+    from public.community_artworks artwork where artwork.id = any(v_artwork_ids);
     update public.community_artworks artwork
     set author_id = null, idempotency_key = null, description = '', moderation_reason = null,
       status = 'removed', published_at = null, deleted_at = coalesce(deleted_at, now()),

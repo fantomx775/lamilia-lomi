@@ -961,6 +961,10 @@ export class CommunityLocalStore {
         }
       }
       for (const artwork of artworks) {
+        snapshot.moderationEvents.push({
+          id: this.uuid(), artworkId: artwork.id, actorUserId: null, revision: artwork.revision + 1,
+          fromStatus: artwork.status, toStatus: "removed", reason: null, createdAt: nowIso,
+        });
         artwork.authorId = null;
         artwork.storagePath = null;
         artwork.idempotencyKey = "";

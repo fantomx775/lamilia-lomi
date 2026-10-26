@@ -230,6 +230,12 @@ describe("Coloring Club local adapter", () => {
     expect(await store.deleteAccount(USER_A)).toBe(1);
     expect(await store.getArtworkMedia(artworkId, [product], unlockedMember)).toBeNull();
     expect(await store.getProfile(unlockedMember)).toBeNull();
+    const deletedAccountSnapshot = JSON.parse(fs.readFileSync(path.join(tempDirs.at(-1)!, "community.json"), "utf8")) as {
+      moderationEvents: Array<{ artworkId: string; actorUserId: string | null; toStatus: string; reason: string | null }>;
+    };
+    expect(deletedAccountSnapshot.moderationEvents.at(-1)).toMatchObject({
+      artworkId, actorUserId: null, toStatus: "removed", reason: null,
+    });
     expect(await store.claimAccountMediaCleanup()).toEqual([]);
 
     current = new Date(current.getTime() + 13 * 60 * 1_000);
