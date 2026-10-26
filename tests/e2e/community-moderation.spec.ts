@@ -149,6 +149,8 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     const rose = await upload(page, book.id, "Rose garden afternoon", "rose-fox.webp");
     const coast = await upload(page, book.id, "Quiet coastal colours", "coastal-light.webp");
     const cottage = await upload(page, book.id, "A peaceful cottage", "cottage.webp");
+    const artworkIds = [rose.id, coast.id, cottage.id];
+    await fixtures.normalizeDisplayTimestamps({ artworkIds });
     const adminPage = await fixtures.newPage(browser);
     adminPage.setDefaultTimeout(12_000);
     observe(adminPage);
@@ -177,6 +179,8 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await select(rose.description);
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-pending", runId));
     await apply("approve");
+    await fixtures.normalizeDisplayTimestamps({ artworkIds });
+    await adminPage.reload();
     await expect(adminPage.getByTestId("community-count-approved")).toContainText("1");
     const visitor = await fixtures.newPage(browser);
     expect((await visitor.request.get(`${origin}/api/community/artworks/${rose.id}/media`)).status()).toBe(200);
@@ -187,12 +191,16 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await adminPage.getByTestId("community-moderation-reason").fill("Please share your own finished colouring.");
     screenshots.push(...await communityScreenshots(adminPage, "cc04", "moderation-rejection", runId));
     await adminPage.getByTestId("community-moderation-confirm").click();
+    await fixtures.normalizeDisplayTimestamps({ artworkIds });
+    await adminPage.reload();
     await expect(adminPage.getByTestId("community-count-rejected")).toContainText("1");
     expect((await visitor.request.get(`${origin}/api/community/artworks/${coast.id}/media`)).status()).toBe(404);
     expect((await visitor.request.get(`${origin}/api/community/artworks/${cottage.id}/media`)).status()).toBe(404);
     await adminPage.getByTestId("community-moderation-status-filter").selectOption("approved");
     await select(rose.description);
     await apply("remove", "Please remove identifying information.");
+    await fixtures.normalizeDisplayTimestamps({ artworkIds });
+    await adminPage.reload();
     expect((await visitor.request.get(`${origin}/api/community/artworks/${rose.id}/media`)).status()).toBe(404);
     await adminPage.getByTestId("community-moderation-status-filter").selectOption("removed");
     await select(rose.description);

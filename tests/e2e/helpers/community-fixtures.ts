@@ -30,6 +30,9 @@ export async function communityFixtures(testInfo: TestInfo) {
   const anon = createClient(status.API_URL, status.ANON_KEY, options);
   const users: string[] = [];
   const products: string[] = [];
+  const normalizedDisplayRows = new Set<string>();
+  const canonicalDisplayEpoch = Date.parse("2026-10-24T12:00:00.000Z");
+  const canonicalDisplayTimestamp = (index: number) => new Date(canonicalDisplayEpoch + index * 10_000).toISOString();
   const curatedObjects = new Map<string, string>();
   const contexts: BrowserContext[] = [];
   const password = `Cc-${randomUUID()}-9!`;
@@ -79,6 +82,89 @@ export async function communityFixtures(testInfo: TestInfo) {
     expect(users).toContain(userId);
     expect(products).toContain(productId);
     expect((await service.from("user_product_unlocks").insert({ user_id: userId, product_id: productId })).error).toBeNull();
+  }
+
+  /** Stabilize controlled UI evidence only after checking the server-generated time was plausible. */
+  async function normalizeDisplayTimestamps(input: { artworkIds?: string[]; reportIds?: string[] }) {
+    const normalized = new Set<string>();
+    const assertTimestamp = (key: string, value: string | null, alreadyNormalized: boolean) => {
+      if (!value) return;
+      const timestamp = Date.parse(value);
+      const canonical = Date.parse(key);
+      if (alreadyNormalized && Math.abs(timestamp - canonical) < 60_000) return;
+      if (!Number.isFinite(timestamp) || Math.abs(Date.now() - timestamp) > 10 * 60_000) {
+        throw new Error("A controlled community fixture has an implausible server-generated timestamp.");
+      }
+    };
+    for (const id of input.artworkIds ?? []) {
+      if (!/^[a-f0-9-]{36}$/i.test(id)) throw new Error("Unsafe community artwork fixture ID.");
+      const result = await service.from("community_artworks")
+        .select("id,author_id,created_at,updated_at,published_at").eq("id", id).maybeSingle();
+      if (result.error || !result.data || !users.includes(result.data.author_id)) {
+        throw new Error("Refusing to normalize a community artwork outside this fixture run.");
+      }
+      const canonical = canonicalDisplayTimestamp(normalized.size);
+      const artworkKey = `artwork:${id}`;
+      for (const field of ["created_at", "updated_at", "published_at"] as const) {
+        const value = result.data[field];
+        if (value) assertTimestamp(canonical, value, normalizedDisplayRows.has(artworkKey));
+      }
+      const update: { created_at: string; updated_at: string; published_at?: string } = {
+        created_at: canonical,
+        updated_at: canonical,
+      };
+      if (result.data.published_at) update.published_at = canonical;
+      expect((await service.from("community_artworks").update(update).eq("id", id).eq("author_id", result.data.author_id)).error).toBeNull();
+      normalized.add(id);
+      normalizedDisplayRows.add(artworkKey);
+
+      const events = await service.from("community_moderation_events").select("id,created_at").eq("artwork_id", id).order("created_at", { ascending: true });
+      if (events.error) throw new Error("Cannot read controlled moderation fixture history.");
+      for (let index = 0; index < (events.data ?? []).length; index++) {
+        const event = events.data![index];
+        const eventTime = canonicalDisplayTimestamp(normalized.size + index + 1);
+        const eventKey = `moderation-event:${event.id}`;
+        assertTimestamp(canonical, event.created_at, normalizedDisplayRows.has(eventKey));
+        setLocalFixtureTimestamp("community_moderation_events", event.id, eventTime);
+        normalizedDisplayRows.add(eventKey);
+      }
+    }
+    for (const id of input.reportIds ?? []) {
+      if (!/^[a-f0-9-]{36}$/i.test(id)) throw new Error("Unsafe community report fixture ID.");
+      const result = await service.from("community_artwork_reports")
+        .select("id,reporter_user_id,created_at,updated_at,resolved_at").eq("id", id).maybeSingle();
+      if (result.error || !result.data || !users.includes(result.data.reporter_user_id)) {
+        throw new Error("Refusing to normalize a community report outside this fixture run.");
+      }
+      const canonical = canonicalDisplayTimestamp(normalized.size);
+      const reportKey = `report:${id}`;
+      assertTimestamp(canonical, result.data.created_at, normalizedDisplayRows.has(reportKey));
+      assertTimestamp(canonical, result.data.updated_at, normalizedDisplayRows.has(reportKey));
+      if (result.data.resolved_at) assertTimestamp(canonical, result.data.resolved_at, normalizedDisplayRows.has(reportKey));
+      const update: { created_at: string; updated_at: string; resolved_at?: string } = { created_at: canonical, updated_at: canonical };
+      if (result.data.resolved_at) update.resolved_at = canonical;
+      expect((await service.from("community_artwork_reports").update(update).eq("id", id).eq("reporter_user_id", result.data.reporter_user_id)).error).toBeNull();
+      normalizedDisplayRows.add(reportKey);
+      const events = await service.from("community_artwork_report_events").select("id,created_at").eq("report_id", id).order("created_at", { ascending: true });
+      if (events.error) throw new Error("Cannot read controlled report fixture history.");
+      for (let index = 0; index < (events.data ?? []).length; index++) {
+        const event = events.data![index];
+        const eventTime = canonicalDisplayTimestamp(normalized.size + index + 1);
+        const eventKey = `report-event:${event.id}`;
+        assertTimestamp(canonical, event.created_at, normalizedDisplayRows.has(eventKey));
+        setLocalFixtureTimestamp("community_artwork_report_events", event.id, eventTime);
+        normalizedDisplayRows.add(eventKey);
+      }
+    }
+  }
+
+  function setLocalFixtureTimestamp(table: "community_moderation_events" | "community_artwork_report_events", id: string, timestamp: string) {
+    if (!/^\d{1,18}$/.test(id)) throw new Error("Unsafe community event fixture ID.");
+    const safeTimestamp = new Date(timestamp).toISOString();
+    execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
+      input: `UPDATE public.${table} SET created_at='${safeTimestamp}'::timestamptz WHERE id=${id}::bigint;`,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
   }
 
   async function readerArtwork(productId: string, displayName: string, sortOrder: number, filename: string) {
@@ -172,7 +258,7 @@ export async function communityFixtures(testInfo: TestInfo) {
     }
   }
 
-  return { service, anon, actor, product, unlock, readerArtwork, setEmailVerified, newPage, login, cleanup, users, products };
+  return { service, anon, actor, product, unlock, readerArtwork, normalizeDisplayTimestamps, setEmailVerified, newPage, login, cleanup, users, products };
 }
 
 export async function essentials(page: Page) {

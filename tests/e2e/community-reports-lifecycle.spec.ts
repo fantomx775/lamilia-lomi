@@ -39,6 +39,7 @@ test("real private reports, admin decisions, notification intent and account med
       headers: { Origin: origin }, data: { action: "approve", revision: artwork.revision },
     });
     expect(approved.status()).toBe(200);
+    await fixtures.normalizeDisplayTimestamps({ artworkIds: [artwork.id] });
     const outbox = await fixtures.service.from("community_moderation_email_outbox").select("moderation_event_id,state,notification_type").eq("author_user_id", owner.id);
     expect(outbox.error).toBeNull();
     expect(outbox.data).toHaveLength(1);
@@ -82,6 +83,7 @@ test("real private reports, admin decisions, notification intent and account med
     expect(stored.error).toBeNull();
     expect(stored.data).toMatchObject({ reason: "privacy", details: "Please review this controlled privacy concern.", revision: 1 });
     const reportId = stored.data!.id;
+    await fixtures.normalizeDisplayTimestamps({ artworkIds: [artwork.id], reportIds: [reportId] });
     const publicListing = await page.request.get(`${origin}/api/community/artworks`);
     expect(await publicListing.text()).not.toContain("controlled privacy concern");
     const adminListing = await adminPage.request.get(`${origin}/api/admin/community/reports`);
