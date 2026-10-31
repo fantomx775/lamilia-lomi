@@ -43,29 +43,65 @@ public visibility, writes, a Production migration or deployment.
   Its harness says READY_FOR_MERGE. Production still has the reproduced
   failure until an explicitly approved normal release and deployed acceptance.
 
+## Fresh isolated browser chronology
+
+The enabled campaign at `5061bea` ran 14 distinct cases: **11 PASS / 3 FAIL / 0 SKIP**.
+The failures were a transient media connection reset, a local Docker guard
+precondition timeout and an unfinished curated-image request during editor
+navigation. No target guard was bypassed. A focused repeat at `ae54c9a` gave
+**2 PASS / 1 FAIL**; the remaining image request exposed a missing lazy-preview
+wait and server-side trust of the owned local TLS certificate. The test now
+waits for the actual decoded preview. Next's custom HTTPS launcher also needs
+`--experimental-https-ca`; browser `ignoreHTTPSErrors` alone cannot configure
+server-side fetch trust. The final lifecycle repeat at `0fb207e` passed
+**1 PASS / 0 FAIL / 0 SKIP**, with no application-source delta between those
+campaigns. All 14 distinct cases therefore have fresh passing evidence; there
+was no single clean 14/14 run. Original failure artifacts are preserved in the
+exclusive campaign directory. Final-head replay provenance is in the PR record.
+
+The real local Mailpit/Auth campaign first failed two cases on its hardcoded
+confirmation-link origin parser. The parser now matches the exact validated
+application origin and retains callback/type/token checks. At `02f3878`, both
+Chromium and mobile WebKit passed: **2 PASS / 0 FAIL / 0 SKIP**, 244.7 seconds.
+Both log scans found no synthetic secrets and fixture cleanup succeeded. This
+is not hosted mailbox acceptance; #30 stays open.
+
+The cases exercise actual local Auth, PostgREST, private Storage, role denial,
+moderation races, report/outbox intent, atomic hearts, UI rollback and cross-tab
+updates, physical account/media deletion and protected maintenance. They do not
+send external email or prove hosted R2/CDN/provider/inbox behavior.
+
+The actual feature-OFF browser case at `02f3878` passed **1 PASS / 0 FAIL /
+0 SKIP**, 90.4 seconds. An approved owned fixture stayed inaccessible to
+anonymous HTML/API/media reads; public mutations were disabled. The owner
+could still read and delete private bytes and leave the club. The protected
+worker physically cleaned owned jobs while both flags were OFF; absent local
+Resend configuration correctly returned 503 rather than a false success.
+This is local feature-OFF proof, separate from read-only Production checks.
+
 ## Journey matrix
 
 | Journey | Implemented safeguards and evidence | Remaining acceptance |
 | --- | --- | --- |
-| Join / adult membership | Verified current Auth user, current profile role, explicit adult/rules opt-in, unique normalized username; SQL and real local repository checks | Current isolated browser journey and owner-approved final rules version |
-| Registration / confirmation / login / return | Existing Auth return-flow implementation; historical real Mailpit and cross-device tests | Actual hosted confirmation, mailbox receipt and second-device return, #30; local Mailpit is insufficient |
+| Join / adult membership | Verified current Auth user, current profile role, explicit adult/rules opt-in, unique normalized username; SQL and real local repository checks | Fresh isolated browser journey passed; owner-approved final rules version remains |
+| Registration / confirmation / login / return | Fresh Chromium and mobile WebKit actual local Auth/SMTP/Mailpit: 2 PASS, real token-hash callback, cross-device context, login/premium and negative cases | Actual hosted confirmation, mailbox receipt and second-device return, #30; local Mailpit is insufficient |
 | Premium entitlement | Server/database published-product unlock checks; SQL role matrix, existing premium regression coverage | Deployed critical-flow acceptance after authorized release; no Production codes used as fixtures |
-| Private uploads | Private Storage, byte/decode/pixel validation, EXIF/GPS removal, reservations and compensating cleanup | Current isolated Storage/browser rerun; dedicated isolated R2 acceptance if that provider is used |
-| My Creations | Owner-only pending/approved/rejected/removed states, revision rules, edit/delete and immediate public revocation | Current desktop/mobile persistence and failure/retry rerun |
-| Moderation | Current admin role, optimistic concurrency, required reasons and append-only audit | Current isolated moderator race/takedown journey; staffed moderation and escalation operations |
+| Private uploads | Private Storage, byte/decode/pixel validation, EXIF/GPS removal, reservations and compensating cleanup | Fresh isolated Supabase Storage/browser passed; dedicated isolated R2 acceptance if that provider is used |
+| My Creations | Owner-only pending/approved/rejected/removed states, revision rules, edit/delete and immediate public revocation | Fresh isolated persistence, failure/retry and responsive captures passed; hosted acceptance remains |
+| Moderation | Current admin role, optimistic concurrency, required reasons and append-only audit | Fresh isolated moderator race/takedown journey passed; staffed moderation and escalation operations remain |
 | Public gallery / creators | Approved projections, no email/internal path exposure, server kill switch, one integrated product gallery | Enabled testing only in an exclusive loopback/isolated environment; never infer Production launch readiness from mocks |
-| Hearts / sorting | Atomic unique reactions and durable rate limits; fresh SQL and coordinated concurrency coverage | Current isolated UI rollback/cross-tab/popular-sort verification |
-| Reports | Private reports, duplicate/rate controls, admin review and bounded retention | Current report/browser rerun plus a monitored reporting mailbox and operational response process |
+| Hearts / sorting | Atomic unique reactions and durable rate limits; fresh SQL and coordinated concurrency coverage | Fresh isolated UI rollback/cross-tab/popular-sort passed; hosted acceptance remains |
+| Reports | Private reports, duplicate/rate controls, admin review and bounded retention | Fresh isolated report/browser passed; monitored reporting mailbox and operational response process remain |
 | Notifications | Transactional outbox, fenced leases, frozen payload fingerprint and event idempotency key; explicit disabled/unconfigured/ready status | Hosted provider failure/retry/inbox proof and scheduling inside the safe idempotency window; #95 |
-| Account deletion / retention | Immediate tombstones, durable media jobs without deleted-user FK, retry leases and retention SQL | Current actual byte cleanup/browser rerun; owner-approved retention/backups and appeals policy |
+| Account deletion / retention | Immediate tombstones, durable media jobs without deleted-user FK, retry leases and retention SQL | Fresh isolated actual byte cleanup/browser passed; owner-approved retention/backups and appeals policy remain |
 | Role/privacy boundaries | Raw community tables/RPCs deny anon/user access; narrow server projections; spoofed metadata denied | Fresh isolated tests are separate from hosted enabled-environment acceptance |
-| Desktop/mobile | Historical reviewed 390/768/1440 captures and real browser journeys; fresh admin desktop/Pixel 7 proof | Current final-head community captures and browser errors/network/persistence checks |
+| Desktop/mobile | Historical reviewed 390/768/1440 captures and real browser journeys; fresh admin desktop/Pixel 7 proof | Fresh responsive captures inspected; final-head replay and errors/network/persistence provenance in PR record |
 
 ## GO / NO-GO checklist
 
 | Gate | Status / owner action |
 | --- | --- |
-| Technical QA | Partial current evidence above; require final-head targeted checks, real isolated critical journeys, independent review and CI for every new candidate. Never turn historical/mock results into fresh hosted PASS. |
+| Technical QA | Fresh isolated journeys and targeted evidence above; final-head review, replay and CI recorded in each candidate PR. Never turn historical/mock results into fresh hosted PASS. |
 | Production admin reliability | PR #98 ready; owner-authorized harness delivery and deployed role/runtime acceptance still required. |
 | Security | Preserve RLS, grants, private Storage, current-role checks, version/lease fences and no-store community media. No anonymous grant workaround. Resolve all material review findings. |
 | Storage/CDN | BLOCKED for actual isolated Lamilia R2 upload/display/replace/delete/fallback and cache behavior. Current connected bucket inventory provides no confirmed dedicated Lamilia test target; Production credentials are not test-resource authorization. Need a scoped dedicated account/bucket target and exact candidate runtime. No Production purge/rule changes. |
@@ -77,16 +113,16 @@ public visibility, writes, a Production migration or deployment.
 | Retention / deletion | SQL/cleanup implementation exists; owner must approve timelines, backup treatment and operational deletion verification. |
 | Notification scheduler | NO-GO: daily cron cannot reliably retry a cron-origin failure before the 24-hour provider-idempotency cutoff. Configure an approved scheduler/plan/owner within the window; do not extend provider guarantees or blindly resend uncertain messages. |
 | Monitoring | Verify protected cron authentication, dispatch configuration status, queue age, retries, uncertain deliveries, cleanup failures and moderation backlog. Safe enums/counts only; no recipient/credential logging. |
-| Rollback | Before launch, verify both feature-OFF controls, no-store byte revocation, continuing private cleanup/retention while paused and operator recovery for durable jobs. Schema remains compatible; do not drop user data as rollback. |
+| Rollback | Fresh local OFF controls, no-store byte revocation and continuing private cleanup/retention passed; hosted operational recovery for durable jobs remains. Schema remains compatible; do not drop user data as rollback. |
 | Launch approval | Explicit owner approval after the preceding gates; do not enable either Production flag as part of stabilization delivery. |
 
 ## Delivery and backlog
 
-#77 remains the open public-launch effort. #78 can close as specification/config
-delivery, independently of launch. #79–#84 should be reconciled against final
-PR #91 evidence and current regression results; no blanket closure from a
-merged feature flag alone. #85 is historically closed; newly discovered
-operational gaps are tracked explicitly in #95–#97.
+#77 remains the open public-launch effort. #78–#84 were closed as verified
+technical implementation slices using final PR #91 delivery evidence and the
+fresh isolated regression results. This is separate from public-launch
+readiness. #85 was already historically closed; newly discovered stabilization
+and operational gaps remain open in #94–#97, #23 and #30.
 
 PR #70 reconstruction retains newer galleries and the deliberate exclusion of
 community media from Next Image. Local image-quality evidence does not close
@@ -96,3 +132,16 @@ remains open through unfinished media/auth acceptance.
 
 Journal #87 and Challenges #86 remain after the actionable P0 stability/readiness
 work. No comments, forum or direct messaging are introduced.
+
+## Protected-worker release boundary
+
+An unauthenticated `GET /api/internal/community/cleanup` returning 401 verifies
+only cron authentication. It returns before the changed maintenance helpers
+run. It must not be labelled positive Production worker acceptance. Local
+protected-worker calls exercised actual owned cleanup and fail-closed provider
+configuration; Production queue processing was **NOT RUN**. The current harness
+cannot inject the cron Authorization header into a protected positive smoke.
+A separately approved scoped worker acceptance procedure/owned fixture and
+safe secret-in-memory invocation are required before that release gate can
+be marked PASS. No scheduler, queue, Production fixture or provider window was
+changed to circumvent this boundary.
