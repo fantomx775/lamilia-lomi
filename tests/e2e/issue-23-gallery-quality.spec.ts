@@ -65,13 +65,19 @@ test("versioned public images reach the optimizer and delivered raster pixels co
     ];
     for (const scenario of scenarios) {
       const context = await browser.newContext({ ...scenario.options, baseURL });
+      const pageErrors: string[] = [];
+      const consoleErrors: string[] = [];
+      const imageFailures: number[] = [];
+      const transportFailures: Array<{ method: string; path: string; error: string; phase: "flow" | "context_teardown" }> = [];
+      let phase: "flow" | "context_teardown" = "flow";
       try {
         const view = await context.newPage();
-        const pageErrors: string[] = [];
-        const consoleErrors: string[] = [];
-        const imageFailures: number[] = [];
         view.on("pageerror", (error) => pageErrors.push(error.message));
         view.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+        view.on("requestfailed", (request) => transportFailures.push({
+          method: request.method(), path: new URL(request.url()).pathname,
+          error: (request.failure()?.errorText ?? "unknown_transport_error").replace(/[?#].*$/, ""), phase,
+        }));
         view.on("response", (response) => {
           if (response.request().resourceType() === "image" && response.status() >= 400) imageFailures.push(response.status());
         });
@@ -94,10 +100,20 @@ test("versioned public images reach the optimizer and delivered raster pixels co
         console.log(JSON.stringify({ scenario: scenario.name, deliveredWidth: decoded.width, sourceWidth, cssWidth: metrics.cssWidth, dpr: metrics.dpr }));
         expect(await view.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await layout.screenshot({ path: testInfo.outputPath(`gallery-${scenario.name}.png`), animations: "disabled", caret: "initial" });
+        await view.waitForLoadState("networkidle");
+      } finally {
+        phase = "context_teardown";
+        await context.close();
+        const expectedTeardownAborts = transportFailures.filter((failure) => failure.phase === "context_teardown" && failure.error === "net::ERR_ABORTED")
+          .map((failure) => ({ ...failure, reason: "The browser context was explicitly closed after the tested flow reached network idle." }));
+        const unresolvedTransportFailures = transportFailures.filter((failure) => failure.phase === "flow" || failure.error !== "net::ERR_ABORTED");
+        console.log("[MEDIA-QUALITY-DIAGNOSTICS] " + JSON.stringify({ scenario: scenario.name,
+          pageErrors, consoleErrors, failedImageResponses: imageFailures, transportFailures, expectedTeardownAborts, unresolvedTransportFailures }));
         expect(pageErrors).toEqual([]);
         expect(consoleErrors).toEqual([]);
         expect(imageFailures).toEqual([]);
-      } finally { await context.close(); }
+        expect(unresolvedTransportFailures).toEqual([]);
+      }
     }
   } finally {
     try {
