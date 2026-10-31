@@ -114,6 +114,24 @@ fixture journey passed.
 
 ## Execute and report
 
+The shared `.mjs` helper stays native ESM for Node, Python and Playwright.
+`playwright.config.ts` excludes only that exact test-helper path from its
+transpilation. In a CommonJS test package, Playwright's require hook otherwise
+emits `exports` inside the ESM module and collection fails before any fixture
+runs. A nested `type: module` package alone does not correct that hook.
+
+Use collection as the quick module-boundary regression check; it starts no
+application or fixture:
+
+```powershell
+npm run e2e -- tests/e2e/community- --project=chromium --list
+```
+
+The 2026-10-31 repair collected all 16 Chromium cases across eight community
+specs. This is collection proof, not 16 executed browser passes. The focused
+helper suite separately passed 63 assertions, while native Node CLI and the
+Python bridge returned only safe verified Docker metadata without running SQL.
+
 The pure target/refusal tests do not contact Docker or Supabase:
 
 ```powershell
