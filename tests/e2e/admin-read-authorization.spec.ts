@@ -94,8 +94,11 @@ test("admin reads authorize every page before querying protected tables", async 
     await denied(context);
     await page.goto("/admin/products/new");
     await expect(page.getByRole("heading", { name: "Brak dostępu" })).toBeVisible();
+    await expect(page.getByText("Zaloguj się na konto administratora", { exact: false })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Logowanie", exact: true })).toHaveAttribute("href", "/en/login?returnTo=/admin");
+    await expect(page.getByText("admin@lamilialomi.test", { exact: false })).toHaveCount(0);
     await mkdir(evidence, { recursive: true });
-    await page.screenshot({ path: path.join(evidence, `denied-${testInfo.project.name}.png`) });
+    await page.screenshot({ path: path.join(evidence, `denied-${testInfo.project.name}.png`), caret: "initial" });
 
     const regular = await browser.newContext({ ignoreHTTPSErrors: true });
     contexts.push(regular);
@@ -127,7 +130,7 @@ test("admin reads authorize every page before querying protected tables", async 
     }
     await page.goto("/admin/products/new");
     await expect(page.getByRole("heading", { name: "Nowy produkt" })).toBeVisible();
-    await page.screenshot({ path: path.join(evidence, `editor-${testInfo.project.name}.png`) });
+    await page.screenshot({ path: path.join(evidence, `editor-${testInfo.project.name}.png`), caret: "initial" });
     await page.reload();
     await expect(page.getByRole("heading", { name: "Nowy produkt" })).toBeVisible();
     const publicResponse = await anonymous.from("products").select("id").eq("id", productId);

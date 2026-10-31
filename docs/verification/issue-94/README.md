@@ -53,6 +53,10 @@ user metadata. Denied callers receive an empty snapshot for the existing
 denial layout. The product-edit page may additionally emit its controlled
 `NEXT_HTTP_ERROR_FALLBACK;404`; this is distinct from an unhandled database
 error. Public snapshot reads retain their existing behavior.
+Supabase denial copy now directs users to their administrator account, rather
+than advertising a local demo identity. The login link uses canonical
+`returnTo=/admin`; the previous `redirectTo` parameter remains a supported
+compatibility alias elsewhere.
 
 The regression first failed three tests with the original implementation.
 Focused coverage includes all sensitive option combinations, public reads,
@@ -66,6 +70,11 @@ are not recorded. Every owned fixture is removed in `finally`.
 Exact final commands, browser provenance, independent review and CI results
 are recorded in current-head PR comments. An initial cold-development-browser
 attempt timed out compiling `/admin`; that failed attempt is not a PASS.
+Another initial browser attempt detected screenshot-induced hydration warnings:
+Playwright's default caret hiding changed input styles before React hydrated.
+The screenshots now use `caret: "initial"`; actual subsequent role/browser
+journeys passed without console errors. This was a test-tool interaction,
+not a reason to suppress application errors.
 
 ## Release boundary
 
