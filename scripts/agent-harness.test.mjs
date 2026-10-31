@@ -1926,6 +1926,75 @@ test("accepts only the asserted same-origin community product-delete redirect ca
   assert.equal(validate(unrelatedNetworkFailure).status, "PASS");
 });
 
+test("validates private login query evidence without exposing it in verification results", () => {
+  const screenshot = "docs/verification/pr-52/login.png";
+  const origin = "https://localhost:3443";
+  const destination = `${origin}/en/account?view=private-browser-query-marker`;
+  const loginUrl = `${origin}/en/login?returnTo=${encodeURIComponent("/en/account?view=private-browser-query-marker")}`;
+  const runId = "private-login-query-run";
+  const outcome = {
+    id: "login-query-1", testedSha: CURRENT_SHA, runId, origin,
+    pageId: "login-page", requestId: "login-request", requestUrl: loginUrl, requestPath: "/en/login",
+    requestMethod: "POST", resource: "fetch", nextServerAction: true, nextActionHeader: true,
+    observedFailure: "net::ERR_ABORTED", responseStatus: 303, phase: "navigation",
+    expectedUrl: destination, observedDestinationUrl: destination,
+    freshFixtureIdentity: true, authenticatedServerAccount: true, accountStatus: 200,
+    assertions: [{ name: "fresh account", status: "PASS", details: "The cookie-bound account identifies the new fixture." }],
+    assertionStatus: "PASS", details: "The real login action authenticated the fixture and reached its expected destination.",
+  };
+  const browser = {
+    status: "PASS", tool: "Playwright", testedSha: CURRENT_SHA, runId, origin,
+    flows: ["real fixture login"], screenshots: [{ path: screenshot, testedSha: CURRENT_SHA, runId }],
+    responsiveLayouts: ["desktop"], persistence: { status: "PASS", details: "The authenticated account survives navigation." },
+    screenshotReview: { status: "PASS", details: "The account destination was inspected." },
+    retestedAfterFixes: true, consoleErrors: [],
+    failedNetworkRequests: [{ url: loginUrl, path: "/en/login", method: "POST", resource: "fetch",
+      error: "net::ERR_ABORTED", pageId: "login-page", requestId: "login-request",
+      disposition: "login-redirect-canceled", nextServerAction: true, phase: "navigation",
+      outcomeId: outcome.id, reason: outcome.details }],
+    expectedLoginRedirects: [outcome],
+  };
+  const files = ["src/app/[locale]/login/page.tsx", screenshot];
+  const comments = (candidate) => [structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({
+    uiBehavior: true, browser: candidate,
+    productionSmokePlan: { status: "PASS", flows: [{ name: "login page", affectedFiles: [files[0]],
+      paths: [{ path: "/en/login", expectedText: "Log in" }] }] },
+  }))];
+  const validate = (candidate) => {
+    const localVerification = validateLocalVerification({ headSha: CURRENT_SHA, comments: comments(candidate) });
+    const checked = validateBrowserVerification({ uiRequired: true, localVerification, files });
+    const assessment = assessPullRequestVerification({ pullRequest: cleanPullRequest(), files,
+      comments: [...comments(candidate), ...cleanAiReviewComments()], mergePolicy: cleanMergePolicy() });
+    for (const result of [localVerification, checked, assessment]) {
+      for (const privateValue of ["private-browser-query-marker", "different-private-query-marker", "?returnTo="]) {
+        assert.equal(JSON.stringify(result).includes(privateValue), false);
+      }
+    }
+    return { localVerification, checked, assessment };
+  };
+  const valid = validate(browser);
+  assert.equal(valid.localVerification.status, "PASS");
+  assert.equal(valid.localVerification.record.browser.expectedLoginRedirects[0].requestUrl, `${origin}/en/login`);
+  assert.equal(valid.checked.status, "PASS");
+  assert.equal(valid.assessment.browserVerification.status, "PASS");
+  assert.equal(valid.assessment.decision, "READY_FOR_MERGE");
+
+  for (const mutate of [
+    (candidate) => { candidate.expectedLoginRedirects[0].observedDestinationUrl = `${origin}/en/account?view=different-private-query-marker`; },
+    (candidate) => { candidate.expectedLoginRedirects[0].responseStatus = 500; },
+    (candidate) => { candidate.expectedLoginRedirects[0].freshFixtureIdentity = false; },
+    (candidate) => { candidate.expectedLoginRedirects[0].testedSha = "b".repeat(40); },
+    (candidate) => { candidate.expectedLoginRedirects[0].requestUrl += "&returnTo=%2Fen%2Faccount";
+      candidate.failedNetworkRequests[0].url = candidate.expectedLoginRedirects[0].requestUrl; },
+  ]) {
+    const invalid = structuredClone(browser);
+    mutate(invalid);
+    const result = validate(invalid);
+    assert.equal(result.checked.status, "FAIL");
+    assert.notEqual(result.assessment.browserVerification.status, "PASS");
+  }
+});
+
 test("validates bounded Next RSC prefetch/link and identity-verified login cancellations", () => {
   const screenshot = "docs/verification/pr-52/next-navigation.png";
   const runId = "pr-52-next-navigation-run-1";
@@ -1993,7 +2062,9 @@ test("validates bounded Next RSC prefetch/link and identity-verified login cance
   };
   const validate = (candidate) => validateBrowserVerification({
     uiRequired: true,
-    localVerification: { reviewedSha: CURRENT_SHA, record: cleanVerificationRecord({ uiBehavior: true, browser: candidate }) },
+    localVerification: validateLocalVerification({ headSha: CURRENT_SHA, comments: [
+      structuredComment(VERIFICATION_MARKER, cleanVerificationRecord({ uiBehavior: true, browser: candidate })),
+    ] }),
     files: ["src/app/[locale]/club/page.tsx", screenshot],
   });
   assert.equal(validate(browser).status, "PASS");
