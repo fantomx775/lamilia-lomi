@@ -39,10 +39,12 @@ export async function removeCommunityArtworkImage(input: {
   authorId: string;
   storagePath: string;
   storageProvider: CommunityStorageProvider;
+  signal?: AbortSignal;
 }) {
   return removeCollectionImage({
     collectionId: input.authorId,
     storagePath: input.storagePath,
     provider: input.storageProvider,
+    ...(input.signal ? { signal: input.signal } : {}),
   });
 }

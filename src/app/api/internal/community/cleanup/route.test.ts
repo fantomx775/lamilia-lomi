@@ -37,11 +37,12 @@ describe("protected scheduled community cleanup", () => {
     const response = await GET(request(`Bearer ${token}`));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, passes: 10,
+      stages: { retention: "completed", notifications: "completed", artworkMedia: "completed", accountMedia: "completed" },
       notifications: { status: "ready", claimed: 0, sent: 0, suppressed: 0, retrying: 0 } });
     expect(cleanup.media).toHaveBeenCalledTimes(10);
-    expect(cleanup.accountMedia).toHaveBeenCalledWith(10);
+    expect(cleanup.accountMedia).toHaveBeenCalledWith(10, expect.any(AbortSignal));
     expect(cleanup.retention).toHaveBeenCalledOnce();
-    expect(cleanup.notifications).toHaveBeenCalledWith(10);
+    expect(cleanup.notifications).toHaveBeenCalledWith(10, expect.any(AbortSignal));
   });
   it.each(["email_provider", "fingerprint_secret"])("reports %s configuration failure after cleanup while the club is paused", async (reason) => {
     cleanup.notifications.mockResolvedValue({ status: "unconfigured", reason, claimed: 0, sent: 0, suppressed: 0, retrying: 0 });
@@ -52,11 +53,12 @@ describe("protected scheduled community cleanup", () => {
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       const body = await response.json();
       expect(body).toEqual({ ok: false, error: "notifications_unconfigured", passes: 10,
+        stages: { retention: "completed", notifications: "completed", artworkMedia: "completed", accountMedia: "completed" },
         notifications: { status: "unconfigured", reason, claimed: 0, sent: 0, suppressed: 0, retrying: 0 } });
       expect(cleanup.media).toHaveBeenCalledTimes(10);
-      expect(cleanup.accountMedia).toHaveBeenCalledWith(10);
+      expect(cleanup.accountMedia).toHaveBeenCalledWith(10, expect.any(AbortSignal));
       expect(cleanup.retention).toHaveBeenCalledOnce();
-      expect(log).toHaveBeenCalledWith(`[community-maintenance] Notification dispatcher is unconfigured: ${reason}.`);
+      expect(log).toHaveBeenCalledWith("[community-maintenance] Maintenance incomplete: notifications_unconfigured.");
       expect(JSON.stringify({ body, logs: log.mock.calls })).not.toContain(token);
     } finally { log.mockRestore(); }
   });
@@ -76,6 +78,9 @@ describe("protected scheduled community cleanup", () => {
       expect(body).not.toContain(token);
       expect(body).not.toContain("private backend diagnostics");
       expect(cleanup.media).toHaveBeenCalledTimes(1);
+      expect(cleanup.retention).toHaveBeenCalledOnce();
+      expect(cleanup.notifications).toHaveBeenCalledOnce();
+      expect(cleanup.accountMedia).toHaveBeenCalledOnce();
     } finally { log.mockRestore(); }
   });
 });

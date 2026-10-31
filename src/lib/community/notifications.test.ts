@@ -52,8 +52,8 @@ describe("community moderation notification outbox", () => {
     }), { idempotencyKey: "community-moderation/41" });
     expect(message?.text).toContain("Your Coloring Club artwork was approved. You can review its status in My Creations.");
     expect(message?.text).not.toMatch(/visible in the gallery/i);
-    expect(mocks.prepare).toHaveBeenCalledWith(41, expect.any(String), expect.stringMatching(/^[a-f0-9]{64}$/), "cc-status-2026-10-26-v2");
-    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "sent", providerMessageId: "resend-id" }));
+    expect(mocks.prepare).toHaveBeenCalledWith(41, expect.any(String), expect.stringMatching(/^[a-f0-9]{64}$/), "cc-status-2026-10-26-v2", undefined);
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "sent", providerMessageId: "resend-id" }), undefined);
     expect(JSON.stringify(mocks.prepare.mock.calls)).not.toContain("author@example.test");
   });
 
@@ -62,7 +62,7 @@ describe("community moderation notification outbox", () => {
     const result = await processCommunityModerationNotifications(1);
     expect(result).toMatchObject({ claimed: 1, suppressed: 1 });
     expect(mocks.resend?.emails.send).not.toHaveBeenCalled();
-    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "suppressed" }));
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "suppressed" }), undefined);
   });
 
   it("distinguishes an unconfigured provider from an idle configured dispatcher without claiming work", async () => {
@@ -109,7 +109,7 @@ describe("community moderation notification outbox", () => {
     mocks.resend!.emails.send.mockResolvedValueOnce({ data: null, error: new Error("provider secret and recipient") });
     const result = await processCommunityModerationNotifications(1);
     expect(result).toMatchObject({ claimed: 1, retrying: 1 });
-    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "retry", errorCode: "provider_error" }));
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "retry", errorCode: "provider_error" }), undefined);
     expect(JSON.stringify(mocks.finish.mock.calls)).not.toMatch(/provider secret|author@example/);
   });
 });

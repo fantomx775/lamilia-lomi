@@ -19,4 +19,6 @@ Messages contain only the generic approval/review state and a My Creations link.
 - Claims use a three-minute lease and fencing token. Retry backoff is bounded; after eight failed attempts the item becomes uncertain. Provider error details are not logged or stored.
 - Queue state distinguishes provider acceptance (`sent`) from inbox delivery; no delivery claim is made.
 
+Scheduled dispatch has an independent ten-second I/O budget, before provider media cleanup. Its cancellation signal reaches the current Resend SDK's native fetch (covered by a transport contract regression) and the account/profile/outbox requests. Cancellation may leave an accepted-but-unacknowledged request; its fenced lease, payload fingerprint, event idempotency key and existing uncertain-window rules remain authoritative. The worker stops issuing further writes after its budget expires rather than attempting an unbounded compensating write or a fresh send.
+
 The configured Resend account, domain, legal sender/contact facts, and actual dispatch readiness still require owner review. Email availability does not enable public flags or constitute launch approval. Resend documents a 24-hour key lifetime and exact-payload matching in its [idempotency guidance](https://resend.com/docs/dashboard/emails/idempotency-keys).
