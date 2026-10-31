@@ -171,6 +171,12 @@ specific suite with its existing `RUN_COMMUNITY_*_E2E=1` variable, then run the
 chosen spec with `--workers=1`. Use `COMMUNITY_ARTIFACT_DIR` to keep fresh
 exact-SHA artifacts separate from historical captures.
 
+If using a self-signed local HTTPS certificate, set `NODE_EXTRA_CA_CERTS` to
+that owned certificate **before starting the application**. Next Server Actions
+fetch their redirect destination on the server; browser `ignoreHTTPSErrors`
+alone does not trust that fetch. Keep certificate verification enabled and
+trust only the disposable environment's certificate.
+
 Report actual command, head SHA, role matrix, cleanup result and PASS/FAIL/SKIP
 counts. Do not count an opt-in skip or mock as real infrastructure acceptance.
 Keep the exclusive backend available while review/testing needs it; after the

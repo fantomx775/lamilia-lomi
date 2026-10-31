@@ -29,13 +29,15 @@ test("real private reports, admin decisions, notification intent and account med
   let observationPhase = "fixture setup";
   const terminals = new Map<object, Promise<void>>();
   const activeReportReads = new Set<object>();
+  const activeReaderReads = new Set<object>();
   function observe(target: typeof page) {
     const settle = new Map<object, () => void>();
     target.on("request", (request) => {
       terminals.set(request, new Promise<void>((resolve) => settle.set(request, resolve)));
       if (request.method() === "GET" && new URL(request.url()).pathname === "/api/admin/community/reports") activeReportReads.add(request);
+      if (request.method() === "GET" && /^\/api\/admin\/products\/[^/]+\/reader-artworks$/.test(new URL(request.url()).pathname)) activeReaderReads.add(request);
     });
-    const finished = (request: object) => { settle.get(request)?.(); settle.delete(request); activeReportReads.delete(request); };
+    const finished = (request: object) => { settle.get(request)?.(); settle.delete(request); activeReportReads.delete(request); activeReaderReads.delete(request); };
     target.on("requestfinished", finished);
     target.on("requestfailed", finished);
     target.on("pageerror", (error) => runtimeErrors.push(error.message));
@@ -95,6 +97,12 @@ test("real private reports, admin decisions, notification intent and account med
     expect(outbox.data?.[0]).toMatchObject({ state: "pending", notification_type: "approved" });
     const curated = await fixtures.readerArtwork(book.id, "A Reader's Garden", 0, "cottage.webp");
     await adminPage.goto(`${origin}/admin/products/${book.id}`);
+    // Load the actual curated record before testing product deletion refusal.
+    // Navigating away while the editor's initial reads are still in flight
+    // cancels unrelated API fetches and does not verify this prerequisite.
+    await expect(adminPage.getByTestId("reader-artwork-item")).toHaveCount(1);
+    await expect(adminPage.getByTestId("reader-artwork-item")).toContainText("A Reader's Garden");
+    await expect.poll(() => activeReaderReads.size).toBe(0);
     await expect(adminPage.getByRole("button", { name: "Usuń produkt", exact: true })).toBeEnabled();
     observationPhase = "product deletion refusal";
     const productDestinations: string[] = [];
