@@ -282,7 +282,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       await expect(page.locator('a[href*="error=verification_required"]')).toBeVisible();
       completed.confirmationRequired = true;
 
-      const userOneLink = await readConfirmationLink(userOne.email, localMailpitUrl);
+      const userOneLink = await readConfirmationLink(userOne.email, localMailpitUrl, appUrl);
       rememberSensitiveLink(userOneLink, sensitiveValues);
       const userOneResumeToken = getResumeToken(userOneLink.href);
       const userOneCallback = new URL(userOneLink.href);
@@ -489,7 +489,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         query: { step: "verify" },
         hash: "#premium",
       });
-      const userTwoLink = await readConfirmationLink(userTwo.email, localMailpitUrl);
+      const userTwoLink = await readConfirmationLink(userTwo.email, localMailpitUrl, appUrl);
       rememberSensitiveLink(userTwoLink, sensitiveValues);
 
       const wrongAccountContext = await createContext();
@@ -576,7 +576,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         query: { step: "verify" },
         hash: "#premium",
       });
-      const userThreeLink = await readConfirmationLink(userThree.email, localMailpitUrl);
+      const userThreeLink = await readConfirmationLink(userThree.email, localMailpitUrl, appUrl);
       rememberSensitiveLink(userThreeLink, sensitiveValues);
       const tamperedCallback = new URL(userThreeLink.href);
       tamperedCallback.searchParams.set(
@@ -672,7 +672,7 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
         throw new Error("Local GoTrue did not send the synthetic expired-token confirmation.");
       }
       completed.expiredConfirmationEmailRequested = true;
-      const expiredLink = await readConfirmationLink(userFour.email, localMailpitUrl);
+      const expiredLink = await readConfirmationLink(userFour.email, localMailpitUrl, appUrl);
       rememberSensitiveLink(expiredLink, sensitiveValues);
       completed.expiredConfirmationEmailRetrieved = true;
       ageLocalSignupConfirmation(expiredUserId);
@@ -981,7 +981,7 @@ async function navigateSensitive(page: Page, url: string) {
   }
 }
 
-async function readConfirmationLink(email: string, mailpitUrl: URL) {
+async function readConfirmationLink(email: string, mailpitUrl: URL, appUrl: URL) {
   const query = encodeURIComponent(`to:${email}`);
   let messageId: string | undefined;
 
@@ -1017,8 +1017,7 @@ async function readConfirmationLink(email: string, mailpitUrl: URL) {
       const href = candidate.replace(/[),.;]+$/, "");
       const url = new URL(href);
       if (
-        url.hostname === "127.0.0.1" &&
-        url.port === String(appPort) &&
+        url.origin === appUrl.origin &&
         url.pathname === "/auth/callback" &&
         url.searchParams.get("type") === "email" &&
         url.searchParams.has("token_hash")
