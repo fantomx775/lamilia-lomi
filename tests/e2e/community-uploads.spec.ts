@@ -373,6 +373,7 @@ test("authorized maintenance drains a real queued deletion without another owner
     // This isolated launcher deliberately has no email provider. Cleanup still
     // completes, but dispatcher readiness must not be represented as healthy.
     expect(await cleaned.json()).toMatchObject({ ok: false, error: "notifications_unconfigured", passes: 10,
+      stages: { retention: "completed", artworkMedia: "completed", accountMedia: "completed" },
       notifications: { status: "unconfigured", reason: "email_provider", claimed: 0 } });
     expect((await fixtures.service.storage.from("collection-media").download(storagePath)).error).toBeTruthy();
     expect((await fixtures.service.from("community_upload_reservations").select("state").eq("author_id", owner.id)

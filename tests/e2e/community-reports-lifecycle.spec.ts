@@ -243,7 +243,10 @@ test("real private reports, admin decisions, notification intent and account med
     const cronSecret = readCommunityCronSecret();
     expect((await page.request.get(`${origin}/api/internal/community/cleanup`)).status()).toBe(401);
     const cleanup = await page.request.get(`${origin}/api/internal/community/cleanup`, { headers: { Authorization: `Bearer ${cronSecret}` } });
-    expect(cleanup.status()).toBe(200);
+    expect(cleanup.status()).toBe(503);
+    expect(await cleanup.json()).toMatchObject({ error: "notifications_unconfigured",
+      stages: { retention: "completed", artworkMedia: "completed", accountMedia: "completed" },
+      notifications: { status: "unconfigured", reason: "email_provider" } });
     expect((await fixtures.service.from("community_account_media_cleanup_jobs").select("id").eq("id", jobs.data![0].id)).data).toEqual([]);
     expect((await fixtures.service.storage.from("collection-media").download(objectPath)).error).not.toBeNull();
     expect(runtimeErrors).toEqual([]);

@@ -113,7 +113,11 @@ test("disabled switches block real public images and mutations while preserving 
     await panel.getByRole("button", { name: "Confirm leave", exact: true }).click();
     await expect(panel.getByRole("status")).toContainText("You left");
     const cronSecret = readCommunityCronSecret();
-    expect((await page.request.get(`${origin}/api/internal/community/cleanup`, { headers: { Authorization: `Bearer ${cronSecret}` } })).status()).toBe(200);
+    const maintenance = await page.request.get(`${origin}/api/internal/community/cleanup`, { headers: { Authorization: `Bearer ${cronSecret}` } });
+    expect(maintenance.status()).toBe(503);
+    expect(await maintenance.json()).toMatchObject({ error: "notifications_unconfigured",
+      stages: { retention: "completed", artworkMedia: "completed", accountMedia: "completed" },
+      notifications: { status: "unconfigured", reason: "email_provider" } });
     await writeFile(await communityArtifactPath("cc07", "public-off-proof.json"), JSON.stringify({
       status: "PASS", testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
       runId: process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc07-public-off-1", publicEnabled: false,

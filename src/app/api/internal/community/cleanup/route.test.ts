@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
 const cleanup = vi.hoisted(() => ({ media: vi.fn(), accountMedia: vi.fn(), retention: vi.fn(), notifications: vi.fn() }));
 vi.mock("@/lib/community/repository", () => ({ processCommunityArtworkCleanup: cleanup.media, processCommunityAccountMediaCleanup: cleanup.accountMedia, processCommunityReportRetention: cleanup.retention }));
 vi.mock("@/lib/community/notifications", () => ({ processCommunityModerationNotifications: cleanup.notifications }));
