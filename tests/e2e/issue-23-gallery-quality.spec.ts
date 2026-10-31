@@ -68,8 +68,10 @@ test("versioned public images reach the optimizer and delivered raster pixels co
       try {
         const view = await context.newPage();
         const pageErrors: string[] = [];
+        const consoleErrors: string[] = [];
         const imageFailures: number[] = [];
         view.on("pageerror", (error) => pageErrors.push(error.message));
+        view.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
         view.on("response", (response) => {
           if (response.request().resourceType() === "image" && response.status() >= 400) imageFailures.push(response.status());
         });
@@ -91,8 +93,9 @@ test("versioned public images reach the optimizer and delivered raster pixels co
         expect(decoded.width).toBeLessThanOrEqual(sourceWidth);
         console.log(JSON.stringify({ scenario: scenario.name, deliveredWidth: decoded.width, sourceWidth, cssWidth: metrics.cssWidth, dpr: metrics.dpr }));
         expect(await view.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-        await layout.screenshot({ path: testInfo.outputPath(`gallery-${scenario.name}.png`), animations: "disabled" });
+        await layout.screenshot({ path: testInfo.outputPath(`gallery-${scenario.name}.png`), animations: "disabled", caret: "initial" });
         expect(pageErrors).toEqual([]);
+        expect(consoleErrors).toEqual([]);
         expect(imageFailures).toEqual([]);
       } finally { await context.close(); }
     }

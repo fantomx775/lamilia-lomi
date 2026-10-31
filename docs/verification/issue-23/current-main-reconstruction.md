@@ -34,6 +34,8 @@ The own local application on `127.0.0.1:3075`, with both community flags OFF, pa
 
 Independent code review at `6c5b199` reported zero unresolved Critical/High/Medium/Low findings after security, fallback, decoded-pixel and fixture corrections. Typecheck/build and broader checks remain owned by exact-head CI; no duplicate local broad pass was run. Hosted infrastructure acceptance below remains **BLOCKED**, not substituted by these local checks.
 
+Buffered development-server output from the first capture sequence exposed a React hydration warning involving screenshot-injected `caret-color` on inputs. Those earlier runs did not assert console errors and are not represented as console-clean evidence. The quality test now preserves the original caret style during screenshot capture and explicitly rejects console errors as well as page/image failures; the final-head confirmation is recorded separately in PR evidence.
+
 ## Infrastructure acceptance still required
 
 Use dedicated owned fixtures and an isolated Supabase/R2 runtime for upload, display, responsive sizes, replacement, refresh, deletion, fallback, publication/revocation races and cleanup. Verify category delivery for both R2 and Supabase providers, upstream HTTPS responses without redirects, and cache behavior after deletion/unpublish at the exact candidate SHA. Record source/optimized bytes and dimensions, DPR1/DPR2, CDN response headers and repeated post-delete responses.
