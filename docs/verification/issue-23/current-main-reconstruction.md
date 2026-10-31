@@ -28,7 +28,11 @@ Version validation rejects stale category image IDs and mismatched product asset
 - Existing local media replacement/category lifecycle E2E plus private community media regression.
 - Independent current-SHA review.
 
-At implementation handoff, only the whitespace check has run. Other checks are **NOT RUN**, awaiting the coordinator's serialized validation window. Preflight reported `node_modules_missing`; this worker did not install dependencies or start a build/server.
+Local verification on source `6c5b1999e21a1a1176b92218f9efb91430052940`: focused Vitest **91 PASS / 0 FAIL / 0 SKIP** across 14 files, changed-file ESLint **PASS** on 18 files, and candidate whitespace check **PASS**. The first focused run exposed four outdated reader-artwork fixture failures; the missing boundary mock was corrected and the complete focused selection passed serially. Preflight first reported `node_modules_missing`; one dedicated `npm ci --no-audit --no-fund` installed 592 packages. No dependency tree or build folder was shared.
+
+The own local application on `127.0.0.1:3075`, with both community flags OFF, passed seven distinct Chromium browser scenarios: the new optimizer/DPR test, product cover replacement, category upload/replacement/removal, deferred category-cleanup warning, private reader-artwork administration/mobile layout, missing-session premium download denial, and public download. The quality scenario was repeated for committed captures. Actual decoded widths were 384 pixels for 290 CSS pixels at DPR1, 640 for 290 CSS pixels at DPR2, and 640 for 182 CSS pixels at Pixel 7's DPR2.625; original source width was 2400. The community media optimizer request returned400. The three gallery captures were opened and inspected; they intentionally use a flat synthetic raster and do not establish subjective Production artwork quality. [Capture/provenance manifest](current-main-browser/capture.json) records the source SHA, run ID, hashes and command.
+
+Independent code review at `6c5b199` reported zero unresolved Critical/High/Medium/Low findings after security, fallback, decoded-pixel and fixture corrections. Typecheck/build and broader checks remain owned by exact-head CI; no duplicate local broad pass was run. Hosted infrastructure acceptance below remains **BLOCKED**, not substituted by these local checks.
 
 ## Infrastructure acceptance still required
 
