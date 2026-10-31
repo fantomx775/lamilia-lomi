@@ -15,6 +15,7 @@ vi.mock("@/lib/config", () => ({
 vi.mock("@/lib/supabase/server", () => ({
   createClient: mocks.createClient,
 }));
+vi.mock("./reader-artworks", () => ({ listReaderArtworks: vi.fn(async () => []) }));
 
 import {
   getContentSnapshotForRequest,

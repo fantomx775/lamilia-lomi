@@ -36,7 +36,7 @@ test("versioned public images reach the optimizer and delivered raster pixels co
     product.slug = `issue-23-dpr-${fixtureId}`;
     product.status = "published";
     product.coverAssetId = randomUUID();
-    product.videoAssetId = null;
+    delete product.videoAssetId;
     product.premiumCodes = [];
     product.assets = [cover, gallery].map((asset, index) => ({ ...asset,
       id: index === 0 ? product.coverAssetId : randomUUID(), productId: fixtureId,
