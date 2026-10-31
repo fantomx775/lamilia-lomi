@@ -954,8 +954,7 @@ function mapAsset(row: DbRow, productStatus?: Product["status"]): ProductAsset {
   const publicR2Url = storageProvider === "r2_public" && Boolean(row.is_public) && productStatus === "published"
     ? r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", rawPath) : null;
   const versionedR2ImagePath =
-    storageProvider === "r2_public" && Boolean(row.is_public) && productStatus === "published"
-      && (kind === "cover" || kind === "gallery")
+    publicR2Url && (kind === "cover" || kind === "gallery")
       ? `/api/media/${id}?v=${encodeURIComponent(id)}` : null;
 
   return {

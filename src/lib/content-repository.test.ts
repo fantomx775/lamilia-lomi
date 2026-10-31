@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+afterEach(() => vi.unstubAllEnvs());
 
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -24,6 +25,7 @@ import {
 describe("public R2 image metadata lookup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("R2_PUBLIC_BASE_URL", "https://media.example.com");
     mocks.getBackendMode.mockReturnValue("supabase");
   });
 
@@ -271,7 +273,8 @@ describe("public product R2 image paths", () => {
     mocks.getBackendMode.mockReturnValue("supabase");
   });
 
-  it("serves published R2 covers and gallery images through UUID-versioned media routes", async () => {
+  it.each(["https://media.example.com", "", "invalid", "http://insecure.example.com"])("keeps public R2 mapping and legacy fallback correct for base %s", async (baseUrl) => {
+    vi.stubEnv("R2_PUBLIC_BASE_URL", baseUrl);
     const productId = "11111111-1111-4111-8111-111111111111";
     const coverId = "22222222-2222-4222-8222-222222222222";
     const galleryId = "33333333-3333-4333-8333-333333333333";
@@ -336,12 +339,13 @@ describe("public product R2 image paths", () => {
 
     const snapshot = await getPublicProductDetailSnapshotForRequest("synthetic-media-fixture");
     const assets = snapshot?.products[0]?.assets ?? [];
+    const versioned = baseUrl === "https://media.example.com";
 
     expect(assets.find((asset) => asset.id === coverId)?.path).toBe(
-      `/api/media/${coverId}?v=${coverId}`,
+      `/api/media/${coverId}${versioned ? `?v=${coverId}` : ""}`,
     );
     expect(assets.find((asset) => asset.id === galleryId)?.path).toBe(
-      `/api/media/${galleryId}?v=${galleryId}`,
+      `/api/media/${galleryId}${versioned ? `?v=${galleryId}` : ""}`,
     );
   });
 });

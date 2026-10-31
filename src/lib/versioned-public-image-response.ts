@@ -24,8 +24,8 @@ export async function versionedPublicImageResponse(request: Request, sourceUrl: 
 
   if (upstream.status === 404 || upstream.status === 410) return null;
 
-  const contentType = upstream.headers.get("content-type")?.split(";", 1)[0].trim();
-  if (!upstream.ok || !upstream.body || !contentType?.toLowerCase().startsWith("image/")) {
+  const contentType = upstream.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+  if (!upstream.ok || !upstream.body || !contentType || !["image/png", "image/jpeg", "image/webp"].includes(contentType)) {
     throw new Error(`The public image source returned HTTP ${upstream.status} or an unsupported content type.`);
   }
 
@@ -33,6 +33,7 @@ export async function versionedPublicImageResponse(request: Request, sourceUrl: 
     "Cache-Control": "public, max-age=60, s-maxage=60",
     "Content-Type": contentType,
     "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; sandbox",
   });
   for (const name of ["etag", "last-modified"] as const) {
     const value = upstream.headers.get(name);

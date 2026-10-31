@@ -22,6 +22,7 @@ describe("versioned public image source streaming", () => {
     expect(new Uint8Array(await result!.arrayBuffer())).toEqual(bytes);
     expect(result?.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
     expect(result?.headers.get("content-type")).toBe("image/webp");
+    expect(result?.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
     expect(result?.headers.get("etag")).toBe('"current"');
     expect(result?.headers.get("last-modified")).toBe("Thu, 01 Oct 2026 12:00:00 GMT");
     expect(result?.headers.get("set-cookie")).toBeNull();
@@ -36,11 +37,14 @@ describe("versioned public image source streaming", () => {
 
   it.each([
     { status: 200, type: "text/html" },
+    { status: 200, type: "image/svg+xml" },
+    { status: 200, type: "image/gif" },
     { status: 403, type: "image/webp" },
     { status: 503, type: "image/webp" },
     { status: 302, type: "image/webp" },
   ])("rejects a non-image or unsuccessful upstream response (%s)", async ({ status, type }) => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("unavailable", { status, headers: { "Content-Type": type } })));
+    const body = type === "image/svg+xml" ? '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' : "unavailable";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status, headers: { "Content-Type": type } })));
     await expect(versionedPublicImageResponse(request(), source)).rejects.toThrow("unsupported content type");
   });
 
