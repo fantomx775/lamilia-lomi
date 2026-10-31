@@ -117,7 +117,7 @@ fixture journey passed.
 The pure target/refusal tests do not contact Docker or Supabase:
 
 ```powershell
-npm test -- scripts/testing/isolated-community-target.test.mjs --maxWorkers=1
+node node_modules/vitest/vitest.mjs run scripts/testing/isolated-community-target.test.mjs --maxWorkers=1 --pool=forks
 ```
 
 The integration suite opts in explicitly and validates Docker identity before
@@ -125,7 +125,7 @@ creating its own controlled resources:
 
 ```powershell
 $env:RUN_COMMUNITY_SUPABASE_TESTS = '1'
-npm test -- src/lib/community/supabase.integration.test.ts --maxWorkers=1
+node node_modules/vitest/vitest.mjs run src/lib/community/supabase.integration.test.ts --maxWorkers=1 --pool=forks
 ```
 
 The coordinated PostgreSQL concurrency runner uses the same Node loader. It
