@@ -15,7 +15,80 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: mocks.createClient,
 }));
 
-import { getContentSnapshotForRequest } from "./content-repository";
+import {
+  getContentSnapshotForRequest,
+  getPublicR2ImageAssetByIdForRequest,
+  getPublicProductDetailSnapshotForRequest,
+} from "./content-repository";
+
+describe("public R2 image metadata lookup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getBackendMode.mockReturnValue("supabase");
+  });
+
+  it("reads only the current published public R2 image and maps its versioned path", async () => {
+    const assetId = "11111111-1111-4111-8111-111111111199";
+    const productId = "11111111-1111-4111-8111-111111111111";
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: assetId,
+        product_id: productId,
+        kind: "cover",
+        bucket: "public-media",
+        path: `products/${productId}/cover/${assetId}-cover.jpg`,
+        filename: "cover.jpg",
+        content_type: "image/jpeg",
+        size_bytes: 12_345,
+        locale: null,
+        title: null,
+        sort_order: 1,
+        is_public: true,
+        is_active: true,
+        storage_provider: "r2_public",
+        product: { status: "published" },
+      },
+      error: null,
+    });
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      maybeSingle,
+    };
+    const from = vi.fn().mockReturnValue(query);
+    mocks.createClient.mockResolvedValue({ from });
+
+    const asset = await getPublicR2ImageAssetByIdForRequest(assetId);
+
+    expect(from).toHaveBeenCalledWith("product_assets");
+    expect(query.eq).toHaveBeenNthCalledWith(1, "id", assetId);
+    expect(query.eq).toHaveBeenNthCalledWith(2, "storage_provider", "r2_public");
+    expect(query.eq).toHaveBeenNthCalledWith(3, "is_public", true);
+    expect(query.eq).toHaveBeenNthCalledWith(4, "is_active", true);
+    expect(query.in).toHaveBeenCalledWith("kind", ["cover", "gallery"]);
+    expect(asset).toMatchObject({
+      id: assetId,
+      storageProvider: "r2_public",
+      path: `/api/media/${assetId}?v=${assetId}`,
+    });
+  });
+
+  it("does not return metadata for a non-published product", async () => {
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: { product: { status: "draft" } },
+        error: null,
+      }),
+    };
+    mocks.createClient.mockResolvedValue({ from: vi.fn().mockReturnValue(query) });
+
+    await expect(getPublicR2ImageAssetByIdForRequest("11111111-1111-4111-8111-111111111199")).resolves.toBeUndefined();
+  });
+});
 
 describe("admin content premium code pagination", () => {
   beforeEach(() => {
@@ -189,5 +262,86 @@ describe("admin content premium code pagination", () => {
       { table: "product_collections", limit: 1_000 },
       { table: "product_collections", cursor: productCollections[999]?.id, limit: 1_000 },
     ]);
+  });
+});
+
+describe("public product R2 image paths", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getBackendMode.mockReturnValue("supabase");
+  });
+
+  it("serves published R2 covers and gallery images through UUID-versioned media routes", async () => {
+    const productId = "11111111-1111-4111-8111-111111111111";
+    const coverId = "22222222-2222-4222-8222-222222222222";
+    const galleryId = "33333333-3333-4333-8333-333333333333";
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: {
+        id: productId,
+        slug: "synthetic-media-fixture",
+        status: "published",
+        audience: "kids",
+        product_type: "coloring-book",
+        cover_asset_id: coverId,
+        video_asset_id: null,
+        review_delay_days: 14,
+        sort_order: 1,
+        created_at: "2026-10-17T00:00:00.000Z",
+        updated_at: "2026-10-17T00:00:00.000Z",
+        product_translations: [],
+        product_categories: [],
+        product_tags: [],
+        product_assets: [
+          {
+            id: coverId,
+            product_id: productId,
+            kind: "cover",
+            bucket: "public-media",
+            path: `products/${productId}/cover/${coverId}-cover.webp`,
+            filename: "cover.webp",
+            content_type: "image/webp",
+            locale: null,
+            title: null,
+            sort_order: 1,
+            is_public: true,
+            is_active: true,
+            storage_provider: "r2_public",
+          },
+          {
+            id: galleryId,
+            product_id: productId,
+            kind: "gallery",
+            bucket: "public-media",
+            path: `products/${productId}/gallery/${galleryId}-page.webp`,
+            filename: "page.webp",
+            content_type: "image/webp",
+            locale: null,
+            title: null,
+            sort_order: 2,
+            is_public: true,
+            is_active: true,
+            storage_provider: "r2_public",
+          },
+        ],
+        amazon_links: [],
+      },
+      error: null,
+    });
+    const query = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle,
+    };
+    mocks.createClient.mockResolvedValue({ from: vi.fn().mockReturnValue(query) });
+
+    const snapshot = await getPublicProductDetailSnapshotForRequest("synthetic-media-fixture");
+    const assets = snapshot?.products[0]?.assets ?? [];
+
+    expect(assets.find((asset) => asset.id === coverId)?.path).toBe(
+      `/api/media/${coverId}?v=${coverId}`,
+    );
+    expect(assets.find((asset) => asset.id === galleryId)?.path).toBe(
+      `/api/media/${galleryId}?v=${galleryId}`,
+    );
   });
 });

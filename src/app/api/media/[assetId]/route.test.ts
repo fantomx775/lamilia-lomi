@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAssetByIdForRequest: vi.fn(),
   getDemoSession: vi.fn(),
   getBackendMode: vi.fn(),
   getProductByIdForRequest: vi.fn(),
+  getPublicR2ImageAssetByIdForRequest: vi.fn(),
   createServiceRoleClient: vi.fn(),
   createSignedR2ReadUrl: vi.fn(),
   getR2PublicBaseUrl: vi.fn(),
@@ -19,6 +20,9 @@ vi.mock("@/lib/media-r2-config", () => ({
   r2PublicMediaUrl: mocks.r2PublicMediaUrl,
 }));
 vi.mock("@/lib/media-r2", () => ({ createSignedR2ReadUrl: mocks.createSignedR2ReadUrl }));
+vi.mock("@/lib/content-repository", () => ({
+  getPublicR2ImageAssetByIdForRequest: mocks.getPublicR2ImageAssetByIdForRequest,
+}));
 vi.mock("@/lib/products-request", () => ({
   getAssetByIdForRequest: mocks.getAssetByIdForRequest,
   getProductByIdForRequest: mocks.getProductByIdForRequest,
@@ -32,12 +36,99 @@ const productId = "11111111-1111-4111-8111-111111111111";
 const assetId = "11111111-1111-4111-8111-111111111199";
 
 describe("public media delivery", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getDemoSession.mockResolvedValue(null);
     mocks.hasAdminAccess.mockImplementation((session) => session?.role === "admin");
     mocks.getR2PublicBaseUrl.mockReturnValue(null);
     mocks.r2PublicMediaUrl.mockReturnValue(null);
+    mocks.getPublicR2ImageAssetByIdForRequest.mockResolvedValue(null);
+  });
+
+  it("rejects a mismatched explicit image version before reading media", async () => {
+    const response = await GET(
+      new Request(`https://lamilialomi.com/api/media/${assetId}?v=${productId}`),
+      { params: Promise.resolve({ assetId }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
+  });
+
+  it("serves current UUID-versioned public R2 bytes to Next Image", async () => {
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    const fetchImage = vi.fn().mockResolvedValue(new Response(bytes, {
+      headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=14400", ETag: '"source-etag"' },
+    }));
+    vi.stubGlobal("fetch", fetchImage);
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getPublicR2ImageAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}?v=${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider: "r2_public",
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      locale: null,
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getR2PublicBaseUrl.mockReturnValue("https://media.example.com");
+    mocks.r2PublicMediaUrl.mockReturnValue("https://media.example.com/current-cover.jpg");
+
+    const response = await GET(
+      new Request(`https://lamilialomi.com/api/media/${assetId}?v=${assetId}`),
+      { params: Promise.resolve({ assetId }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/jpeg");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
+    expect(response.headers.get("etag")).toBe('"source-etag"');
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    const [sourceUrl, fetchOptions] = fetchImage.mock.calls[0] ?? [];
+    expect(String(sourceUrl)).toBe("https://media.example.com/current-cover.jpg");
+    expect(fetchOptions?.cache).toBe("no-store");
+    expect(fetchOptions?.redirect).toBe("error");
+    expect(fetchOptions?.signal?.aborted).toBe(false);
+    expect(mocks.getPublicR2ImageAssetByIdForRequest).toHaveBeenCalledWith(assetId);
+    expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
+    expect(mocks.getProductByIdForRequest).not.toHaveBeenCalled();
+    expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
+  });
+
+  it("keeps legacy public R2 media URLs as redirects", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getAssetByIdForRequest.mockResolvedValue({
+      id: assetId,
+      productId,
+      kind: "cover",
+      bucket: "public-media",
+      path: `/api/media/${assetId}`,
+      storagePath: `products/${productId}/cover/${assetId}-cover.jpg`,
+      storageProvider: "r2_public",
+      filename: "cover.jpg",
+      contentType: "image/jpeg",
+      isPublic: true,
+      isActive: true,
+    });
+    mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+    mocks.getR2PublicBaseUrl.mockReturnValue("https://media.example.com");
+    mocks.r2PublicMediaUrl.mockReturnValue("https://media.example.com/current-cover.jpg");
+
+    const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), { params: Promise.resolve({ assetId }) });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://media.example.com/current-cover.jpg");
+    expect(response.headers.get("cache-control")).toBe("private, max-age=30");
   });
 
   it("redirects authorized media to a short-lived Storage URL without downloading through Next", async () => {
