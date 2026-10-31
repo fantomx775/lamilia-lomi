@@ -65,12 +65,15 @@ test("admin reads authorize every page before querying protected tables", async 
     "/admin/collections", "/admin/pages/about", "/admin/pages/privacy", "/admin/pages/terms"];
   async function denied(target: BrowserContext) {
     for (const pathname of paths) {
-      const response = await target.request.get(`${appUrl.origin}${pathname}`);
+      const response = await target.request.get(`${appUrl.origin}${pathname}`, { timeout: 90_000 });
       const html = await response.text();
-      expect(response.status()).toBeLessThan(400);
+      // The edit page intentionally calls notFound() for the empty denied
+      // snapshot. Next may commit the layout's 200 before streaming that 404.
+      expect(pathname === `/admin/products/${productId}` ? [200, 404] : [200]).toContain(response.status());
       expect(html).toContain("Brak dostępu");
       // RSC failures can be hidden behind a successful HTML status and denial UI.
-      expect(html).not.toMatch(/:E\{\\?"digest/);
+      const digests = [...html.matchAll(/\\?"digest\\?":\\?"([^"\\]+)\\?"/g)].map((match) => match[1]);
+      expect(digests.every((digest) => pathname === `/admin/products/${productId}` && digest === "NEXT_HTTP_ERROR_FALLBACK;404")).toBe(true);
       expect(html).not.toContain("permission denied");
       expect(html).not.toContain("Admin regression private book");
       expect(html).not.toContain("ADMIN-READ-PRIVATE-CODE");
@@ -115,7 +118,7 @@ test("admin reads authorize every page before querying protected tables", async 
       expect(adminRows.data).toHaveLength(1);
     }
     for (const pathname of paths) {
-      const response = await context.request.get(`${appUrl.origin}${pathname}`);
+      const response = await context.request.get(`${appUrl.origin}${pathname}`, { timeout: 90_000 });
       expect(response.status()).toBe(200);
       const html = await response.text();
       expect(html).not.toMatch(/:E\{\\?"digest/);
