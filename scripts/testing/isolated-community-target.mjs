@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const historicalProjectId = "lamilia-coloring-club-p0";
 const historicalStatusPath = "/tmp/lamilia-p0-preflight/local-supabase-status.json";
@@ -127,4 +128,23 @@ export function loadIsolatedCommunityTarget(env = process.env) {
     throw new Error("Cannot verify the selected isolated community Docker project.");
   }
   return { ...validateIsolatedCommunityTarget(status, projectId, containers), dockerExecutable, dockerEndpoint };
+}
+
+/** Python/SQL runners receive only safe metadata from the same complete target verification. */
+export function loadIsolatedCommunityDockerTarget(env = process.env) {
+  const { dockerExecutable, dockerEndpoint, databaseContainerId } = loadIsolatedCommunityTarget(env);
+  return { dockerExecutable, dockerEndpoint, databaseContainerId };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    if (process.argv.length !== 3 || process.argv[2] !== "--docker-metadata") {
+      throw new Error("Unsupported isolated-target helper option.");
+    }
+    process.stdout.write(JSON.stringify(loadIsolatedCommunityDockerTarget()) + "\n");
+  } catch {
+    // Never echo status contents, provider keys, or the output of a failed Docker invocation.
+    process.stderr.write("Cannot verify the isolated local community Docker target.\n");
+    process.exitCode = 1;
+  }
 }

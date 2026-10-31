@@ -121,6 +121,21 @@ $env:RUN_COMMUNITY_SUPABASE_TESTS = '1'
 npm test -- src/lib/community/supabase.integration.test.ts --maxWorkers=1
 ```
 
+The coordinated PostgreSQL concurrency runner uses the same Node loader. It
+receives only verified safe Docker metadata (local daemon endpoint, executable
+and immutable database container ID), never status contents or keys. It does
+not accept a container argument or implement a separate Python target policy.
+With the same private status-path/project environment already set, run:
+
+```powershell
+python -X utf8 supabase/tests/community-hearts-concurrency.py
+```
+
+The normal command executes all four existing fixed-order scenarios:
+heart/profile suspension, heart/Auth deletion, approval/profile suspension and
+approval/Auth deletion. The historical `--reproduce-old-order` diagnostic
+remains diagnostic-only and is never release acceptance.
+
 For browser runs, start the application at the selected local HTTPS origin with
 `LAMILIA_BACKEND=supabase` and only the isolated status credentials. For an
 enabled community acceptance environment, set both Coloring Club flags to true

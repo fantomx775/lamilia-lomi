@@ -10,6 +10,7 @@ import {
   assertLocalDockerEndpoint,
   isolatedCommunityConfig,
   loadIsolatedCommunityTarget,
+  loadIsolatedCommunityDockerTarget,
   validateIsolatedCommunityTarget,
 } from "./isolated-community-target.mjs";
 
@@ -59,6 +60,18 @@ describe("isolated community fixture target", () => {
     expect(args.join(" ")).not.toContain(status.DB_URL);
     expect(options).toMatchObject({ timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     expect(options.env).toMatchObject({ DOCKER_HOST: "unix:///var/run/docker.sock", DOCKER_CONTEXT: "" });
+  });
+
+  it("exports only verified safe Docker metadata to the Python SQL runner", () => {
+    const metadata = loadIsolatedCommunityDockerTarget({ COMMUNITY_SUPABASE_PROJECT_ID: projectId });
+    expect(metadata).toEqual({ dockerExecutable: process.platform === "win32" ? "docker.exe" : "docker",
+      dockerEndpoint: "unix:///var/run/docker.sock", databaseContainerId: "d".repeat(64) });
+    const output = JSON.stringify(metadata);
+    for (const privateValue of [status.ANON_KEY, status.SERVICE_ROLE_KEY, status.DB_URL]) {
+      expect(output).not.toContain(privateValue);
+    }
+    expect(metadata).not.toHaveProperty("apiUrl");
+    expect(metadata).not.toHaveProperty("projectId");
   });
 
   it.each(["unix:///var/run/docker.sock", "unix:///run/user/1000/docker.sock", "npipe:////./pipe/docker_engine", "npipe:////./pipe/dockerDesktopLinuxEngine"])
