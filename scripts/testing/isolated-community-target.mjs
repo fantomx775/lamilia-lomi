@@ -6,6 +6,21 @@ const historicalProjectId = "lamilia-coloring-club-p0";
 const historicalStatusPath = "/tmp/lamilia-p0-preflight/local-supabase-status.json";
 const isolatedApiUrl = "http://127.0.0.1:55421";
 
+export function assertLocalDockerEndpoint(endpoint) {
+  if (typeof endpoint === "string" && /^npipe:\/\/\/\/\.\/pipe\/(docker_engine|dockerDesktopLinuxEngine|dockerDesktopWindowsEngine)$/i.test(endpoint)) {
+    return endpoint;
+  }
+  let parsed;
+  try { parsed = new URL(endpoint); } catch {
+    throw new Error("Community fixtures require a local Docker named pipe or Unix socket.");
+  }
+  if (parsed.protocol !== "unix:" || parsed.hostname || parsed.username || parsed.password
+    || !parsed.pathname.startsWith("/") || !parsed.pathname.endsWith(".sock") || parsed.search || parsed.hash) {
+    throw new Error("Community fixtures require a local Docker named pipe or Unix socket.");
+  }
+  return endpoint;
+}
+
 export function isolatedCommunityConfig(env = process.env) {
   const projectId = env.COMMUNITY_SUPABASE_PROJECT_ID ?? historicalProjectId;
   const statusPath = env.COMMUNITY_SUPABASE_STATUS_PATH ?? historicalStatusPath;
@@ -61,7 +76,8 @@ export function validateIsolatedCommunityTarget(status, projectId, containers) {
       || container.Labels?.["com.supabase.cli.project"] !== projectId
       || container.Labels?.["com.docker.compose.project"] !== projectId
       || !container.Networks?.[network]
-      || !container.Ports?.[internalPort]?.some((binding) => binding.HostPort === externalPort)) {
+      || !container.Ports?.[internalPort]?.some((binding) => binding.HostPort === externalPort
+        && ["127.0.0.1", "0.0.0.0"].includes(binding.HostIp))) {
       throw new Error("The community fixture API and database must belong to the selected running local project.");
     }
   }
@@ -78,21 +94,37 @@ export function validateIsolatedCommunityTarget(status, projectId, containers) {
 /** No credentials or complete Docker inspect payloads are logged or put in subprocess arguments. */
 export function loadIsolatedCommunityTarget(env = process.env) {
   const { projectId, statusPath } = isolatedCommunityConfig(env);
+  const dockerExecutable = process.platform === "win32" ? "docker.exe" : "docker";
+  const dockerEnv = { ...process.env, ...env };
+  if (dockerEnv.DOCKER_HOST) assertLocalDockerEndpoint(dockerEnv.DOCKER_HOST);
+  let dockerEndpoint;
+  try {
+    const contextEndpoint = JSON.parse(execFileSync(dockerExecutable,
+      ["context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000, windowsHide: true, env: dockerEnv,
+      }).trim());
+    assertLocalDockerEndpoint(contextEndpoint);
+    dockerEndpoint = assertLocalDockerEndpoint(dockerEnv.DOCKER_HOST || contextEndpoint);
+  } catch {
+    throw new Error("Cannot verify a local Docker endpoint for community fixtures.");
+  }
+  // Pin subsequent commands to the verified local daemon even if another tool changes the active context.
+  dockerEnv.DOCKER_HOST = dockerEndpoint;
+  dockerEnv.DOCKER_CONTEXT = "";
   let status;
   try { status = JSON.parse(readFileSync(statusPath, "utf8")); } catch {
     throw new Error("Cannot read the private isolated community Supabase status file.");
   }
   let containers;
-  const dockerExecutable = process.platform === "win32" ? "docker.exe" : "docker";
   const format = '{"Id":{{json .Id}},"Name":{{json .Name}},"Running":{{json .State.Running}},"Labels":{{json .Config.Labels}},"Networks":{{json .NetworkSettings.Networks}},"Ports":{{json .NetworkSettings.Ports}}}';
   try {
     const output = execFileSync(dockerExecutable, ["inspect", "--format", format,
       `supabase_db_${projectId}`, `supabase_kong_${projectId}`], {
-      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000, windowsHide: true,
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000, windowsHide: true, env: dockerEnv,
     });
     containers = output.trim().split(/\r?\n/).map((line) => JSON.parse(line));
   } catch {
     throw new Error("Cannot verify the selected isolated community Docker project.");
   }
-  return { ...validateIsolatedCommunityTarget(status, projectId, containers), dockerExecutable };
+  return { ...validateIsolatedCommunityTarget(status, projectId, containers), dockerExecutable, dockerEndpoint };
 }

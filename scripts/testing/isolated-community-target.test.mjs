@@ -1,5 +1,5 @@
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ readFileSync: vi.fn(), execFileSync: vi.fn() }));
 vi.mock("node:fs", () => ({ readFileSync: mocks.readFileSync }));
@@ -7,6 +7,7 @@ vi.mock("node:child_process", () => ({ execFileSync: mocks.execFileSync }));
 
 import {
   communityTestOrigin,
+  assertLocalDockerEndpoint,
   isolatedCommunityConfig,
   loadIsolatedCommunityTarget,
   validateIsolatedCommunityTarget,
@@ -31,12 +32,19 @@ function localContainers(id = projectId) {
 }
 
 describe("isolated community fixture target", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("DOCKER_HOST", "");
+    vi.stubEnv("DOCKER_CONTEXT", "");
+    mocks.readFileSync.mockReturnValue(JSON.stringify(status));
+    mocks.execFileSync.mockImplementation((_executable, args) => args[0] === "context"
+      ? JSON.stringify("unix:///var/run/docker.sock")
+      : localContainers().map((container) => JSON.stringify(container)).join("\n"));
+  });
+  afterEach(() => vi.unstubAllEnvs());
 
   it("reads an absolute private status path and verifies both containers before returning keys", () => {
     const statusPath = path.resolve("private", "local-supabase-status.json");
-    mocks.readFileSync.mockReturnValue(JSON.stringify(status));
-    mocks.execFileSync.mockReturnValue(localContainers().map((container) => JSON.stringify(container)).join("\n"));
 
     const target = loadIsolatedCommunityTarget({
       COMMUNITY_SUPABASE_STATUS_PATH: statusPath,
@@ -45,11 +53,38 @@ describe("isolated community fixture target", () => {
 
     expect(target).toMatchObject({ apiUrl: status.API_URL, databaseContainer: `supabase_db_${projectId}`, databaseContainerId: "d".repeat(64), projectId });
     expect(mocks.readFileSync).toHaveBeenCalledWith(statusPath, "utf8");
-    const [, args, options] = mocks.execFileSync.mock.calls[0];
+    const [, args, options] = mocks.execFileSync.mock.calls.find(([, invocationArgs]) => invocationArgs[0] === "inspect");
     expect(args.slice(-2)).toEqual([`supabase_db_${projectId}`, `supabase_kong_${projectId}`]);
     expect(args.join(" ")).not.toContain(status.SERVICE_ROLE_KEY);
     expect(args.join(" ")).not.toContain(status.DB_URL);
     expect(options).toMatchObject({ timeout: 10_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    expect(options.env).toMatchObject({ DOCKER_HOST: "unix:///var/run/docker.sock", DOCKER_CONTEXT: "" });
+  });
+
+  it.each(["unix:///var/run/docker.sock", "unix:///run/user/1000/docker.sock", "npipe:////./pipe/docker_engine", "npipe:////./pipe/dockerDesktopLinuxEngine"])
+    ("accepts a local Docker endpoint %s", (endpoint) => {
+      expect(assertLocalDockerEndpoint(endpoint)).toBe(endpoint);
+    });
+
+  it.each(["tcp://remote.example:2376", "tcp://127.0.0.1:2375", "ssh://docker@remote.example", "https://remote.example", "unix://remote.example/docker.sock", "npipe:////remote/pipe/docker_engine"])
+    ("refuses remote or ambiguous Docker endpoints", (endpoint) => {
+      expect(() => assertLocalDockerEndpoint(endpoint)).toThrow("local Docker named pipe or Unix socket");
+    });
+
+  it("rejects a remote DOCKER_HOST before reading private status or contacting Docker", () => {
+    expect(() => loadIsolatedCommunityTarget({ COMMUNITY_SUPABASE_PROJECT_ID: projectId, DOCKER_HOST: "ssh://docker@remote.example" }))
+      .toThrow("local Docker named pipe or Unix socket");
+    expect(mocks.execFileSync).not.toHaveBeenCalled();
+    expect(mocks.readFileSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects a remote active context before status reads or container inspection", () => {
+    mocks.execFileSync.mockReturnValue(JSON.stringify("tcp://remote.example:2376"));
+    expect(() => loadIsolatedCommunityTarget({ COMMUNITY_SUPABASE_PROJECT_ID: projectId }))
+      .toThrow("Cannot verify a local Docker endpoint");
+    expect(mocks.execFileSync).toHaveBeenCalledTimes(1);
+    expect(mocks.execFileSync.mock.calls[0][1][0]).toBe("context");
+    expect(mocks.readFileSync).not.toHaveBeenCalled();
   });
 
   it("preserves the historical local project default", () => {
@@ -103,9 +138,27 @@ describe("isolated community fixture target", () => {
     expect(() => validateIsolatedCommunityTarget(status, projectId, containers)).toThrow("selected running local project");
   });
 
+  it.each([0, 1])("accepts an IPv4 wildcard binding for container %s", (index) => {
+    const containers = localContainers();
+    const port = index === 0 ? "5432/tcp" : "8000/tcp";
+    containers[index].Ports[port][0].HostIp = "0.0.0.0";
+    expect(validateIsolatedCommunityTarget(status, projectId, containers)).toHaveProperty("projectId", projectId);
+  });
+
+  it.each(["192.168.1.20", "::", "::1", ""])("refuses a HostPort binding which does not cover IPv4 loopback", (hostIp) => {
+    for (const index of [0, 1]) {
+      const containers = localContainers();
+      const port = index === 0 ? "5432/tcp" : "8000/tcp";
+      containers[index].Ports[port][0].HostIp = hostIp;
+      expect(() => validateIsolatedCommunityTarget(status, projectId, containers)).toThrow("selected running local project");
+    }
+  });
+
   it("fails closed without echoing Docker errors or private status contents", () => {
-    mocks.readFileSync.mockReturnValue(JSON.stringify(status));
-    mocks.execFileSync.mockImplementation(() => { throw new Error(status.SERVICE_ROLE_KEY); });
+    mocks.execFileSync.mockImplementation((_executable, args) => {
+      if (args[0] === "context") return JSON.stringify("unix:///var/run/docker.sock");
+      throw new Error(status.SERVICE_ROLE_KEY);
+    });
     expect(() => loadIsolatedCommunityTarget({ COMMUNITY_SUPABASE_PROJECT_ID: projectId }))
       .toThrow("Cannot verify the selected isolated community Docker project.");
   });

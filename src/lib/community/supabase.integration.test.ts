@@ -93,6 +93,7 @@ describe.skipIf(process.env.RUN_COMMUNITY_SUPABASE_TESTS !== "1")("community rea
             (SELECT id FROM public.community_artworks WHERE author_id IN (${ids}));
             DELETE FROM public.community_artworks WHERE author_id IN (${ids}); COMMIT;`,
           stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
         });
       }
       if (service) {

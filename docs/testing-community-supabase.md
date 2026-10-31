@@ -24,10 +24,17 @@ Before any Auth, Storage or SQL fixture write, the shared loader verifies:
 - Project slug contains only lowercase letters, digits, `_` and `-`.
 - Both the database and Kong gateway are running, carry the matching Supabase
   CLI and Docker Compose project labels, and share that project's network.
-- Those containers publish the expected database/API ports.
+- Those containers publish the expected database/API ports on IPv4 loopback
+  (`127.0.0.1`) or its wildcard (`0.0.0.0`). A matching port published only on
+  another interface or IPv6 is insufficient for the fixed IPv4 API target.
+- `DOCKER_HOST`, when present, and the selected Docker context use a local
+  named pipe or Unix socket. TCP, SSH and HTTP daemon endpoints are refused,
+  including TCP loopback endpoints which may be forwarded elsewhere.
 
 SQL fixture operations use the verified database's immutable Docker ID, so a
 later container-name reuse cannot redirect cleanup into another database.
+Their subprocesses also pin the verified local daemon endpoint, overriding
+later changes to the active Docker context.
 Docker inspection requests only identity, labels, networks and published ports;
 credentials are neither printed nor passed as subprocess arguments.
 

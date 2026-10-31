@@ -208,6 +208,7 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
     execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
       input: `UPDATE public.${table} SET created_at='${safeTimestamp}'::timestamptz WHERE id=${id}::bigint;`,
       stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
     });
   }
 
@@ -229,6 +230,7 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
     execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
       input: `UPDATE auth.users SET email_confirmed_at=${verified ? "now()" : "NULL"} WHERE id='${userId}'::uuid;`,
       stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
     });
   }
 
@@ -283,6 +285,7 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
             DELETE FROM public.community_moderation_events WHERE artwork_id IN (${ownedArt});
             DELETE FROM public.community_artworks WHERE id IN (${ownedArt}); COMMIT;`,
           stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
         });
       }
       for (const id of products) expect((await service.from("products").delete().eq("id", id)).error).toBeNull();
