@@ -1,0 +1,98 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const historicalProjectId = "lamilia-coloring-club-p0";
+const historicalStatusPath = "/tmp/lamilia-p0-preflight/local-supabase-status.json";
+const isolatedApiUrl = "http://127.0.0.1:55421";
+
+export function isolatedCommunityConfig(env = process.env) {
+  const projectId = env.COMMUNITY_SUPABASE_PROJECT_ID ?? historicalProjectId;
+  const statusPath = env.COMMUNITY_SUPABASE_STATUS_PATH ?? historicalStatusPath;
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(projectId)) {
+    throw new Error("A safe isolated community Supabase project ID is required.");
+  }
+  if (!path.isAbsolute(statusPath)) {
+    throw new Error("The isolated community status file path must be absolute.");
+  }
+  return { projectId, statusPath };
+}
+
+export function communityTestOrigin(env = process.env) {
+  const value = env.COMMUNITY_TEST_ORIGIN ?? "https://127.0.0.1:3443";
+  let origin;
+  try { origin = new URL(value); } catch {
+    throw new Error("The community test application must use its dedicated local HTTPS origin.");
+  }
+  if (origin.protocol !== "https:" || !["127.0.0.1", "localhost"].includes(origin.hostname)
+    || origin.port !== "3443" || origin.username || origin.password || origin.pathname !== "/"
+    || origin.search || origin.hash) {
+    throw new Error("The community test application must use its dedicated local HTTPS origin.");
+  }
+  return origin.origin;
+}
+
+/** Pure safety check used before creating any Auth, Storage, or SQL fixture. */
+export function validateIsolatedCommunityTarget(status, projectId, containers) {
+  isolatedCommunityConfig({ COMMUNITY_SUPABASE_PROJECT_ID: projectId });
+  if (status?.API_URL !== isolatedApiUrl || typeof status.ANON_KEY !== "string" || !status.ANON_KEY.trim()
+    || typeof status.SERVICE_ROLE_KEY !== "string" || !status.SERVICE_ROLE_KEY.trim()) {
+    throw new Error("Community fixtures require private local Supabase status on API port 55421.");
+  }
+  let databaseUrl;
+  try { databaseUrl = new URL(status.DB_URL); } catch {
+    throw new Error("The community fixture status must identify its isolated local database.");
+  }
+  if (!["postgres:", "postgresql:"].includes(databaseUrl.protocol)
+    || !["127.0.0.1", "localhost"].includes(databaseUrl.hostname)
+    || databaseUrl.port !== "55422" || databaseUrl.pathname !== "/postgres" || databaseUrl.search || databaseUrl.hash) {
+    throw new Error("The community fixture database must use its dedicated local port 55422.");
+  }
+  const databaseContainer = `supabase_db_${projectId}`;
+  const gatewayContainer = `supabase_kong_${projectId}`;
+  const network = `supabase_network_${projectId}`;
+  if (!Array.isArray(containers)) {
+    throw new Error("The community fixture API and database must belong to the selected running local project.");
+  }
+  const expected = [[databaseContainer, "5432/tcp", "55422"], [gatewayContainer, "8000/tcp", "55421"]];
+  for (const [name, internalPort, externalPort] of expected) {
+    const container = containers.find((item) => item?.Name === `/${name}`);
+    if (!container?.Running || !/^[a-f0-9]{64}$/.test(container.Id ?? "")
+      || container.Labels?.["com.supabase.cli.project"] !== projectId
+      || container.Labels?.["com.docker.compose.project"] !== projectId
+      || !container.Networks?.[network]
+      || !container.Ports?.[internalPort]?.some((binding) => binding.HostPort === externalPort)) {
+      throw new Error("The community fixture API and database must belong to the selected running local project.");
+    }
+  }
+  return {
+    apiUrl: isolatedApiUrl,
+    publishableKey: status.ANON_KEY,
+    serviceRoleKey: status.SERVICE_ROLE_KEY,
+    databaseContainer,
+    databaseContainerId: containers.find((item) => item.Name === `/${databaseContainer}`).Id,
+    projectId,
+  };
+}
+
+/** No credentials or complete Docker inspect payloads are logged or put in subprocess arguments. */
+export function loadIsolatedCommunityTarget(env = process.env) {
+  const { projectId, statusPath } = isolatedCommunityConfig(env);
+  let status;
+  try { status = JSON.parse(readFileSync(statusPath, "utf8")); } catch {
+    throw new Error("Cannot read the private isolated community Supabase status file.");
+  }
+  let containers;
+  const dockerExecutable = process.platform === "win32" ? "docker.exe" : "docker";
+  const format = '{"Id":{{json .Id}},"Name":{{json .Name}},"Running":{{json .State.Running}},"Labels":{{json .Config.Labels}},"Networks":{{json .NetworkSettings.Networks}},"Ports":{{json .NetworkSettings.Ports}}}';
+  try {
+    const output = execFileSync(dockerExecutable, ["inspect", "--format", format,
+      `supabase_db_${projectId}`, `supabase_kong_${projectId}`], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10_000, windowsHide: true,
+    });
+    containers = output.trim().split(/\r?\n/).map((line) => JSON.parse(line));
+  } catch {
+    throw new Error("Cannot verify the selected isolated community Docker project.");
+  }
+  return { ...validateIsolatedCommunityTarget(status, projectId, containers), dockerExecutable };
+}

@@ -6,8 +6,9 @@ import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextCancellationObserver } from "./next-navigation-cancellations";
 import { COMMUNITY_RULES_VERSION } from "../../../src/lib/community/rules";
+import { communityTestOrigin, loadIsolatedCommunityTarget } from "../../../scripts/testing/isolated-community-target.mjs";
 
-export const COMMUNITY_TEST_ORIGIN = "https://127.0.0.1:3443";
+export const COMMUNITY_TEST_ORIGIN = communityTestOrigin();
 
 export function createCommunityNavigationObserver(runId: string) {
   return new NextCancellationObserver({
@@ -67,11 +68,10 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
   if (testInfo.project.use.baseURL !== COMMUNITY_TEST_ORIGIN || process.env.LAMILIA_BACKEND !== "supabase") {
     throw new Error("Community browser fixtures require the isolated local HTTPS application.");
   }
-  const status = JSON.parse(await readFile("/tmp/lamilia-p0-preflight/local-supabase-status.json", "utf8"));
-  if (status.API_URL !== "http://127.0.0.1:55421") throw new Error("Unexpected community fixture database target.");
+  const target = loadIsolatedCommunityTarget();
   const options = { auth: { persistSession: false, autoRefreshToken: false } };
-  const service = createClient(status.API_URL, status.SERVICE_ROLE_KEY, options);
-  const anon = createClient(status.API_URL, status.ANON_KEY, options);
+  const service = createClient(target.apiUrl, target.serviceRoleKey, options);
+  const anon = createClient(target.apiUrl, target.publishableKey, options);
   const users: string[] = [];
   const products: string[] = [];
   const normalizedDisplayRows = new Set<string>();
@@ -205,7 +205,7 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
   function setLocalFixtureTimestamp(table: "community_moderation_events" | "community_artwork_report_events", id: string, timestamp: string) {
     if (!/^\d{1,18}$/.test(id)) throw new Error("Unsafe community event fixture ID.");
     const safeTimestamp = new Date(timestamp).toISOString();
-    execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
+    execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
       input: `UPDATE public.${table} SET created_at='${safeTimestamp}'::timestamptz WHERE id=${id}::bigint;`,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -226,7 +226,7 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
 
   function setEmailVerified(userId: string, verified: boolean) {
     if (!users.includes(userId) || !/^[a-f0-9-]{36}$/.test(userId)) throw new Error("Unsafe fixture identity.");
-    execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
+    execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
       input: `UPDATE auth.users SET email_confirmed_at=${verified ? "now()" : "NULL"} WHERE id='${userId}'::uuid;`,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -271,7 +271,7 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
         const identities = users.map((id) => `'${id}'::uuid`).join(",");
         const productIds = products.length ? products.map((id) => `'${id}'::uuid`).join(",") : "NULL::uuid";
         const ownedArt = `SELECT id FROM public.community_artworks WHERE author_id IN (${identities}) OR product_id IN (${productIds})`;
-        execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
+        execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
           input: `BEGIN;
             DELETE FROM public.community_account_media_cleanup_jobs WHERE split_part(storage_path, '/', 2)::uuid IN (${identities});
             DELETE FROM public.community_upload_reservations WHERE author_id IN (${identities}) OR product_id IN (${productIds});
