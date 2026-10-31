@@ -10,16 +10,24 @@ import * as supabase from "./supabase-adapter";
 const TEMPLATE_VERSION = "cc-status-2026-10-26-v2";
 const FROM = "LamiliaLomi <hello@lamilialomi.com>";
 
+type NotificationCounts = { claimed: number; sent: number; suppressed: number; retrying: number };
+export type CommunityNotificationResult = NotificationCounts & (
+  | { status: "ready" }
+  | { status: "disabled"; reason: "local_backend" }
+  | { status: "unconfigured"; reason: "email_provider" | "fingerprint_secret" }
+);
+const emptyCounts: NotificationCounts = { claimed: 0, sent: 0, suppressed: 0, retrying: 0 };
+
 /**
  * Sends only committed moderation outcomes. The outbox is authoritative; no
  * Resend key, lookup outage, or provider error can reverse a moderation write.
  */
-export async function processCommunityModerationNotifications(limit = 10) {
-  if (getBackendMode() !== "supabase") return { claimed: 0, sent: 0, suppressed: 0, retrying: 0 };
+export async function processCommunityModerationNotifications(limit = 10): Promise<CommunityNotificationResult> {
+  if (getBackendMode() !== "supabase") return { ...emptyCounts, status: "disabled", reason: "local_backend" };
   const resend = getResendClient();
-  if (!resend) return { claimed: 0, sent: 0, suppressed: 0, retrying: 0 };
+  if (!resend) return { ...emptyCounts, status: "unconfigured", reason: "email_provider" };
   const fingerprintSecret = process.env.AUTH_RESUME_SECRET;
-  if (!fingerprintSecret || fingerprintSecret.length < 32) return { claimed: 0, sent: 0, suppressed: 0, retrying: 0 };
+  if (!fingerprintSecret || fingerprintSecret.length < 32) return { ...emptyCounts, status: "unconfigured", reason: "fingerprint_secret" };
 
   const leaseToken = randomUUID();
   const messages = await supabase.claimModerationEmailOutbox(leaseToken, Math.min(Math.max(limit, 1), 10));
@@ -57,7 +65,7 @@ export async function processCommunityModerationNotifications(limit = 10) {
       }
     }
   }
-  return { claimed: messages.length, sent, suppressed, retrying };
+  return { status: "ready", claimed: messages.length, sent, suppressed, retrying };
 }
 
 function buildStatusMessage(status: "approved" | "rejected") {

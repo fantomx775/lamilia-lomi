@@ -368,8 +368,11 @@ test("authorized maintenance drains a real queued deletion without another owner
     expect((await fixtures.service.storage.from("collection-media").download(storagePath)).data).toBeTruthy();
     const secret = (await readFile("/tmp/lamilia-p0-preflight/community-cron-secret", "utf8")).trim();
     const cleaned = await page.request.get(endpoint, { headers: { Authorization: `Bearer ${secret}` } });
-    expect(cleaned.status()).toBe(200);
-    expect(await cleaned.json()).toEqual({ ok: true, passes: 10 });
+    expect(cleaned.status()).toBe(503);
+    // This isolated launcher deliberately has no email provider. Cleanup still
+    // completes, but dispatcher readiness must not be represented as healthy.
+    expect(await cleaned.json()).toMatchObject({ ok: false, error: "notifications_unconfigured", passes: 10,
+      notifications: { status: "unconfigured", reason: "email_provider", claimed: 0 } });
     expect((await fixtures.service.storage.from("collection-media").download(storagePath)).error).toBeTruthy();
     expect((await fixtures.service.from("community_upload_reservations").select("state").eq("author_id", owner.id)
       .eq("idempotency_key", key).single()).data?.state).toBe("cleaned");

@@ -65,14 +65,44 @@ describe("community moderation notification outbox", () => {
     expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "suppressed" }));
   });
 
-  it("leaves records queued when Resend is unconfigured and never sends in local mode", async () => {
+  it("distinguishes an unconfigured provider from an idle configured dispatcher without claiming work", async () => {
     mocks.resend = null;
-    expect(await processCommunityModerationNotifications()).toMatchObject({ claimed: 0 });
+    expect(await processCommunityModerationNotifications()).toEqual({
+      status: "unconfigured", reason: "email_provider", claimed: 0, sent: 0, suppressed: 0, retrying: 0,
+    });
     expect(mocks.claims).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.finish).not.toHaveBeenCalled();
     mocks.resend = { emails: { send: vi.fn() } };
-    mocks.mode = "local";
-    expect(await processCommunityModerationNotifications()).toMatchObject({ claimed: 0 });
+    mocks.claims.mockResolvedValue([]);
+    expect(await processCommunityModerationNotifications()).toEqual({
+      status: "ready", claimed: 0, sent: 0, suppressed: 0, retrying: 0,
+    });
+    expect(mocks.claims).toHaveBeenCalledOnce();
     expect(mocks.resend.emails.send).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", "short-secret"])("reports a missing/short fingerprint secret without claiming or sending", async (secret) => {
+    if (secret === undefined) delete process.env.AUTH_RESUME_SECRET;
+    else process.env.AUTH_RESUME_SECRET = secret;
+    const result = await processCommunityModerationNotifications();
+    expect(result).toEqual({
+      status: "unconfigured", reason: "fingerprint_secret", claimed: 0, sent: 0, suppressed: 0, retrying: 0,
+    });
+    expect(mocks.claims).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.finish).not.toHaveBeenCalled();
+    expect(mocks.resend?.emails.send).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("short-secret");
+  });
+
+  it("explicitly disables dispatch in local mode even without provider credentials", async () => {
+    mocks.mode = "local";
+    mocks.resend = null;
+    expect(await processCommunityModerationNotifications()).toEqual({
+      status: "disabled", reason: "local_backend", claimed: 0, sent: 0, suppressed: 0, retrying: 0,
+    });
+    expect(mocks.claims).not.toHaveBeenCalled();
   });
 
   it("records provider failures for durable retry without leaking details", async () => {

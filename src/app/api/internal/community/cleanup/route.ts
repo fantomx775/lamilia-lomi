@@ -25,8 +25,12 @@ export async function GET(request: Request) {
     for (let pass = 0; pass < 10; pass++) await processCommunityArtworkCleanup();
     await processCommunityAccountMediaCleanup(10);
     await processCommunityReportRetention();
-    await processCommunityModerationNotifications(10);
-    return json({ ok: true, passes: 10 });
+    const notifications = await processCommunityModerationNotifications(10);
+    if (notifications.status === "unconfigured") {
+      console.error(`[community-maintenance] Notification dispatcher is unconfigured: ${notifications.reason}.`);
+      return json({ ok: false, error: "notifications_unconfigured", passes: 10, notifications }, 503);
+    }
+    return json({ ok: true, passes: 10, notifications });
   } catch {
     console.error("[community-maintenance] Scheduled cleanup pass failed; durable work remains queued.");
     return json({ ok: false, error: "cleanup_unavailable" }, 503);

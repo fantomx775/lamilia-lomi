@@ -6,6 +6,8 @@ Approve/reject audit events enqueue one private outbox row in the same database 
 
 Only the existing Resend client is used. No API key means the item remains queued. Local mode never sends external mail. The recipient is looked up at dispatch time and must still have a confirmed Auth email and active adult community profile with current rules acceptance. Deleted, unverified, revoked, suspended, or stale-rules profiles are suppressed.
 
+Dispatcher results distinguish `ready` (including an empty queue), `disabled` for the local backend, and `unconfigured` for a missing email provider or missing/short fingerprint secret. Missing configuration does not claim or mutate outbox rows. The authenticated maintenance endpoint completes its cleanup and retention work, then returns HTTP 503 with `notifications_unconfigured` and a safe reason enum when dispatch is unconfigured. Its result includes notification counts; these measure processing/provider acceptance, not inbox delivery. The response and log contain no configuration values or recipient data. Local mode remains a successful maintenance run with notification status `disabled`.
+
 Messages contain only the generic approval/review state and a My Creations link. They contain no moderation reason, user artwork, report text, storage path, or public file URL. The sender uses the existing LamiliaLomi sender identity.
 
 ## Retry and privacy bounds
