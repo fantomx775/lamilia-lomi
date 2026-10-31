@@ -103,6 +103,9 @@ test("real private reports, admin decisions, notification intent and account med
     await expect(adminPage.getByTestId("reader-artwork-item")).toHaveCount(1);
     await expect(adminPage.getByTestId("reader-artwork-item")).toContainText("A Reader's Garden");
     await expect.poll(() => activeReaderReads.size).toBe(0);
+    const curatedPreview = adminPage.getByTestId("reader-artwork-item").locator("img").first();
+    await curatedPreview.scrollIntoViewIfNeeded();
+    await expect.poll(() => curatedPreview.evaluate((image) => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0)).toBe(true);
     await expect(adminPage.getByRole("button", { name: "Usuń produkt", exact: true })).toBeEnabled();
     observationPhase = "product deletion refusal";
     const productDestinations: string[] = [];
