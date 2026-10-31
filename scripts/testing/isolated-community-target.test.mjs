@@ -11,6 +11,7 @@ import {
   isolatedCommunityConfig,
   loadIsolatedCommunityTarget,
   loadIsolatedCommunityDockerTarget,
+  readCommunityCronSecret,
   validateIsolatedCommunityTarget,
 } from "./isolated-community-target.mjs";
 
@@ -72,6 +73,36 @@ describe("isolated community fixture target", () => {
     }
     expect(metadata).not.toHaveProperty("apiUrl");
     expect(metadata).not.toHaveProperty("projectId");
+  });
+
+  it("reads a strong maintenance bearer only from its configured absolute private file", () => {
+    const secretPath = path.resolve("private", "community-cron-secret");
+    mocks.readFileSync.mockReturnValue(`  ${"s".repeat(32)}\n`);
+    expect(readCommunityCronSecret({ COMMUNITY_CRON_SECRET_PATH: secretPath })).toBe("s".repeat(32));
+    expect(mocks.readFileSync).toHaveBeenCalledWith(secretPath, "utf8");
+    expect(mocks.execFileSync).not.toHaveBeenCalled();
+  });
+
+  it("preserves only the historical cron file path as a compatibility default", () => {
+    mocks.readFileSync.mockReturnValue("s".repeat(32));
+    readCommunityCronSecret({});
+    expect(mocks.readFileSync).toHaveBeenCalledWith("/tmp/lamilia-p0-preflight/community-cron-secret", "utf8");
+  });
+
+  it("refuses a relative cron file before reading it", () => {
+    expect(() => readCommunityCronSecret({ COMMUNITY_CRON_SECRET_PATH: "private/cron-secret" })).toThrow("must be absolute");
+    expect(mocks.readFileSync).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "s".repeat(31), `${"s".repeat(32)}\nembedded`, `${"s".repeat(32)} embedded`])
+    ("refuses weak or header-unsafe maintenance bearers without echoing them", (secret) => {
+      mocks.readFileSync.mockReturnValue(secret);
+      expect(() => readCommunityCronSecret({})).toThrow("at least 32 non-whitespace characters");
+    });
+
+  it("does not expose an unreadable private cron file or underlying error", () => {
+    mocks.readFileSync.mockImplementation(() => { throw new Error("private-file-content"); });
+    expect(() => readCommunityCronSecret({})).toThrow("Cannot read the private local community cron secret file.");
   });
 
   it.each(["unix:///var/run/docker.sock", "unix:///run/user/1000/docker.sock", "npipe:////./pipe/docker_engine", "npipe:////./pipe/dockerDesktopLinuxEngine"])

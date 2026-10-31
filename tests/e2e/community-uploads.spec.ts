@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { createCommunityNavigationObserver, communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { readCommunityCronSecret } from "../../scripts/testing/isolated-community-target.mjs";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -366,7 +367,7 @@ test("authorized maintenance drains a real queued deletion without another owner
     expect((await page.request.get(endpoint)).status()).toBe(401);
     expect((await page.request.get(endpoint, { headers: { Authorization: "Bearer invalid-fixture-token" } })).status()).toBe(401);
     expect((await fixtures.service.storage.from("collection-media").download(storagePath)).data).toBeTruthy();
-    const secret = (await readFile("/tmp/lamilia-p0-preflight/community-cron-secret", "utf8")).trim();
+    const secret = readCommunityCronSecret();
     const cleaned = await page.request.get(endpoint, { headers: { Authorization: `Bearer ${secret}` } });
     expect(cleaned.status()).toBe(503);
     // This isolated launcher deliberately has no email provider. Cleanup still

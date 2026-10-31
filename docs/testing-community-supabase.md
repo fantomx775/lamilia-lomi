@@ -16,6 +16,12 @@ Set `COMMUNITY_SUPABASE_STATUS_PATH` to an absolute private JSON status file and
 The historical Linux defaults remain supported, but are unnecessary on a fresh
 machine. `COMMUNITY_TEST_ORIGIN` optionally selects
 `https://localhost:3443`; its default is `https://127.0.0.1:3443`.
+Maintenance browser tests also use `COMMUNITY_CRON_SECRET_PATH`, an absolute
+path to the exclusive local application's private maintenance secret file.
+The loader trims the file and requires at least 32 non-whitespace characters;
+it never logs the bearer or underlying file errors. Its historical `/tmp`
+path remains a compatibility default. Configure the application process's
+`CRON_SECRET` from that same owned file; never use a Production bearer.
 
 Before any Auth, Storage or SQL fixture write, the shared loader verifies:
 
@@ -96,6 +102,7 @@ supabase status --workdir $localRoot -o json > "$localRoot\status-private.json" 
 $env:COMMUNITY_SUPABASE_STATUS_PATH = Join-Path $localRoot 'status-private.json'
 $env:COMMUNITY_SUPABASE_PROJECT_ID = $localProject
 $env:COMMUNITY_TEST_ORIGIN = 'https://localhost:3443'
+$env:COMMUNITY_CRON_SECRET_PATH = Join-Path $localRoot 'community-cron-secret'
 ```
 
 The status file must include `API_URL`, `DB_URL`, `ANON_KEY` and

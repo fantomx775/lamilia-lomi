@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createCommunityNavigationObserver, communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN as origin } from "./helpers/community-fixtures";
+import { readCommunityCronSecret } from "../../scripts/testing/isolated-community-target.mjs";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -239,7 +240,7 @@ test("real private reports, admin decisions, notification intent and account med
     // Only this controlled fixture's ledger row is aged, so the actual protected
     // maintenance worker can verify physical storage removal without sleeping.
     expect((await fixtures.service.from("community_account_media_cleanup_jobs").update({ not_before: "2020-01-01T00:00:00Z" }).eq("id", jobs.data![0].id)).error).toBeNull();
-    const cronSecret = (await readFile("/tmp/lamilia-p0-preflight/community-cron-secret", "utf8")).trim();
+    const cronSecret = readCommunityCronSecret();
     expect((await page.request.get(`${origin}/api/internal/community/cleanup`)).status()).toBe(401);
     const cleanup = await page.request.get(`${origin}/api/internal/community/cleanup`, { headers: { Authorization: `Bearer ${cronSecret}` } });
     expect(cleanup.status()).toBe(200);

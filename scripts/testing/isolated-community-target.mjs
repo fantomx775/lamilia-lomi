@@ -48,6 +48,22 @@ export function communityTestOrigin(env = process.env) {
   return origin.origin;
 }
 
+/** Read only the private local application's maintenance bearer; never log its value. */
+export function readCommunityCronSecret(env = process.env) {
+  const secretPath = env.COMMUNITY_CRON_SECRET_PATH ?? "/tmp/lamilia-p0-preflight/community-cron-secret";
+  if (!path.isAbsolute(secretPath)) {
+    throw new Error("The private community cron secret file path must be absolute.");
+  }
+  let secret;
+  try { secret = readFileSync(secretPath, "utf8").trim(); } catch {
+    throw new Error("Cannot read the private local community cron secret file.");
+  }
+  if (secret.length < 32 || /\s/.test(secret)) {
+    throw new Error("The private community cron secret must contain at least 32 non-whitespace characters.");
+  }
+  return secret;
+}
+
 /** Pure safety check used before creating any Auth, Storage, or SQL fixture. */
 export function validateIsolatedCommunityTarget(status, projectId, containers) {
   isolatedCommunityConfig({ COMMUNITY_SUPABASE_PROJECT_ID: projectId });
