@@ -93,7 +93,7 @@ export async function redeemPremiumCodeForRequest(input: {
     const existingRedemption = snapshot.products
       .find((item) => item.id === product.id)
       ?.premiumCodes.find(
-        (code) => code.redeemedAt && code.redeemedBy === redeemerId,
+        (code) => (code.redeemedAt && code.redeemedBy === redeemerId) || code.redeemedByUsers?.includes(redeemerId),
       );
 
     if (existingRedemption) {
@@ -111,7 +111,7 @@ export async function redeemPremiumCodeForRequest(input: {
       };
     }
 
-    if (matchingCode.redeemedAt) {
+    if (matchingCode.codeType !== "shared" && matchingCode.redeemedAt) {
       return { ok: false, status: "already_used" };
     }
 
@@ -129,7 +129,9 @@ export async function redeemPremiumCodeForRequest(input: {
               ...item,
               premiumCodes: item.premiumCodes.map((code) =>
                 code.id === matchingCode.id
-                  ? { ...code, redeemedAt, redeemedBy: redeemerId }
+                  ? code.codeType === "shared"
+                    ? { ...code, redeemedByUsers: [...new Set([...(code.redeemedByUsers ?? []), redeemerId])] }
+                    : { ...code, redeemedAt, redeemedBy: redeemerId }
                   : code,
               ),
             },

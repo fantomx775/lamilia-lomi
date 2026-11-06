@@ -91,7 +91,7 @@ describe("Supabase auth callback", () => {
     expect(response.headers.get("location")).not.toContain("valid");
   });
 
-  it("confirms email on another device, preserves the product return, and requires code re-entry", async () => {
+  it("confirms email on another device and binds the encrypted code to the verified email", async () => {
     resume.callbackIntent = {
       locale: "en",
       emailHash: "reader-email-hash",
@@ -123,7 +123,7 @@ describe("Supabase auth callback", () => {
     expect(resume.redeem).toHaveBeenCalledWith({
       ...resume.callbackIntent,
       userId: "new-device-user",
-      code: undefined,
+      code: "LOMI-BOOK-2026",
     });
     expect(response.headers.get("location")).toBe(
       "https://canonical.lamilialomi.example/en/products/moon-garden-coloring-book#premium",
@@ -496,7 +496,7 @@ describe("Supabase auth callback", () => {
     expect(response.headers.get("location")).not.toContain("LOMI-BOOK-2026");
   });
 
-  it("keeps the product destination for an email-only code exchange without redeeming its code", async () => {
+  it("binds the encrypted callback code only after a successful exchange matching its email", async () => {
     resume.callbackIntent = {
       locale: "en",
       emailHash: "reader-email-hash",
@@ -523,7 +523,7 @@ describe("Supabase auth callback", () => {
     expect(resume.redeem).toHaveBeenCalledWith({
       ...resume.callbackIntent,
       userId: "new-device-user",
-      code: undefined,
+      code: "LOMI-BOOK-2026",
     });
     expect(response.headers.get("location")).toBe(
       "https://canonical.lamilialomi.example/en/products/moon-garden-coloring-book#premium",
@@ -565,7 +565,7 @@ describe("Supabase auth callback", () => {
     expect(resume.redeem).toHaveBeenCalledWith({
       ...resume.callbackIntent,
       userId: "reader-user",
-      code: undefined,
+      code: "LOMI-BOOK-2026",
     });
     expect(resume.clearUnlock).toHaveBeenCalledTimes(1);
     expect(resume.setUnlock).not.toHaveBeenCalled();

@@ -271,6 +271,17 @@ export async function loginDemoAction(formData: FormData) {
     }),
   );
 
+  if (formCode && returnProductSlug && !email.toLowerCase().includes("unverified")) {
+    const product = await getProductBySlugForRequest(returnProductSlug);
+    if (product) {
+      const redemption = await redeemPremiumCodeForRequest({ productId: product.id, productSlug: product.slug, code: formCode });
+      if (redemption.ok) {
+        await clearUnlockIntent();
+        redirect(appendQueryPath(getAuthResumeRedirect({ locale, productSlug: product.slug, returnTo }, locale), "unlocked", redemption.status === "already_unlocked" ? "already" : "1"));
+      }
+    }
+  }
+
   redirect(
     getAuthResumeRedirect(
       { locale, productSlug: returnProductSlug, returnTo },
@@ -632,6 +643,21 @@ export async function verifyDemoEmailAction(formData: FormData) {
   }
 
   await setDemoSession({ ...session, emailVerified: true });
+  const unlockIntent = await getUnlockIntent();
+  if (unlockIntent?.code && unlockIntent.locale === locale && unlockIntent.returnTo === returnTo) {
+    const product = await getProductBySlugForRequest(unlockIntent.productSlug);
+    if (product) {
+      const redemption = await redeemPremiumCodeForRequest({
+        productId: product.id,
+        productSlug: product.slug,
+        code: unlockIntent.code,
+      });
+      if (redemption.ok) {
+        await clearUnlockIntent();
+        redirect(appendQueryPath(buildAuthRedirect({ locale, redirectTo: returnTo }), "unlocked", redemption.status === "already_unlocked" ? "already" : "1"));
+      }
+    }
+  }
   redirect(buildAuthRedirect({ locale, redirectTo: returnTo }));
 }
 

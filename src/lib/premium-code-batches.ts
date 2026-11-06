@@ -51,12 +51,12 @@ export function exportPremiumCodesToCsv(product: Product, appUrl = getCanonicalA
   const title = product.translations.find((translation) => translation.locale === "en")?.title ?? product.slug;
   const rows = [
     ["product_title", "product_slug", "premium_code", "status", "active", "redeemed_at", "qr_payload"],
-    ...product.premiumCodes.map((code) => {
+    ...product.premiumCodes.filter((code) => code.codeType !== "shared").map((code) => {
       const status = code.redeemedAt
         ? code.active ? "redeemed" : "redeemed_disabled"
         : code.active ? "unused" : "disabled";
       const qrPayload = code.active && !code.redeemedAt
-        ? buildQrPayload(appUrl, product.slug, product.id, code.code)
+        ? buildQrPayload(appUrl, product.id, code.code)
         : "";
 
       return [
@@ -85,10 +85,9 @@ function formatGeneratedCode(hex: string) {
   return `LL-${groups.join("-")}`;
 }
 
-function buildQrPayload(appUrl: URL, slug: string, productId: string, code: string) {
-  const payload = new URL(`/api/unlock/en/${encodeURIComponent(slug)}`, appUrl);
-  payload.searchParams.set("productId", productId);
-  payload.searchParams.set("code", code);
+function buildQrPayload(appUrl: URL, productId: string, code: string) {
+  const payload = new URL(`/en/unlock/${encodeURIComponent(productId)}`, appUrl);
+  payload.hash = new URLSearchParams({ productId, code }).toString();
   return payload.toString();
 }
 

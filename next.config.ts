@@ -6,6 +6,9 @@ const r2PublicBaseUrl = getR2PublicBaseUrl();
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
+  outputFileTracingIncludes: {
+    "/api/admin/products/*/shared-code": ["./src/lib/fonts/NotoSansMono-Regular.ttf"],
+  },
   logging: {
     incomingRequests: {
       ignore: [/\/auth\/callback(?:\?|$)/],

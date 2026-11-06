@@ -27,6 +27,7 @@ import { MAX_PREMIUM_CODE_BATCH_SIZE, MAX_PREMIUM_CODE_LENGTH, validatePremiumCo
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Collection, Product, ProductAsset, Tag } from "@/lib/types";
 import { ReaderArtworkManager } from "./reader-artwork-manager";
+import { SharedPremiumCodeManager } from "./shared-premium-code-manager";
 import { useAdminToast } from "@/components/admin/admin-toast";
 import { AdminSaveBar } from "@/components/admin/admin-save-bar";
 
@@ -1132,6 +1133,7 @@ export function ProductEditor({
             </AdminEditorSection>
 
             <AdminEditorSection title="Dostęp premium" description="Kody są przypisane do tego produktu. Wykorzystanych kodów nie można zmienić ani usunąć.">
+              <SharedPremiumCodeManager key={product?.id ?? "new-product"} productId={product?.id} isPublished={product?.status === "published"} initialCode={product?.premiumCodes.find((code) => code.codeType === "shared")} />
               <div id="product-premium-codes" className="grid gap-3">
                 {fieldErrors["product-premium-codes"]?.map((message) => <p key={message} role="alert" className="text-sm text-red-800">{message}</p>)}
                 {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}
@@ -1853,7 +1855,7 @@ function buildPremiumCodes(
     });
   }
 
-  return (product?.premiumCodes ?? []).map((code) => ({ clientId: `existing-code-${code.id}`, id: code.id, code: code.code, active: code.active, redeemedAt: code.redeemedAt, removed: false }));
+  return (product?.premiumCodes ?? []).filter((code) => code.codeType !== "shared").map((code) => ({ clientId: `existing-code-${code.id}`, id: code.id, code: code.code, active: code.active, redeemedAt: code.redeemedAt, removed: false }));
 }
 
 function createClientId() {

@@ -279,6 +279,16 @@ export default async function ProductPage({ params, searchParams }: Props) {
     );
   }
 
+  if (product.slug !== slug) {
+    const current = new URL(`/${locale}/products/${product.slug}`, getCanonicalAppUrl());
+    for (const key of ["step", "unlock", "unlocked"]) {
+      const value = stringParam(query[key]);
+      if (value) current.searchParams.set(key, value.slice(0, 128));
+    }
+    current.hash = "premium";
+    redirect(`${current.pathname}${current.search}${current.hash}`);
+  }
+
   const productCopy = await getTranslations("Product");
   const galleryImages = product.gallery.map((asset) => ({
     id: asset.id,

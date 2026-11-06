@@ -1022,6 +1022,7 @@ function mapPremiumCode(row: DbRow): PremiumCode {
     productId: stringValue(row.product_id),
     code: stringValue(row.code),
     active: Boolean(row.active),
+    ...(row.code_type === "shared" ? { codeType: "shared" as const } : {}),
     ...(redeemedAt ? { redeemedAt } : {}),
     ...(redeemedBy ? { redeemedBy } : {}),
   };

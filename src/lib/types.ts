@@ -124,6 +124,8 @@ export type PremiumCode = {
   productId: string;
   code: string;
   active: boolean;
+  codeType?: "single_use" | "shared";
+  redeemedByUsers?: string[];
   redeemedAt?: string;
   redeemedBy?: string;
 };

@@ -135,7 +135,7 @@ describe("admin premium code batch and export routes", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(response.headers.get("content-disposition")).toContain("attachment;");
-    expect(csv).toContain(`https://lamilialomi.test/api/unlock/en/printed-book?productId=${productId}&code=LL-UNUSED`);
+    expect(csv).toContain(`https://lamilialomi.test/en/unlock/${productId}#productId=${productId}&code=LL-UNUSED`);
     expect(csv).toContain("\"unused\",\"yes\"");
     expect(csv).toContain("\"disabled\",\"no\"");
     expect(csv).toContain("\"redeemed\",\"yes\",\"2026-10-10T12:00:00.000Z\"");

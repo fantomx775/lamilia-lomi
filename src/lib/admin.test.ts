@@ -385,6 +385,23 @@ describe("admin behavior", () => {
     expect(omitted.product.premiumCodes).toEqual([redeemedCode]);
   });
 
+  it("preserves the authoritative shared print code across omitted or forged product fields", () => {
+    const snapshot = getSeedContentSnapshot();
+    const source = snapshot.products[0];
+    const shared = { id: "shared-print-code", productId: source.id, code: "KDP-STABLE", codeType: "shared" as const, active: false, redeemedByUsers: ["reader-a"] };
+    const existing = { ...source, premiumCodes: [shared] };
+    const forged = new FormData();
+    forged.set("premiumCodeId", shared.id);
+    forged.set("premiumCode", "ROTATED");
+    forged.set("premiumCodeActive", shared.id);
+    forged.set("premiumCodeRemove", shared.id);
+    for (const form of [new FormData(), forged]) {
+      const result = buildProductFromFormData(form, { existing, snapshot });
+      expect(result.product.premiumCodes).toEqual([shared]);
+      expect(result.errors).not.toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+    }
+  });
+
   it("allows disabling a redeemed code without changing its owner or timestamp", () => {
     const snapshot = getSeedContentSnapshot();
     const source = snapshot.products[0];

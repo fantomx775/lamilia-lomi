@@ -171,9 +171,6 @@ test("premium code intent survives login and unlocks the product", async ({ page
   await page.getByLabel("Email").fill("premium-flow-reader@example.com");
   await page.getByRole("button", { name: "Continue" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
-  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
-  await page.getByRole("button", { name: "Unlock premium content" }).click();
 
   await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}\\?unlocked=1#premium$`));
   await expect(page.getByTestId("unlock-success-state")).toBeVisible();
@@ -205,10 +202,6 @@ test("premium code intent survives local registration, demo verification, and un
   await saveEvidenceScreenshot(page, testInfo, "premium-registration-verification");
 
   await verifyButton.click();
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
-  await expect(page.getByTestId("unlock-code-state")).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
-  await page.getByRole("button", { name: "Unlock premium content" }).click();
 
   await expect(page).toHaveURL(
     new RegExp(`/en/products/${productSlug}\\?unlocked=1#premium$`),

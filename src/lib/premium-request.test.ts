@@ -271,6 +271,27 @@ describe("authorizePremiumDownloadForRequest", () => {
 });
 
 describe("redeemPremiumCodeForRequest in local mode", () => {
+  it("lets different accounts claim one shared code concurrently and preserves each entitlement", async () => {
+    const productId = "local-shared-product";
+    const code = "SHARED-KDP-CODE";
+    let snapshot = { products: [{ id: productId, premiumCodes: [{ id: "shared-1", productId, code, codeType: "shared", active: true, redeemedByUsers: [] as string[] }] }] };
+    mocks.getBackendMode.mockReturnValue("local");
+    mocks.getProductBySlug.mockReturnValue({ id: productId });
+    mocks.getContentSnapshot.mockImplementation(() => snapshot);
+    mocks.saveContentSnapshot.mockImplementation((value: typeof snapshot) => { snapshot = value; });
+    mocks.getDemoSession.mockResolvedValueOnce({ email: "first@example.com", emailVerified: true, unlockedProductIds: [] }).mockResolvedValueOnce({ email: "second@example.com", emailVerified: true, unlockedProductIds: [] });
+    const results = await Promise.all([redeemPremiumCodeForRequest({ productSlug: "book", productId, code }), redeemPremiumCodeForRequest({ productSlug: "book", productId, code })]);
+    expect(results.map((result) => result.status)).toEqual(["success", "success"]);
+    expect(snapshot.products[0].premiumCodes[0].redeemedByUsers).toEqual(["email:first@example.com", "email:second@example.com"]);
+    expect(snapshot.products[0].premiumCodes[0]).not.toHaveProperty("redeemedAt");
+    snapshot.products[0].premiumCodes[0].active = false;
+    mocks.getDemoSession.mockResolvedValueOnce({ email: "first@example.com", emailVerified: true, unlockedProductIds: [] });
+    await expect(redeemPremiumCodeForRequest({ productSlug: "book", productId, code })).resolves.toMatchObject({ ok: true, status: "already_unlocked" });
+    mocks.getDemoSession.mockResolvedValueOnce({ email: "third@example.com", emailVerified: true, unlockedProductIds: [] });
+    await expect(redeemPremiumCodeForRequest({ productSlug: "book", productId, code })).resolves.toEqual({ ok: false, status: "inactive_code" });
+    mocks.saveContentSnapshot.mockClear();
+  });
+
   it("allows one account to claim a code when two accounts redeem it concurrently", async () => {
     type LocalSnapshot = {
       products: Array<{
