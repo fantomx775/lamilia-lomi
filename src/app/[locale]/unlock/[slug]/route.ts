@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { isSupportedLocale } from "@/lib/locale";
+import { getCanonicalAppUrl } from "@/lib/config";
+import { getLocalizedProductViewByIdForRequest, getLocalizedProductViewForRequest } from "@/lib/products-request";
 
 export const dynamic = "force-dynamic";
 
@@ -14,11 +16,20 @@ export async function GET(request: Request, { params }: {
   if (!isSupportedLocale(locale) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
     return new Response("Not found", { status: 404 });
   }
-  const endpoint = `/api/unlock/${locale}/${slug}`;
   const url = new URL(request.url);
+  try {
+    const productId = url.searchParams.get("productId") || (/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(slug) ? slug : null);
+    const product = productId
+      ? await getLocalizedProductViewByIdForRequest(productId, locale)
+      : await getLocalizedProductViewForRequest(slug, locale);
+    if (!product) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return new Response("Book temporarily unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
+  const endpoint = `/api/unlock/${locale}/${slug}`;
   // Compatibility for previously printed query-string links.
   if (url.searchParams.has("code") || url.searchParams.has("premiumCode")) {
-    const target = new URL(endpoint, url.origin);
+    const target = new URL(endpoint, getCanonicalAppUrl());
     for (const key of ["productId", "code", "premiumCode"]) {
       const value = url.searchParams.get(key);
       if (value) target.searchParams.set(key, value);

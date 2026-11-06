@@ -286,9 +286,9 @@ test("mobile unlock flow stays English and has no language selector", async ({ p
   await page.getByLabel("Email").fill("locked@example.com");
   await page.getByRole("button", { name: "Continue" }).click();
   expect(page.url()).not.toContain("code=");
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
+  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}\\?unlocked=1#premium$`));
   await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
-  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
+  await expect(page.getByTestId("unlock-success-state")).toBeVisible();
 });
 
 test("mobile unlock keeps its code tied to the matching product across legacy redirects", async ({ page }) => {
