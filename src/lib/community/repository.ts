@@ -335,27 +335,39 @@ export async function consumeCommunityRateLimit(
   return supabase.consumeRateLimit(scope, identifier, maxHits, windowSeconds);
 }
 
-export async function processCommunityArtworkCleanup(actor?: CommunityActor) {
+export async function processCommunityArtworkCleanup(actor?: CommunityActor, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const candidates: CommunityUploadCleanupCandidate[] = getBackendMode() === "local"
     ? await localStore.claimUploadCleanup(actor?.backend === "local" ? actor : undefined, 10)
-    : await supabase.claimArtworkUploadCleanup(10);
-  for (const candidate of candidates) await removeAndFinishArtworkCleanup(candidate);
+    : await supabase.claimArtworkUploadCleanup(10, signal);
+  for (const candidate of candidates) {
+    signal?.throwIfAborted();
+    await removeAndFinishArtworkCleanup(candidate, signal);
+  }
 }
 
-export async function processCommunityReportRetention() {
+export async function processCommunityReportRetention(signal?: AbortSignal) {
+  signal?.throwIfAborted();
   if (getBackendMode() === "local") return localStore.purgeExpiredReportDetails();
-  return supabase.purgeExpiredReportDetails();
+  return supabase.purgeExpiredReportDetails(signal);
 }
 
-export async function processCommunityAccountMediaCleanup(limit = 20) {
+export async function processCommunityAccountMediaCleanup(limit = 20, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   if (getBackendMode() === "local") {
     const candidates = await localStore.claimAccountMediaCleanup(limit);
-    for (const candidate of candidates) await removeAccountMediaCleanupCandidate(candidate);
+    for (const candidate of candidates) {
+      signal?.throwIfAborted();
+      await removeAccountMediaCleanupCandidate(candidate, signal);
+    }
     return { claimed: candidates.length };
   }
   const leaseToken = randomUUID();
-  const candidates = await supabase.claimAccountMediaCleanup(leaseToken, Math.min(Math.max(limit, 1), 50));
-  for (const candidate of candidates) await removeAccountMediaCleanupCandidate(candidate);
+  const candidates = await supabase.claimAccountMediaCleanup(leaseToken, Math.min(Math.max(limit, 1), 50), signal);
+  for (const candidate of candidates) {
+    signal?.throwIfAborted();
+    await removeAccountMediaCleanupCandidate(candidate, signal);
+  }
   return { claimed: candidates.length };
 }
 
@@ -363,21 +375,23 @@ export async function cleanupCommunityUploadCandidate(candidate: CommunityUpload
   await removeAndFinishArtworkCleanup(candidate);
 }
 
-async function removeAndFinishArtworkCleanup(candidate: CommunityUploadCleanupCandidate) {
+async function removeAndFinishArtworkCleanup(candidate: CommunityUploadCleanupCandidate, signal?: AbortSignal) {
   try {
     await removeCommunityArtworkImage({
       authorId: candidate.authorId,
       storagePath: candidate.storagePath,
       storageProvider: candidate.storageProvider,
+      ...(signal ? { signal } : {}),
     });
     if (getBackendMode() === "local") await localStore.finishUploadCleanup(candidate);
-    else await supabase.finishArtworkUploadCleanup(candidate);
+    else await supabase.finishArtworkUploadCleanup(candidate, signal);
   } catch {
+    signal?.throwIfAborted();
     console.error("[community-media] Private artwork cleanup will retry.");
   }
 }
 
-async function removeAccountMediaCleanupCandidate(candidate: CommunityAccountMediaCleanupCandidate | supabase.AccountMediaCleanupJob) {
+async function removeAccountMediaCleanupCandidate(candidate: CommunityAccountMediaCleanupCandidate | supabase.AccountMediaCleanupJob, signal?: AbortSignal) {
   const local = "storagePath" in candidate;
   const provider = local ? candidate.storageProvider : candidate.storage_provider;
   const storagePath = local ? candidate.storagePath : candidate.storage_path;
@@ -385,13 +399,14 @@ async function removeAccountMediaCleanupCandidate(candidate: CommunityAccountMed
   const match = /^community\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.exec(storagePath);
   try {
     if (!match) throw new Error("Invalid account cleanup object key.");
-    await removeCommunityArtworkImage({ authorId: match[1]!, storagePath, storageProvider: provider });
+    await removeCommunityArtworkImage({ authorId: match[1]!, storagePath, storageProvider: provider, ...(signal ? { signal } : {}) });
     if (local) await localStore.finishAccountMediaCleanup(candidate, "deleted");
-    else await supabase.finishAccountMediaCleanup(Number(candidate.id), leaseToken, "deleted");
+    else await supabase.finishAccountMediaCleanup(Number(candidate.id), leaseToken, "deleted", signal);
   } catch {
+    signal?.throwIfAborted();
     try {
       if (local) await localStore.finishAccountMediaCleanup(candidate, "retry");
-      else await supabase.finishAccountMediaCleanup(Number(candidate.id), leaseToken, "retry");
+      else await supabase.finishAccountMediaCleanup(Number(candidate.id), leaseToken, "retry", signal);
     } catch {
       // A fenced lease will become eligible on a later scheduled pass.
     }

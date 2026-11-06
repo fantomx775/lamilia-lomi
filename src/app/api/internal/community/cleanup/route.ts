@@ -1,7 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
-import { processCommunityAccountMediaCleanup, processCommunityArtworkCleanup, processCommunityReportRetention } from "@/lib/community/repository";
-import { processCommunityModerationNotifications } from "@/lib/community/notifications";
+import { runCommunityMaintenance } from "@/lib/community/maintenance";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -19,14 +18,9 @@ export async function GET(request: Request) {
     return json({ ok: false, error: "unauthorized" }, 401);
   }
   try {
-    // Each pass claims up to ten new rows with SQL/file-backed fencing. Failed
-    // deletions retain their durable lease and retry on a later invocation.
-    // Run independently of public/upload flags so pausing the club cannot stop cleanup.
-    for (let pass = 0; pass < 10; pass++) await processCommunityArtworkCleanup();
-    await processCommunityAccountMediaCleanup(10);
-    await processCommunityReportRetention();
-    await processCommunityModerationNotifications(10);
-    return json({ ok: true, passes: 10 });
+    const result = await runCommunityMaintenance();
+    if (!result.ok) console.error(`[community-maintenance] Maintenance incomplete: ${result.error}.`);
+    return json(result, result.ok ? 200 : 503);
   } catch {
     console.error("[community-maintenance] Scheduled cleanup pass failed; durable work remains queued.");
     return json({ ok: false, error: "cleanup_unavailable" }, 503);

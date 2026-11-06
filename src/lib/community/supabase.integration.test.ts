@@ -1,6 +1,5 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -9,6 +8,7 @@ vi.mock("server-only", () => ({}));
 import * as adapter from "./supabase-adapter";
 import { getCommunityPublicArtwork, listCommunityPublicArtworks } from "./repository";
 import type { CommunityActor } from "./session";
+import { loadIsolatedCommunityTarget } from "../../../scripts/testing/isolated-community-target.mjs";
 
 /** Explicitly opt in; never use deployed/customer resources as test fixtures. */
 describe.skipIf(process.env.RUN_COMMUNITY_SUPABASE_TESTS !== "1")("community real local Auth/PostgREST repository", () => {
@@ -19,6 +19,7 @@ describe.skipIf(process.env.RUN_COMMUNITY_SUPABASE_TESTS !== "1")("community rea
   let admin: CommunityActor;
   let other: CommunityActor;
   let artworkId: string;
+  let target: ReturnType<typeof loadIsolatedCommunityTarget>;
   const userIds: string[] = [];
   const productId = randomUUID();
   const token = randomUUID().replaceAll("-", "").slice(0, 12);
@@ -27,22 +28,17 @@ describe.skipIf(process.env.RUN_COMMUNITY_SUPABASE_TESTS !== "1")("community rea
   const password = `Cc-${randomUUID()}-9!`;
 
   beforeAll(async () => {
-    const status = JSON.parse(readFileSync(
-      "/tmp/lamilia-p0-preflight/local-supabase-status.json", "utf8",
-    )) as Record<string, string>;
-    if (status.API_URL !== "http://127.0.0.1:55421") {
-      throw new Error("Community integration tests require the isolated Lamilia API on port 55421.");
-    }
+    target = loadIsolatedCommunityTarget();
     vi.stubEnv("LAMILIA_BACKEND", "supabase");
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://localhost:3443");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", status.API_URL);
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", status.ANON_KEY);
-    vi.stubEnv("SUPABASE_SECRET_KEY", status.SERVICE_ROLE_KEY);
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", target.apiUrl);
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", target.publishableKey);
+    vi.stubEnv("SUPABASE_SECRET_KEY", target.serviceRoleKey);
     vi.stubEnv("COLORING_CLUB_PUBLIC_ENABLED", "true");
     const options = { auth: { autoRefreshToken: false, persistSession: false } };
-    service = createClient(status.API_URL, status.SERVICE_ROLE_KEY, options);
-    anon = createClient(status.API_URL, status.ANON_KEY, options);
-    signedIn = createClient(status.API_URL, status.ANON_KEY, options);
+    service = createClient(target.apiUrl, target.serviceRoleKey, options);
+    anon = createClient(target.apiUrl, target.publishableKey, options);
+    signedIn = createClient(target.apiUrl, target.publishableKey, options);
 
     async function createActor(kind: "member" | "admin" | "other"): Promise<CommunityActor> {
       const { data, error } = await service.auth.admin.createUser({
@@ -87,7 +83,7 @@ describe.skipIf(process.env.RUN_COMMUNITY_SUPABASE_TESTS !== "1")("community rea
         // database's superuser removes exactly this run's controlled fixtures.
         if (userIds.some((id) => !/^[0-9a-f-]{36}$/.test(id))) throw new Error("Unsafe cleanup identity.");
         const ids = userIds.map((id) => `'${id}'::uuid`).join(",");
-        execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0",
+        execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId,
           "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
           input: `BEGIN;
             DELETE FROM public.community_moderation_email_outbox WHERE moderation_event_id IN
@@ -97,6 +93,7 @@ describe.skipIf(process.env.RUN_COMMUNITY_SUPABASE_TESTS !== "1")("community rea
             (SELECT id FROM public.community_artworks WHERE author_id IN (${ids}));
             DELETE FROM public.community_artworks WHERE author_id IN (${ids}); COMMIT;`,
           stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
         });
       }
       if (service) {
