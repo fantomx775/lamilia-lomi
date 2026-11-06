@@ -2115,7 +2115,10 @@ export function validateBrowserVerification({
       details: "Browser verification is not required for the detected change scope.",
     };
   }
-  const record = localVerification?.record?.browser;
+  // Validate observed URLs before redaction removes query data needed to bind
+  // login destinations and Next navigations. Keep the public result redacted.
+  const rawRecord = (localVerification && PRIVATE_RAW_VERIFICATION_RECORD.get(localVerification)) || localVerification?.record;
+  const record = rawRecord?.browser;
   if (!record) {
     return {
       status: "NOT RUN",
@@ -2211,7 +2214,7 @@ export function validateBrowserVerification({
   if (record.status !== "PASS" || !record.tool || !record.flows?.length) {
     failures.push("browser tool, affected flow, or PASS result is missing");
   }
-  return {
+  return redactPersistedData({
     status: valid
       ? "PASS"
       : record.status === "FAIL" || console.status === "FAIL" || network.status === "FAIL" ||
@@ -2226,7 +2229,7 @@ export function validateBrowserVerification({
     details: valid
       ? "Browser flow, screenshots, responsive checks, console/network inspection, and final retest are recorded."
       : failures.join("; "),
-  };
+  });
 }
 
 export function validateReleaseEvidence({ files = [], filesAvailable = true, localVerification }) {

@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/site-header";
 import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { getAdminLayoutAccessForRequest } from "@/lib/session.server";
+import { getBackendMode } from "@/lib/config";
 import { AdminToastProvider } from "@/components/admin/admin-toast";
 
 const nav: DashboardNavItem[] = [
@@ -35,6 +36,7 @@ async function AdminAccessLayout({ children }: { children: React.ReactNode }) {
   const access = await getAdminLayoutAccessForRequest();
 
   if (!access) {
+    const isDemo = getBackendMode() === "local";
     return (
       <>
         <SiteHeader locale="en" />
@@ -45,11 +47,12 @@ async function AdminAccessLayout({ children }: { children: React.ReactNode }) {
             </CardHeader>
             <CardContent>
               <p className="text-sm leading-6 text-[var(--color-muted)]">
-                Panel admina jest dostępny tylko dla użytkownika z rolą admin.
-                Zaloguj się jako `admin@lamilialomi.test`, aby zobaczyć tryb demo.
+                {isDemo
+                  ? "Panel admina jest dostępny tylko dla użytkownika z rolą admin. Zaloguj się jako admin@lamilialomi.test, aby zobaczyć tryb demo."
+                  : "Panel admina jest dostępny tylko dla użytkownika z rolą admin. Zaloguj się na konto administratora, aby otworzyć panel."}
               </p>
-              <NavigationLink pendingLabel="Przechodzenie do logowania" className={buttonClassName({ className: "mt-5" })} href="/en/login?redirectTo=/admin">
-                Logowanie demo
+              <NavigationLink pendingLabel="Przechodzenie do logowania" className={buttonClassName({ className: "mt-5" })} href="/en/login?returnTo=/admin">
+                {isDemo ? "Logowanie demo" : "Logowanie"}
               </NavigationLink>
             </CardContent>
           </Card>

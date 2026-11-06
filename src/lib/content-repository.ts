@@ -4,6 +4,7 @@ import { cache } from "react";
 
 import { getBackendMode } from "@/lib/config";
 import { createClient } from "@/lib/supabase/server";
+import { getAdminLayoutAccessForRequest } from "@/lib/session.server";
 
 import { normalizeCatalogSettings } from "./catalog-settings";
 import { normalizeAboutPageSettings } from "./about-settings";
@@ -630,6 +631,23 @@ export async function getContentSnapshotForRequest(options: {
   includePremiumCodes?: boolean;
   includeCollections?: boolean;
 } = {}): Promise<ContentSnapshot> {
+  // Layouts and pages render independently. Denying the layout does not stop
+  // its children from querying, so authorize here before starting any reads.
+  if (
+    (options.includePremiumCodes || options.includeCollections) &&
+    !(await getAdminLayoutAccessForRequest())
+  ) {
+    return {
+      products: [],
+      collections: [],
+      categories: [],
+      tags: [],
+      staticPages: [],
+      catalogSettings: normalizeCatalogSettings(undefined),
+      aboutPageSettings: normalizeAboutPageSettings(undefined),
+    };
+  }
+
   if (getBackendMode() === "local") {
     const { getContentSnapshot } = await import("./content-store");
     const snapshot = getContentSnapshot();
