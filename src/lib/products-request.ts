@@ -1,6 +1,8 @@
 import "server-only";
 
 import { cache } from "react";
+import { getBackendMode } from "./config";
+import { createClient } from "./supabase/server";
 
 import {
   getAdminContentSnapshot,
@@ -28,7 +30,10 @@ export async function getProductBySlugForRequest(
     ? await getAdminContentSnapshot()
     : await getPublicContentSnapshot();
 
-  return snapshot.products.find((product) => product.slug === slug);
+  const current = snapshot.products.find((product) => product.slug === slug);
+  if (current || options.includeDrafts) return current;
+  const productId = await resolveHistoricalProductSlug(slug);
+  return productId ? snapshot.products.find((product) => product.id === productId) : undefined;
 }
 
 export async function getProductByIdForRequest(
@@ -64,7 +69,19 @@ export async function getLocalizedProductViewForRequest(
     ? await getAdminContentSnapshot()
     : await getPublicContentSnapshot();
 
-  return getLocalizedProductViewFromSnapshot(snapshot, slug, requestedLocale, options);
+  const current = getLocalizedProductViewFromSnapshot(snapshot, slug, requestedLocale, options);
+  if (current || options.includeDrafts) return current;
+  const productId = await resolveHistoricalProductSlug(slug);
+  const product = productId ? snapshot.products.find((item) => item.id === productId) : null;
+  return product ? getLocalizedProductViewFromSnapshot(snapshot, product.slug, requestedLocale, options) : null;
+}
+
+async function resolveHistoricalProductSlug(slug: string): Promise<string | null> {
+  if (getBackendMode() !== "supabase" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("product_slug_aliases").select("product_id").eq("slug", slug).maybeSingle();
+  if (error) throw new Error("Could not resolve the printed book link.");
+  return typeof data?.product_id === "string" ? data.product_id : null;
 }
 
 export async function getLocalizedProductViewByIdForRequest(
@@ -82,7 +99,15 @@ export async function getLocalizedProductViewByIdForRequest(
 const getLocalizedProductDetailViewForRequestCached = cache(
   async (slug: string, requestedLocale: string | undefined) => {
     await delayProductDetailForE2E();
-    const snapshot = await getPublicProductDetailSnapshotForRequest(slug);
+    let snapshot = await getPublicProductDetailSnapshotForRequest(slug);
+    if (!snapshot) {
+      const productId = await resolveHistoricalProductSlug(slug);
+      const product = productId ? await getProductByIdForRequest(productId) : null;
+      if (product) {
+        snapshot = await getPublicProductDetailSnapshotForRequest(product.slug);
+        slug = product.slug;
+      }
+    }
 
     return snapshot
       ? getLocalizedProductViewFromSnapshot(snapshot, slug, requestedLocale)

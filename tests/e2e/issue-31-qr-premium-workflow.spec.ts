@@ -76,9 +76,6 @@ test.describe("Issue 31 local QR and premium workflow", () => {
     await expect(page.getByTestId("unlock-verification-state")).toBeVisible();
 
     await page.getByRole("button", { name: "Mark demo email as verified" }).click();
-    await expect(page.getByTestId("unlock-code-state")).toBeVisible();
-    await expect(page.getByLabel("Premium code")).toHaveValue(premiumCode);
-    await page.getByRole("button", { name: "Unlock premium content" }).click();
 
     await expect(page).toHaveURL(
       new RegExp(`/en/products/${productSlug}\\?unlocked=1#premium$`),

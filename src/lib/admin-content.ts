@@ -755,6 +755,12 @@ function parsePremiumCodes(
     const existingId = valueAt(ids, index);
     const existingCode = existingId ? existingById.get(existingId) : undefined;
 
+    // Shared print codes have a separate management endpoint. A stale product
+    // editor must never rotate, remove or reactivate one of these printed codes.
+    if (existingCode?.codeType === "shared") {
+      return existingCode;
+    }
+
     if (existingId && removed.has(existingId)) {
       if (existingCode?.redeemedAt) {
         errors.push(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
@@ -782,6 +788,10 @@ function parsePremiumCodes(
   }).filter((code): code is Product["premiumCodes"][number] => Boolean(code));
 
   for (const existingCode of existing?.premiumCodes ?? []) {
+    if (existingCode.codeType === "shared") {
+      if (!rows.some((row) => row.id === existingCode.id)) rows.push(existingCode);
+      continue;
+    }
     if (submittedIds.has(existingCode.id) || removed.has(existingCode.id)) {
       continue;
     }

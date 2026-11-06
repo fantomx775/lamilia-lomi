@@ -121,15 +121,19 @@ export async function GET(request: Request) {
       ? cookieIntent
       : null;
 
-  // An email-bound callback token is enough to preserve the destination, but
-  // it cannot authorize the premium code. Reuse a code only when a separate,
-  // signed cookie already binds it to the authenticated user.
+  // Only a freshly successful Auth exchange plus the confirmed account's
+  // matching email can bind an encrypted callback intent on another device.
+  // A cookie or an existing session alone cannot establish this binding.
   const verifiedIntent =
     intent && user?.id && !intent.userId
       ? {
           ...intent,
           userId: user.id,
-          code: matchingBoundCookieIntent?.code,
+          code: matchingBoundCookieIntent?.code ?? (
+            user.email_confirmed_at && callbackIntent?.emailHash && authResumeIntentMatchesEmail(callbackIntent, user.email)
+              ? callbackIntent.code
+              : undefined
+          ),
         }
       : intent;
 
@@ -287,6 +291,7 @@ function appendQuery(path: string, key: string, value: string) {
 function successResponse(path: string) {
   const response = NextResponse.redirect(new URL(path, getCanonicalAppUrl()));
   response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Referrer-Policy", "no-referrer");
 
   return response;
 }
@@ -310,6 +315,7 @@ function failureResponse(
 
   const response = NextResponse.redirect(target);
   response.headers.set("Cache-Control", "private, no-store");
+  response.headers.set("Referrer-Policy", "no-referrer");
 
   return response;
 }

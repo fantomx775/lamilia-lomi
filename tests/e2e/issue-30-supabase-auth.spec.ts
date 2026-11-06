@@ -374,21 +374,14 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       completed.crossDeviceSessionCookieEstablished = true;
       completed.sessionEstablishedForAccountOne = await isConfirmedUser(admin, userOne.email);
       expect(completed.sessionEstablishedForAccountOne).toBe(true);
-      completed.emailOnlyCallbackDidNotRedeemPremiumCode =
-        !(await hasUnlock(admin, userOne.email));
-      expect(completed.emailOnlyCallbackDidNotRedeemPremiumCode).toBe(true);
-
-      const crossDeviceUnlock = crossDevicePage.getByTestId("unlock-code-state");
-      await crossDeviceUnlock.getByLabel("Premium code").fill(premiumCode);
-      await crossDeviceUnlock
-        .getByRole("button", { name: "Unlock premium content", exact: true })
-        .click();
+      completed.encryptedCallbackAutomaticallyRedeemedPremiumCode = await hasUnlock(admin, userOne.email);
+      expect(completed.encryptedCallbackAutomaticallyRedeemedPremiumCode).toBe(true);
       await waitForLocation(crossDevicePage, {
         pathname: `/en/products/${productSlug}`,
         query: { unlocked: "1" },
         hash: "#premium",
       });
-      completed.premiumCodeReenteredAfterCrossDeviceConfirmation = true;
+      completed.noCodeReentryAfterCrossDeviceConfirmation = true;
       completed.premiumIntentRedeemedForAccountOne = await hasUnlock(admin, userOne.email);
       expect(completed.premiumIntentRedeemedForAccountOne).toBe(true);
 

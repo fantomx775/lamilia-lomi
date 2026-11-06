@@ -143,12 +143,10 @@ test("guest login preserves code intent without putting code in the auth return 
   await page.getByLabel("Email").fill("locked@example.com");
   await page.getByRole("button", { name: "Continue" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}#premium$`));
-  await expect(page.getByTestId("product-unlock-section")).toBeInViewport();
+  await expect(page.getByTestId("unlock-success-state")).toBeVisible();
   expect(page.url()).not.toContain("code=");
-  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
   await page.reload();
-  await expect(page.getByLabel("Premium code")).toHaveValue("LOMI-BOOK-2026");
+  await expect(page.getByTestId("unlock-success-state")).toBeVisible();
 });
 
 test("generic login opens account creation without unlock context", async ({ page }) => {
