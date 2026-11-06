@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/config", () => ({
   getCanonicalAppUrl: () => new URL("https://canonical.lamilialomi.example"),
+  getBackendMode: () => mocks.getBackendMode(),
 }));
 
 const mocks = vi.hoisted(() => ({
+  getBackendMode: vi.fn(),
   getLocalizedProductViewByIdForRequest: vi.fn(),
   getLocalizedProductViewForRequest: vi.fn(),
   getUnlockIntent: vi.fn(),
@@ -31,6 +33,7 @@ import { GET, POST } from "./route";
 describe("QR unlock origin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getBackendMode.mockReturnValue("local");
     mocks.getLocalizedProductViewForRequest.mockResolvedValue({
       slug: "moon-garden-coloring-book",
     });
@@ -124,6 +127,19 @@ describe("QR unlock origin", () => {
 
   it("rejects cross-origin POSTs before reading or storing a code", async () => {
     const response = await POST(new Request("https://edge.example/api/unlock/en/book", { method: "POST", headers: { origin: "https://evil.example" }, body: "code=SECRET" }), { params: Promise.resolve({ locale: "en", slug: "book" }) });
+    expect(response.status).toBe(403);
+    expect(mocks.setUnlockIntent).not.toHaveBeenCalled();
+  });
+
+  it("rejects an opaque null Origin", async () => {
+    const response = await POST(new Request("https://edge.example/api/unlock/en/book", { method: "POST", headers: { origin: "null", "content-type": "application/x-www-form-urlencoded" }, body: "code=SECRET" }), { params: Promise.resolve({ locale: "en", slug: "book" }) });
+    expect(response.status).toBe(403);
+    expect(mocks.setUnlockIntent).not.toHaveBeenCalled();
+  });
+
+  it("requires the configured canonical origin with the Supabase backend", async () => {
+    mocks.getBackendMode.mockReturnValue("supabase");
+    const response = await POST(new Request("https://internal.example/api/unlock/en/book", { method: "POST", headers: { origin: "https://internal.example", "content-type": "application/x-www-form-urlencoded" }, body: "code=SECRET" }), { params: Promise.resolve({ locale: "en", slug: "book" }) });
     expect(response.status).toBe(403);
     expect(mocks.setUnlockIntent).not.toHaveBeenCalled();
   });

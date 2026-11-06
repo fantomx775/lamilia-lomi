@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCanonicalAppUrl } from "@/lib/config";
+import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { isSupportedLocale } from "@/lib/locale";
 import { redeemPremiumCodeForRequest } from "@/lib/premium-request";
 import {
@@ -25,7 +25,8 @@ export async function GET(request: Request, { params }: Props) {
 
 export async function POST(request: Request, { params }: Props) {
   const origin = request.headers.get("origin");
-  if (origin !== getCanonicalAppUrl().origin && origin !== new URL(request.url).origin) {
+  const isLocalOrigin = getBackendMode() === "local" && origin === new URL(request.url).origin;
+  if (origin !== getCanonicalAppUrl().origin && !isLocalOrigin) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   if (!request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {

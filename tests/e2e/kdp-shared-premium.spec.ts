@@ -30,6 +30,9 @@ async function scan(page: Page) {
 
 test("private QR survives signup and verification; a second account and repeat scans keep access", async ({ page, context }, info) => {
   const leakedRequests: string[] = [];
+  const browserErrors: string[] = [];
+  page.on("pageerror", error => browserErrors.push(error.message));
+  page.on("console", message => { if (message.type() === "error") browserErrors.push(message.text()); });
   page.on("request", request => {
     if (request.url().includes(code)) leakedRequests.push(request.url());
   });
@@ -50,7 +53,7 @@ test("private QR survives signup and verification; a second account and repeat s
   fs.mkdirSync(path.dirname(filename), { recursive: true });
   await page.screenshot({ path: filename, fullPage: false });
   await context.clearCookies();
-  await page.goto(`/en/products/${slug}#premium`);
+  await page.reload();
   await page.getByTestId("product-unlock-section").getByLabel("Premium code").fill(code);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await expect(page).toHaveURL(/\/en\/login\?/, { timeout: 120_000 });
@@ -63,4 +66,5 @@ test("private QR survives signup and verification; a second account and repeat s
   expect(downloadUrl).toBeTruthy();
   const download = await page.request.get(downloadUrl!, { headers: { accept: "application/json" } });
   expect(download.status()).toBe(200);
+  expect(browserErrors).toEqual([]);
 });

@@ -43,6 +43,12 @@ describe("admin shared premium code API", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
+  it("accepts the configured public origin when Next receives the request on an internal host", async () => {
+    const response = await POST(new Request(`http://localhost:3000/api/admin/products/${productId}/shared-code`, { method: "POST", headers: { origin: "https://book.test", "content-type": "application/json" }, body: '{"active":true}' }), context);
+    expect(response.status).toBe(200);
+    expect(mocks.rpc).toHaveBeenCalledOnce();
+  });
+
   it("calls the authenticated atomic RPC without accepting a replacement code", async () => {
     const response = await POST(request({ active: false, code: "UNWANTED-ROTATION" }), context);
     expect(response.status).toBe(200);

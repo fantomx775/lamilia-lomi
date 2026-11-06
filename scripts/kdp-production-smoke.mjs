@@ -82,6 +82,9 @@ try {
   const scan = `/en/unlock/${product.id}#${new URLSearchParams({ productId: product.id, code: code.code })}`;
   const page = await a.context.newPage();
   let leaked = false;
+  let browserErrors = 0;
+  page.on('pageerror', () => { browserErrors += 1; });
+  page.on('console', (message) => { if (message.type() === 'error') browserErrors += 1; });
   page.on('request', (r) => { if (r.url().includes(code.code)) leaked = true; });
   await page.goto(scan);
   await page.getByTestId('unlock-success-state').waitFor();
@@ -103,6 +106,8 @@ try {
   const row = ok(await admin.from('premium_codes').select('redeemed_at,redeemed_by,code_type').eq('id', code.id).single(), 'Shared state');
   assert.equal(row.code_type, 'shared'); assert.equal(row.redeemed_at, null); assert.equal(row.redeemed_by, null);
   check('Shared code remains unconsumed');
+  assert.equal(browserErrors, 0, 'Production browser must have no new console or script errors');
+  check('Production premium browser flow has no console or script errors');
   await guest.close();
   report.status = 'PASS';
 } catch (error) {

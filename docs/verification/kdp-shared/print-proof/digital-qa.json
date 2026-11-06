@@ -1,0 +1,48 @@
+{
+  "decoder": "zxing-cpp",
+  "all_pass": true,
+  "results": [
+    {
+      "file": "sample-pdf-150dpi.png",
+      "pixels": [
+        414,
+        485
+      ],
+      "payload_matches": true
+    },
+    {
+      "file": "sample-pdf-300dpi.png",
+      "pixels": [
+        827,
+        969
+      ],
+      "payload_matches": true
+    },
+    {
+      "file": "sample-pdf-300dpi.png",
+      "variant": "blur_0.8px",
+      "payload_matches": true
+    },
+    {
+      "file": "sample-svg-150dpi.png",
+      "pixels": [
+        413,
+        484
+      ],
+      "payload_matches": true
+    },
+    {
+      "file": "sample-svg-300dpi.png",
+      "pixels": [
+        827,
+        969
+      ],
+      "payload_matches": true
+    },
+    {
+      "file": "sample-svg-300dpi.png",
+      "variant": "blur_0.8px",
+      "payload_matches": true
+    }
+  ]
+}

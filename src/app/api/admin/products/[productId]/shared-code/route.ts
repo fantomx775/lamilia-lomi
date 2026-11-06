@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { hasAdminAccess } from "@/lib/auth";
-import { getBackendMode } from "@/lib/config";
+import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { getAdminContentSnapshot } from "@/lib/content-repository";
 import { getContentSnapshot, saveContentSnapshot } from "@/lib/content-store";
 import { createPremiumCodeBatch } from "@/lib/premium-code-batches";
@@ -16,7 +16,7 @@ const privateHeaders = { "Cache-Control": "private, no-store", "Referrer-Policy"
 
 export async function POST(request: Request, { params }: Context) {
   if (!await isAdmin()) return json({ error: "unauthorized" }, 401);
-  if (request.headers.get("origin") !== new URL(request.url).origin) return json({ error: "invalid_request" }, 403);
+  if (!isTrustedOrigin(request)) return json({ error: "invalid_request" }, 403);
   const { productId } = await params;
   let body: unknown;
   try { body = await request.json(); } catch { return json({ error: "invalid_request" }, 400); }
@@ -68,6 +68,13 @@ export async function GET(request: Request, { params }: Context) {
 
 async function isAdmin() {
   try { return hasAdminAccess(await getDemoSession()); } catch { return false; }
+}
+
+function isTrustedOrigin(request: Request) {
+  try {
+    const origin = request.headers.get("origin");
+    return origin === getCanonicalAppUrl().origin || (getBackendMode() === "local" && origin === new URL(request.url).origin);
+  } catch { return false; }
 }
 
 function json(body: Record<string, unknown>, status: number) {

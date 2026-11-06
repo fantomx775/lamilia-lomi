@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SharedPremiumCodeManager } from "./shared-premium-code-manager";
@@ -38,5 +39,3 @@ describe("shared premium code manager", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 });
-/** @vitest-environment jsdom */
-
