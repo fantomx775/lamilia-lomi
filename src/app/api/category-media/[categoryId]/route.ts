@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getBackendMode } from "@/lib/config";
 import { getPublicContentSnapshot } from "@/lib/content-repository";
 import { getR2PublicBaseUrl, isSafeCategoryImageStoragePath, r2PublicMediaUrl } from "@/lib/media-r2-config";
+import { versionedPublicImageResponse } from "@/lib/versioned-public-image-response";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 type Props = { params: Promise<{ categoryId: string }> };
@@ -12,11 +13,11 @@ export async function GET(request: Request, { params }: Props) {
   if (!isUuid(categoryId)) return notFound();
 
   const requestedImageId = new URL(request.url).searchParams.get("v");
-  if (requestedImageId && !isUuid(requestedImageId)) return notFound();
+  if (requestedImageId !== null && !isUuid(requestedImageId)) return notFound();
 
   if (getBackendMode() === "local") {
     const category = (await getPublicContentSnapshot()).categories.find((entry) => entry.id === categoryId);
-    if (!category?.image || (requestedImageId && requestedImageId !== category.image.id)) return notFound();
+    if (!category?.image || (requestedImageId !== null && requestedImageId !== category.image.id)) return notFound();
     const response = NextResponse.redirect(new URL(category.image.path, request.url));
     response.headers.set("Cache-Control", "private, max-age=30");
     return response;
@@ -39,7 +40,7 @@ export async function GET(request: Request, { params }: Props) {
   const provider = data?.image_storage_provider;
   if (
     !isUuid(imageId) ||
-    (requestedImageId && requestedImageId !== imageId) ||
+    (requestedImageId !== null && requestedImageId !== imageId) ||
     !isSafeCategoryImageStoragePath(storagePath, categoryId, imageId) ||
     (provider !== "supabase" && provider !== "r2_public")
   ) {
@@ -48,7 +49,11 @@ export async function GET(request: Request, { params }: Props) {
 
   if (provider === "r2_public") {
     const publicUrl = r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", storagePath);
-    return publicUrl ? redirect(publicUrl) : notFound();
+    return publicUrl
+      ? requestedImageId
+        ? serveVersionedImage(request, publicUrl, categoryId, imageId)
+        : redirect(publicUrl)
+      : notFound();
   }
 
   const { data: signedData, error: signedError } = await supabase.storage
@@ -66,7 +71,32 @@ export async function GET(request: Request, { params }: Props) {
     return notFound();
   }
   if (signedUrl.protocol !== "https:") return notFound();
-  return redirect(signedUrl.toString());
+  return requestedImageId
+    ? serveVersionedImage(request, signedUrl.toString(), categoryId, imageId)
+    : redirect(signedUrl.toString());
+}
+
+async function serveVersionedImage(request: Request, sourceUrl: string, categoryId: string, imageId: string) {
+  try {
+    const response = await versionedPublicImageResponse(request, sourceUrl);
+    return response ?? notFound();
+  } catch (error) {
+    console.error("[category-media] Nie udało się pobrać aktualnego obrazu kategorii.", {
+      categoryId,
+      imageId,
+      status: storageErrorStatusCode(error),
+    });
+    return NextResponse.json({ error: "Obraz chwilowo niedostępny." }, {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+}
+
+function storageErrorStatusCode(error: unknown) {
+  if (typeof error !== "object" || error === null || !("status" in error)) return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
 }
 
 function redirect(destination: string) {

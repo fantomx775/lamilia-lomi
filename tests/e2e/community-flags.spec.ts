@@ -1,10 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { communityArtifactPath, communityHtmlCheck, communityFixtures, essentials, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 import { COMMUNITY_RULES_VERSION } from "../../src/lib/community/rules";
+import { readCommunityCronSecret } from "../../scripts/testing/isolated-community-target.mjs";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -111,8 +112,12 @@ test("disabled switches block real public images and mutations while preserving 
     await panel.getByRole("button", { name: "Leave the Coloring Club", exact: true }).click();
     await panel.getByRole("button", { name: "Confirm leave", exact: true }).click();
     await expect(panel.getByRole("status")).toContainText("You left");
-    const cronSecret = (await readFile("/tmp/lamilia-p0-preflight/community-cron-secret", "utf8")).trim();
-    expect((await page.request.get(`${origin}/api/internal/community/cleanup`, { headers: { Authorization: `Bearer ${cronSecret}` } })).status()).toBe(200);
+    const cronSecret = readCommunityCronSecret();
+    const maintenance = await page.request.get(`${origin}/api/internal/community/cleanup`, { headers: { Authorization: `Bearer ${cronSecret}` } });
+    expect(maintenance.status()).toBe(503);
+    expect(await maintenance.json()).toMatchObject({ error: "notifications_unconfigured",
+      stages: { retention: "completed", artworkMedia: "completed", accountMedia: "completed" },
+      notifications: { status: "unconfigured", reason: "email_provider" } });
     await writeFile(await communityArtifactPath("cc07", "public-off-proof.json"), JSON.stringify({
       status: "PASS", testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
       runId: process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc07-public-off-1", publicEnabled: false,

@@ -11,6 +11,7 @@ import {
 export function createServiceRoleClient(options?: {
   storageAuthorizationToken?: string;
   storageRequestTimeoutMs?: number;
+  requestSignal?: AbortSignal;
 }) {
   if (getBackendMode() !== "supabase") {
     throw new Error("The Supabase service-role client is unavailable in local mode.");
@@ -24,7 +25,7 @@ export function createServiceRoleClient(options?: {
       autoRefreshToken: false,
       persistSession: false,
     },
-    ...(!usesLegacyJwt || options?.storageRequestTimeoutMs
+    ...(!usesLegacyJwt || options?.storageRequestTimeoutMs || options?.requestSignal
       ? {
           global: {
             ...(!usesLegacyJwt ? { headers: {
@@ -46,7 +47,9 @@ export function createServiceRoleClient(options?: {
               const timeout = options?.storageRequestTimeoutMs
                 ? AbortSignal.timeout(options.storageRequestTimeoutMs)
                 : undefined;
-              const signal = timeout && init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout ?? init?.signal;
+              const signals = [init?.signal, timeout, options?.requestSignal].filter((signal): signal is AbortSignal => Boolean(signal));
+              const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+              signal?.throwIfAborted();
               return fetch(input, { ...init, headers, ...(signal ? { signal } : {}) });
             },
           },

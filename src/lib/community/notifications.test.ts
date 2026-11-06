@@ -52,8 +52,8 @@ describe("community moderation notification outbox", () => {
     }), { idempotencyKey: "community-moderation/41" });
     expect(message?.text).toContain("Your Coloring Club artwork was approved. You can review its status in My Creations.");
     expect(message?.text).not.toMatch(/visible in the gallery/i);
-    expect(mocks.prepare).toHaveBeenCalledWith(41, expect.any(String), expect.stringMatching(/^[a-f0-9]{64}$/), "cc-status-2026-10-26-v2");
-    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "sent", providerMessageId: "resend-id" }));
+    expect(mocks.prepare).toHaveBeenCalledWith(41, expect.any(String), expect.stringMatching(/^[a-f0-9]{64}$/), "cc-status-2026-10-26-v2", undefined);
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "sent", providerMessageId: "resend-id" }), undefined);
     expect(JSON.stringify(mocks.prepare.mock.calls)).not.toContain("author@example.test");
   });
 
@@ -62,24 +62,54 @@ describe("community moderation notification outbox", () => {
     const result = await processCommunityModerationNotifications(1);
     expect(result).toMatchObject({ claimed: 1, suppressed: 1 });
     expect(mocks.resend?.emails.send).not.toHaveBeenCalled();
-    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "suppressed" }));
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "suppressed" }), undefined);
   });
 
-  it("leaves records queued when Resend is unconfigured and never sends in local mode", async () => {
+  it("distinguishes an unconfigured provider from an idle configured dispatcher without claiming work", async () => {
     mocks.resend = null;
-    expect(await processCommunityModerationNotifications()).toMatchObject({ claimed: 0 });
+    expect(await processCommunityModerationNotifications()).toEqual({
+      status: "unconfigured", reason: "email_provider", claimed: 0, sent: 0, suppressed: 0, retrying: 0,
+    });
     expect(mocks.claims).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.finish).not.toHaveBeenCalled();
     mocks.resend = { emails: { send: vi.fn() } };
-    mocks.mode = "local";
-    expect(await processCommunityModerationNotifications()).toMatchObject({ claimed: 0 });
+    mocks.claims.mockResolvedValue([]);
+    expect(await processCommunityModerationNotifications()).toEqual({
+      status: "ready", claimed: 0, sent: 0, suppressed: 0, retrying: 0,
+    });
+    expect(mocks.claims).toHaveBeenCalledOnce();
     expect(mocks.resend.emails.send).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", "short-secret"])("reports a missing/short fingerprint secret without claiming or sending", async (secret) => {
+    if (secret === undefined) delete process.env.AUTH_RESUME_SECRET;
+    else process.env.AUTH_RESUME_SECRET = secret;
+    const result = await processCommunityModerationNotifications();
+    expect(result).toEqual({
+      status: "unconfigured", reason: "fingerprint_secret", claimed: 0, sent: 0, suppressed: 0, retrying: 0,
+    });
+    expect(mocks.claims).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.finish).not.toHaveBeenCalled();
+    expect(mocks.resend?.emails.send).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain("short-secret");
+  });
+
+  it("explicitly disables dispatch in local mode even without provider credentials", async () => {
+    mocks.mode = "local";
+    mocks.resend = null;
+    expect(await processCommunityModerationNotifications()).toEqual({
+      status: "disabled", reason: "local_backend", claimed: 0, sent: 0, suppressed: 0, retrying: 0,
+    });
+    expect(mocks.claims).not.toHaveBeenCalled();
   });
 
   it("records provider failures for durable retry without leaking details", async () => {
     mocks.resend!.emails.send.mockResolvedValueOnce({ data: null, error: new Error("provider secret and recipient") });
     const result = await processCommunityModerationNotifications(1);
     expect(result).toMatchObject({ claimed: 1, retrying: 1 });
-    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "retry", errorCode: "provider_error" }));
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "retry", errorCode: "provider_error" }), undefined);
     expect(JSON.stringify(mocks.finish.mock.calls)).not.toMatch(/provider secret|author@example/);
   });
 });

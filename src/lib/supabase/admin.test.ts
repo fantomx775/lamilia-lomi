@@ -58,6 +58,29 @@ describe("createServiceRoleClient", () => {
     expect(options.global).toBeUndefined();
   });
 
+  it("cancels actual client fetch with a maintenance signal for legacy and secret keys", async () => {
+    for (const serverKey of ["eyJlegacy-service-role-jwt", "sb_secret_test"]) {
+      mocks.createClient.mockClear();
+      mocks.getServiceRoleKey.mockReturnValue(serverKey);
+      const controller = new AbortController();
+      let seenSignal: AbortSignal | undefined;
+      const transport = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        seenSignal = init.signal ?? undefined;
+        seenSignal!.addEventListener("abort", () => reject(seenSignal!.reason), { once: true });
+      }));
+      vi.stubGlobal("fetch", transport);
+      createServiceRoleClient({ requestSignal: controller.signal, storageRequestTimeoutMs: 60_000 });
+      const [, , options] = mocks.createClient.mock.calls[0];
+      const pending = options.global.fetch("https://example.supabase.co/storage/v1/object", { method: "DELETE" });
+      controller.abort(new Error("owned request deadline"));
+      await expect(pending).rejects.toThrow("owned request deadline");
+      expect(seenSignal?.aborted).toBe(true);
+      expect(transport).toHaveBeenCalledOnce();
+      expect(() => options.global.fetch("https://example.supabase.co/rest/v1/rpc/cleanup")).toThrow("owned request deadline");
+      expect(transport).toHaveBeenCalledOnce();
+    }
+  });
+
   it("uses apikey for any non-JWT server key format", async () => {
     const serverKey = "server-key-from-migrated-environment";
     const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));

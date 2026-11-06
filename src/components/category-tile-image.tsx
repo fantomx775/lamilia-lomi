@@ -4,7 +4,7 @@ import Image from "next/image";
 import { BookOpen } from "lucide-react";
 import { useState } from "react";
 
-import { isMediaProxyPath } from "@/lib/media-upload";
+import { isCategoryMediaProxyPath, isMediaProxyPath } from "@/lib/media-upload";
 
 export function CategoryTileImage({ src, sizes = "56px" }: { src?: string | null; sizes?: string }) {
   const [failedSource, setFailedSource] = useState<string | null>(null);
@@ -29,7 +29,7 @@ export function CategoryTileImage({ src, sizes = "56px" }: { src?: string | null
       alt=""
       fill
       sizes={sizes}
-      unoptimized={isMediaProxyPath(src) || src.startsWith("/api/category-media/")}
+      unoptimized={isMediaProxyPath(src) || isCategoryMediaProxyPath(src)}
       onError={() => setFailedSource(src)}
       className="object-contain p-1"
     />

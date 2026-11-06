@@ -2,11 +2,12 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { communityArtifactPath, createCommunityNavigationObserver, loginCommunityFixture } from "./helpers/community-fixtures";
+import { communityArtifactPath, createCommunityNavigationObserver, loginCommunityFixture, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 import { COMMUNITY_RULES_VERSION } from "../../src/lib/community/rules";
+import { loadIsolatedCommunityTarget } from "../../scripts/testing/isolated-community-target.mjs";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -14,13 +15,12 @@ test("real club membership, concurrency, privacy and responsive account/profile 
   test.skip(process.env.RUN_COMMUNITY_PROFILES_E2E !== "1" || testInfo.project.name !== "chromium",
     "Requires the explicitly isolated Lamilia Supabase/HTTPS application; run once with one worker.");
   test.setTimeout(240_000);
-  const appOrigin = "https://127.0.0.1:3443";
+  const appOrigin = COMMUNITY_TEST_ORIGIN;
   if (testInfo.project.use.baseURL !== appOrigin || process.env.LAMILIA_BACKEND !== "supabase") {
     throw new Error("Community browser fixtures require Supabase mode and the isolated HTTPS app on port 3443.");
   }
-  const status = JSON.parse(await readFile("/tmp/lamilia-p0-preflight/local-supabase-status.json", "utf8"));
-  if (status.API_URL !== "http://127.0.0.1:55421") throw new Error("Wrong local Supabase test target.");
-  const service = createClient(status.API_URL, status.SERVICE_ROLE_KEY, {
+  const target = loadIsolatedCommunityTarget();
+  const service = createClient(target.apiUrl, target.serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   const ids: string[] = [];
@@ -251,8 +251,9 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     const unverifiedPage = await newPage();
     await login(unverifiedPage, unverified.email);
     if (!/^[0-9a-f-]{36}$/.test(unverified.id)) throw new Error("Unsafe local fixture identity.");
-    execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
+    execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
       input: `UPDATE auth.users SET email_confirmed_at=NULL WHERE id='${unverified.id}'::uuid;`, stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
     });
     expect([401, 403]).toContain((await postJoin(unverifiedPage, "p0_unverified")).status);
     expect((await service.from("community_profiles").select("user_id").eq("user_id", unverified.id)).data).toEqual([]);
@@ -284,7 +285,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
             if (objects.length && (await service.storage.from("collection-media").remove(objects)).error) throw new Error("Isolated profile fixture object cleanup failed.");
           }
           const literals = ids.map((id) => `'${id}'::uuid`).join(",");
-          execFileSync("docker", ["exec", "-i", "supabase_db_lamilia-coloring-club-p0", "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
+          execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
             input: `BEGIN; DELETE FROM public.community_upload_reservations WHERE author_id IN (${literals});
               DELETE FROM public.community_moderation_email_outbox WHERE moderation_event_id IN
                 (SELECT id FROM public.community_moderation_events WHERE artwork_id IN
@@ -292,6 +293,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
               DELETE FROM public.community_moderation_events WHERE artwork_id IN
               (SELECT id FROM public.community_artworks WHERE author_id IN (${literals}));
               DELETE FROM public.community_artworks WHERE author_id IN (${literals}); COMMIT;`, stdio: ["pipe", "pipe", "pipe"],
+            env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
           });
           for (const id of ids) {
             const result = await service.auth.admin.deleteUser(id);

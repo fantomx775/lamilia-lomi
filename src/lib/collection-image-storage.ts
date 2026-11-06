@@ -160,8 +160,10 @@ export async function removeCollectionImage(input: {
   storagePath: string;
   provider: CollectionImageProvider;
   authorizationToken?: string | null;
+  signal?: AbortSignal;
 }) {
   assertPath(input.storagePath, input.collectionId);
+  input.signal?.throwIfAborted();
 
   if (input.provider === "local") {
     await fs.rm(localImagePath(input.storagePath), { force: true });
@@ -170,7 +172,8 @@ export async function removeCollectionImage(input: {
   if (input.provider === "r2") {
     const { privateBucket } = getR2StorageConfig();
     await getR2Client().send(new DeleteObjectCommand({ Bucket: privateBucket, Key: input.storagePath }), {
-      ...(input.storagePath.startsWith("community/") ? { abortSignal: AbortSignal.timeout(60_000) } : {}),
+      ...(input.signal ? { abortSignal: input.signal }
+        : input.storagePath.startsWith("community/") ? { abortSignal: AbortSignal.timeout(60_000) } : {}),
     });
     return;
   }
@@ -178,6 +181,7 @@ export async function removeCollectionImage(input: {
   const { error } = await createServiceRoleClient({
     storageAuthorizationToken: input.authorizationToken ?? undefined,
     ...(input.storagePath.startsWith("community/") ? { storageRequestTimeoutMs: 60_000 } : {}),
+    ...(input.signal ? { requestSignal: input.signal } : {}),
   }).storage.from(COLLECTION_IMAGE_BUCKET).remove([input.storagePath]);
   if (error) throw new Error(`Collection image cleanup failed: ${error.message}`);
 }

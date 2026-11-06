@@ -403,8 +403,8 @@ export async function scheduleArtworkUploadCleanup(actor: CommunityActor, idempo
   });
 }
 
-export async function claimArtworkUploadCleanup(limit = 10) {
-  const data = await rpc("community_claim_upload_cleanup", { p_limit: limit });
+export async function claimArtworkUploadCleanup(limit = 10, signal?: AbortSignal) {
+  const data = await rpc("community_claim_upload_cleanup", { p_limit: limit }, signal);
   return (Array.isArray(data) ? data : []).map((row) => {
     const value = row as Row;
     return {
@@ -417,12 +417,12 @@ export async function claimArtworkUploadCleanup(limit = 10) {
   });
 }
 
-export async function finishArtworkUploadCleanup(candidate: { authorId: string; idempotencyKey: string; leaseToken: string }) {
+export async function finishArtworkUploadCleanup(candidate: { authorId: string; idempotencyKey: string; leaseToken: string }, signal?: AbortSignal) {
   return rpc("community_finish_upload_cleanup", {
     p_actor_user_id: candidate.authorId,
     p_idempotency_key: candidate.idempotencyKey,
     p_cleanup_token: candidate.leaseToken,
-  });
+  }, signal);
 }
 
 export async function getArtworkMediaForRequest(id: string, actor?: CommunityActor) {
@@ -574,8 +574,8 @@ export async function updateReport(actor: CommunityActor, id: string, revision: 
   return rpc("community_update_artwork_report", { p_actor_user_id: actor.userId, p_report_id: id, p_expected_revision: revision, p_action: action });
 }
 
-export async function purgeExpiredReportDetails() {
-  return rpc("community_purge_expired_report_details", { p_limit: 100 });
+export async function purgeExpiredReportDetails(signal?: AbortSignal) {
+  return rpc("community_purge_expired_report_details", { p_limit: 100 }, signal);
 }
 
 export type AccountMediaCleanupJob = {
@@ -585,8 +585,8 @@ export type AccountMediaCleanupJob = {
   lease_token: string;
 };
 
-export async function claimAccountMediaCleanup(leaseToken: string, limit = 10) {
-  const result = await rpc("community_claim_account_media_cleanup", { p_lease_token: leaseToken, p_limit: limit });
+export async function claimAccountMediaCleanup(leaseToken: string, limit = 10, signal?: AbortSignal) {
+  const result = await rpc("community_claim_account_media_cleanup", { p_lease_token: leaseToken, p_limit: limit }, signal);
   if (!Array.isArray(result)) throw new Error("Account media cleanup queue could not be read.");
   return result.map((row) => {
     const value = row as Row;
@@ -597,8 +597,8 @@ export async function claimAccountMediaCleanup(leaseToken: string, limit = 10) {
   });
 }
 
-export async function finishAccountMediaCleanup(id: number, leaseToken: string, result: "deleted" | "retry") {
-  return rpc("community_finish_account_media_cleanup", { p_id: id, p_lease_token: leaseToken, p_result: result });
+export async function finishAccountMediaCleanup(id: number, leaseToken: string, result: "deleted" | "retry", signal?: AbortSignal) {
+  return rpc("community_finish_account_media_cleanup", { p_id: id, p_lease_token: leaseToken, p_result: result }, signal);
 }
 
 export type CommunityNotificationClaim = {
@@ -611,14 +611,14 @@ export type CommunityNotificationClaim = {
   template_version: string | null;
 };
 
-export async function claimModerationEmailOutbox(leaseToken: string, limit: number) {
-  const result = await rpc("community_claim_moderation_email_outbox", { p_lease_token: leaseToken, p_limit: limit });
+export async function claimModerationEmailOutbox(leaseToken: string, limit: number, signal?: AbortSignal) {
+  const result = await rpc("community_claim_moderation_email_outbox", { p_lease_token: leaseToken, p_limit: limit }, signal);
   if (!Array.isArray(result)) throw new Error("Community notification queue could not be read.");
   return result as CommunityNotificationClaim[];
 }
 
-export async function getModerationEmailRecipient(userId: string) {
-  const client = createServiceRoleClient();
+export async function getModerationEmailRecipient(userId: string, signal?: AbortSignal) {
+  const client = createServiceRoleClient(signal ? { requestSignal: signal } : undefined);
   const { data: authResult, error: authError } = await client.auth.admin.getUserById(userId);
   if (authError) {
     if (authError.status === 404) return null;
@@ -635,21 +635,21 @@ export async function getModerationEmailRecipient(userId: string) {
   return user.email;
 }
 
-export async function prepareModerationEmailSend(eventId: number, leaseToken: string, fingerprint: string, templateVersion: string) {
+export async function prepareModerationEmailSend(eventId: number, leaseToken: string, fingerprint: string, templateVersion: string, signal?: AbortSignal) {
   return (await rpc("community_prepare_moderation_email_send", {
     p_moderation_event_id: eventId, p_lease_token: leaseToken,
     p_payload_fingerprint: fingerprint, p_template_version: templateVersion,
-  })) === true;
+  }, signal)) === true;
 }
 
 export async function finishModerationEmailSend(input: {
   eventId: number; leaseToken: string; result: "sent" | "suppressed" | "retry";
   providerMessageId?: string; errorCode?: "provider_error" | "network_error";
-}) {
+}, signal?: AbortSignal) {
   return (await rpc("community_finish_moderation_email_send", {
     p_moderation_event_id: input.eventId, p_lease_token: input.leaseToken,
     p_result: input.result, p_provider_message_id: input.providerMessageId ?? null, p_error_code: input.errorCode ?? null,
-  })) === true;
+  }, signal)) === true;
 }
 
 async function getLikedArtworkIds(viewerUserId: string | undefined, rows: Row[]) {
@@ -663,8 +663,9 @@ async function getLikedArtworkIds(viewerUserId: string | undefined, rows: Row[])
   return new Set(((data ?? []) as unknown as Row[]).map((row) => String(row.artwork_id)));
 }
 
-async function rpc(name: string, args: Record<string, unknown>) {
-  const { data, error } = await createServiceRoleClient().rpc(name, args as never);
+async function rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const { data, error } = await createServiceRoleClient(signal ? { requestSignal: signal } : undefined).rpc(name, args as never);
   if (error) throw mapCommunityDatabaseError(error.code ?? "");
   return data;
 }

@@ -2,9 +2,12 @@
 
 Default: all fixed-order checks must pass. --reproduce-old-order is an explicit
 diagnostic for the pre-fix function and requires a genuine 40P01, never a release pass.
-No database credentials, cloud target, or Python dependencies are needed.
+The shared Node loader verifies the disposable local target and exports only
+safe Docker metadata. Python receives no keys and needs no third-party packages.
 """
 import json
+import os
+from pathlib import Path
 import queue
 import subprocess
 import sys
@@ -12,13 +15,25 @@ import threading
 import time
 import uuid
 
-CONTAINER = "supabase_db_lamilia-coloring-club-p0"
-CMD = ["docker", "exec", "-i", CONTAINER, "psql", "-X", "-qAt", "-U", "supabase_admin",
-       "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose"]
+CMD = None
+DOCKER_ENV = None
+
+
+def verified_docker_target():
+    """Use the shared Node guard; never accept a caller-supplied Docker container."""
+    helper = Path(__file__).resolve().parents[2] / "scripts" / "testing" / "isolated-community-target.mjs"
+    result = subprocess.run(["node", str(helper), "--docker-metadata"], text=True,
+                            capture_output=True, timeout=30)
+    if result.returncode:
+        raise RuntimeError("Cannot verify the isolated local community Docker target.")
+    try:
+        return json.loads(result.stdout)
+    except (TypeError, ValueError):
+        raise RuntimeError("The verified community Docker metadata was unavailable.") from None
 
 
 def sql(query):
-    return subprocess.run(CMD, input=query, text=True, capture_output=True, timeout=25)
+    return subprocess.run(CMD, input=query, text=True, capture_output=True, timeout=25, env=DOCKER_ENV)
 
 
 def required(query):
@@ -31,7 +46,7 @@ def required(query):
 class Session:
     def __init__(self, name):
         self.process = subprocess.Popen(CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                        stderr=subprocess.STDOUT, text=True, bufsize=1, env=DOCKER_ENV)
         self.lines = []
         self.events = queue.Queue()
 
@@ -160,10 +175,13 @@ def scenario(kind, old_order):
 
 
 if __name__ == "__main__":
-    identity = subprocess.check_output(["docker", "inspect", "--format", "{{.Name}}", CONTAINER], text=True).strip()
-    assert identity == "/" + CONTAINER, "Unexpected database container."
-    assert required("SELECT current_database();") == "postgres"
     diagnostic = sys.argv[1:] == ["--reproduce-old-order"]
     assert not sys.argv[1:] or diagnostic, "Unsupported test option."
+    target = verified_docker_target()
+    DOCKER_ENV = dict(os.environ, DOCKER_HOST=target["dockerEndpoint"], DOCKER_CONTEXT="")
+    CMD = [target["dockerExecutable"], "exec", "-i", target["databaseContainerId"],
+           "psql", "-X", "-qAt", "-U", "supabase_admin", "-d", "postgres",
+           "-v", "ON_ERROR_STOP=1", "-v", "VERBOSITY=verbose"]
+    assert required("SELECT current_database();") == "postgres"
     for test_kind in (["heart-profile"] if diagnostic else ["heart-profile", "heart-auth", "approve-profile", "approve-auth"]):
         scenario(test_kind, diagnostic)

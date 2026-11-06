@@ -4,6 +4,11 @@ const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  build: {
+    // This native ESM helper is also a Node/Python CLI. Transpiling it through
+    // Playwright's CommonJS require hook emits `exports` inside an ESM module.
+    external: ["**/scripts/testing/isolated-community-target.mjs"],
+  },
   timeout: 30_000,
   expect: {
     timeout: 8_000,
