@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MEDIA_UPLOAD_SPECS,
   filenameWithCollisionSuffix,
+  isCategoryMediaProxyPath,
   isMediaProxyPath,
   isMediaKind,
   mediaBucketForKind,
@@ -58,7 +59,22 @@ describe("media upload rules", () => {
 
   it("identifies media proxy paths that must bypass Next image optimization", () => {
     expect(isMediaProxyPath("/api/media/asset-id")).toBe(true);
+    expect(isMediaProxyPath("/api/media/11111111-1111-4111-8111-111111111111?v=11111111-1111-4111-8111-111111111111")).toBe(false);
     expect(isMediaProxyPath("/assets/cover.jpg")).toBe(false);
     expect(isMediaProxyPath("https://cdn.example/cover.jpg")).toBe(false);
+  });
+
+  it("keeps versioned category media optimized while legacy proxy paths stay direct", () => {
+    expect(isCategoryMediaProxyPath("/api/category-media/category-id")).toBe(true);
+    expect(isCategoryMediaProxyPath("/api/category-media/11111111-1111-4111-8111-111111111111?v=22222222-2222-4222-8222-222222222222")).toBe(false);
+    expect(isCategoryMediaProxyPath("/api/category-media/11111111-1111-4111-8111-111111111111?v=invalid")).toBe(true);
+  });
+
+  it("keeps downloads, ambiguous versions and additional query parameters outside optimization", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    for (const query of [`v=${id}&download=1`, `v=${id}&v=${id}`, `v=${id}&unknown=1`, "v="]) {
+      expect(isMediaProxyPath(`/api/media/${id}?${query}`)).toBe(true);
+      expect(isCategoryMediaProxyPath(`/api/category-media/${id}?${query}`)).toBe(true);
+    }
   });
 });
