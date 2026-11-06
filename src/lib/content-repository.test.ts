@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   createClient: vi.fn(),
   getBackendMode: vi.fn(),
+  getAdminLayoutAccessForRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -15,12 +16,48 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: mocks.createClient,
 }));
 
+vi.mock("@/lib/session.server", () => ({
+  getAdminLayoutAccessForRequest: mocks.getAdminLayoutAccessForRequest,
+}));
+
 import { getContentSnapshotForRequest } from "./content-repository";
 
 describe("admin content premium code pagination", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getBackendMode.mockReturnValue("supabase");
+    mocks.getAdminLayoutAccessForRequest.mockResolvedValue({ preferredLocale: "en" });
+  });
+
+  it.each([
+    { includePremiumCodes: true },
+    { includeCollections: true },
+    { includePremiumCodes: true, includeCollections: true },
+  ])("does not start any snapshot queries before admin authorization: %j", async (options) => {
+    mocks.getAdminLayoutAccessForRequest.mockResolvedValue(null);
+    mocks.createClient.mockResolvedValue({
+      from: () => { throw new Error("permission denied for table collections"); },
+    });
+
+    const snapshot = await getContentSnapshotForRequest(options);
+
+    expect(snapshot).toMatchObject({
+      products: [], collections: [], categories: [], tags: [], staticPages: [],
+    });
+    expect(mocks.createClient).not.toHaveBeenCalled();
+  });
+
+  it("keeps public reads available without an admin session", async () => {
+    mocks.getAdminLayoutAccessForRequest.mockResolvedValue(null);
+    const from = vi.fn(() => ({ select: async () => ({ data: [], error: null }) }));
+    mocks.createClient.mockResolvedValue({ from });
+
+    await getContentSnapshotForRequest();
+
+    expect(mocks.getAdminLayoutAccessForRequest).not.toHaveBeenCalled();
+    expect(from.mock.calls.flat()).not.toContain("collections");
+    expect(from.mock.calls.flat()).not.toContain("product_collections");
+    expect(from.mock.calls.flat()).not.toContain("premium_codes");
   });
 
   it("loads every premium code beyond the PostgREST row cap in stable id order", async () => {
