@@ -1,3 +1,7 @@
+-- The pinned Supabase CLI 2.118 path does not open the transaction LOCK needs.
+-- Keep the schema expansion, alias backfill and trigger installation atomic.
+begin;
+
 -- Run this migration in one transaction. Lock products before premium_codes
 -- so slug backfill and trigger installation see one stable product identity,
 -- using the same product-before-code order as saves and redemptions.
@@ -310,3 +314,5 @@ revoke all on function private.preserve_product_slug_aliases() from public, anon
 create trigger products_preserve_printed_slug
   after insert or update of slug on public.products
   for each row execute function private.preserve_product_slug_aliases();
+
+commit;

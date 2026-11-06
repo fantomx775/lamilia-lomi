@@ -45,6 +45,9 @@ and a physical KDP proof copy remain the publisher's pre-print check.
 ## Release order and rollback
 
 1. Validate additive migration `20261106140824` on an isolated local Supabase.
+   The file contains explicit `BEGIN`/`COMMIT`: the pinned Supabase CLI 2.118
+   path does not open the transaction block required by `LOCK TABLE`. Validate through
+   the actual CLI migration runner as well as SQL tests.
 2. Pass focused tests, relevant browser/security E2E, production dependency
    audit, exact-candidate CI and independent review.
 3. Apply and verify only this compatible migration on Production project
