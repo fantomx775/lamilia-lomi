@@ -32,6 +32,59 @@ vi.mock("./supabase/auth-cookie", () => ({
 }));
 vi.mock("./supabase/server", () => ({ createClient: mocks.createClient }));
 
+describe("admin data access identity", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    vi.stubEnv("LAMILIA_BACKEND", "supabase");
+    mocks.cookies.mockResolvedValue({ getAll: () => [] });
+    mocks.hasSupabaseAuthCookie.mockReturnValue(true);
+    mocks.createClient.mockResolvedValue(mocks.supabase);
+    mocks.supabase.auth.getUser.mockResolvedValue({
+      data: { user: { id: "reader", user_metadata: { role: "admin" } } }, error: null,
+    });
+    mocks.supabase.from.mockReturnValue(mocks.profileQuery);
+    mocks.profileQuery.select.mockReturnValue(mocks.profileQuery);
+    mocks.profileQuery.eq.mockReturnValue(mocks.profileQuery);
+    mocks.profileQuery.maybeSingle.mockResolvedValue({ data: { role: "user" }, error: null });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("denies guests without constructing a Supabase client", async () => {
+    mocks.hasSupabaseAuthCookie.mockReturnValue(false);
+    const { getAdminLayoutAccessForRequest } = await import("./session.server");
+    expect(await getAdminLayoutAccessForRequest()).toBeNull();
+    expect(mocks.createClient).not.toHaveBeenCalled();
+  });
+
+  it("denies an expired session before reading the profile", async () => {
+    mocks.supabase.auth.getUser.mockResolvedValue({ data: { user: null }, error: { message: "expired" } });
+    const { getAdminLayoutAccessForRequest } = await import("./session.server");
+    expect(await getAdminLayoutAccessForRequest()).toBeNull();
+    expect(mocks.supabase.from).not.toHaveBeenCalled();
+  });
+
+  it("denies a regular user despite editable admin metadata", async () => {
+    const { getAdminLayoutAccessForRequest } = await import("./session.server");
+    expect(await getAdminLayoutAccessForRequest()).toBeNull();
+    expect(mocks.profileQuery.eq).toHaveBeenCalledWith("id", "reader");
+  });
+
+  it("denies a missing or unreadable current profile", async () => {
+    mocks.profileQuery.maybeSingle.mockResolvedValue({ data: null, error: { message: "unavailable" } });
+    const { getAdminLayoutAccessForRequest } = await import("./session.server");
+    expect(await getAdminLayoutAccessForRequest()).toBeNull();
+  });
+
+  it("allows the current profile's admin role", async () => {
+    mocks.profileQuery.maybeSingle.mockResolvedValue({ data: { role: "admin", preferred_locale: "pl" }, error: null });
+    const { getAdminLayoutAccessForRequest } = await import("./session.server");
+    expect(await getAdminLayoutAccessForRequest()).toEqual({ preferredLocale: "en" });
+    expect(mocks.supabase.auth.getUser).toHaveBeenCalled();
+  });
+});
+
 describe("getAccountSessionForRequest", () => {
   const originalBackendMode = process.env.LAMILIA_BACKEND;
 
