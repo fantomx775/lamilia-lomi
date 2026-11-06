@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
 import { isLocalDemoAppTarget } from "./local-target";
@@ -28,24 +29,35 @@ async function scan(page: Page) {
   await expect(page).not.toHaveURL(/LOMI-BOOK-2026/);
 }
 
+async function submitAndFinish(page: Page, pathname: string, submit: () => Promise<void>) {
+  const responsePromise = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === pathname);
+  await submit();
+  const response = await responsePromise;
+  expect(await response.finished()).toBeNull();
+}
+
 test("private QR survives signup and verification; a second account and repeat scans keep access", async ({ page, context }, info) => {
   const leakedRequests: string[] = [];
   const browserErrors: string[] = [];
+  const failedNetworkRequests: Array<{ method: string; path: string; error: string }> = [];
+  const failedResponses: Array<{ method: string; path: string; status: number }> = [];
   page.on("pageerror", error => browserErrors.push(error.message));
   page.on("console", message => { if (message.type() === "error") browserErrors.push(message.text()); });
+  page.on("requestfailed", request => failedNetworkRequests.push({ method: request.method(), path: new URL(request.url()).pathname, error: request.failure()?.errorText ?? "unknown" }));
+  page.on("response", response => { if (response.status() >= 400) failedResponses.push({ method: response.request().method(), path: new URL(response.url()).pathname, status: response.status() }); });
   page.on("request", request => {
     if (request.url().includes(code)) leakedRequests.push(request.url());
   });
   await context.clearCookies();
   await scan(page);
   await expect(page.getByTestId("product-unlock-section").getByLabel("Premium code")).toHaveValue(code);
-  await page.getByRole("button", { name: "Create account", exact: true }).click();
+  await submitAndFinish(page, `/en/products/${slug}`, () => page.getByRole("button", { name: "Create account", exact: true }).click());
   await expect(page).toHaveURL(/\/en\/register\?/, { timeout: 120_000 });
   await page.getByLabel("Email").fill(`kdp-${info.project.name}@example.test`);
   await page.getByLabel("Password").fill("password123");
   await page.getByRole("checkbox", { name: /Terms/ }).check();
-  await page.getByRole("button", { name: "Create account", exact: true }).click();
-  await page.getByRole("button", { name: "Mark demo email as verified" }).click();
+  await submitAndFinish(page, "/en/register", () => page.getByRole("button", { name: "Create account", exact: true }).click());
+  await submitAndFinish(page, `/en/products/${slug}`, () => page.getByRole("button", { name: "Mark demo email as verified" }).click());
   await expect(page.getByTestId("unlock-success-state")).toBeVisible();
   await scan(page);
   await expect(page.getByTestId("unlock-success-state")).toBeVisible();
@@ -55,16 +67,19 @@ test("private QR survives signup and verification; a second account and repeat s
   await context.clearCookies();
   await page.reload();
   await page.getByTestId("product-unlock-section").getByLabel("Premium code").fill(code);
-  await page.getByRole("button", { name: "Log in", exact: true }).click();
+  await submitAndFinish(page, `/en/products/${slug}`, () => page.getByRole("button", { name: "Log in", exact: true }).click());
   await expect(page).toHaveURL(/\/en\/login\?/, { timeout: 120_000 });
   await page.getByLabel("Email").fill(`kdp-second-${info.project.name}@example.test`);
   await page.getByLabel("Password").fill("password123");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await submitAndFinish(page, "/en/login", () => page.getByRole("button", { name: "Continue", exact: true }).click());
   await expect(page.getByTestId("unlock-success-state")).toBeVisible();
   expect(leakedRequests).toEqual([]);
   const downloadUrl = await page.locator('a[href*="/api/downloads/asset-moon-premium-pdf"]').first().getAttribute("href");
   expect(downloadUrl).toBeTruthy();
   const download = await page.request.get(downloadUrl!, { headers: { accept: "application/json" } });
   expect(download.status()).toBe(200);
+  await info.attach("kdp-browser-diagnostics", { body: JSON.stringify({ testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId: process.env.LAMILIA_BROWSER_RUN_ID ?? `kdp-reader-${info.project.name}-${info.startTime.getTime()}`, browserErrors, failedNetworkRequests, failedResponses, leakedCodeInUrls: leakedRequests.length }), contentType: "application/json" });
   expect(browserErrors).toEqual([]);
+  expect(failedNetworkRequests).toEqual([]);
+  expect(failedResponses).toEqual([]);
 });

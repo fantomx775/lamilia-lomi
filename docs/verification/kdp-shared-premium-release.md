@@ -62,9 +62,10 @@ access data. Older application code remains compatible with this schema.
 
 ## Evidence
 
-Implementation and verification are in progress. Production has not yet been
-changed by this task. The release report and exact-SHA PR evidence will record
-actual results, including any failed or unexecuted gate.
+The authoritative exact-SHA review, CI, migration and deployment results are
+recorded on [PR #102](https://github.com/fantomx775/lamilia-lomi/pull/102).
+The sections below describe reproducible local verification; they do not by
+themselves claim that Production delivery has completed.
 
 ### Digital print validation
 

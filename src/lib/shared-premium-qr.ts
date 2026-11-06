@@ -2,7 +2,8 @@ import QRCode from "qrcode";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PDFDocument, rgb } from "pdf-lib";
-import opentype, { type Font } from "opentype.js";
+import * as opentype from "opentype.js";
+import type { Font } from "opentype.js";
 
 import { getCanonicalAppUrl } from "./config";
 

@@ -1,3 +1,8 @@
+-- Run this migration in one transaction. Lock products before premium_codes
+-- so slug backfill and trigger installation see one stable product identity,
+-- using the same product-before-code order as saves and redemptions.
+lock table public.products in share row exclusive mode;
+
 -- Expand only: existing codes default to single_use; historical unlocks are untouched.
 alter table public.premium_codes
   add column code_type text not null default 'single_use',

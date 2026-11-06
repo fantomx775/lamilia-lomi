@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { createDemoSession, serializeDemoSession } from "@/lib/auth";
 import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
 import { isLocalDemoAppTarget } from "./local-target";
 
@@ -22,44 +23,48 @@ test.afterEach(() => { restore?.(); restore = undefined; });
 test("admin creates a permanent shared code, downloads print files, toggles and reloads without rotating", async ({ page }, info) => {
   await page.setViewportSize({ width: info.project.name === "mobile" ? 390 : 1440, height: info.project.name === "mobile" ? 844 : 1100 });
   const consoleErrors: string[] = [];
-  const failedRequests: string[] = [];
+  const failedRequests: Array<{ url: string; method: string; resource: string; error: string }> = [];
+  const failedResponses: Array<{ url: string; status: number }> = [];
   page.on("pageerror", (error) => consoleErrors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-  page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(request.url()); });
+  page.on("requestfailed", (request) => failedRequests.push({ url: request.url(), method: request.method(), resource: request.resourceType(), error: request.failure()?.errorText ?? "unknown" }));
+  page.on("response", (response) => { if (response.status() >= 400) failedResponses.push({ url: response.url(), status: response.status() }); });
   await page.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
-  await page.goto("/en/login?redirectTo=/admin");
-  await page.getByLabel("Email").fill("admin@lamilialomi.test");
-  await page.getByLabel("Password").fill("demo-password");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page).toHaveURL(/\/admin$/);
-  await expect.poll(async () => {
-    const cookie = (await page.context().cookies()).find((item) => item.name === "ll_demo_session");
-    return cookie ? JSON.parse(Buffer.from(cookie.value.split(".")[0], "base64url").toString("utf8")).role : null;
-  }).toBe("admin");
+  // Login/verification has its own reader E2E. This isolated local-only fixture
+  // starts as the known demo administrator and exercises the actual admin UI.
+  await page.context().addCookies([{ name: "ll_demo_session", value: serializeDemoSession(createDemoSession({ email: "admin@lamilialomi.test" })), url: String(info.project.use.baseURL), httpOnly: true, sameSite: "Lax" }]);
   await page.goto(`/admin/products/${productId}`);
   const manager = page.getByTestId("shared-premium-code-manager");
   const disclosure = manager.locator("xpath=ancestor::details[1]");
   if (await disclosure.count()) await disclosure.locator("summary").click();
-  await manager.getByRole("button", { name: "Utwórz stały wspólny kod" }).click();
+  const [created] = await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith(`/api/admin/products/${productId}/shared-code`) && response.request().method() === "POST", { timeout: 120_000 }),
+    manager.getByRole("button", { name: "Utwórz stały wspólny kod" }).click(),
+  ]);
+  expect(created.status()).toBe(200);
   const code = manager.getByLabel("Wspólny kod premium");
   await expect(code).toBeVisible();
   const stableCode = await code.innerText();
   expect(stableCode.length).toBeGreaterThan(20);
   const preview = manager.getByRole("img");
   await expect(preview).toBeVisible();
-  await expect.poll(() => preview.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect.poll(() => preview.evaluate((element) => (element as HTMLImageElement).naturalWidth), { timeout: 120_000 }).toBeGreaterThan(0);
 
   for (const format of ["SVG", "PDF"]) {
-    const downloadPromise = page.waitForEvent("download");
-    await manager.getByRole("link", { name: `Pobierz ${format} do druku` }).click();
-    const download = await downloadPromise;
-    expect(download.suggestedFilename()).toBe(`lamilialomi-kdp-${productId}.${format.toLowerCase()}`);
-    expect(await download.failure()).toBeNull();
+    const link = manager.getByRole("link", { name: `Pobierz ${format} do druku` });
+    await expect(link).toBeVisible();
+    const href = await link.getAttribute("href");
+    expect(href).toBe(`/api/admin/products/${productId}/shared-code?format=${format.toLowerCase()}`);
+    const download = await page.request.get(href!);
+    expect(download.status()).toBe(200);
+    expect(download.headers()["content-disposition"]).toBe(`attachment; filename="lamilialomi-kdp-${productId}.${format.toLowerCase()}"`);
+    expect(download.headers()["content-type"]).toContain(format === "SVG" ? "image/svg+xml" : "application/pdf");
+    expect((await download.body()).length).toBeGreaterThan(100);
   }
   await manager.scrollIntoViewIfNeeded();
   const screenshot = path.resolve("docs/verification/pr-102", `${info.project.name === "mobile" ? "mobile" : "desktop"}-shared-manager.png`);
   fs.mkdirSync(path.dirname(screenshot), { recursive: true });
-  await page.screenshot({ path: screenshot, fullPage: false });
+  await page.screenshot({ path: screenshot, fullPage: false, mask: [code, preview], maskColor: "#d6d3ce" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await manager.getByRole("button", { name: "Dezaktywuj wspólny kod" }).click();
@@ -73,6 +78,8 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
   if (await reloadedDisclosure.count()) await reloadedDisclosure.locator("summary").click();
   await expect(reloaded.getByLabel("Wspólny kod premium")).toHaveText(stableCode);
   await expect(reloaded.getByRole("button", { name: "Dezaktywuj wspólny kod" })).toBeVisible();
+  await info.attach("shared-manager-browser-diagnostics", { body: JSON.stringify({ consoleErrors, failedRequests, failedResponses }), contentType: "application/json" });
   expect(consoleErrors).toEqual([]);
   expect(failedRequests).toEqual([]);
+  expect(failedResponses).toEqual([]);
 });
