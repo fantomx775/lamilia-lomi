@@ -1133,7 +1133,7 @@ export function ProductEditor({
             </AdminEditorSection>
 
             <AdminEditorSection title="Dostęp premium" description="Kody są przypisane do tego produktu. Wykorzystanych kodów nie można zmienić ani usunąć.">
-              <SharedPremiumCodeManager productId={product?.id} isPublished={product?.status === "published"} initialCode={product?.premiumCodes.find((code) => code.codeType === "shared")} />
+              <SharedPremiumCodeManager key={product?.id ?? "new-product"} productId={product?.id} isPublished={product?.status === "published"} initialCode={product?.premiumCodes.find((code) => code.codeType === "shared")} />
               <div id="product-premium-codes" className="grid gap-3">
                 {fieldErrors["product-premium-codes"]?.map((message) => <p key={message} role="alert" className="text-sm text-red-800">{message}</p>)}
                 {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}

@@ -87,3 +87,9 @@ explicitly traces the font asset into the deployed function.
 
 Physical KDP proof-copy scanning remains a publisher step: digital sampling is
 evidence of export quality, not an assertion that a physical print was tested.
+
+Admin browser screenshots mask the generated code and QR preview. The browser
+test separately checks the real code, successful preview rendering, both
+authenticated print downloads, deactivation/reactivation, reload persistence,
+responsive overflow, and strict console/network diagnostics. The unmasked print
+proof above uses a fixed fake code for repeatable visual and decoder review.
