@@ -13,6 +13,7 @@ import {
   setAuthResumeIntent,
 } from "@/lib/auth-resume";
 import { normalizeLocale } from "@/lib/locale";
+import { clearRecoveryCookies, createRecoveryClient } from "@/lib/supabase/recovery";
 import { createClient } from "@/lib/supabase/server";
 import { clearUnlockIntent, setUnlockIntent } from "@/lib/unlock-intent";
 
@@ -21,6 +22,9 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const locale = normalizeLocale(requestUrl.searchParams.get("locale") ?? undefined);
+  if (requestUrl.searchParams.get("recovery") === "1") {
+    return handlePasswordRecovery(requestUrl, locale);
+  }
   const safeCallbackReturnTo = sanitizeInternalReturnTo(
     requestUrl.searchParams.get("returnTo"),
     locale,
@@ -224,6 +228,27 @@ export async function GET(request: Request) {
       ? getAuthResumeRedirect(verifiedIntent, locale)
       : callbackReturnTo,
   );
+}
+
+async function handlePasswordRecovery(url: URL, locale: string) {
+  const path = `/${locale}/reset-password`;
+  const failure = () => successResponse(`${path}?status=invalid-link`);
+  const code = url.searchParams.get("code");
+  if (getBackendMode() !== "supabase" || !code || url.searchParams.has("token_hash")) {
+    return failure();
+  }
+
+  try {
+    const supabase = await createRecoveryClient();
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (!error && data.session && data.redirectType === "recovery") {
+      return successResponse(`${path}?status=choose-password`);
+    }
+    if (data.session) await clearRecoveryCookies();
+  } catch {
+    console.error("[password-recovery] Code exchange failed");
+  }
+  return failure();
 }
 
 async function persistAuthResumeIntent(
