@@ -29,6 +29,7 @@ test("resets a password through the real local email and rejects a reused link",
 
   const browserErrors: string[] = [];
   const failedRequests: string[] = [];
+  let canceledPrefetches = 0;
   page.on("pageerror", () => browserErrors.push("Uncaught page error"));
   page.on("console", (message) => {
     if (message.type() === "error") {
@@ -36,7 +37,15 @@ test("resets a password through the real local email and rejects a reused link",
     }
   });
   page.on("requestfailed", (request) => {
-    failedRequests.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText}`);
+    const url = new URL(request.url());
+    const failure = request.failure()?.errorText;
+    const headers = request.headers();
+    if (failure === "net::ERR_ABORTED" && request.method() === "GET" && url.origin === app.origin &&
+      url.searchParams.has("_rsc") && (headers["next-router-prefetch"] === "1" || headers["next-router-segment-prefetch"])) {
+      canceledPrefetches++;
+      return;
+    }
+    failedRequests.push(`${request.method()} ${url.pathname}: ${failure}`);
   });
   const submit = async (name: string) => {
     const [response] = await Promise.all([
@@ -100,6 +109,7 @@ test("resets a password through the real local email and rejects a reused link",
     await expect(page.getByText("could not be verified", { exact: false })).toBeVisible();
     expect(browserErrors).toEqual([]);
     expect(failedRequests).toEqual([]);
+    testInfo.annotations.push({ type: "canceled background Next.js prefetches", description: String(canceledPrefetches) });
   } finally {
     const { error: cleanupError } = await admin.auth.admin.deleteUser(data.user.id);
     if (cleanupError) throw new Error("Could not clean up the local recovery fixture.");
