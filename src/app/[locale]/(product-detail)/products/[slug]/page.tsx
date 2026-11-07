@@ -337,7 +337,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
       </div>
       <section data-testid="product-hero" className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)] lg:gap-12 lg:px-8">
         <div className="min-w-0">
-          <div className="relative mx-auto aspect-[8.5/11] w-full max-w-[360px] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] shadow-[0_18px_46px_rgba(62,52,47,0.12)] lg:mx-0">
+          <div className="relative mx-auto aspect-[8.5/11] w-full max-w-[360px] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] shadow-[0_18px_46px_rgba(62,52,47,0.12)] lg:sticky lg:top-24 lg:mx-0 lg:max-w-[min(360px,calc((100svh-7rem)*8.5/11))]">
             <ImageWithFallback
               src={product.cover.path}
               alt={product.cover.title ?? product.title}
