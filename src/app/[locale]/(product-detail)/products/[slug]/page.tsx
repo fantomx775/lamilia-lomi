@@ -1,7 +1,7 @@
 import { ArrowLeft, Download, FileText, LockKeyhole } from "lucide-react";
 import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { Suspense } from "react";
 import Link from "next/link";
 
@@ -132,12 +132,12 @@ async function ProductUnlockSection({
     <section
       id="premium"
       aria-labelledby="premium-title"
-      className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8"
+      className="mx-auto w-full max-w-7xl min-w-0 px-4 py-12 sm:px-6 lg:px-8"
       data-testid="product-unlock-section"
     >
       <ScrollToFragment targetId="premium" />
-      <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr]">
-        <div>
+      <div className="grid min-w-0 gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="min-w-0">
           <p className="text-sm font-medium text-[var(--color-terracotta)]">
             {copy("ownerEyebrow")}
           </p>
@@ -148,7 +148,7 @@ async function ProductUnlockSection({
             {copy("ownerDescription")}
           </p>
         </div>
-        <div className="rounded-lg border border-[var(--color-border)] bg-white/75 p-5">
+        <div className="min-w-0 rounded-lg border border-[var(--color-border)] bg-white/75 p-4 sm:p-5">
           {access ? (
             <>
               <UnlockForm
@@ -195,15 +195,15 @@ async function ProductUnlockSection({
                 }}
               />
               {downloadLinks.length ? (
-                <div className="mt-5 grid gap-3" data-testid="premium-download-links">
+                <div className="mt-5 grid min-w-0 gap-3" data-testid="premium-download-links">
                   {downloadLinks.map(({ asset, href }) => (
                     <a
                       key={asset.id}
-                      className={buttonClassName({ variant: "secondary", className: "w-full" })}
+                      className={buttonClassName({ variant: "secondary", className: "w-full min-w-0 whitespace-normal break-words text-center" })}
                       href={href}
                     >
                       <Download className="size-4" aria-hidden />
-                      {asset.title ?? copy("download")}
+                      <span className="min-w-0 break-all">{asset.title ?? copy("download")}</span>
                     </a>
                   ))}
                 </div>
@@ -258,14 +258,6 @@ export default async function ProductPage({ params, searchParams }: Props) {
     notFound();
   }
 
-  const communityFlags = getCommunityFlags();
-  const communitySession = communityFlags.uploadsEnabled ? await getDemoSession() : null;
-  const heartContext = communityFlags.publicEnabled ? await getCommunityHeartContext() : { access: "guest" as const };
-  const communityArtworksPage = communityFlags.publicEnabled
-    ? await listCommunityPublicArtworks({ productId: product.id, limit: 5, viewer: heartContext.access === "member" ? heartContext.actor : undefined }).catch(() => ({ items: [], nextCursor: null }))
-    : { items: [], nextCursor: null };
-  const communityArtworks = communityArtworksPage.items.slice(0, 4);
-
   if (code?.trim()) {
     const unlockParams = new URLSearchParams({ code });
     const step = stringParam(query.step);
@@ -285,9 +277,16 @@ export default async function ProductPage({ params, searchParams }: Props) {
       const value = stringParam(query[key]);
       if (value) current.searchParams.set(key, value.slice(0, 128));
     }
-    current.hash = "premium";
-    redirect(`${current.pathname}${current.search}${current.hash}`);
+    permanentRedirect(`${current.pathname}${current.search}`);
   }
+
+  const communityFlags = getCommunityFlags();
+  const communitySession = communityFlags.uploadsEnabled ? await getDemoSession() : null;
+  const heartContext = communityFlags.publicEnabled ? await getCommunityHeartContext() : { access: "guest" as const };
+  const communityArtworksPage = communityFlags.publicEnabled
+    ? await listCommunityPublicArtworks({ productId: product.id, limit: 5, viewer: heartContext.access === "member" ? heartContext.actor : undefined }).catch(() => ({ items: [], nextCursor: null }))
+    : { items: [], nextCursor: null };
+  const communityArtworks = communityArtworksPage.items.slice(0, 4);
 
   const productCopy = await getTranslations("Product");
   const galleryImages = product.gallery.map((asset) => ({

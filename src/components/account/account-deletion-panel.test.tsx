@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("AccountDeletionPanel", () => {
-  it("explains unlock and consumed-code consequences and requires exact confirmation", async () => {
+  it("explains shared-code consequences and requires exact confirmation", async () => {
     const user = userEvent.setup();
     const replaceDocument = vi.fn();
     vi.stubGlobal("location", { replace: replaceDocument });
@@ -26,7 +26,9 @@ describe("AccountDeletionPanel", () => {
     render(<AccountDeletionPanel locale="en" />);
 
     expect(screen.getByText(/removes your login and access to product unlocks/)).toBeInTheDocument();
-    expect(screen.getByText(/already redeemed are single-use and stay consumed/)).toBeInTheDocument();
+    expect(screen.getByText(/single-use code you redeemed stays consumed/)).toBeInTheDocument();
+    expect(screen.getByText(/Shared codes remain available to other accounts/)).toBeInTheDocument();
+    expect(screen.getByText("Danger Zone")).toBeInTheDocument();
     const submit = screen.getByTestId("account-deletion-submit");
     expect(submit).toBeDisabled();
     await user.type(screen.getByLabelText("Type DELETE to confirm"), "delete");

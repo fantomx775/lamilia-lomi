@@ -71,9 +71,11 @@ test("real shared QR: concurrent readers, renamed book, cross-device email confi
     const registered = userList.data.users.find(user => user.email === credentials[2].email);
     if (!registered) throw new Error("Registered isolated account missing.");
     users.push(registered.id);
-    const download = await context.request.get(`/api/downloads/${assetId}?locale=en`);
+    const download = await context.request.get(`/api/downloads/${assetId}?locale=en`, { maxRedirects: 0 });
     expect(download.status()).toBe(200);
     expect(download.headers()["content-type"]).toContain("application/pdf");
+    expect(download.headers()["location"]).toBeUndefined();
+    expect(await download.body()).toEqual(pdf);
     const publicFile = await fetch(`${api.origin}/storage/v1/object/public/premium-files/${objectPath}`);
     expect(publicFile.ok).toBe(false);
     const screenshot = path.resolve("docs/verification/pr-102", "supabase-cross-device-unlocked.png");
@@ -84,6 +86,14 @@ test("real shared QR: concurrent readers, renamed book, cross-device email confi
     // Historical slug-only printed links resolve even though the product was renamed.
     const oldQr = await context.request.get(`/api/unlock/en/${slug}`, { maxRedirects: 0 });
     expect(oldQr.headers().location).toContain(`/en/products/${changedSlug}`);
+    const oldProduct = await context.request.get(
+      `/en/products/${slug}?utm_source=legacy-qr&ref=preserved`,
+      { maxRedirects: 0 },
+    );
+    expect(oldProduct.status()).toBe(308);
+    expect(oldProduct.headers().location).toBe(
+      `http://127.0.0.1:3031/en/products/${changedSlug}?utm_source=legacy-qr&ref=preserved`,
+    );
     expect(leaks).toEqual([]);
     expect((await admin.from("premium_codes").update({ active: false }).eq("id", codeId)).error).toBeNull();
     await verified.reload();

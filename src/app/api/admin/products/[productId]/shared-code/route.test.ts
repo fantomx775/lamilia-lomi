@@ -44,7 +44,7 @@ describe("admin shared premium code API", () => {
   });
 
   it("accepts the configured public origin when Next receives the request on an internal host", async () => {
-    const response = await POST(new Request(`http://localhost:3000/api/admin/products/${productId}/shared-code`, { method: "POST", headers: { origin: "https://book.test", "content-type": "application/json" }, body: '{"active":true}' }), context);
+    const response = await POST(new Request(`http://localhost:3000/api/admin/products/${productId}/shared-code`, { method: "POST", headers: { origin: "https://book.test", "content-type": "application/json" }, body: '{"active":true,"code":"KDP-MANUAL-1"}' }), context);
     expect(response.status).toBe(200);
     expect(mocks.rpc).toHaveBeenCalledOnce();
   });
@@ -52,7 +52,7 @@ describe("admin shared premium code API", () => {
   it("calls the authenticated atomic RPC without accepting a replacement code", async () => {
     const response = await POST(request({ active: false, code: "UNWANTED-ROTATION" }), context);
     expect(response.status).toBe(200);
-    expect(mocks.rpc).toHaveBeenCalledWith("manage_shared_premium_code", { requested_product_id: productId, requested_active: false });
+    expect(mocks.rpc).toHaveBeenCalledWith("manage_shared_premium_code", { requested_product_id: productId, requested_code: "KDP-STABLE", requested_active: false });
     expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 
@@ -75,7 +75,7 @@ describe("admin shared premium code API", () => {
     let snapshot = { products: [{ id: productId, premiumCodes: [] as typeof sharedCode[] }] };
     mocks.getContentSnapshot.mockImplementation(() => snapshot);
     mocks.saveContentSnapshot.mockImplementation((next) => { snapshot = next; });
-    const created = await (await POST(request({ active: true }), context)).json();
+    const created = await (await POST(request({ active: true, code: "KDP-MANUAL-1" }), context)).json();
     const disabled = await (await POST(request({ active: false }), context)).json();
     const enabled = await (await POST(request({ active: true }), context)).json();
     expect(created.code.codeType).toBe("shared");
@@ -83,5 +83,20 @@ describe("admin shared premium code API", () => {
     expect(disabled.code.code).toBe(created.code.code);
     expect(disabled.code.active).toBe(false);
     expect(snapshot.products[0].premiumCodes).toHaveLength(1);
+  });
+
+  it("requires a valid manual code and rejects duplicates in local mode", async () => {
+    mocks.getBackendMode.mockReturnValue("local");
+    const snapshot = { products: [{ id: productId, premiumCodes: [] as typeof sharedCode[] }, { id: "other", premiumCodes: [{ ...sharedCode, productId: "other" }] }] };
+    mocks.getContentSnapshot.mockReturnValue(snapshot);
+    expect((await POST(request({ active: true }), context)).status).toBe(400);
+    expect((await POST(request({ active: true, code: "bad code" }), context)).status).toBe(400);
+    expect((await POST(request({ active: true, code: "KDP-STABLE" }), context)).status).toBe(409);
+  });
+
+  it("does not create an inactive generated code when no shared code exists", async () => {
+    mocks.getAdminContentSnapshot.mockResolvedValue({ products: [{ id: productId, status: "published", premiumCodes: [] }] });
+    expect((await POST(request({ active: false }), context)).status).toBe(404);
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 });

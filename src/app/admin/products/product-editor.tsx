@@ -23,7 +23,7 @@ import {
   PRODUCT_TITLE_MAX_LENGTH,
   validateProductTextLengths,
 } from "@/lib/product-text";
-import { MAX_PREMIUM_CODE_BATCH_SIZE, MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
+import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Collection, Product, ProductAsset, Tag } from "@/lib/types";
 import { ReaderArtworkManager } from "./reader-artwork-manager";
@@ -183,10 +183,6 @@ export function ProductEditor({
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product, submittedValues));
   const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product, submittedValues));
   const [premiumErrors, setPremiumErrors] = useState<Partial<Record<string, AdminErrorCode>>>({});
-  const [premiumBatchCount, setPremiumBatchCount] = useState("25");
-  const [isGeneratingPremiumBatch, setIsGeneratingPremiumBatch] = useState(false);
-  const [premiumBatchError, setPremiumBatchError] = useState<string | null>(null);
-  const [premiumBatchMessage, setPremiumBatchMessage] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const savedFormSignatureRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
@@ -871,55 +867,6 @@ export function ProductEditor({
     updatePremium(code.clientId, "removed", true);
   };
 
-  const generatePremiumBatch = async () => {
-    if (!product?.id || isDirty || isSaving || hasActiveMediaUpload || isGeneratingPremiumBatch) return;
-    const count = Number(premiumBatchCount);
-    if (!Number.isSafeInteger(count) || count < 1 || count > MAX_PREMIUM_CODE_BATCH_SIZE) {
-      setPremiumBatchError(`Podaj liczbę od 1 do ${MAX_PREMIUM_CODE_BATCH_SIZE}.`);
-      setPremiumBatchMessage(null);
-      return;
-    }
-
-    setIsGeneratingPremiumBatch(true);
-    setPremiumBatchError(null);
-    setPremiumBatchMessage(null);
-    try {
-      const response = await fetch(`/api/admin/products/${encodeURIComponent(product.id)}/premium-codes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ count }),
-      });
-      const result = await response.json() as { ok?: boolean; codes?: Array<{ id: string; productId: string; code: string; active: boolean }> };
-      if (!response.ok || !result.ok || !Array.isArray(result.codes)) {
-        setPremiumBatchError("Nie udało się wygenerować kodów. Spróbuj ponownie.");
-        return;
-      }
-
-      const generatedCodes = result.codes.map((code) => ({
-        clientId: `generated-code-${code.id}`,
-        id: code.id,
-        code: code.code,
-        active: code.active,
-        removed: false,
-      }));
-      setPremiumCodes((current) => [
-        ...current,
-        ...generatedCodes,
-      ]);
-      scheduleAfterRender(() => {
-        if (!formRef.current) return;
-        savedFormSignatureRef.current = productEditorFormSignature(formRef.current);
-        isDirtyRef.current = false;
-        setIsDirty(false);
-      });
-      setPremiumBatchMessage(`Wygenerowano ${result.codes.length} kodów. Partia została zapisana.`);
-    } catch {
-      setPremiumBatchError("Nie udało się wygenerować kodów. Spróbuj ponownie.");
-    } finally {
-      setIsGeneratingPremiumBatch(false);
-    }
-  };
-
   const validatePremiumCodesBeforeSubmit = () => {
     const activeCodes = premiumCodes.filter((code) => !code.removed);
     const issues = validatePremiumCodeEntries(activeCodes);
@@ -948,7 +895,7 @@ export function ProductEditor({
 
   const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSaving || isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction) return;
+    if (isSaving || hasActiveMediaUpload || !saveAction) return;
 
     if (!validatePremiumCodesBeforeSubmit()) {
       setSaveStatus("error");
@@ -1052,7 +999,7 @@ export function ProductEditor({
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
         <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
 
-        <fieldset disabled={isSaving || isGeneratingPremiumBatch} className="m-0 grid min-w-0 gap-6 border-0 p-0">
+        <fieldset disabled={isSaving} className="m-0 grid min-w-0 gap-6 border-0 p-0">
         <AdminEditorHeader
           backHref="/admin/products"
           backLabel="Produkty"
@@ -1135,6 +1082,7 @@ export function ProductEditor({
             <AdminEditorSection title="Dostęp premium" description="Kody są przypisane do tego produktu. Wykorzystanych kodów nie można zmienić ani usunąć.">
               <SharedPremiumCodeManager key={product?.id ?? "new-product"} productId={product?.id} isPublished={product?.status === "published"} initialCode={product?.premiumCodes.find((code) => code.codeType === "shared")} />
               <div id="product-premium-codes" className="grid gap-3">
+                <h3 className="border-t border-[var(--color-border)] pt-5 text-base font-semibold">Kody jednorazowe (legacy)</h3>
                 {fieldErrors["product-premium-codes"]?.map((message) => <p key={message} role="alert" className="text-sm text-red-800">{message}</p>)}
                 {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}
                 {premiumCodes.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze kodów premium.</p> : null}
@@ -1142,47 +1090,6 @@ export function ProductEditor({
                   <PremiumEditor key={code.clientId} code={code} index={index} error={premiumErrors[code.clientId] ? getAdminErrorMessage(premiumErrors[code.clientId]!, "pl") : undefined} onChange={updatePremium} onRemove={removePremium} onUndo={() => updatePremium(code.clientId, "removed", false)} />
                 ))}
                 <Button type="button" variant="outline" onClick={addPremium} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj kod</Button>
-                {product?.id ? (
-                  <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] p-4 sm:grid-cols-[minmax(9rem,14rem)_auto_auto] sm:items-end">
-                    <Field label="Liczba kodów w partii" htmlFor="premium-code-batch-count">
-                      <Input
-                        id="premium-code-batch-count"
-                        type="number"
-                        min={1}
-                        max={MAX_PREMIUM_CODE_BATCH_SIZE}
-                        step={1}
-                        value={premiumBatchCount}
-                        onChange={(event) => setPremiumBatchCount(event.target.value)}
-                        disabled={isGeneratingPremiumBatch}
-                      />
-                    </Field>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={generatePremiumBatch}
-                      disabled={isDirty || isSaving || hasActiveMediaUpload || isGeneratingPremiumBatch}
-                    >
-                      {isGeneratingPremiumBatch ? "Generowanie…" : "Wygeneruj partię"}
-                    </Button>
-                    {product.status === "published" ? (
-                      <a
-                        className={buttonClassName({ variant: "outline" })}
-                        href={`/api/admin/products/${encodeURIComponent(product.id)}/premium-codes`}
-                      >
-                        Pobierz CSV z QR
-                      </a>
-                    ) : (
-                      <p className="text-xs text-[var(--color-muted)]">Opublikuj produkt, aby pobrać CSV z działającymi QR.</p>
-                    )}
-                    <p className="text-xs leading-5 text-[var(--color-muted)] sm:col-span-3">
-                      Kody są losowe i zapisywane od razu. Limit jednej partii to {MAX_PREMIUM_CODE_BATCH_SIZE} kodów.
-                    </p>
-                    {premiumBatchError ? <p role="alert" className="text-sm text-red-800 sm:col-span-3">{premiumBatchError}</p> : null}
-                    {premiumBatchMessage ? <p role="status" className="text-sm text-green-800 sm:col-span-3">{premiumBatchMessage}</p> : null}
-                  </div>
-                ) : (
-                  <p className="text-sm text-[var(--color-muted)]">Zapisz produkt, aby wygenerować partię kodów.</p>
-                )}
               </div>
             </AdminEditorSection>
             <AdminEditorSection title="Publikacja i organizacja">
@@ -1220,11 +1127,11 @@ export function ProductEditor({
 
       {product && archiveAction && deleteAction ? (
         <div className="mx-auto mt-8 w-full max-w-6xl">
-          <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving || isGeneratingPremiumBatch} />
+          <DangerZone product={product} archiveAction={archiveAction} deleteAction={deleteAction} disabled={isDirty || isSaving} />
         </div>
       ) : null}
 
-      <AdminSaveBar formId="product-editor-form" dirty={isDirty} pending={isSaving} status={saveStatus} disabled={isGeneratingPremiumBatch || hasActiveMediaUpload || !saveAction} testId="product-save-bar" nativeSubmitLabel="Zapisz produkt" idleMessage={product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"} savedMessage="Zapisano. Zmiany są aktualne." errorMessage="Zapis nie powiódł się. Sprawdź wskazane błędy." allowCleanSubmit />
+      <AdminSaveBar formId="product-editor-form" dirty={isDirty} pending={isSaving} status={saveStatus} disabled={hasActiveMediaUpload || !saveAction} testId="product-save-bar" nativeSubmitLabel="Zapisz produkt" idleMessage={product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"} savedMessage="Zapisano. Zmiany są aktualne." errorMessage="Zapis nie powiódł się. Sprawdź wskazane błędy." allowCleanSubmit />
     </div>
   );
 }

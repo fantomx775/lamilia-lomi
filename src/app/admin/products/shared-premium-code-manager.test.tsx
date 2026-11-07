@@ -12,14 +12,15 @@ describe("shared premium code manager", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("creates a shared code and offers preview and both print exports", async () => {
+  it("creates a manually entered shared code and offers QR-only print exports", async () => {
     const code = { id: "code", productId: "book", code: "KDP-ABCDEF", active: true, codeType: "shared" as const };
     const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, code }) });
     vi.stubGlobal("fetch", fetch);
     render(<SharedPremiumCodeManager productId="book" isPublished />);
-    fireEvent.click(screen.getByRole("button", { name: "Utwórz stały wspólny kod" }));
+    fireEvent.change(screen.getByLabelText("Kod do wpisania"), { target: { value: "kdp-abc123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Utwórz kod premium i QR" }));
     expect(await screen.findByLabelText("Wspólny kod premium")).toHaveTextContent("KDP-ABCDEF");
-    expect(fetch).toHaveBeenCalledWith("/api/admin/products/book/shared-code", expect.objectContaining({ method: "POST", body: '{"active":true}' }));
+    expect(fetch).toHaveBeenCalledWith("/api/admin/products/book/shared-code", expect.objectContaining({ method: "POST", body: '{"active":true,"code":"KDP-ABC123"}' }));
     expect(screen.getByRole("img")).toHaveAttribute("src", "/api/admin/products/book/shared-code?format=svg&preview=1");
     expect(screen.getByRole("link", { name: "Pobierz SVG do druku" })).toHaveAttribute("href", "/api/admin/products/book/shared-code?format=svg");
     expect(screen.getByRole("link", { name: "Pobierz PDF do druku" })).toHaveAttribute("href", "/api/admin/products/book/shared-code?format=pdf");

@@ -10,6 +10,8 @@ import { getAssetByIdForRequest } from "@/lib/products-request";
 import { authorizePremiumDownloadForRequest } from "@/lib/premium-request";
 import { sanitizeReturnTo } from "@/lib/return-to";
 
+export const runtime = "nodejs";
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ assetId: string }> },
@@ -97,7 +99,7 @@ export async function GET(
       headers: {
         "Content-Type": asset.contentType,
         "Content-Length": String(file.byteLength),
-        "Content-Disposition": `attachment; filename="${safeFilename(asset.filename)}"`,
+        "Content-Disposition": contentDisposition(asset.filename),
         "Cache-Control": "private, no-store",
       },
     });
@@ -113,18 +115,33 @@ export async function GET(
     );
   }
 
-  const redirectTarget = new URL(signedUrl.url, request.url);
-  const response = NextResponse.redirect(redirectTarget);
-  response.headers.set("Cache-Control", "private, no-store");
-  response.headers.set(
-    "Content-Disposition",
-    `attachment; filename="${safeFilename(asset.filename)}"`,
-  );
-
-  if (asset) {
-    setDownloadEvent(response, asset);
+  let upstream: Response;
+  try {
+    upstream = await fetch(signedUrl.url, { cache: "no-store", redirect: "error", signal: request.signal });
+  } catch {
+    console.error("[premium-download] Private storage streaming failed.");
+    return premiumErrorResponse({ ok: false, reason: "unavailable" }, 503);
   }
 
+  if (!upstream.ok || !upstream.body) {
+    await upstream.body?.cancel().catch(() => undefined);
+    return premiumErrorResponse({ ok: false, reason: "unavailable" }, 502);
+  }
+
+  const headers = new Headers({
+    "Content-Type": asset.contentType,
+    "Content-Disposition": contentDisposition(asset.filename),
+    "Cache-Control": "private, no-store",
+    "X-Content-Type-Options": "nosniff",
+  });
+  const contentLength = upstream.headers.get("content-length");
+  // Fetch decompresses upstream bodies before exposing the stream.
+  if (contentLength && /^\d+$/.test(contentLength) && !upstream.headers.has("content-encoding")) {
+    headers.set("Content-Length", contentLength);
+  }
+
+  const response = new NextResponse(upstream.body, { status: 200, headers });
+  setDownloadEvent(response, asset);
   return response;
 }
 
@@ -164,6 +181,15 @@ function getPrivateDemoAssetPath(filename: string | undefined) {
 
 function safeFilename(filename: string) {
   return path.basename(filename).replace(/["\\\r\n]/g, "_");
+}
+
+function contentDisposition(filename: string) {
+  const safe = safeFilename(filename);
+  const ascii = safe.replace(/[^\x20-\x7e]/g, "_");
+  const encoded = encodeURIComponent(safe).replace(/['()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
 }
 
 function setDownloadEvent(

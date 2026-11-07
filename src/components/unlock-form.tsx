@@ -142,17 +142,19 @@ export function UnlockForm({
 
   if (isUnlocked || alreadyUnlocked) {
     return (
-      <div className="grid gap-4" data-testid="unlock-success-state">
-        <div className="flex gap-3 rounded-lg bg-[var(--color-sage)]/80 p-4" role="status" aria-live="polite">
-          <CheckCircle2 className="mt-1 size-5 shrink-0 text-[var(--color-ink)]" aria-hidden />
-          <div>
-            <p className="font-medium">{alreadyUnlocked ? copy.already : copy.success}</p>
-            <p className="mt-1 text-sm leading-6 text-[var(--color-muted)]">
+      <div className="grid min-w-0 gap-4" data-testid="unlock-success-state">
+        <div className="flex min-w-0 gap-4 rounded-xl border border-emerald-300 bg-emerald-50 p-5 text-emerald-950 shadow-sm" role="status" aria-live="polite">
+          <span className="grid size-11 shrink-0 place-items-center rounded-full bg-emerald-600 text-white shadow-sm">
+            <CheckCircle2 className="size-7" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <p className="font-semibold text-emerald-950">{alreadyUnlocked ? copy.already : copy.success}</p>
+            <p className="mt-1 break-words text-sm leading-6 text-emerald-900">
               {copy.successDescription}
             </p>
           </div>
         </div>
-        <Link className={buttonClassName({ variant: "outline" })} href={`/${locale}/library`}>
+        <Link className={buttonClassName({ variant: "secondary", className: "w-full whitespace-normal text-center sm:w-auto" })} href={`/${locale}/library`}>
           {copy.goLibrary}
         </Link>
       </div>

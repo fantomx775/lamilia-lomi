@@ -4,7 +4,7 @@ import { hasAdminAccess } from "@/lib/auth";
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { getAdminContentSnapshot } from "@/lib/content-repository";
 import { getContentSnapshot, saveContentSnapshot } from "@/lib/content-store";
-import { createPremiumCodeBatch } from "@/lib/premium-code-batches";
+import { MAX_PREMIUM_CODE_LENGTH, normalizePremiumCode } from "@/lib/premium-code";
 import { getDemoSession } from "@/lib/session.server";
 import { renderSharedPremiumQrPdf, renderSharedPremiumQrSvg } from "@/lib/shared-premium-qr";
 import { createClient } from "@/lib/supabase/server";
@@ -22,25 +22,41 @@ export async function POST(request: Request, { params }: Context) {
   try { body = await request.json(); } catch { return json({ error: "invalid_request" }, 400); }
   if (!body || typeof body !== "object" || typeof (body as { active?: unknown }).active !== "boolean") return json({ error: "invalid_request" }, 400);
   const active = (body as { active: boolean }).active;
+  const requestedCode = typeof (body as { code?: unknown }).code === "string" ? normalizePremiumCode((body as { code: string }).code) : null;
+  if (requestedCode && !/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(requestedCode)) return json({ error: "invalid_code_format" }, 400);
+  if (requestedCode && (requestedCode.length < 3 || requestedCode.length > MAX_PREMIUM_CODE_LENGTH)) return json({ error: "invalid_code_length" }, 400);
   try {
+    const currentSharedCode = await getExistingSharedCode(productId);
+    const codeForMutation = active && requestedCode ? requestedCode : currentSharedCode?.code;
+    if (!codeForMutation) return json({ error: active ? "code_required" : "code_not_found" }, active ? 400 : 404);
     if (getBackendMode() === "local") {
       const snapshot = getContentSnapshot();
       const product = snapshot.products.find((item) => item.id === productId);
       if (!product) return json({ error: "not_found" }, 404);
       const current = product.premiumCodes.find((code) => code.codeType === "shared");
+      if (current && normalizePremiumCode(current.code) !== normalizePremiumCode(codeForMutation)) return json({ error: "code_immutable" }, 409);
+      if (!current && snapshot.products.some((item) => item.premiumCodes.some((entry) => normalizePremiumCode(entry.code) === normalizePremiumCode(codeForMutation)))) return json({ error: "duplicate_code" }, 409);
       const code: PremiumCode = current ? { ...current, active } : {
-        ...createPremiumCodeBatch({ productId, count: 1, existingCodes: snapshot.products.flatMap((item) => item.premiumCodes.map((entry) => entry.code)) })[0],
-        codeType: "shared", active,
+        id: crypto.randomUUID(), productId, code: codeForMutation, active, codeType: "shared",
       };
       saveContentSnapshot({ ...snapshot, products: snapshot.products.map((item) => item.id === productId ? { ...item, premiumCodes: [...item.premiumCodes.filter((entry) => entry.codeType !== "shared"), code] } : item) });
       return json({ ok: true, code }, 200);
     }
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc("manage_shared_premium_code", { requested_product_id: productId, requested_active: active });
+    const { data, error } = await supabase.rpc("manage_shared_premium_code", { requested_product_id: productId, requested_code: codeForMutation, requested_active: active });
+    if (error?.code === "23505") return json({ error: "duplicate_code" }, 409);
+    if (error?.code === "23514" || error?.code === "22023") return json({ error: "invalid_code" }, 400);
     if (error) throw new Error("Shared code mutation failed.");
     if (!data) return json({ error: "not_found" }, 404);
     return json({ ok: true, code: { id: data.id, productId: data.product_id, code: data.code, active: data.active, codeType: "shared" } }, 200);
   } catch { return json({ error: "unavailable" }, 503); }
+}
+
+async function getExistingSharedCode(productId: string) {
+  try {
+    const snapshot = getBackendMode() === "local" ? getContentSnapshot() : await getAdminContentSnapshot();
+    return snapshot.products.find((item) => item.id === productId)?.premiumCodes.find((item) => item.codeType === "shared");
+  } catch { return undefined; }
 }
 
 export async function GET(request: Request, { params }: Context) {

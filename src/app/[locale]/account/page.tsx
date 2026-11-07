@@ -1,7 +1,7 @@
 import { logoutAction, verifyDemoEmailAction } from "@/app/actions";
 import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
 import { SubmitButton } from "@/components/submit-button";
-import { Button } from "@/components/ui/button";
+import { Button, buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CommunityAccountPanel } from "@/components/community/community-account-panel";
 import { AccountDeletionPanel } from "@/components/account/account-deletion-panel";
@@ -82,23 +82,13 @@ export default async function AccountPage({ params }: Props) {
           <h1 className="mt-2 font-serif text-4xl font-semibold">
             Account
           </h1>
-          <p className="text-sm text-[var(--color-muted)]">{session.email}</p>
+          <p className="break-all text-base font-medium text-[var(--color-ink)]">{session.email}</p>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <dl className="grid gap-3 text-sm">
-            <div className="flex justify-between border-b border-[var(--color-border)] pb-2">
-              <dt>Role</dt>
-              <dd>{session.role}</dd>
-            </div>
-            <div className="flex justify-between border-b border-[var(--color-border)] pb-2">
-              <dt>Email</dt>
-              <dd>{session.emailVerified ? "verified" : "unverified"}</dd>
-            </div>
-            <div className="flex justify-between border-b border-[var(--color-border)] pb-2">
-              <dt>Marketing consent</dt>
-              <dd>{session.marketingConsent ? "yes" : "no"}</dd>
-            </div>
-          </dl>
+          <p className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold ${session.emailVerified ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
+            <span aria-hidden>{session.emailVerified ? "✓" : "!"}</span>
+            {session.emailVerified ? "Email verified" : "Email not verified"}
+          </p>
           {!session.emailVerified && session.isDemo ? (
             <form action={verifyDemoEmailAction}>
               <input type="hidden" name="locale" value={locale} />
@@ -115,7 +105,26 @@ export default async function AccountPage({ params }: Props) {
               Open email verification options
             </NavigationLink>
           ) : null}
-          <CommunityAccountPanel
+          <NavigationLink
+            className={buttonClassName({ variant: "secondary", className: "w-full sm:w-fit" })}
+            href={`/${locale}/library`}
+            pendingLabel="Opening your library"
+          >
+            My Library
+          </NavigationLink>
+          <form action={logoutAction}>
+            <input type="hidden" name="locale" value={locale} />
+            <Button type="submit" variant="outline">
+              Log out
+            </Button>
+          </form>
+          <section aria-labelledby="account-preferences-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+            <h2 id="account-preferences-title" className="font-serif text-xl font-semibold text-[var(--color-ink)]">Communication preferences</h2>
+            <p className="mt-2 text-sm text-[var(--color-muted)]">
+              Marketing emails: <span className="font-medium text-[var(--color-ink)]">{session.marketingConsent ? "Subscribed" : "Not subscribed"}</span>
+            </p>
+          </section>
+          {communityFlags.publicEnabled || communityFlags.uploadsEnabled || communityProfile ? <CommunityAccountPanel
             profile={communityProfile}
             enabled={communityFlags.publicEnabled || communityFlags.uploadsEnabled}
             publicEnabled={communityFlags.publicEnabled}
@@ -123,14 +132,8 @@ export default async function AccountPage({ params }: Props) {
             guidelinesHref={`/${locale}/community-guidelines`}
             creatorProfileBaseHref={`/${locale}/club/creators`}
             contactHref={`/${locale}/contact`}
-          />
+          /> : null}
           <AccountDeletionPanel locale={locale} />
-          <form action={logoutAction}>
-            <input type="hidden" name="locale" value={locale} />
-            <Button type="submit" variant="outline">
-              Log out
-            </Button>
-          </form>
         </CardContent>
       </Card>
     </DashboardShell>
