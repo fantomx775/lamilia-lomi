@@ -42,11 +42,10 @@ export function buildProductFromFormData(
     translations.find((translation) => translation.locale === "en")?.title ??
     existing?.translations.find((translation) => translation.locale === "en")?.title ??
     "untitled product";
-  const slug = uniqueSlug(
-    textField(formData, "slug") || slugify(englishTitle),
-    snapshot.products,
-    id,
-  );
+  const submittedSlug = formData.has("slug") ? textField(formData, "slug") : existing?.slug;
+  const slug = submittedSlug
+    ? slugify(submittedSlug)
+    : uniqueSlug(englishTitle, snapshot.products, id);
   const assets = parseAssets(formData, id, existing?.assets ?? []);
   const coverAssetId =
     textField(formData, "coverAssetId") ||
@@ -839,6 +838,8 @@ function validateProductDraft(product: Product, snapshot: ContentSnapshot) {
 
   if (!product.slug) {
     errors.push(ADMIN_ERROR_CODES.VALIDATION_SLUG_REQUIRED);
+  } else if (snapshot.products.some((item) => item.id !== product.id && item.slug === product.slug)) {
+    errors.push(ADMIN_ERROR_CODES.CONFLICT_SLUG);
   }
 
   if (product.collectionId && !snapshot.collections.some((collection) => collection.id === product.collectionId)) {

@@ -30,17 +30,13 @@ describe("KDP shared premium print exports", () => {
     expect(svg).toContain(`width="${qr.widthMm}mm"`);
     expect(svg).toContain('fill="#fff"');
     expect(svg).toContain('fill="#000"');
-    expect(svg).toContain(code);
+    expect(svg).not.toContain(code);
+    expect(svg).not.toContain("Manual code");
+    expect(svg).not.toContain("Scan for premium");
     expect(svg).not.toContain("<image");
   });
 
-  it("escapes manually entered text in SVG instead of creating executable markup", () => {
-    const svg = renderSharedPremiumQrSvg(productId, '<script>alert("x")</script>', origin);
-    expect(svg).not.toContain("<script>");
-    expect(svg).toContain("&lt;script&gt;");
-  });
-
-  it("exports a one-page vector PDF with the same physical dimensions and readable code", async () => {
+  it("exports a one-page QR-only vector PDF with the same physical dimensions", async () => {
     const bytes = await renderSharedPremiumQrPdf(productId, code, origin);
     const pdf = await PDFDocument.load(bytes);
     const qr = createSharedPremiumQr(productId, code, origin);

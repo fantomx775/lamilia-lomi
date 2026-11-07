@@ -38,6 +38,21 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+a[href],
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled),
+select:not(:disabled),
+summary {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
 ::selection {
   background: var(--color-blush);
   color: var(--color-ink);

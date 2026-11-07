@@ -126,19 +126,61 @@ describe("premium download delivery", () => {
     );
   });
 
-  it("marks authorized redirects as private and no-store", async () => {
+  it("streams the private file through the app origin", async () => {
     mocks.authorizePremiumDownloadForRequest.mockResolvedValue({
       ok: true,
       url: "https://project.storage.supabase.co/object/sign/premium-files/file?token=short",
     });
-
-    const response = await GET(
-      new Request("https://lamilialomi.com/api/downloads/asset-1"),
-      { params: Promise.resolve({ assetId: "asset-1" }) },
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("%PDF-1.7 streamed", {
+        headers: { "content-length": "17", "content-type": "application/pdf" },
+      }),
     );
+    vi.stubGlobal("fetch", fetchMock);
 
-    expect(response.status).toBe(307);
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(response.headers.get("content-disposition")).toBe('attachment; filename="bonus.pdf"');
+    try {
+      const response = await GET(
+        new Request("https://lamilialomi.com/api/downloads/asset-1"),
+        { params: Promise.resolve({ assetId: "asset-1" }) },
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("content-disposition")).toBe(
+        'attachment; filename="bonus.pdf"; filename*=UTF-8\'\'bonus.pdf',
+      );
+      expect(response.headers.get("content-type")).toBe("application/pdf");
+      expect(response.headers.get("content-length")).toBe("17");
+      expect(response.headers.get("location")).toBeNull();
+      expect(await response.text()).toBe("%PDF-1.7 streamed");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://project.storage.supabase.co/object/sign/premium-files/file?token=short",
+        { cache: "no-store", redirect: "error", signal: expect.any(AbortSignal) },
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not return a storage URL when private storage is unavailable", async () => {
+    mocks.authorizePremiumDownloadForRequest.mockResolvedValue({
+      ok: true,
+      url: "https://project.storage.supabase.co/object/sign/premium-files/file?token=secret",
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("missing", { status: 404 })));
+
+    try {
+      const response = await GET(
+        new Request("https://lamilialomi.com/api/downloads/asset-1"),
+        { params: Promise.resolve({ assetId: "asset-1" }) },
+      );
+
+      expect(response.status).toBe(502);
+      const body = await response.text();
+      expect(body).not.toContain("supabase.co");
+      expect(body).not.toContain("secret");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

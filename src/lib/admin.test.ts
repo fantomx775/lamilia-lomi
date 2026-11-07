@@ -50,6 +50,19 @@ describe("admin behavior", () => {
     expect(buildProductFromFormData(form, { existing, snapshot }).errors).toContain(ADMIN_ERROR_CODES.NOT_FOUND_COLLECTION);
   });
 
+  it("normalizes a manually edited product slug and rejects an occupied address", () => {
+    const snapshot = getSeedContentSnapshot();
+    const form = new FormData();
+    form.set("title", "Coppélia: A Ballet Story");
+    form.set("slug", "Coppélia Ballet Story");
+    const edited = buildProductFromFormData(form, { snapshot });
+    expect(edited.errors).toEqual([]);
+    expect(edited.product.slug).toBe("coppelia-ballet-story");
+
+    form.set("slug", snapshot.products[0].slug);
+    expect(buildProductFromFormData(form, { snapshot }).errors).toContain("admin.conflict.slug");
+  });
+
   it("generates a unique collection slug and validates private image metadata", () => {
     const snapshot = getSeedContentSnapshot();
     snapshot.collections = [{

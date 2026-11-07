@@ -219,6 +219,7 @@ test("real private reports, admin decisions, notification intent and account med
 
     observationPhase = "open owner account";
     await ownerPage.goto(`${origin}/en/account`);
+    await ownerPage.getByText("Danger Zone", { exact: true }).click();
     await expect(ownerPage.getByTestId("account-deletion-submit")).toBeDisabled();
     await ownerPage.getByTestId("account-deletion-confirmation").fill("DELETE");
     screenshots.push(...await communityScreenshots(ownerPage, "cc07", "delete-account", runId));

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { createDemoSession, serializeDemoSession } from "@/lib/auth";
@@ -37,15 +38,23 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
   const manager = page.getByTestId("shared-premium-code-manager");
   const disclosure = manager.locator("xpath=ancestor::details[1]");
   if (await disclosure.count()) await disclosure.locator("summary").click();
+  const enteredCode = "KDP-E2E-PRINT-2026";
+  const field = manager.getByLabel("Kod do wpisania");
+  const createButton = manager.getByRole("button", { name: "Utwórz kod premium i QR" });
+  await expect(async () => {
+    await field.fill("");
+    await field.fill(enteredCode);
+    await expect(createButton).toBeEnabled({ timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
   const [created] = await Promise.all([
     page.waitForResponse((response) => response.url().endsWith(`/api/admin/products/${productId}/shared-code`) && response.request().method() === "POST", { timeout: 120_000 }),
-    manager.getByRole("button", { name: "Utwórz stały wspólny kod" }).click(),
+    createButton.click(),
   ]);
   expect(created.status()).toBe(200);
   const code = manager.getByLabel("Wspólny kod premium");
   await expect(code).toBeVisible();
   const stableCode = await code.innerText();
-  expect(stableCode.length).toBeGreaterThan(20);
+  expect(stableCode).toBe(enteredCode);
   const preview = manager.getByRole("img");
   await expect(preview).toBeVisible();
   await expect.poll(() => preview.evaluate((element) => (element as HTMLImageElement).naturalWidth), { timeout: 120_000 }).toBeGreaterThan(0);
@@ -59,10 +68,18 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
     expect(download.status()).toBe(200);
     expect(download.headers()["content-disposition"]).toBe(`attachment; filename="lamilialomi-kdp-${productId}.${format.toLowerCase()}"`);
     expect(download.headers()["content-type"]).toContain(format === "SVG" ? "image/svg+xml" : "application/pdf");
-    expect((await download.body()).length).toBeGreaterThan(100);
+    const contents = await download.body();
+    const qrProofDirectory = path.join(os.tmpdir(), "lamilialomi-premium-ux");
+    fs.mkdirSync(qrProofDirectory, { recursive: true });
+    fs.writeFileSync(path.join(qrProofDirectory, format === "SVG" ? "qr.svg" : "qr.pdf"), contents);
+    expect(contents.length).toBeGreaterThan(100);
+    const printableContent = contents.toString("utf8");
+    expect(printableContent).not.toContain(enteredCode);
+    expect(printableContent).not.toContain("Scan for premium");
+    expect(printableContent).not.toContain("Manual code");
   }
   await manager.scrollIntoViewIfNeeded();
-  const screenshot = path.resolve("docs/verification/pr-102", `${info.project.name === "mobile" ? "mobile" : "desktop"}-shared-manager.png`);
+  const screenshot = path.join(os.tmpdir(), "lamilialomi-premium-ux", `${info.project.name === "mobile" ? "mobile" : "desktop"}-shared-manager.png`);
   fs.mkdirSync(path.dirname(screenshot), { recursive: true });
   await page.screenshot({ path: screenshot, fullPage: false, mask: [code, preview], maskColor: "#d6d3ce" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
