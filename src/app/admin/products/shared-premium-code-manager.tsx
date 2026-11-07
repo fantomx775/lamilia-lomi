@@ -17,7 +17,7 @@ export function SharedPremiumCodeManager({ productId, isPublished, initialCode }
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ active, ...(active && !code ? { code: draft.trim().toUpperCase() } : {}) }) });
+      const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ active, ...(active && !code ? { code: draft.trim() } : {}) }) });
       const result = await response.json();
       if (!response.ok || !result.code) throw new Error(result.error === "duplicate_code" ? "Ten kod jest już używany. Wybierz inny." : result.error === "invalid_code_format" || result.error === "invalid_code_length" ? "Użyj 3–128 znaków A–Z, 0–9 i myślników." : "Nie udało się zapisać wspólnego kodu. Spróbuj ponownie.");
       setCode(result.code);

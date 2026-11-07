@@ -39,10 +39,16 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
   const disclosure = manager.locator("xpath=ancestor::details[1]");
   if (await disclosure.count()) await disclosure.locator("summary").click();
   const enteredCode = "KDP-E2E-PRINT-2026";
-  await manager.getByLabel("Kod do wpisania").fill(enteredCode);
+  const field = manager.getByLabel("Kod do wpisania");
+  const createButton = manager.getByRole("button", { name: "Utwórz kod premium i QR" });
+  await expect(async () => {
+    await field.fill("");
+    await field.fill(enteredCode);
+    await expect(createButton).toBeEnabled({ timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
   const [created] = await Promise.all([
     page.waitForResponse((response) => response.url().endsWith(`/api/admin/products/${productId}/shared-code`) && response.request().method() === "POST", { timeout: 120_000 }),
-    manager.getByRole("button", { name: "Utwórz kod premium i QR" }).click(),
+    createButton.click(),
   ]);
   expect(created.status()).toBe(200);
   const code = manager.getByLabel("Wspólny kod premium");

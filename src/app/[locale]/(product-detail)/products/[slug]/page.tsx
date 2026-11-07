@@ -199,11 +199,11 @@ async function ProductUnlockSection({
                   {downloadLinks.map(({ asset, href }) => (
                     <a
                       key={asset.id}
-                      className={buttonClassName({ variant: "secondary", className: "w-full min-w-0 whitespace-normal break-words text-center" })}
+                      className={buttonClassName({ variant: "secondary", className: "h-auto min-h-11 w-full min-w-0 whitespace-normal text-center" })}
                       href={href}
                     >
-                      <Download className="size-4" aria-hidden />
-                      <span className="min-w-0 flex-1 break-all">{asset.title ?? copy("download")}</span>
+                      <Download className="size-4 shrink-0" aria-hidden />
+                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{asset.title ?? copy("download")}</span>
                     </a>
                   ))}
                 </div>

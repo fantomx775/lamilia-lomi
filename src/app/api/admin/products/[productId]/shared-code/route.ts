@@ -23,9 +23,9 @@ export async function POST(request: Request, { params }: Context) {
   if (!body || typeof body !== "object" || typeof (body as { active?: unknown }).active !== "boolean") return json({ error: "invalid_request" }, 400);
   const active = (body as { active: boolean }).active;
   const rawCode = typeof (body as { code?: unknown }).code === "string" ? (body as { code: string }).code.trim() : null;
+  if (rawCode && !/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(rawCode)) return json({ error: "invalid_code_format" }, 400);
+  if (rawCode && (rawCode.length < 3 || rawCode.length > MAX_PREMIUM_CODE_LENGTH)) return json({ error: "invalid_code_length" }, 400);
   const requestedCode = rawCode ? rawCode.toUpperCase() : null;
-  if (requestedCode && !/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(requestedCode)) return json({ error: "invalid_code_format" }, 400);
-  if (requestedCode && (requestedCode.length < 3 || requestedCode.length > MAX_PREMIUM_CODE_LENGTH)) return json({ error: "invalid_code_length" }, 400);
   try {
     const currentSharedCode = await getExistingSharedCode(productId);
     const codeForMutation = active && requestedCode ? requestedCode : currentSharedCode?.code;

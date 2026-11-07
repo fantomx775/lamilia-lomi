@@ -59,8 +59,14 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await expect(downloadLink).toBeVisible();
     const bounds = await downloadLink.boundingBox();
-    expect(bounds).not.toBeNull();
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+    const filenameBounds = await filename.boundingBox();
+    const libraryBounds = await page.getByTestId("unlock-success-state").locator("..")
+      .getByRole("link", { name: "Go to My Library" }).boundingBox();
+    if (!bounds || !filenameBounds || !libraryBounds) throw new Error("Premium actions must be visible.");
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
+    expect(bounds.y).toBeGreaterThanOrEqual(libraryBounds.y + libraryBounds.height);
+    expect(filenameBounds.y).toBeGreaterThanOrEqual(bounds.y);
+    expect(filenameBounds.y + filenameBounds.height).toBeLessThanOrEqual(bounds.y + bounds.height);
     await page.getByTestId("product-unlock-section").screenshot({ path: join(screenshotDirectory, `premium-unlocked-${width}.png`) });
   }
 });
