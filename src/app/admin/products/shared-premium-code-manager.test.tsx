@@ -20,7 +20,7 @@ describe("shared premium code manager", () => {
     fireEvent.change(screen.getByLabelText("Kod do wpisania"), { target: { value: "kdp-abc123" } });
     fireEvent.click(screen.getByRole("button", { name: "Utwórz kod premium i QR" }));
     expect(await screen.findByLabelText("Wspólny kod premium")).toHaveTextContent("KDP-ABCDEF");
-    expect(fetch).toHaveBeenCalledWith("/api/admin/products/book/shared-code", expect.objectContaining({ method: "POST", body: '{"active":true,"code":"KDP-ABC123"}' }));
+    expect(fetch).toHaveBeenCalledWith("/api/admin/products/book/shared-code", expect.objectContaining({ method: "POST", body: '{"active":true,"code":"kdp-abc123"}' }));
     expect(screen.getByRole("img")).toHaveAttribute("src", "/api/admin/products/book/shared-code?format=svg&preview=1");
     expect(screen.getByRole("link", { name: "Pobierz SVG do druku" })).toHaveAttribute("href", "/api/admin/products/book/shared-code?format=svg");
     expect(screen.getByRole("link", { name: "Pobierz PDF do druku" })).toHaveAttribute("href", "/api/admin/products/book/shared-code?format=pdf");
