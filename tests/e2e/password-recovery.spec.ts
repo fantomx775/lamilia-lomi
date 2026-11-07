@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
 function localUrl(value: string | undefined, protocol = "http:") {
@@ -29,37 +29,48 @@ test("resets a password through the real local email and rejects a reused link",
 
   const browserErrors: string[] = [];
   const failedRequests: string[] = [];
+  const completedActions = new Set<Request>();
+  const canceledActionStreams: Request[] = [];
   let canceledPrefetches = 0;
-  page.on("pageerror", () => browserErrors.push("Uncaught page error"));
-  page.on("console", (message) => {
-    if (message.type() === "error") {
-      browserErrors.push(message.text().split("\n")[0].replace(/https?:\/\/\S+/g, "[URL]"));
-    }
-  });
-  page.on("requestfailed", (request) => {
-    const url = new URL(request.url());
-    const failure = request.failure()?.errorText;
-    const headers = request.headers();
-    if (failure === "net::ERR_ABORTED" && request.method() === "GET" && url.origin === app.origin &&
-      url.searchParams.has("_rsc") && (headers["next-router-prefetch"] === "1" || headers["next-router-segment-prefetch"])) {
-      canceledPrefetches++;
-      return;
-    }
-    failedRequests.push(`${request.method()} ${url.pathname}: ${failure}`);
-  });
-  const submit = async (name: string) => {
+  const monitor = (tab: Page) => {
+    tab.on("pageerror", () => browserErrors.push("Uncaught page error"));
+    tab.on("console", (message) => {
+      if (message.type() === "error") {
+        browserErrors.push(message.text().split("\n")[0].replace(/https?:\/\/\S+/g, "[URL]"));
+      }
+    });
+    tab.on("requestfailed", (request) => {
+      const url = new URL(request.url());
+      const failure = request.failure()?.errorText;
+      const headers = request.headers();
+      if (failure === "net::ERR_ABORTED" && request.method() === "POST" &&
+        url.origin === app.origin && url.pathname === "/en/reset-password") {
+        canceledActionStreams.push(request);
+        return;
+      }
+      if (failure === "net::ERR_ABORTED" && request.method() === "GET" && url.origin === app.origin &&
+        url.searchParams.has("_rsc") && (headers["next-router-prefetch"] === "1" || headers["next-router-segment-prefetch"])) {
+        canceledPrefetches++;
+        return;
+      }
+      failedRequests.push(`${request.method()} ${url.pathname}: ${failure}`);
+    });
+  };
+  monitor(page);
+  const submit = async (tab: Page, name: string) => {
     const [response] = await Promise.all([
-      page.waitForResponse((result) =>
+      tab.waitForResponse((result) =>
         result.request().method() === "POST" && new URL(result.url()).pathname === "/en/reset-password"),
-      page.getByRole("button", { name }).click(),
+      tab.getByRole("button", { name }).click(),
     ]);
     expect(response.status()).toBeLessThan(400);
+    completedActions.add(response.request());
   };
 
   try {
     await page.goto("/en/reset-password");
     await page.getByLabel("Email").fill(email);
-    await submit("Send reset link");
+    await submit(page, "Send reset link");
     await expect(page.getByText("Open it in this same browser", { exact: false })).toBeVisible();
 
     let messageId: string | undefined;
@@ -80,9 +91,13 @@ test("resets a password through the real local email and rejects a reused link",
       throw new Error("Unexpected local password recovery link target.");
     }
 
-    await page.goto(link.href, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
-    await page.screenshot({
+    // An email client normally opens a new tab in the same browser. Leave
+    // the requesting tab in place so the test cannot abort its action stream.
+    const recoveryTab = await page.context().newPage();
+    monitor(recoveryTab);
+    await recoveryTab.goto(link.href, { waitUntil: "domcontentloaded" });
+    await expect(recoveryTab.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
+    await recoveryTab.screenshot({
       path: testInfo.outputPath("choose-password.png"), caret: "initial", style: "nextjs-portal { display: none }",
     });
 
@@ -95,21 +110,28 @@ test("resets a password through the real local email and rejects a reused link",
       await other.close();
     }
 
-    await page.getByLabel("New password", { exact: true }).fill(password);
-    await page.getByLabel("Confirm new password").fill(password);
-    await submit("Save new password");
-    await expect(page.getByText("Your password has been changed", { exact: false })).toBeVisible();
-    await page.screenshot({
+    await recoveryTab.getByLabel("New password", { exact: true }).fill(password);
+    await recoveryTab.getByLabel("Confirm new password").fill(password);
+    await submit(recoveryTab, "Save new password");
+    await expect(recoveryTab.getByText("Your password has been changed", { exact: false })).toBeVisible();
+    await recoveryTab.screenshot({
       path: testInfo.outputPath("password-changed.png"), caret: "initial", style: "nextjs-portal { display: none }",
     });
     expect(Boolean((await reader.auth.signInWithPassword({ email, password: previous })).error)).toBe(true);
     expect(Boolean((await reader.auth.signInWithPassword({ email, password })).data.session)).toBe(true);
 
-    await page.goto(link.href, { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("could not be verified", { exact: false })).toBeVisible();
+    const reusedTab = await page.context().newPage();
+    monitor(reusedTab);
+    await reusedTab.goto(link.href, { waitUntil: "domcontentloaded" });
+    await expect(reusedTab.getByText("could not be verified", { exact: false })).toBeVisible();
     expect(browserErrors).toEqual([]);
     expect(failedRequests).toEqual([]);
+    // The router may close a response stream after applying its redirect.
+    // A cancellation without a successful response for that exact request
+    // still fails, even if another request produced the expected page.
+    expect(canceledActionStreams.every((request) => completedActions.has(request))).toBe(true);
     testInfo.annotations.push({ type: "canceled background Next.js prefetches", description: String(canceledPrefetches) });
+    testInfo.annotations.push({ type: "canceled streams after successful action response", description: String(canceledActionStreams.length) });
   } finally {
     const { error: cleanupError } = await admin.auth.admin.deleteUser(data.user.id);
     if (cleanupError) throw new Error("Could not clean up the local recovery fixture.");
