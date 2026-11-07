@@ -107,6 +107,7 @@ describe("ProductImageGallery", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     expect(dialog).toHaveAttribute("open");
+    expect(within(dialog).queryByText("Image preview")).not.toBeInTheDocument();
     expect(within(dialog).getByRole("img", { name: "Stars and little houses" })).toBeVisible();
     expect(within(dialog).getByText("1 of 2")).toBeVisible();
 
@@ -130,12 +131,14 @@ describe("ProductImageGallery", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     const frame = within(dialog).getByTestId("product-gallery-preview-frame");
-    const previewImage = within(dialog).getByRole("img", { name: "Stars and little houses" });
+    const nextPreview = frame.querySelector('img[src="/page-two.svg"]');
+    expect(nextPreview).toHaveAttribute("loading", "eager");
+    expect(nextPreview).toHaveClass("invisible");
     fireEvent.pointerDown(frame, { pointerType: "touch", clientX: 280 });
     fireEvent.pointerUp(frame, { pointerType: "touch", clientX: 80 });
 
     expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBeVisible();
-    expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBe(previewImage);
+    expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBe(nextPreview);
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
     expect(within(dialog).getByRole("img", { name: "Stars and little houses" })).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Close image preview" }));
@@ -234,7 +237,10 @@ describe("ProductImageGallery", () => {
 
     await user.click(lastThumbnail);
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
+    const frame = within(dialog).getByTestId("product-gallery-preview-frame");
     expect(within(dialog).getByRole("img", { name: "Page 4" })).toBeVisible();
+    expect(Array.from(frame.querySelectorAll("img"), (image) => image.getAttribute("src")))
+      .toEqual(["/page-4.svg", "/page-5.svg", "/page-3.svg"]);
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
     expect(within(dialog).getByRole("img", { name: "Page 5" })).toBeVisible();
   });
