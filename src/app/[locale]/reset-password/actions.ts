@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { normalizeLocale } from "@/lib/locale";
-import { clearRecoveryCookies, createRecoveryClient } from "@/lib/supabase/recovery";
+import { clearRecoveryCookies, createRecoveryClient, preserveRecoveryVerifier } from "@/lib/supabase/recovery";
 
 export async function requestPasswordReset(rawLocale: string, form: FormData) {
   const locale = normalizeLocale(rawLocale);
@@ -19,14 +19,19 @@ export async function requestPasswordReset(rawLocale: string, form: FormData) {
   const callback = new URL("/auth/callback", getCanonicalAppUrl());
   callback.searchParams.set("locale", locale);
   callback.searchParams.set("recovery", "1");
+  const restoreVerifier = await preserveRecoveryVerifier();
   try {
     await clearRecoveryCookies();
     const supabase = await createRecoveryClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: callback.toString(),
     });
-    if (error) console.warn("[password-recovery] Request rejected", { status: error.status });
+    if (error) {
+      restoreVerifier();
+      console.warn("[password-recovery] Request rejected", { status: error.status });
+    }
   } catch {
+    restoreVerifier();
     console.error("[password-recovery] Request failed");
   }
 
@@ -34,14 +39,14 @@ export async function requestPasswordReset(rawLocale: string, form: FormData) {
   redirect(`${path}?status=requested`);
 }
 
-export async function saveRecoveredPassword(rawLocale: string, form: FormData) {
+export async function saveRecoveredPassword(rawLocale: string, userId: string, form: FormData) {
   const locale = normalizeLocale(rawLocale);
   const path = `/${locale}/reset-password`;
   if (getBackendMode() !== "supabase") redirect(`${path}?status=unavailable`);
 
   const supabase = await createRecoveryClient();
   const { data, error } = await supabase.auth.getUser();
-  if (error || !data.user) redirect(`${path}?status=invalid-link`);
+  if (error || !data.user || data.user.id !== userId) redirect(`${path}?status=invalid-link`);
 
   const password = form.get("password");
   if (typeof password !== "string" || password.length < 8 || password.length > 128 ||
@@ -54,6 +59,8 @@ export async function saveRecoveredPassword(rawLocale: string, form: FormData) {
 
   try {
     await supabase.auth.signOut({ scope: "local" });
+  } catch {
+    console.warn("[password-recovery] Session sign-out failed");
   } finally {
     await clearRecoveryCookies();
   }

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getBackendMode } from "@/lib/config";
 import { normalizeLocale } from "@/lib/locale";
+import { createRecoveryClient } from "@/lib/supabase/recovery";
 
 import { requestPasswordReset, saveRecoveredPassword } from "./actions";
 
@@ -26,27 +27,33 @@ export default async function ResetPasswordPage({
   searchParams: Promise<{ status?: string }>;
 }) {
   const locale = normalizeLocale((await params).locale);
-  const { status } = await searchParams;
+  let { status } = await searchParams;
   const available = getBackendMode() === "supabase";
-  const choosing = status === "choose-password" || status === "invalid-password" || status === "update-failed";
+  let recoveryUser = null;
+  if (available && (status === "choose-password" || status === "invalid-password" || status === "update-failed")) {
+    const supabase = await createRecoveryClient(true);
+    const { data, error } = await supabase.auth.getUser();
+    recoveryUser = error ? null : data.user;
+    if (!recoveryUser) status = "invalid-link";
+  }
   const message = status && Object.hasOwn(messages, status) ? messages[status as keyof typeof messages] : null;
 
   return (
     <div className="mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl place-items-center px-4 py-10">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <h1 className="font-serif text-3xl font-semibold">{choosing && available ? "Choose a new password" : "Reset password"}</h1>
+          <h1 className="font-serif text-3xl font-semibold">{recoveryUser ? "Choose a new password" : "Reset password"}</h1>
           <p className="text-sm leading-6 text-[var(--color-muted)]">
             {!available ? "Password reset is unavailable in demo mode." :
-              choosing ? "Enter and confirm your new password." :
+              recoveryUser ? "Enter and confirm your new password." :
               status !== "complete" && "Enter your email to receive a password reset link."}
           </p>
         </CardHeader>
         <CardContent>
           <div className="grid gap-4">
             {message && available && <p role="status" className="text-sm">{message}</p>}
-            {available && status !== "complete" && (choosing ? (
-              <form className="grid gap-4" action={saveRecoveredPassword.bind(null, locale)}>
+            {available && status !== "complete" && (recoveryUser ? (
+              <form className="grid gap-4" action={saveRecoveredPassword.bind(null, locale, recoveryUser.id)}>
                 <div className="grid gap-2">
                   <Label htmlFor="password">New password</Label>
                   <Input id="password" name="password" type="password" autoComplete="new-password" minLength={8} maxLength={128} required />

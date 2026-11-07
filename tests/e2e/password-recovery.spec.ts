@@ -27,11 +27,21 @@ test("resets a password through the real local email and rejects a reused link",
   const { data, error } = await admin.auth.admin.createUser({ email, password: previous, email_confirm: true });
   if (error || !data.user) throw new Error("Could not create the local recovery fixture.");
 
+  const browserErrors: string[] = [];
+  const failedRequests: string[] = [];
+  page.on("pageerror", () => browserErrors.push("Uncaught page error"));
+  page.on("console", (message) => {
+    if (message.type() === "error") browserErrors.push("Console error");
+  });
+  page.on("requestfailed", (request) => {
+    failedRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+  });
+
   try {
     await page.goto("/en/reset-password");
     await page.getByLabel("Email").fill(email);
     await page.getByRole("button", { name: "Send reset link" }).click();
-    await expect(page.getByRole("status")).toContainText("Open it in this same browser");
+    await expect(page.getByText("Open it in this same browser", { exact: false })).toBeVisible();
 
     let messageId: string | undefined;
     await expect.poll(async () => {
@@ -53,15 +63,15 @@ test("resets a password through the real local email and rejects a reused link",
 
     await page.goto(link.href, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath("choose-password.png") });
+    await page.screenshot({
+      path: testInfo.outputPath("choose-password.png"), animations: "disabled", style: "nextjs-portal { display: none }",
+    });
 
     const other = await browser.newPage({ baseURL: app.origin, ignoreHTTPSErrors: true });
     try {
       await other.goto("/en/reset-password?status=choose-password");
-      await other.getByLabel("New password", { exact: true }).fill(password);
-      await other.getByLabel("Confirm new password").fill(password);
-      await other.getByRole("button", { name: "Save new password" }).click();
-      await expect(other.getByRole("status")).toContainText("could not be verified");
+      await expect(other.getByRole("button", { name: "Save new password" })).toHaveCount(0);
+      await expect(other.getByText("could not be verified", { exact: false })).toBeVisible();
     } finally {
       await other.close();
     }
@@ -69,13 +79,17 @@ test("resets a password through the real local email and rejects a reused link",
     await page.getByLabel("New password", { exact: true }).fill(password);
     await page.getByLabel("Confirm new password").fill(password);
     await page.getByRole("button", { name: "Save new password" }).click();
-    await expect(page.getByRole("status")).toContainText("Your password has been changed");
-    await page.screenshot({ path: testInfo.outputPath("password-changed.png") });
+    await expect(page.getByText("Your password has been changed", { exact: false })).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("password-changed.png"), animations: "disabled", style: "nextjs-portal { display: none }",
+    });
     expect(Boolean((await reader.auth.signInWithPassword({ email, password: previous })).error)).toBe(true);
     expect(Boolean((await reader.auth.signInWithPassword({ email, password })).data.session)).toBe(true);
 
     await page.goto(link.href, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("status")).toContainText("could not be verified");
+    await expect(page.getByText("could not be verified", { exact: false })).toBeVisible();
+    expect(browserErrors).toEqual([]);
+    expect(failedRequests).toEqual([]);
   } finally {
     const { error: cleanupError } = await admin.auth.admin.deleteUser(data.user.id);
     if (cleanupError) throw new Error("Could not clean up the local recovery fixture.");

@@ -241,7 +241,7 @@ async function handlePasswordRecovery(url: URL, locale: string) {
   try {
     const supabase = await createRecoveryClient();
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error && data.session && data.redirectType === "recovery") {
+    if (!error && data.session && "redirectType" in data && data.redirectType === "recovery") {
       return successResponse(`${path}?status=choose-password`);
     }
     if (data.session) await clearRecoveryCookies();
