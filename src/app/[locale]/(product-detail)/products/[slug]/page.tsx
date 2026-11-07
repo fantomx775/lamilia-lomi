@@ -203,7 +203,7 @@ async function ProductUnlockSection({
                       href={href}
                     >
                       <Download className="size-4" aria-hidden />
-                      <span className="min-w-0 break-all">{asset.title ?? copy("download")}</span>
+                      <span className="min-w-0 flex-1 break-all">{asset.title ?? copy("download")}</span>
                     </a>
                   ))}
                 </div>

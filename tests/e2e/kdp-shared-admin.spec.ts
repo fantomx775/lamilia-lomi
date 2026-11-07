@@ -73,7 +73,7 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
     expect(printableContent).not.toContain("Manual code");
   }
   await manager.scrollIntoViewIfNeeded();
-  const screenshot = path.resolve("docs/verification/pr-102", `${info.project.name === "mobile" ? "mobile" : "desktop"}-shared-manager.png`);
+  const screenshot = path.join(os.tmpdir(), "lamilialomi-premium-ux", `${info.project.name === "mobile" ? "mobile" : "desktop"}-shared-manager.png`);
   fs.mkdirSync(path.dirname(screenshot), { recursive: true });
   await page.screenshot({ path: screenshot, fullPage: false, mask: [code, preview], maskColor: "#d6d3ce" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

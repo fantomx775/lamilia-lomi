@@ -17,6 +17,9 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
   );
 
   mkdirSync(screenshotDirectory, { recursive: true });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false }));
+  });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.context().addCookies([{
     name: "ll_demo_session",
@@ -37,7 +40,7 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
   await expect(page.locator("details")).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "Join the Coloring Club" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.screenshot({ path: join(screenshotDirectory, "account-390.png"), fullPage: true });
+  await page.getByRole("main").last().screenshot({ path: join(screenshotDirectory, "account-390.png") });
 
   for (const width of [320, 375, 390]) {
     await page.setViewportSize({ width, height: 844 });
@@ -46,13 +49,18 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
     await expect(page.getByTestId("premium-download-links")).toBeVisible();
 
     const downloadLink = page.getByTestId("premium-download-links").getByRole("link").first();
-    await downloadLink.evaluate((element) => {
-      element.replaceChildren(document.createTextNode(`${"MoonGardenPremiumPrintableFile_".repeat(5)}.pdf`));
-    });
+    const longFilename = `${"MoonGardenPremiumPrintableFile_".repeat(5)}.pdf`;
+    await downloadLink.locator("span").evaluate((element, text) => {
+      element.textContent = text;
+    }, longFilename);
+    const filename = downloadLink.locator("span");
+    await expect(filename).toHaveText(longFilename);
+    await expect.poll(() => filename.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await expect(downloadLink).toBeVisible();
     const bounds = await downloadLink.boundingBox();
     expect(bounds).not.toBeNull();
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
-    await page.screenshot({ path: join(screenshotDirectory, `premium-unlocked-${width}.png`), fullPage: true });
+    await page.getByTestId("product-unlock-section").screenshot({ path: join(screenshotDirectory, `premium-unlocked-${width}.png`) });
   }
 });

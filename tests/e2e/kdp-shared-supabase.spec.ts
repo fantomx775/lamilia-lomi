@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { expect, test } from "@playwright/test";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
@@ -78,7 +79,7 @@ test("real shared QR: concurrent readers, renamed book, cross-device email confi
     expect(await download.body()).toEqual(pdf);
     const publicFile = await fetch(`${api.origin}/storage/v1/object/public/premium-files/${objectPath}`);
     expect(publicFile.ok).toBe(false);
-    const screenshot = path.resolve("docs/verification/pr-102", "supabase-cross-device-unlocked.png");
+    const screenshot = path.join(tmpdir(), "lamilialomi-premium-ux", "supabase-cross-device-unlocked.png");
     await mkdir(path.dirname(screenshot), { recursive: true });
     await verified.screenshot({ path: screenshot });
     await verified.goto(`/en/unlock/${productId}#code=${code}&productId=${productId}`);
