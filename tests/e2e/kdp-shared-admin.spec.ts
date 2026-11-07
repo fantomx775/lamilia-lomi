@@ -96,10 +96,8 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
   if (await reloadedDisclosure.count()) await reloadedDisclosure.locator("summary").click();
   await expect(reloaded.getByLabel("Wspólny kod premium")).toHaveText(stableCode);
   await expect(reloaded.getByRole("button", { name: "Dezaktywuj wspólny kod" })).toBeVisible();
-  const legacy = page.locator("#product-premium-codes").getByRole("link", { name: "Pobierz SVG do druku" }).last();
-  const legacyHref = await legacy.getAttribute("href");
-  expect(legacyHref).not.toContain(codeId);
-  expect((await page.request.get(legacyHref!)).status()).toBe(200);
+  await expect(page.getByText("Kod jednorazowy", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Dodaj kod", exact: true })).toHaveCount(0);
 
   page.once("dialog", (dialog) => dialog.accept());
   await reloaded.getByRole("button", { name: "Usuń wspólny kod" }).click();

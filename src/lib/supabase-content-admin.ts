@@ -175,7 +175,7 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
         {
           product_state: buildProductMutationPayload(
             product,
-            formData.getAll("premiumCodeRemove").flatMap((value) =>
+            formData.get("preservePremiumCodes") === "1" ? [] : formData.getAll("premiumCodeRemove").flatMap((value) =>
               typeof value === "string" && value.trim() ? [value.trim()] : [],
             ),
             formData.get(`longDescription${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`) === "2",

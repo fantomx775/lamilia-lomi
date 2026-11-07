@@ -396,6 +396,12 @@ describe("admin behavior", () => {
     const omitted = buildProductFromFormData(new FormData(), { existing, snapshot });
     expect(omitted.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
     expect(omitted.product.premiumCodes).toEqual([redeemedCode]);
+
+    const editorForm = new FormData();
+    editorForm.set("preservePremiumCodes", "1");
+    const editorSave = buildProductFromFormData(editorForm, { existing, snapshot });
+    expect(editorSave.errors).not.toContain(ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED);
+    expect(editorSave.product.premiumCodes).toEqual([redeemedCode]);
   });
 
   it("preserves the authoritative shared print code across omitted or forged product fields", () => {

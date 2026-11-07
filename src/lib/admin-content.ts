@@ -740,6 +740,10 @@ function parsePremiumCodes(
   productId: string,
   existing?: Product,
 ) {
+  if (formData.get("preservePremiumCodes") === "1") {
+    return { codes: existing?.premiumCodes ?? [], errors: [] };
+  }
+
   const removed = new Set(existingIds(formData, "premiumCodeRemove"));
   const ids = formData.getAll("premiumCodeId");
   const codes = formData.getAll("premiumCode");
