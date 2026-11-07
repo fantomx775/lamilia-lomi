@@ -64,7 +64,7 @@ test("resets a password through the real local email and rejects a reused link",
     await page.goto(link.href, { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Choose a new password" })).toBeVisible();
     await page.screenshot({
-      path: testInfo.outputPath("choose-password.png"), animations: "disabled", style: "nextjs-portal { display: none }",
+      path: testInfo.outputPath("choose-password.png"), caret: "initial", style: "nextjs-portal { display: none }",
     });
 
     const other = await browser.newPage({ baseURL: app.origin, ignoreHTTPSErrors: true });
@@ -81,7 +81,7 @@ test("resets a password through the real local email and rejects a reused link",
     await page.getByRole("button", { name: "Save new password" }).click();
     await expect(page.getByText("Your password has been changed", { exact: false })).toBeVisible();
     await page.screenshot({
-      path: testInfo.outputPath("password-changed.png"), animations: "disabled", style: "nextjs-portal { display: none }",
+      path: testInfo.outputPath("password-changed.png"), caret: "initial", style: "nextjs-portal { display: none }",
     });
     expect(Boolean((await reader.auth.signInWithPassword({ email, password: previous })).error)).toBe(true);
     expect(Boolean((await reader.auth.signInWithPassword({ email, password })).data.session)).toBe(true);
