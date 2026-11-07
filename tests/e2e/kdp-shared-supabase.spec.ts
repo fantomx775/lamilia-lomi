@@ -24,7 +24,7 @@ test("real shared QR: concurrent readers, renamed book, cross-device email confi
   const objectPath = `products/${productId}/premium_download/kdp-${randomUUID()}.pdf`;
   const originalAsset = await admin.from("product_assets").select("path,size_bytes").eq("id", assetId).single();
   expect(originalAsset.error).toBeNull();
-  const existing = await admin.from("premium_codes").select("id,code,active").eq("product_id", productId).eq("code_type", "shared").maybeSingle();
+  const existing = await admin.from("premium_codes").select("id,code,active").eq("product_id", productId).eq("code_type", "shared").is("retired_at", null).maybeSingle();
   expect(existing.error).toBeNull();
   const codeId = existing.data?.id ?? randomUUID();
   const code = existing.data?.code ?? `KDP-${randomBytes(16).toString("hex").toUpperCase()}`;
