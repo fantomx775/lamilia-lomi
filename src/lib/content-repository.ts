@@ -10,6 +10,7 @@ import { normalizeCatalogSettings } from "./catalog-settings";
 import { normalizeAboutPageSettings } from "./about-settings";
 import { sortFeaturedProductCandidates } from "./featured-product-ranking";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
+import { versionedProductImagePath } from "./product-image-cache";
 import { listReaderArtworks } from "./reader-artworks";
 import type {
   AmazonLink,
@@ -973,7 +974,7 @@ function mapAsset(row: DbRow, productStatus?: Product["status"]): ProductAsset {
     ? r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", rawPath) : null;
   const versionedR2ImagePath =
     publicR2Url && (kind === "cover" || kind === "gallery")
-      ? `/api/media/${id}?v=${encodeURIComponent(id)}` : null;
+      ? versionedProductImagePath(id) : null;
 
   return {
     id,
