@@ -92,8 +92,11 @@ test("real shared QR: concurrent readers, renamed book, cross-device email confi
       { maxRedirects: 0 },
     );
     expect(oldProduct.status()).toBe(308);
-    expect(oldProduct.headers().location).toBe(
-      `http://127.0.0.1:3031/en/products/${changedSlug}?utm_source=legacy-qr&ref=preserved`,
+    expect(new URL(oldProduct.headers().location!, app.origin).href).toBe(
+      new URL(
+        `/en/products/${changedSlug}?utm_source=legacy-qr&ref=preserved`,
+        app.origin,
+      ).href,
     );
     expect(leaks).toEqual([]);
     expect((await admin.from("premium_codes").update({ active: false }).eq("id", codeId)).error).toBeNull();
