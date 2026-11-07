@@ -31,16 +31,21 @@ test("resets a password through the real local email and rejects a reused link",
   const failedRequests: string[] = [];
   page.on("pageerror", () => browserErrors.push("Uncaught page error"));
   page.on("console", (message) => {
-    if (message.type() === "error") browserErrors.push("Console error");
+    if (message.type() === "error") {
+      browserErrors.push(message.text().split("\n")[0].replace(/https?:\/\/\S+/g, "[URL]"));
+    }
   });
   page.on("requestfailed", (request) => {
-    failedRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+    failedRequests.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText}`);
   });
-  const submit = (name: string) => Promise.all([
-    page.waitForEvent("requestfinished", (request) =>
-      request.method() === "POST" && new URL(request.url()).pathname === "/en/reset-password"),
-    page.getByRole("button", { name }).click(),
-  ]);
+  const submit = async (name: string) => {
+    const [response] = await Promise.all([
+      page.waitForResponse((result) =>
+        result.request().method() === "POST" && new URL(result.url()).pathname === "/en/reset-password"),
+      page.getByRole("button", { name }).click(),
+    ]);
+    expect(response.status()).toBeLessThan(400);
+  };
 
   try {
     await page.goto("/en/reset-password");
