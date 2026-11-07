@@ -1079,13 +1079,12 @@ export function ProductEditor({
               </div>
             </AdminEditorSection>
 
-            <AdminEditorSection title="Dostęp premium" description="Kody są przypisane do tego produktu. Wykorzystanych kodów nie można zmienić ani usunąć.">
+            <AdminEditorSection title="Dostęp premium" description="Kody są przypisane do tego produktu. Wykorzystane kody jednorazowe zachowują swój dotychczasowy stan.">
               <div id="product-premium-codes" className="grid gap-3">
                 <SharedPremiumCodeManager key={product?.id ?? "new-product"} productId={product?.id} isPublished={product?.status === "published"} initialCode={product?.premiumCodes.find((code) => code.codeType === "shared" && !code.retiredAt)} />
-                <p className="text-sm font-semibold">Kody jednorazowe</p>
                 {fieldErrors["product-premium-codes"]?.map((message) => <p key={message} role="alert" className="text-sm text-red-800">{message}</p>)}
                 {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}
-                {premiumCodes.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze kodów premium.</p> : null}
+                {premiumCodes.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze kodów jednorazowych.</p> : null}
                 {premiumCodes.map((code, index) => (
                   <PremiumEditor key={code.clientId} code={code} index={index} qrProductId={product?.premiumCodes.some((saved) => saved.id === code.id && saved.code === code.code) ? product.id : undefined} error={premiumErrors[code.clientId] ? getAdminErrorMessage(premiumErrors[code.clientId]!, "pl") : undefined} onChange={updatePremium} onRemove={removePremium} onUndo={() => updatePremium(code.clientId, "removed", false)} />
                 ))}
@@ -1400,7 +1399,31 @@ function PremiumEditor({
   const status = code.redeemedAt
     ? code.active ? "Wykorzystany" : "Wykorzystany · wyłączony"
     : code.active ? "Niewykorzystany" : "Wyłączony";
-  return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]"><input type="hidden" name="premiumCodeClientId" value={code.clientId} /><input type="hidden" name="premiumCodeId" value={code.id} /><Field label="Kod" htmlFor={inputId}><Input id={inputId} name="premiumCode" value={code.code} maxLength={MAX_PREMIUM_CODE_LENGTH} readOnly={Boolean(code.redeemedAt)} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())} placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />{error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}</Field><div className="grid content-end gap-2 pb-3"><span className="text-xs font-medium text-[var(--color-muted)]" aria-label={`Status kodu: ${status}`}>{status}</span><label className="flex items-center gap-2 text-sm"><input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active} onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />Aktywny</label></div>{code.redeemedAt ? <Button type="button" variant="ghost" size="sm" disabled title="Wykorzystanego kodu nie można usunąć." className="self-end text-red-800">Usuń</Button> : <Button type="button" variant="ghost" size="sm" onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button>}{qrProductId ? <PremiumCodeQrLinks productId={qrProductId} codeId={code.id} /> : null}</div>;
+  return (
+    <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+      <span className="text-sm font-semibold sm:col-span-full">Kod jednorazowy</span>
+      <input type="hidden" name="premiumCodeClientId" value={code.clientId} />
+      <input type="hidden" name="premiumCodeId" value={code.id} />
+      <Field label="Kod" htmlFor={inputId}>
+        <Input id={inputId} name="premiumCode" value={code.code} maxLength={MAX_PREMIUM_CODE_LENGTH}
+          readOnly={Boolean(code.redeemedAt)} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())}
+          placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />
+        {error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}
+      </Field>
+      <div className="grid content-end gap-2 pb-3">
+        <span className="text-xs font-medium text-[var(--color-muted)]" aria-label={`Status kodu: ${status}`}>{status}</span>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active}
+            onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />
+          Aktywny
+        </label>
+      </div>
+      <Button type="button" variant="ghost" size="sm" disabled={Boolean(code.redeemedAt)}
+        title={code.redeemedAt ? "Wykorzystanego kodu nie można usunąć." : undefined}
+        onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button>
+      {qrProductId ? <PremiumCodeQrLinks productId={qrProductId} codeId={code.id} /> : null}
+    </div>
+  );
 }
 
 function CheckboxGroup({ label, name, values, selected }: { label: string; name: string; values: Array<{ id: string; label: string }>; selected: string[] }) {

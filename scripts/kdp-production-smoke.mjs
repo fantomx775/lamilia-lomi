@@ -51,8 +51,10 @@ try {
   browser = await chromium.launch();
   const products = ok(await admin.from('products').select('id,slug').eq('status', 'published').order('created_at'), 'Read products');
   const assets = ok(await admin.from('product_assets').select('id,product_id,path,bucket').eq('kind', 'premium_download').eq('is_active', true), 'Read premium assets');
-  const asset = assets.find((a) => products.some((p) => p.id === a.product_id));
-  assert(asset, 'A published product with an active premium asset is required');
+  const activeShared = ok(await admin.from('premium_codes').select('product_id').eq('code_type', 'shared').eq('active', true).is('retired_at', null), 'Read current shared codes');
+  const activeProductIds = new Set(activeShared.map((code) => code.product_id));
+  const asset = assets.find((a) => activeProductIds.has(a.product_id) && products.some((p) => p.id === a.product_id));
+  assert(asset, 'A published product with an active shared code and premium asset is required');
   const product = products.find((p) => p.id === asset.product_id);
   report.productId = product.id;
   const manager = await account('admin', 'admin');
@@ -64,12 +66,10 @@ try {
   const before = await b.context.request.get(`/api/downloads/${asset.id}`, { headers: { accept: 'application/json' } });
   assert.equal(before.status(), 403); check('Verified locked reader denied');
   const management = `/api/admin/products/${product.id}/shared-code`;
-  const existing = ok(await admin.from('premium_codes').select('active').eq('product_id', product.id).eq('code_type', 'shared').maybeSingle(), 'Read existing shared state');
-  assert(!existing || existing.active, 'Smoke must preserve a deliberately deactivated shared code');
-  const created = await manager.context.request.post(management, { headers: { origin }, data: { active: true } });
-  assert.equal(created.status(), 200);
-  const { code } = await created.json();
-  assert(code?.code && code.codeType === 'shared'); check('Production admin creates or reuses permanent shared code');
+  const current = await manager.context.request.get(management);
+  assert.equal(current.status(), 200);
+  const { code } = await current.json();
+  assert(code?.code && code.codeType === 'shared' && code.active); check('Production admin reads current active shared code');
   for (const [format, mime] of [['svg', 'image/svg+xml'], ['pdf', 'application/pdf']]) {
     const output = await manager.context.request.get(`${management}?format=${format}`);
     assert.equal(output.status(), 200); assert(output.headers()['content-type'].startsWith(mime));

@@ -82,7 +82,7 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
   await manager.scrollIntoViewIfNeeded();
   const screenshot = path.join(os.tmpdir(), "lamilialomi-premium-ux", `${info.project.name === "mobile" ? "mobile" : "desktop"}-shared-manager.png`);
   fs.mkdirSync(path.dirname(screenshot), { recursive: true });
-  await page.screenshot({ path: screenshot, fullPage: false, mask: [code, preview], maskColor: "#d6d3ce" });
+  await page.locator("#product-premium-codes").screenshot({ path: screenshot, mask: [code, preview], maskColor: "#d6d3ce" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await manager.getByRole("button", { name: "Dezaktywuj wspólny kod" }).click();
