@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { PremiumCode } from "@/lib/types";
 
-export function PremiumCodeQrLinks({ productId, codeId }: { productId: string; codeId: string }) {
+function PremiumCodeQrLinks({ productId, codeId }: { productId: string; codeId: string }) {
   const endpoint = `/api/admin/products/${encodeURIComponent(productId)}/shared-code`;
   return <div className="flex flex-wrap gap-2 sm:col-span-full">
     {(["svg", "pdf"] as const).map((format) => {

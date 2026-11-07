@@ -23,11 +23,10 @@ import {
   PRODUCT_TITLE_MAX_LENGTH,
   validateProductTextLengths,
 } from "@/lib/product-text";
-import { MAX_PREMIUM_CODE_LENGTH, validatePremiumCodeEntries } from "@/lib/premium-code";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
 import type { AmazonLink, Category, Collection, Product, ProductAsset, Tag } from "@/lib/types";
 import { ReaderArtworkManager } from "./reader-artwork-manager";
-import { PremiumCodeQrLinks, SharedPremiumCodeManager } from "./shared-premium-code-manager";
+import { SharedPremiumCodeManager } from "./shared-premium-code-manager";
 import { useAdminToast } from "@/components/admin/admin-toast";
 import { AdminSaveBar } from "@/components/admin/admin-save-bar";
 
@@ -78,15 +77,6 @@ const amazonMarketOptions: ReadonlyArray<{ value: AmazonLink["market"]; label: s
   { value: "amazon.com", label: "Amazon.com" },
   { value: "amazon.de", label: "Amazon.de" },
 ];
-
-type PremiumDraft = {
-  clientId: string;
-  id: string;
-  code: string;
-  active: boolean;
-  redeemedAt?: string;
-  removed: boolean;
-};
 
 const productTypes = ["coloring-book", "picture-book", "audiobook"];
 
@@ -181,8 +171,6 @@ export function ProductEditor({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
   const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product, submittedValues));
-  const [premiumCodes, setPremiumCodes] = useState<PremiumDraft[]>(() => buildPremiumCodes(product, submittedValues));
-  const [premiumErrors, setPremiumErrors] = useState<Partial<Record<string, AdminErrorCode>>>({});
   const formRef = useRef<HTMLFormElement>(null);
   const savedFormSignatureRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
@@ -267,7 +255,6 @@ export function ProductEditor({
     setShowRouteFeedback(false);
     setSaveErrorCodes([]);
     setFieldErrors({});
-    setPremiumErrors({});
     scheduleAfterRender(refreshDirtyState);
   }, [refreshDirtyState]);
 
@@ -304,8 +291,7 @@ export function ProductEditor({
     const formData = formDataFromProductSaveValues(submittedValues);
     const nextAssets = buildAssets(product, submittedValues);
     const nextAmazonLinks = buildAmazonLinks(product, submittedValues);
-    const nextPremiumCodes = buildPremiumCodes(product, submittedValues);
-    const errorMapping = mapProductSaveErrors(nativeSaveState.errors, formData, nextAmazonLinks, nextPremiumCodes);
+    const errorMapping = mapProductSaveErrors(nativeSaveState.errors, formData, nextAmazonLinks);
 
     setContent(buildProductContent(product, submittedValues));
     setAssets(nextAssets);
@@ -313,10 +299,8 @@ export function ProductEditor({
     setProductSlug(submittedValue(submittedValues, "slug", product?.slug ?? ""));
     setProductStatus(parseProductStatus(submittedValue(submittedValues, "status", product?.status ?? "draft")));
     setAmazonLinks(nextAmazonLinks);
-    setPremiumCodes(nextPremiumCodes);
     setSaveErrorCodes(nativeSaveState.errors);
     setFieldErrors(errorMapping.fieldErrors);
-    setPremiumErrors(errorMapping.premiumErrors);
     setSaveStatus("error");
     savedFormSignatureRef.current = "";
     isDirtyRef.current = true;
@@ -833,82 +817,14 @@ export function ProductEditor({
     updateAmazon(link.clientId, "removed", true);
   };
 
-  const updatePremium = <K extends keyof PremiumDraft>(clientId: string, field: K, value: PremiumDraft[K]) => {
-    const current = premiumCodes.find((code) => code.clientId === clientId);
-    if (current?.redeemedAt && field === "code") return;
-    markDirty();
-    setPremiumCodes((current) => current.map((code) => code.clientId === clientId ? { ...code, [field]: value } : code));
-    setPremiumErrors((current) => {
-      if (!current[clientId]) return current;
-      const next = { ...current };
-      delete next[clientId];
-      return next;
-    });
-  };
-
-  const addPremium = () => {
-    markDirty();
-    setPremiumCodes((current) => [...current, {
-      clientId: `code-${Date.now()}-${current.length}`,
-      id: "",
-      code: "",
-      active: true,
-      removed: false,
-    }]);
-  };
-
-  const removePremium = (code: PremiumDraft) => {
-    if (code.redeemedAt) return;
-    if (!code.id) {
-      markDirty();
-      setPremiumCodes((current) => current.filter((item) => item.clientId !== code.clientId));
-      return;
-    }
-    updatePremium(code.clientId, "removed", true);
-  };
-
-  const validatePremiumCodesBeforeSubmit = () => {
-    const activeCodes = premiumCodes.filter((code) => !code.removed);
-    const issues = validatePremiumCodeEntries(activeCodes);
-    const nextErrors: Partial<Record<string, AdminErrorCode>> = {};
-
-    for (const issue of issues) {
-      const code = activeCodes[issue.index];
-      if (code) {
-        nextErrors[code.clientId] = issue.reason === "required"
-          ? "admin.validation.premium_code_required"
-          : issue.reason === "too_long"
-            ? "admin.validation.premium_code_too_long"
-            : "admin.conflict.premium_code_duplicate";
-      }
-    }
-
-    setPremiumErrors(nextErrors);
-    return issues.length === 0;
-  };
-
-  const premiumErrorMessages = Array.from(new Set(
-    Object.values(premiumErrors)
-      .filter((code): code is AdminErrorCode => Boolean(code))
-      .map((code) => getAdminErrorMessage(code, "pl")),
-  ));
-
   const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isSaving || hasActiveMediaUpload || !saveAction) return;
 
-    if (!validatePremiumCodesBeforeSubmit()) {
-      setSaveStatus("error");
-      scheduleAfterRender(() => {
-        formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
-      });
-      return;
-    }
-
     const form = event.currentTarget;
     const formData = new FormData(form);
     if (productTextErrors.length) {
-      const mapped = mapProductSaveErrors(productTextErrors, formData, amazonLinks, premiumCodes);
+      const mapped = mapProductSaveErrors(productTextErrors, formData, amazonLinks);
       setSaveStatus("error");
       setSaveErrorCodes(productTextErrors);
       setFieldErrors(mapped.fieldErrors);
@@ -926,7 +842,7 @@ export function ProductEditor({
         const result = await saveAction(formData);
         if (!result.ok) {
           publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
-          const mapped = mapProductSaveErrors(result.errors, formData, amazonLinks, premiumCodes);
+          const mapped = mapProductSaveErrors(result.errors, formData, amazonLinks);
           const cleanupFailures = new Map((result.mediaCleanupFailures ?? []).map((failure) => [failure.assetId, failure]));
           setAssets((current) => current.map((asset) => {
             if (!asset.uploaded) return asset;
@@ -950,7 +866,6 @@ export function ProductEditor({
           setSaveStatus("error");
           setSaveErrorCodes(result.errors);
           setFieldErrors(mapped.fieldErrors);
-          setPremiumErrors(mapped.premiumErrors);
           scheduleAfterRender(() => focusFirstError(mapped.focusTarget));
           return;
         }
@@ -961,7 +876,6 @@ export function ProductEditor({
         setSaveStatus("saved");
         setSaveErrorCodes([]);
         setFieldErrors({});
-        setPremiumErrors({});
         scheduleAfterRender(() => {
           const form = formRef.current;
           if (form) savedFormSignatureRef.current = productEditorFormSignature(form);
@@ -995,6 +909,7 @@ export function ProductEditor({
     <div className="min-w-0 pb-28">
       <form ref={formRef} id="product-editor-form" action={saveFormAction ? nativeSaveFormAction : undefined} onSubmit={handleSave} onChangeCapture={markDirty} className="grid gap-6">
         <input type="hidden" name="id" value={draftProductId} />
+        <input type="hidden" name="preservePremiumCodes" value="1" />
         <input type="hidden" name="coverAssetId" value={coverAsset?.id ?? ""} />
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
         <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
@@ -1079,16 +994,9 @@ export function ProductEditor({
               </div>
             </AdminEditorSection>
 
-            <AdminEditorSection title="Dostęp premium" description="Kody są przypisane do tego produktu. Wykorzystane kody jednorazowe zachowują swój dotychczasowy stan.">
+            <AdminEditorSection title="Dostęp premium" description="Zarządzaj wspólnym kodem i plikami QR do druku.">
               <div id="product-premium-codes" className="grid gap-3">
                 <SharedPremiumCodeManager key={product?.id ?? "new-product"} productId={product?.id} isPublished={product?.status === "published"} initialCode={product?.premiumCodes.find((code) => code.codeType === "shared" && !code.retiredAt)} />
-                {fieldErrors["product-premium-codes"]?.map((message) => <p key={message} role="alert" className="text-sm text-red-800">{message}</p>)}
-                {premiumErrorMessages.length ? <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">Popraw błędy kodów premium oznaczone poniżej.</div> : null}
-                {premiumCodes.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze kodów jednorazowych.</p> : null}
-                {premiumCodes.map((code, index) => (
-                  <PremiumEditor key={code.clientId} code={code} index={index} qrProductId={product?.premiumCodes.some((saved) => saved.id === code.id && saved.code === code.code) ? product.id : undefined} error={premiumErrors[code.clientId] ? getAdminErrorMessage(premiumErrors[code.clientId]!, "pl") : undefined} onChange={updatePremium} onRemove={removePremium} onUndo={() => updatePremium(code.clientId, "removed", false)} />
-                ))}
-                <Button type="button" variant="outline" onClick={addPremium} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj kod</Button>
               </div>
             </AdminEditorSection>
             <AdminEditorSection title="Publikacja i organizacja">
@@ -1373,59 +1281,6 @@ function AmazonEditor({
   return <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[10rem_minmax(0,1fr)_auto_auto]"><input type="hidden" name="amazonClientId" value={link.clientId} /><input type="hidden" name="amazonId" value={link.id} /><Field label="Rynek" htmlFor={`amazon-market-${link.clientId}`}><select id={`amazon-market-${link.clientId}`} name="amazonMarket" value={link.market} onChange={(event) => onChange(link.clientId, "market", event.target.value as AmazonDraft["market"])} className="h-11 w-full rounded-md border border-[var(--color-border)] bg-white px-3 text-sm">{availableMarkets.map((market) => <option key={market.value} value={market.value}>{market.label}</option>)}</select></Field><Field label="Link" htmlFor={`amazon-url-${link.clientId}`}><Input id={`amazon-url-${link.clientId}`} name="amazonUrl" value={link.url} onChange={(event) => onChange(link.clientId, "url", event.target.value)} placeholder="https://www.amazon.com/..." /></Field><label className="flex items-end gap-2 pb-3 text-sm"><input type="radio" name="amazonPrimary" value={primaryValue} checked={link.isPrimary} onChange={() => onPrimary(link.clientId)} /><Star className="size-4" aria-hidden />Domyślny</label><Button type="button" variant="ghost" size="sm" onClick={() => onRemove(link)} className="self-end text-red-800">Usuń</Button></div>;
 }
 
-function PremiumEditor({
-  code,
-  index,
-  qrProductId,
-  error,
-  onChange,
-  onRemove,
-  onUndo,
-}: {
-  code: PremiumDraft;
-  index: number;
-  qrProductId?: string;
-  error?: string;
-  onChange: <K extends keyof PremiumDraft>(clientId: string, field: K, value: PremiumDraft[K]) => void;
-  onRemove: (code: PremiumDraft) => void;
-  onUndo: () => void;
-}) {
-  if (code.removed) {
-    return <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900"><span>Kod {code.code || "(pusty)"} zostanie usunięty.</span><><input type="hidden" name="premiumCodeClientId" value={code.clientId} /><input type="hidden" name="premiumCodeId" value={code.id} /><input type="hidden" name="premiumCode" value={code.code} /><input type="hidden" name="premiumCodeRemove" value={code.id} /><input type="hidden" name="premiumCodeRemoveClientId" value={code.clientId} /><Button type="button" variant="ghost" size="sm" onClick={onUndo}><Undo2 className="size-4" aria-hidden />Cofnij</Button></></div>;
-  }
-  const activeValue = code.id || `new-${index}`;
-  const inputId = `premium-code-${code.clientId}`;
-  const errorId = `${inputId}-error`;
-  const status = code.redeemedAt
-    ? code.active ? "Wykorzystany" : "Wykorzystany · wyłączony"
-    : code.active ? "Niewykorzystany" : "Wyłączony";
-  return (
-    <div className="grid min-w-0 gap-3 rounded-lg border border-[var(--color-border)] bg-white p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
-      <span className="text-sm font-semibold sm:col-span-full">Kod jednorazowy</span>
-      <input type="hidden" name="premiumCodeClientId" value={code.clientId} />
-      <input type="hidden" name="premiumCodeId" value={code.id} />
-      <Field label="Kod" htmlFor={inputId}>
-        <Input id={inputId} name="premiumCode" value={code.code} maxLength={MAX_PREMIUM_CODE_LENGTH}
-          readOnly={Boolean(code.redeemedAt)} onChange={(event) => onChange(code.clientId, "code", event.target.value.toUpperCase())}
-          placeholder="LOMI-BOOK-2026" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} />
-        {error ? <p id={errorId} role="alert" className="text-sm text-red-800">{error}</p> : null}
-      </Field>
-      <div className="grid content-end gap-2 pb-3">
-        <span className="text-xs font-medium text-[var(--color-muted)]" aria-label={`Status kodu: ${status}`}>{status}</span>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" name="premiumCodeActive" value={activeValue} checked={code.active}
-            onChange={(event) => onChange(code.clientId, "active", event.target.checked)} />
-          Aktywny
-        </label>
-      </div>
-      <Button type="button" variant="ghost" size="sm" disabled={Boolean(code.redeemedAt)}
-        title={code.redeemedAt ? "Wykorzystanego kodu nie można usunąć." : undefined}
-        onClick={() => onRemove(code)} className="self-end text-red-800">Usuń</Button>
-      {qrProductId ? <PremiumCodeQrLinks productId={qrProductId} codeId={code.id} /> : null}
-    </div>
-  );
-}
-
 function CheckboxGroup({ label, name, values, selected }: { label: string; name: string; values: Array<{ id: string; label: string }>; selected: string[] }) {
   return <fieldset data-testid={`taxonomy-group-${name}`} className="grid min-w-0 gap-2">
     <legend className="mb-1 text-sm font-medium">{label}</legend>
@@ -1470,7 +1325,6 @@ function getProductTextLimitWarning(length: number, maximum: number) {
 
 type ProductSaveErrorMapping = {
   fieldErrors: Record<string, string[]>;
-  premiumErrors: Partial<Record<string, AdminErrorCode>>;
   focusTarget?: string;
 };
 
@@ -1478,10 +1332,8 @@ function mapProductSaveErrors(
   errors: AdminErrorCode[],
   formData: FormData,
   amazonLinks: AmazonDraft[],
-  premiumCodes: PremiumDraft[],
 ): ProductSaveErrorMapping {
   const fieldErrors: Record<string, string[]> = {};
-  const premiumErrors: Partial<Record<string, AdminErrorCode>> = {};
   let focusTarget: string | undefined;
 
   const addFieldError = (target: string, code: AdminErrorCode) => {
@@ -1536,50 +1388,6 @@ function mapProductSaveErrors(
       case ADMIN_ERROR_CODES.VALIDATION_GALLERY_LIMIT:
         addFieldError("media-section-gallery", code);
         break;
-      case ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED:
-      case ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG:
-      case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE: {
-        const activeCodes = premiumCodes.filter((premiumCode) => !premiumCode.removed);
-        let affectedCodes = activeCodes;
-
-        if (code === ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REQUIRED) {
-          affectedCodes = activeCodes.filter((premiumCode) => !premiumCode.code.trim());
-        } else if (code === ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_TOO_LONG) {
-          affectedCodes = activeCodes.filter((premiumCode) => premiumCode.code.length > MAX_PREMIUM_CODE_LENGTH);
-        } else if (code === ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_DUPLICATE) {
-          const duplicateIndexes = new Set(validatePremiumCodeEntries(activeCodes).map((issue) => issue.index));
-          affectedCodes = activeCodes.filter((_, index) => duplicateIndexes.has(index));
-        }
-
-        affectedCodes.forEach((premiumCode) => {
-          premiumErrors[premiumCode.clientId] = code;
-          focusTarget ??= `premium-code-${premiumCode.clientId}`;
-        });
-        if (!focusTarget) focusTarget = "product-premium-codes";
-        break;
-      }
-      case ADMIN_ERROR_CODES.VALIDATION_PREMIUM_CODE_REDEEMED: {
-        const redeemedCodes = premiumCodes.filter((premiumCode) => premiumCode.redeemedAt);
-        if (redeemedCodes.length) {
-          redeemedCodes.forEach((premiumCode) => {
-            premiumErrors[premiumCode.clientId] = code;
-            focusTarget ??= `premium-code-${premiumCode.clientId}`;
-          });
-        } else {
-          addFieldError("product-premium-codes", code);
-        }
-        break;
-      }
-      case ADMIN_ERROR_CODES.CONFLICT_PREMIUM_CODE_EXISTING: {
-        const submittedCodes = premiumCodes.filter((premiumCode) => !premiumCode.removed && premiumCode.code.trim());
-        if (submittedCodes.length === 1) {
-          premiumErrors[submittedCodes[0].clientId] = code;
-          focusTarget ??= `premium-code-${submittedCodes[0].clientId}`;
-        } else {
-          addFieldError("product-premium-codes", code);
-        }
-        break;
-      }
       case ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_ACTIVE:
       case ADMIN_ERROR_CODES.VALIDATION_MEDIA_UPLOAD_STATE:
       case ADMIN_ERROR_CODES.VALIDATION_ASSET_UPLOAD_INCOMPLETE:
@@ -1602,7 +1410,7 @@ function mapProductSaveErrors(
     focusTarget ??= "product-amazon-links";
   }
 
-  return { fieldErrors, premiumErrors, focusTarget };
+  return { fieldErrors, focusTarget };
 }
 
 export function productEditorFormSignature(form: HTMLFormElement) {
@@ -1762,32 +1570,6 @@ function buildAmazonLinks(
   }
 
   return (product?.amazonLinks ?? []).map((link) => ({ clientId: `existing-amazon-${link.id}`, id: link.id, market: link.market, url: link.url, isPrimary: link.isPrimary, removed: false }));
-}
-
-function buildPremiumCodes(
-  product?: Product,
-  values?: ProductSaveFormState["values"],
-): PremiumDraft[] {
-  const redeemedAtById = new Map((product?.premiumCodes ?? []).map((code) => [code.id, code.redeemedAt]));
-  if (values) {
-    const ids = values.premiumCodeId ?? [];
-    const activeValues = new Set(values.premiumCodeActive ?? []);
-    const removedClientIds = new Set(values.premiumCodeRemoveClientId ?? []);
-    const removedIds = new Set(values.premiumCodeRemove ?? []);
-    return ids.map((id, index) => {
-      const clientId = values.premiumCodeClientId?.[index] || (id ? `existing-code-${id}` : `submitted-code-${index}`);
-      return {
-        clientId,
-        id,
-        code: values.premiumCode?.[index] ?? "",
-        active: activeValues.has(id || `new-${index}`),
-        redeemedAt: id ? redeemedAtById.get(id) : undefined,
-        removed: removedClientIds.has(clientId) || (Boolean(id) && removedIds.has(id)),
-      };
-    });
-  }
-
-  return (product?.premiumCodes ?? []).filter((code) => code.codeType !== "shared").map((code) => ({ clientId: `existing-code-${code.id}`, id: code.id, code: code.code, active: code.active, redeemedAt: code.redeemedAt, removed: false }));
 }
 
 function createClientId() {

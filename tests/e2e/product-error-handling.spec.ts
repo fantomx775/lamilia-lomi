@@ -56,57 +56,7 @@ test("product gallery images load through the Next image optimizer without brows
   await page.screenshot({ path: testInfo.outputPath("product-image-flow.png"), fullPage: true });
 });
 
-test("admin blocks duplicate normalized premium codes before the save action", async ({ page }, testInfo) => {
-  test.skip(
-    !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
-    "Admin premium-code E2E uses fixed demo credentials and requires a loopback app running the local demo backend.",
-  );
-  const serverErrors: string[] = [];
-  const saveRequests: string[] = [];
-
-  page.on("response", (response) => {
-    if (response.status() >= 500) {
-      serverErrors.push(`${response.status()} ${response.url()}`);
-    }
-  });
-  page.on("request", (request) => {
-    if (request.method() === "POST" && request.url().includes("/admin/products/new")) {
-      saveRequests.push(request.url());
-    }
-  });
-
-  await page.goto("/en/login?redirectTo=/admin");
-  await page.getByLabel("Email").fill("admin@lamilialomi.test");
-  await page.getByLabel("Password").fill("demo-password");
-  await Promise.all([
-    page.waitForURL((url) => url.pathname === "/admin"),
-    page.getByRole("button", { name: "Continue" }).click(),
-  ]);
-
-  await page.goto("/admin/products/new");
-  await expect(page.getByRole("heading", { name: "Nowy produkt" })).toBeVisible();
-  await page.getByRole("button", { name: "Dodaj kod" }).click();
-  await page.getByRole("button", { name: "Dodaj kod" }).click();
-
-  const codeInputs = page.getByRole("textbox", { name: "Kod" });
-  await codeInputs.nth(0).fill("lomi-book");
-  await codeInputs.nth(1).fill("LOMI – BOOK");
-  await page.getByRole("button", { name: /Zapisz/ }).click();
-
-  await expect(page.getByText("Każdy kod premium może wystąpić w tym produkcie tylko raz.")).toHaveCount(2);
-  await expect(codeInputs.nth(0)).toHaveAttribute("aria-invalid", "true");
-  await expect(codeInputs.nth(1)).toHaveAttribute("aria-invalid", "true");
-  expect(saveRequests).toEqual([]);
-  expect(serverErrors).toEqual([]);
-
-  await testInfo.attach("admin-browser-network.log", {
-    body: serverErrors.join("\n") || "No 5xx responses; client validation prevented the save request.",
-    contentType: "text/plain",
-  });
-  await page.screenshot({ path: testInfo.outputPath("admin-premium-duplicate.png"), fullPage: true });
-});
-
-test("admin saves a product with an uploaded asset and a unique premium code", async ({ page }, testInfo) => {
+test("admin saves a product with an uploaded asset", async ({ page }, testInfo) => {
   page.setDefaultTimeout(15_000);
   page.setDefaultNavigationTimeout(30_000);
   test.skip(
@@ -121,7 +71,6 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
   const serverErrors: string[] = [];
   const uniqueSuffix = `${Date.now()}-${testInfo.project.name}`;
   const uniqueTitle = `E2E Product ${uniqueSuffix}`;
-  const uniqueCode = `E2E-${uniqueSuffix}`.toUpperCase();
   let productPath: string | undefined;
 
   page.on("console", (message) => {
@@ -155,8 +104,6 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
       path.resolve(process.cwd(), "public", "assets", "downloads", "moon-garden-free-guide.pdf"),
     );
     await expect(page.getByText("Przesłano", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Dodaj kod" }).click();
-    await page.getByRole("textbox", { name: "Kod" }).fill(uniqueCode);
 
     await Promise.all([
       page.getByRole("button", { name: /Zapisz/ }).click(),
@@ -177,22 +124,6 @@ test("admin saves a product with an uploaded asset and a unique premium code", a
     });
     await page.screenshot({ path: testInfo.outputPath("admin-product-save.png"), fullPage: true });
 
-    await page.goto("/admin/products/new");
-    await page.getByLabel("Tytuł").fill(`E2E Duplicate Product ${uniqueSuffix}`);
-    await page.getByRole("button", { name: "Dodaj kod" }).click();
-    await page.getByRole("textbox", { name: "Kod" }).fill(` ${uniqueCode.toLowerCase()} `);
-    await page.getByRole("button", { name: /Zapisz/ }).click();
-    await expect(page.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeVisible();
-    const duplicateCodeMessage = "Ten kod premium jest już przypisany do innego produktu.";
-    await expect(page.locator("#product-editor-form").getByText(duplicateCodeMessage, { exact: true })).toHaveCount(2);
-    await expect(page.locator('[role="alert"][aria-live="assertive"]').getByText(duplicateCodeMessage, { exact: true })).toBeVisible();
-    await expect(page.getByLabel("Tytuł")).toHaveValue(`E2E Duplicate Product ${uniqueSuffix}`);
-    await expect(page.getByRole("textbox", { name: "Kod" })).toHaveValue(` ${uniqueCode} `);
-    await expect(page.getByRole("textbox", { name: "Kod" })).toHaveAttribute("aria-invalid", "true");
-    await expect(page).toHaveURL(/\/admin\/products\/new$/);
-    expect(serverErrors).toEqual([]);
-    expect(consoleErrors).toEqual([]);
-    await page.screenshot({ path: testInfo.outputPath("admin-premium-existing.png"), fullPage: true });
   } finally {
     try {
       if (productPath) {
