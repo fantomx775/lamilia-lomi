@@ -36,11 +36,16 @@ test("resets a password through the real local email and rejects a reused link",
   page.on("requestfailed", (request) => {
     failedRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
   });
+  const submit = (name: string) => Promise.all([
+    page.waitForEvent("requestfinished", (request) =>
+      request.method() === "POST" && new URL(request.url()).pathname === "/en/reset-password"),
+    page.getByRole("button", { name }).click(),
+  ]);
 
   try {
     await page.goto("/en/reset-password");
     await page.getByLabel("Email").fill(email);
-    await page.getByRole("button", { name: "Send reset link" }).click();
+    await submit("Send reset link");
     await expect(page.getByText("Open it in this same browser", { exact: false })).toBeVisible();
 
     let messageId: string | undefined;
@@ -78,7 +83,7 @@ test("resets a password through the real local email and rejects a reused link",
 
     await page.getByLabel("New password", { exact: true }).fill(password);
     await page.getByLabel("Confirm new password").fill(password);
-    await page.getByRole("button", { name: "Save new password" }).click();
+    await submit("Save new password");
     await expect(page.getByText("Your password has been changed", { exact: false })).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("password-changed.png"), caret: "initial", style: "nextjs-portal { display: none }",
