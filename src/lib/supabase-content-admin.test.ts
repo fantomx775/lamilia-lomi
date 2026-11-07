@@ -1015,6 +1015,12 @@ describe("Supabase content admin mutations", () => {
       expect.objectContaining({ id: preservedCode.id, code: preservedCode.code }),
     ]);
     expect(payload.product_state.premiumCodeRemovals).toEqual([removedCode.id]);
+
+    form.set("preservePremiumCodes", "1");
+    await expect(saveProductForRequest(form)).resolves.toMatchObject({ ok: true, id: productId });
+    expect(mocks.rpc).toHaveBeenLastCalledWith("save_product", {
+      product_state: expect.objectContaining({ premiumCodes: [], premiumCodeRemovals: [] }),
+    });
   });
 
   it("saves only the English static page while retaining other locale rows", async () => {

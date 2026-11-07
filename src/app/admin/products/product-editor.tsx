@@ -997,7 +997,6 @@ export function ProductEditor({
             <AdminEditorSection title="Dostęp premium" description="Zarządzaj wspólnym kodem i plikami QR do druku.">
               <div id="product-premium-codes" className="grid gap-3">
                 <SharedPremiumCodeManager key={product?.id ?? "new-product"} productId={product?.id} isPublished={product?.status === "published"} initialCode={product?.premiumCodes.find((code) => code.codeType === "shared" && !code.retiredAt)} />
-                {fieldErrors["product-premium-codes"]?.map((message) => <p key={message} role="alert" className="text-sm text-red-800">{message}</p>)}
               </div>
             </AdminEditorSection>
             <AdminEditorSection title="Publikacja i organizacja">

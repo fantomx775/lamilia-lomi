@@ -170,12 +170,14 @@ export async function saveProductForRequest(formData: FormData): Promise<AdminMu
       previousAssets.some((asset) => asset.storageProvider !== undefined && asset.storageProvider !== "supabase");
     let saveResult: Awaited<ReturnType<typeof supabase.rpc>>;
     try {
+      const preservePremiumCodes = formData.get("preservePremiumCodes") === "1";
       saveResult = await supabase.rpc(
         usesStorageProviderMetadata ? "save_product_with_storage_provider" : "save_product",
         {
           product_state: buildProductMutationPayload(
-            product,
-            formData.get("preservePremiumCodes") === "1" ? [] : formData.getAll("premiumCodeRemove").flatMap((value) =>
+            // The database preserves omitted codes under its product lock.
+            preservePremiumCodes ? { ...product, premiumCodes: [] } : product,
+            preservePremiumCodes ? [] : formData.getAll("premiumCodeRemove").flatMap((value) =>
               typeof value === "string" && value.trim() ? [value.trim()] : [],
             ),
             formData.get(`longDescription${RICH_TEXT_EDITOR_VERSION_FIELD_SUFFIX}`) === "2",
