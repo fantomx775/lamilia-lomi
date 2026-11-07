@@ -1023,6 +1023,7 @@ function mapPremiumCode(row: DbRow): PremiumCode {
     code: stringValue(row.code),
     active: Boolean(row.active),
     ...(row.code_type === "shared" ? { codeType: "shared" as const } : {}),
+    ...(stringValue(row.retired_at) ? { retiredAt: stringValue(row.retired_at) } : {}),
     ...(redeemedAt ? { redeemedAt } : {}),
     ...(redeemedBy ? { redeemedBy } : {}),
   };
