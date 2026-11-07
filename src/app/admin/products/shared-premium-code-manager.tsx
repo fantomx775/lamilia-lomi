@@ -6,6 +6,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { PremiumCode } from "@/lib/types";
 
+export function PremiumCodeQrLinks({ productId, codeId }: { productId: string; codeId: string }) {
+  const endpoint = `/api/admin/products/${encodeURIComponent(productId)}/shared-code`;
+  return <div className="flex flex-wrap gap-2 sm:col-span-full">
+    {(["svg", "pdf"] as const).map((format) => {
+      const params = new URLSearchParams({ format, codeId });
+      return <a key={format} href={`${endpoint}?${params}`} className={buttonClassName({ variant: "secondary", size: "sm" })}>Pobierz {format.toUpperCase()} do druku</a>;
+    })}
+  </div>;
+}
+
 export function SharedPremiumCodeManager({ productId, isPublished, initialCode }: { productId?: string; isPublished?: boolean; initialCode?: PremiumCode }) {
   const [code, setCode] = useState(initialCode);
   const [busy, setBusy] = useState(false);
@@ -17,7 +27,7 @@ export function SharedPremiumCodeManager({ productId, isPublished, initialCode }
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ active, ...(active && !code ? { code: draft.trim() } : {}) }) });
+      const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ active, ...(code ? { codeId: code.id } : { code: draft.trim() }) }) });
       const result = await response.json();
       if (!response.ok || !result.code) throw new Error(result.error === "duplicate_code" ? "Ten kod jest już używany. Wybierz inny." : result.error === "invalid_code_format" || result.error === "invalid_code_length" ? "Użyj 3–128 znaków A–Z, 0–9 i myślników." : "Nie udało się zapisać wspólnego kodu. Spróbuj ponownie.");
       setCode(result.code);
@@ -27,18 +37,34 @@ export function SharedPremiumCodeManager({ productId, isPublished, initialCode }
     } finally { setBusy(false); }
   }
 
+  async function remove() {
+    if (!code || !window.confirm("Usunąć wspólny kod z listy? Stary QR przestanie odblokowywać materiały. Wcześniej przyznane dostępy pozostaną.")) return;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${endpoint}?codeId=${encodeURIComponent(code.id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error();
+      setCode(undefined);
+    } catch {
+      setError("Nie udało się usunąć wspólnego kodu. Odśwież stronę i spróbuj ponownie.");
+    } finally { setBusy(false); }
+  }
+
   return <div className="grid gap-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4" data-testid="shared-premium-code-manager">
-    <div><h3 className="font-semibold">Wspólny kod do książki Amazon KDP</h3><p className="mt-1 text-sm text-[var(--color-muted)]">Jeden stały kod dla wszystkich egzemplarzy tej książki. Dowolna liczba kont, bez terminu ważności. Każde konto otrzymuje dostęp tylko raz.</p></div>
+    <div><h3 className="font-semibold">Wspólny kod do książki Amazon KDP</h3><p className="mt-1 text-sm text-[var(--color-muted)]">Jeden kod dla wszystkich egzemplarzy tej książki. Dowolna liczba kont, bez terminu ważności. Każde konto otrzymuje dostęp tylko raz.</p></div>
     {!productId ? <p className="text-sm">Najpierw zapisz produkt, aby utworzyć jego stały kod.</p> : <>
       {code ? <><p className="break-all rounded-md border bg-white px-3 py-3 font-mono text-sm" aria-label="Wspólny kod premium">{code.code}</p><p className="text-sm">Status: <strong>{code.active ? "Aktywny" : "Nieaktywny"}</strong>. Wyłączenie kodu zatrzymuje nowe aktywacje; wcześniej przyznane dostępy pozostają.</p></> : <div className="grid gap-2"><Label htmlFor="shared-premium-code">Kod do wpisania</Label><Input id="shared-premium-code" value={draft} onChange={(event) => setDraft(event.target.value)} autoCapitalize="characters" autoComplete="off" maxLength={128} placeholder="np. KDP-BOOK-2026" aria-describedby="shared-premium-code-help"/><p id="shared-premium-code-help" className="text-xs text-[var(--color-muted)]">3–128 znaków: litery A–Z, cyfry 0–9 i myślniki. Kod musi być unikalny.</p></div>}
       <div className="flex flex-wrap gap-2"><Button type="button" variant={code?.active ? "secondary" : "default"} disabled={busy || (!code && !draft.trim())} onClick={() => void update(!code?.active)}>{busy ? "Zapisywanie…" : code ? code.active ? "Dezaktywuj wspólny kod" : "Aktywuj ponownie ten sam kod" : "Utwórz kod premium i QR"}</Button></div>
+      {code ? <div className="flex flex-wrap items-center gap-2">
+        <PremiumCodeQrLinks productId={productId} codeId={code.id} />
+        <Button type="button" size="sm" variant="ghost" disabled={busy} className="text-red-800" onClick={() => void remove()}>Usuń wspólny kod</Button>
+      </div> : null}
       {code?.active && isPublished ? <>
         {/* The SVG is generated by our authenticated endpoint and contains no executable content. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`${endpoint}?format=svg&preview=1`} alt="Podgląd kodu QR do druku" width={280} height={280} className="h-auto max-w-full rounded-md border bg-white" referrerPolicy="no-referrer" />
-        <div className="flex flex-wrap gap-2"><a href={`${endpoint}?format=svg`} className={buttonClassName({ variant: "secondary", size: "sm" })}>Pobierz SVG do druku</a><a href={`${endpoint}?format=pdf`} className={buttonClassName({ variant: "secondary", size: "sm" })}>Pobierz PDF do druku</a></div>
+        <img src={`${endpoint}?format=svg&preview=1&codeId=${encodeURIComponent(code.id)}`} alt="Podgląd kodu QR do druku" width={280} height={280} className="h-auto max-w-full rounded-md border bg-white" referrerPolicy="no-referrer" />
         <p className="text-xs text-[var(--color-muted)]">Drukuj w skali 100%, czarno na białym, bez przycinania białej ramki. QR ma minimum 50 mm i 4 moduły marginesu. Umieść etykietę wewnątrz bezpiecznych marginesów książki. Przed publikacją KDP zeskanuj fizyczny wydruk próbny. Zmiana nazwy lub sluga nie zmienia tego QR.</p>
-      </> : <p className="text-sm text-[var(--color-muted)]">Podgląd i eksport QR są dostępne po opublikowaniu produktu i aktywacji kodu.</p>}
+      </> : code ? <p className="text-sm text-[var(--color-muted)]">QR zacznie odblokowywać materiały, gdy produkt będzie opublikowany, a kod aktywny.</p> : null}
     </>}
     {error ? <p role="alert" className="text-sm text-red-800">{error}</p> : null}
   </div>;

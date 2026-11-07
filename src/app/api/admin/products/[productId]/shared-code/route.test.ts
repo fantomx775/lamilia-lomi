@@ -8,7 +8,7 @@ vi.mock("@/lib/content-repository", () => ({ getAdminContentSnapshot: mocks.getA
 vi.mock("@/lib/content-store", () => ({ getContentSnapshot: mocks.getContentSnapshot, saveContentSnapshot: mocks.saveContentSnapshot }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc: mocks.rpc }) }));
 vi.mock("@/lib/shared-premium-qr", () => ({ renderSharedPremiumQrSvg: () => '<svg xmlns="http://www.w3.org/2000/svg"/>', renderSharedPremiumQrPdf: async () => new Uint8Array([37, 80, 68, 70]) }));
-import { GET, POST } from "./route";
+import { DELETE, GET, POST } from "./route";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const context = { params: Promise.resolve({ productId }) };
@@ -83,6 +83,30 @@ describe("admin shared premium code API", () => {
     expect(disabled.code.code).toBe(created.code.code);
     expect(disabled.code.active).toBe(false);
     expect(snapshot.products[0].premiumCodes).toHaveLength(1);
+  });
+
+  it("exports an individual saved one-time code and checks that it belongs to the product", async () => {
+    mocks.getAdminContentSnapshot.mockResolvedValue({ products: [{ id: productId, status: "draft", premiumCodes: [{ id: "legacy", code: "ONE-TIME", active: true }] }] });
+    const exported = await GET(download("pdf&codeId=legacy"), context);
+    expect(exported.status).toBe(200);
+    expect(exported.headers.get("content-disposition")).toContain(`${productId}-legacy.pdf`);
+    expect((await GET(download("svg&codeId=other"), context)).status).toBe(404);
+  });
+
+  it("retires the exact shared code and lets an admin create a replacement without reusing the old string", async () => {
+    mocks.getBackendMode.mockReturnValue("local");
+    let snapshot = { products: [{ id: productId, premiumCodes: [{ ...sharedCode, redeemedByUsers: ["reader"] }] }] };
+    mocks.getContentSnapshot.mockImplementation(() => snapshot);
+    mocks.saveContentSnapshot.mockImplementation((next) => { snapshot = next; });
+    const remove = new Request(`${download().url}?codeId=shared`, { method: "DELETE", headers: { origin: "https://book.test" } });
+    expect((await DELETE(remove, context)).status).toBe(200);
+    expect((await POST(request({ active: true, codeId: "shared" }), context)).status).toBe(404);
+    expect((await POST(request({ active: true, code: sharedCode.code }), context)).status).toBe(409);
+    expect((await POST(request({ active: true, code: "KDP-REPLACEMENT" }), context)).status).toBe(200);
+    expect(snapshot.products[0].premiumCodes).toEqual([
+      expect.objectContaining({ id: "shared", active: false, retiredAt: expect.any(String), redeemedByUsers: ["reader"] }),
+      expect.objectContaining({ code: "KDP-REPLACEMENT", active: true }),
+    ]);
   });
 
   it("requires a valid manual code and rejects duplicates in local mode", async () => {

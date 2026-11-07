@@ -51,6 +51,7 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
     createButton.click(),
   ]);
   expect(created.status()).toBe(200);
+  const { code: { id: codeId } } = await created.json();
   const code = manager.getByLabel("Wspólny kod premium");
   await expect(code).toBeVisible();
   const stableCode = await code.innerText();
@@ -63,10 +64,10 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
     const link = manager.getByRole("link", { name: `Pobierz ${format} do druku` });
     await expect(link).toBeVisible();
     const href = await link.getAttribute("href");
-    expect(href).toBe(`/api/admin/products/${productId}/shared-code?format=${format.toLowerCase()}`);
+    expect(href).toBe(`/api/admin/products/${productId}/shared-code?format=${format.toLowerCase()}&codeId=${codeId}`);
     const download = await page.request.get(href!);
     expect(download.status()).toBe(200);
-    expect(download.headers()["content-disposition"]).toBe(`attachment; filename="lamilialomi-kdp-${productId}.${format.toLowerCase()}"`);
+    expect(download.headers()["content-disposition"]).toBe(`attachment; filename="lamilialomi-kdp-${productId}-${codeId}.${format.toLowerCase()}"`);
     expect(download.headers()["content-type"]).toContain(format === "SVG" ? "image/svg+xml" : "application/pdf");
     const contents = await download.body();
     const qrProofDirectory = path.join(os.tmpdir(), "lamilialomi-premium-ux");
@@ -81,7 +82,7 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
   await manager.scrollIntoViewIfNeeded();
   const screenshot = path.join(os.tmpdir(), "lamilialomi-premium-ux", `${info.project.name === "mobile" ? "mobile" : "desktop"}-shared-manager.png`);
   fs.mkdirSync(path.dirname(screenshot), { recursive: true });
-  await page.screenshot({ path: screenshot, fullPage: false, mask: [code, preview], maskColor: "#d6d3ce" });
+  await page.locator("#product-premium-codes").screenshot({ path: screenshot, mask: [code, preview], maskColor: "#d6d3ce" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
   await manager.getByRole("button", { name: "Dezaktywuj wspólny kod" }).click();
@@ -95,6 +96,17 @@ test("admin creates a permanent shared code, downloads print files, toggles and 
   if (await reloadedDisclosure.count()) await reloadedDisclosure.locator("summary").click();
   await expect(reloaded.getByLabel("Wspólny kod premium")).toHaveText(stableCode);
   await expect(reloaded.getByRole("button", { name: "Dezaktywuj wspólny kod" })).toBeVisible();
+  const legacy = page.locator("#product-premium-codes").getByRole("link", { name: "Pobierz SVG do druku" }).last();
+  const legacyHref = await legacy.getAttribute("href");
+  expect(legacyHref).not.toContain(codeId);
+  expect((await page.request.get(legacyHref!)).status()).toBe(200);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await reloaded.getByRole("button", { name: "Usuń wspólny kod" }).click();
+  await reloaded.getByLabel("Kod do wpisania").fill("KDP-NEW-PRINT-2026");
+  await reloaded.getByRole("button", { name: "Utwórz kod premium i QR" }).click();
+  await expect(reloaded.getByLabel("Wspólny kod premium")).toHaveText("KDP-NEW-PRINT-2026");
+  expect((await page.request.get(`/api/admin/products/${productId}/shared-code?format=svg&codeId=${codeId}`)).status()).toBe(404);
   await info.attach("shared-manager-browser-diagnostics", { body: JSON.stringify({ consoleErrors, failedRequests, failedResponses }), contentType: "application/json" });
   expect(consoleErrors).toEqual([]);
   expect(failedRequests).toEqual([]);

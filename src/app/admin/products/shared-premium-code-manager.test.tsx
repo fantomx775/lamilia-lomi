@@ -21,18 +21,19 @@ describe("shared premium code manager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Utwórz kod premium i QR" }));
     expect(await screen.findByLabelText("Wspólny kod premium")).toHaveTextContent("KDP-ABCDEF");
     expect(fetch).toHaveBeenCalledWith("/api/admin/products/book/shared-code", expect.objectContaining({ method: "POST", body: '{"active":true,"code":"kdp-abc123"}' }));
-    expect(screen.getByRole("img")).toHaveAttribute("src", "/api/admin/products/book/shared-code?format=svg&preview=1");
-    expect(screen.getByRole("link", { name: "Pobierz SVG do druku" })).toHaveAttribute("href", "/api/admin/products/book/shared-code?format=svg");
-    expect(screen.getByRole("link", { name: "Pobierz PDF do druku" })).toHaveAttribute("href", "/api/admin/products/book/shared-code?format=pdf");
+    expect(screen.getByRole("img")).toHaveAttribute("src", "/api/admin/products/book/shared-code?format=svg&preview=1&codeId=code");
+    expect(screen.getByRole("link", { name: "Pobierz SVG do druku" })).toHaveAttribute("href", "/api/admin/products/book/shared-code?format=svg&codeId=code");
+    expect(screen.getByRole("link", { name: "Pobierz PDF do druku" })).toHaveAttribute("href", "/api/admin/products/book/shared-code?format=pdf&codeId=code");
   });
 
-  it("deactivates without allowing edits or rotation, hides exports, and reactivates the same code", async () => {
+  it("keeps exports available while inactive and can reactivate the same code", async () => {
     const code = { id: "code", productId: "book", code: "KDP-STABLE", active: true, codeType: "shared" as const };
     const fetch = vi.fn().mockImplementation(async (_url, options) => ({ ok: true, json: async () => ({ code: { ...code, active: JSON.parse(options.body).active } }) }));
     vi.stubGlobal("fetch", fetch);
     render(<SharedPremiumCodeManager productId="book" isPublished initialCode={code} />);
     fireEvent.click(screen.getByRole("button", { name: "Dezaktywuj wspólny kod" }));
     await waitFor(() => expect(screen.queryByRole("img")).toBeNull());
+    expect(screen.getByRole("link", { name: "Pobierz SVG do druku" })).toBeVisible();
     expect(screen.getByLabelText("Wspólny kod premium")).toHaveTextContent("KDP-STABLE");
     fireEvent.click(screen.getByRole("button", { name: "Aktywuj ponownie ten sam kod" }));
     expect(await screen.findByRole("img")).toBeVisible();

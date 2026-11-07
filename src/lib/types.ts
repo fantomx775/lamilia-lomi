@@ -125,6 +125,7 @@ export type PremiumCode = {
   code: string;
   active: boolean;
   codeType?: "single_use" | "shared";
+  retiredAt?: string;
   redeemedByUsers?: string[];
   redeemedAt?: string;
   redeemedBy?: string;
