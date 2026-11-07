@@ -28,7 +28,10 @@ vi.mock("./config", () => ({
 vi.mock("./supabase/admin", () => ({ createServiceRoleClient: mocks.createServiceRoleClient }));
 vi.mock("./supabase/server", () => ({ createClient: mocks.createClient }));
 vi.mock("./media-r2-config", () => ({ getR2StorageConfig: mocks.getR2StorageConfig }));
-vi.mock("./product-image-cache", () => ({ purgeProductImageCache: mocks.purgeProductImageCache }));
+vi.mock("./product-image-cache", () => ({
+  assertProductImageCachePurgeAvailable: vi.fn(),
+  purgeProductImageCache: mocks.purgeProductImageCache,
+}));
 vi.mock("./media-r2", () => ({
   assertR2PrivateObject: mocks.assertR2PrivateObject,
   assertR2PublicObject: mocks.assertR2PublicObject,

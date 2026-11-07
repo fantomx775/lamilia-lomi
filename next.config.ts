@@ -28,7 +28,7 @@ const nextConfig: NextConfig = {
     ],
     remotePatterns: r2PublicBaseUrl
       ? [
-        { protocol: "https", hostname: new URL(r2PublicBaseUrl).hostname, pathname: "/products/**" },
+        { protocol: "https", hostname: new URL(r2PublicBaseUrl).hostname, pathname: "/products/**", search: "" },
         { protocol: "https", hostname: new URL(r2PublicBaseUrl).hostname, pathname: "/categories/**" },
       ]
       : [],

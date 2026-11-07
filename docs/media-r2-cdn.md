@@ -27,14 +27,20 @@ The 24-hour policy for the versioned product cover and gallery endpoint requires
 on Vercel. Use a Cloudflare token with only Cache Purge for the media domain's
 zone. Vercel clears transformed variants through its function runtime. The
 source route bypasses shared HTTP caches so the optimizer must check the
-publication state again after a purge.
+publication state again after a purge. Provision the zone and token before
+deploying this policy to Production. A Production revocation stops before
+changing storage when its purge configuration or runtime support is missing.
 
 Revocation checks the private copy, removes the public object, and purges
-Cloudflare before removing Vercel variants. A shared R2 source stays available
+Cloudflare by the full object path to include query variants before removing
+Vercel variants. A shared R2 source stays available
 for other published assets and only the retiring asset's versioned Vercel
 source is purged. On a purge failure the mutation stops with the revocation
 marker held. Clear the exact affected CDN keys successfully before reconciling
 the incomplete revocation. Copies in a visitor's browser expire independently.
+Keep purge enabled across subsequent releases until extended-cache entries
+have been cleared. An older deployment that predates these hooks cannot
+revoke optimized variants on its own.
 
 Create two Lamilia-specific R2 buckets in the intended Cloudflare account:
 

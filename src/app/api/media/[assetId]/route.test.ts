@@ -68,6 +68,9 @@ describe("public media delivery", () => {
       vi.stubEnv("PRODUCT_IMAGE_CLOUDFLARE_PURGE_TOKEN", "test");
       vi.stubEnv("PRODUCT_IMAGE_CLOUDFLARE_ZONE_ID", "test");
       vi.stubEnv("VERCEL", "1");
+      vi.stubGlobal(Symbol.for("@vercel/request-context"), {
+        get: () => ({ purge: { dangerouslyDeleteBySrcImage: vi.fn() } }),
+      });
     }
     const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
     const fetchImage = vi.fn().mockResolvedValue(new Response(bytes, {

@@ -8,7 +8,7 @@ import { createServiceRoleClient } from "./supabase/admin";
 import { createClient } from "./supabase/server";
 import type { AssetKind, ProductAsset, ProductStatus } from "./types";
 import { getR2StorageConfig, type MediaStorageProvider } from "./media-r2-config";
-import { purgeProductImageCache } from "./product-image-cache";
+import { assertProductImageCachePurgeAvailable, purgeProductImageCache } from "./product-image-cache";
 import {
   assertR2PrivateObject,
   assertR2PublicObject,
@@ -446,6 +446,7 @@ async function revokeR2PublicAsset(
   asset: ProductAsset,
   options: { restoreIfEligible?: boolean } = {},
 ) {
+  assertProductImageCachePurgeAvailable();
   const storagePath = asset.storagePath ?? asset.path;
   const acquired = await beginR2PublicRevocation(asset.id, storagePath);
   if (!acquired) return false;

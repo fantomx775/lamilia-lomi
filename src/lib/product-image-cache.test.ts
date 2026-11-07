@@ -15,6 +15,9 @@ describe("public product image cache purge", () => {
     vi.stubEnv("PRODUCT_IMAGE_CLOUDFLARE_PURGE_TOKEN", "cf-token");
     vi.stubEnv("PRODUCT_IMAGE_CLOUDFLARE_ZONE_ID", "zone");
     vi.stubEnv("VERCEL", "1");
+    vi.stubGlobal(Symbol.for("@vercel/request-context"), {
+      get: () => ({ purge: { dangerouslyDeleteBySrcImage } }),
+    });
     vi.stubEnv("R2_PUBLIC_BASE_URL", "https://media.example.test");
   });
 
@@ -30,7 +33,9 @@ describe("public product image cache purge", () => {
     await purgeProductImageCache("image", storagePath);
 
     expect(fetchPurge).toHaveBeenNthCalledWith(1, "https://api.cloudflare.com/client/v4/zones/zone/purge_cache",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ files: [publicUrl] }) }));
+      expect.objectContaining({ method: "POST", body: JSON.stringify({
+        prefixes: ["media.example.test/products/product/gallery/a%20page.webp"],
+      }) }));
     expect(dangerouslyDeleteBySrcImage).toHaveBeenCalledWith(["/api/media/image?v=image", publicUrl]);
   });
 
@@ -62,5 +67,13 @@ describe("public product image cache purge", () => {
     await purgeProductImageCache("image", storagePath);
     expect(fetchPurge).not.toHaveBeenCalled();
     expect(dangerouslyDeleteBySrcImage).not.toHaveBeenCalled();
+  });
+
+  it("rejects Production revocation when Vercel's runtime purge API is missing", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubGlobal(Symbol.for("@vercel/request-context"), undefined);
+
+    expect(hasProductImageCachePurge()).toBe(false);
+    await expect(purgeProductImageCache("image", storagePath)).rejects.toThrow("purge is unavailable in Production");
   });
 });

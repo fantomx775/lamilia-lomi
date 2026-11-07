@@ -11,8 +11,22 @@ function getPurgeConfig() {
   return { cloudflareToken, zoneId };
 }
 
+function hasVercelPurgeContext() {
+  // The pinned SDK silently resolves if the runtime purge API is missing.
+  const runtime = globalThis as typeof globalThis & {
+    [key: symbol]: { get?: () => { purge?: { dangerouslyDeleteBySrcImage?: unknown } } } | undefined;
+  };
+  return typeof runtime[Symbol.for("@vercel/request-context")]?.get?.()?.purge?.dangerouslyDeleteBySrcImage === "function";
+}
+
 export function hasProductImageCachePurge() {
-  return getPurgeConfig() !== null;
+  return getPurgeConfig() !== null && hasVercelPurgeContext();
+}
+
+export function assertProductImageCachePurgeAvailable() {
+  if (process.env.VERCEL_ENV === "production" && !hasProductImageCachePurge()) {
+    throw new Error("Public product image cache purge is unavailable in Production.");
+  }
 }
 
 export function versionedProductImagePath(assetId: string) {
@@ -21,12 +35,15 @@ export function versionedProductImagePath(assetId: string) {
 
 export async function purgeProductImageCache(assetId: string, deletedStoragePath?: string) {
   const config = getPurgeConfig();
+  assertProductImageCachePurgeAvailable();
   if (!config) return;
+  if (!hasVercelPurgeContext()) throw new Error("Vercel product image cache purge is unavailable.");
 
   const srcImages = [versionedProductImagePath(assetId)];
   if (deletedStoragePath) {
     const sourceUrl = r2PublicMediaUrl(getR2PublicBaseUrl() ?? "", deletedStoragePath);
     if (!sourceUrl) throw new Error("Cannot purge an invalid public product image URL.");
+    const { host, pathname } = new URL(sourceUrl);
     const cloudflareUrl = `https://api.cloudflare.com/client/v4/zones/${encodeURIComponent(config.zoneId)}/purge_cache`;
     const response = await fetch(cloudflareUrl, {
       method: "POST",
@@ -34,7 +51,7 @@ export async function purgeProductImageCache(assetId: string, deletedStoragePath
         Authorization: `Bearer ${config.cloudflareToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ files: [sourceUrl] }),
+      body: JSON.stringify({ prefixes: [`${host}${pathname}`] }),
       signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok || (await response.json()).success !== true) {
