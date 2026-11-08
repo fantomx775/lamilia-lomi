@@ -166,6 +166,8 @@ test("resets a password through the real local email and rejects a reused link",
     const recoveredAccountEmail = accountTab.getByText(email, { exact: true });
     await expect(recoveredAccountEmail).toBeVisible();
     await expect(accountTab.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
+    if (crossBrowser) await accountTab.getByRole("button", { name: "Essential only" }).click();
+    await expect(accountTab.getByRole("button", { name: "Essential only" })).toHaveCount(0);
     await accountTab.screenshot({
       path: testInfo.outputPath("password-changed.png"), caret: "initial", style: "nextjs-portal { display: none }",
       mask: [recoveredAccountEmail],
