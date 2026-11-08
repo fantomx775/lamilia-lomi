@@ -62,13 +62,15 @@ test("resets a password through the real local email and rejects a reused link",
   const submit = async (tab: Page, name: string) => {
     const [response] = await Promise.all([
       tab.waitForResponse((result) =>
-        result.request().method() === "POST" && new URL(result.url()).pathname === "/en/reset-password"),
+        result.request().method() === "POST" && new URL(result.url()).pathname === "/en/reset-password",
+      { timeout: 45_000 }),
       tab.getByRole("button", { name }).click(),
     ]);
     expect(response.status()).toBeLessThan(400);
     completedActions.add(response.request());
   };
 
+  let separateContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
     await page.goto("/en/reset-password");
     await page.getByRole("button", { name: "Essential only" }).click();
@@ -125,9 +127,8 @@ test("resets a password through the real local email and rejects a reused link",
     if (crossBrowser && (link.origin !== app.origin || link.pathname !== "/auth/recovery")) {
       throw new Error("Unexpected cross-browser recovery link target.");
     }
-    const recoveryTab = crossBrowser
-      ? await browser.newPage({ ignoreHTTPSErrors: true })
-      : await page.context().newPage();
+    if (crossBrowser) separateContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    const recoveryTab = await (separateContext ?? page.context()).newPage();
     monitor(recoveryTab);
     if (crossBrowser) {
       const scanner = await recoveryTab.request.get(new URL(link.pathname, app).href);
@@ -157,9 +158,19 @@ test("resets a password through the real local email and rejects a reused link",
     await recoveryTab.getByLabel("New password", { exact: true }).fill(password);
     await recoveryTab.getByLabel("Confirm new password").fill(password);
     await submit(recoveryTab, "Save new password");
-    await expect(recoveryTab.getByText("Your password has been changed", { exact: false })).toBeVisible();
-    await recoveryTab.screenshot({
+    await expect(recoveryTab).toHaveURL(/\/en\/account$/);
+    await expect(recoveryTab.getByText(email, { exact: true })).toBeVisible();
+    const accountTab = await recoveryTab.context().newPage();
+    monitor(accountTab);
+    await accountTab.goto(new URL("/en/account", app).href);
+    const recoveredAccountEmail = accountTab.getByText(email, { exact: true });
+    await expect(recoveredAccountEmail).toBeVisible();
+    await expect(accountTab.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
+    if (crossBrowser) await accountTab.getByRole("button", { name: "Essential only" }).click();
+    await expect(accountTab.getByRole("button", { name: "Essential only" })).toHaveCount(0);
+    await accountTab.screenshot({
       path: testInfo.outputPath("password-changed.png"), caret: "initial", style: "nextjs-portal { display: none }",
+      mask: [recoveredAccountEmail],
     });
     expect(Boolean((await reader.auth.signInWithPassword({ email, password: previous })).error)).toBe(true);
     expect(Boolean((await reader.auth.signInWithPassword({ email, password })).data.session)).toBe(true);
@@ -178,6 +189,7 @@ test("resets a password through the real local email and rejects a reused link",
     testInfo.annotations.push({ type: "canceled background Next.js prefetches", description: String(canceledPrefetches) });
     testInfo.annotations.push({ type: "canceled streams after successful action response", description: String(canceledActionStreams.length) });
   } finally {
+    await separateContext?.close();
     const { error: cleanupError } = await admin.auth.admin.deleteUser(data.user.id);
     if (cleanupError) throw new Error("Could not clean up the local recovery fixture.");
   }
