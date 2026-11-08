@@ -130,7 +130,7 @@ export async function GET(request: Request, { params }: Props) {
           const extendedCache = hasProductImageCachePurge();
           const canonicalSource = `${requestUrl.pathname}${requestUrl.search}` === versionedProductImagePath(assetId);
           const imageResponse = await versionedPublicImageResponse(request, publicUrl);
-          if (imageResponse && extendedCache && canonicalSource) {
+          if (imageResponse && extendedCache && canonicalSource && !adminPreviewAuthorized) {
             imageResponse.headers.set("Cache-Control", "public, max-age=60, s-maxage=86400");
             // Keep the source route out of shared caches so a purged transform
             // must recheck publication before it can fetch the original again.
