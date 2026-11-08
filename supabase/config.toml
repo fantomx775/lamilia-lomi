@@ -258,6 +258,10 @@ otp_expiry = 3600
 subject = "Confirm your Lamilia Lomi account"
 content_path = "./supabase/templates/confirmation.html"
 
+[auth.email.template.recovery]
+subject = "Reset your Lamilia Lomi password"
+content_path = "./supabase/templates/recovery.html"
+
 # Use a production-ready SMTP server
 # [auth.email.smtp]
 # enabled = true
