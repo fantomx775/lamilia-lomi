@@ -128,15 +128,13 @@ export async function GET(request: Request, { params }: Props) {
       if (requestedVersion !== null && !isDownload) {
         try {
           const extendedCache = hasProductImageCachePurge();
-          if (extendedCache && `${requestUrl.pathname}${requestUrl.search}` !== versionedProductImagePath(assetId)) {
-            return notFoundMediaResponse();
-          }
+          const canonicalSource = `${requestUrl.pathname}${requestUrl.search}` === versionedProductImagePath(assetId);
           const imageResponse = await versionedPublicImageResponse(request, publicUrl);
-          if (imageResponse && extendedCache) {
-            imageResponse.headers.set("Cache-Control", "public, max-age=86400");
+          if (imageResponse && extendedCache && canonicalSource) {
+            imageResponse.headers.set("Cache-Control", "public, max-age=60, s-maxage=86400");
             // Keep the source route out of shared caches so a purged transform
             // must recheck publication before it can fetch the original again.
-            imageResponse.headers.set("CDN-Cache-Control", "no-store");
+            imageResponse.headers.set("Vercel-CDN-Cache-Control", "no-store");
           }
           return imageResponse ?? notFoundMediaResponse();
         } catch (error) {

@@ -103,9 +103,9 @@ describe("public media delivery", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/jpeg");
     expect(response.headers.get("cache-control")).toBe(
-      extendedCache ? "public, max-age=86400" : "public, max-age=60, s-maxage=60",
+      extendedCache ? "public, max-age=60, s-maxage=86400" : "public, max-age=60, s-maxage=60",
     );
-    expect(response.headers.get("cdn-cache-control")).toBe(extendedCache ? "no-store" : null);
+    expect(response.headers.get("vercel-cdn-cache-control")).toBe(extendedCache ? "no-store" : null);
     expect(response.headers.get("etag")).toBe('"source-etag"');
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
     const [sourceUrl, fetchOptions] = fetchImage.mock.calls[0] ?? [];
@@ -122,8 +122,7 @@ describe("public media delivery", () => {
         new Request(`https://lamilialomi.com/api/media/${assetId}?v=${assetId}&extra=1`),
         { params: Promise.resolve({ assetId }) },
       );
-      expect(alternate.status).toBe(404);
-      expect(fetchImage).toHaveBeenCalledTimes(1);
+      expect(alternate.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
     }
   });
 
