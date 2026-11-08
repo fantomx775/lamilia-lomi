@@ -157,9 +157,14 @@ test("resets a password through the real local email and rejects a reused link",
     await recoveryTab.getByLabel("New password", { exact: true }).fill(password);
     await recoveryTab.getByLabel("Confirm new password").fill(password);
     await submit(recoveryTab, "Save new password");
-    await expect(recoveryTab.getByText("Your password has been changed", { exact: false })).toBeVisible();
+    await expect(recoveryTab).toHaveURL(/\/en\/account$/);
+    await recoveryTab.reload();
+    const recoveredAccountEmail = recoveryTab.getByText(email, { exact: true });
+    await expect(recoveredAccountEmail).toBeVisible();
+    await expect(recoveryTab.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
     await recoveryTab.screenshot({
       path: testInfo.outputPath("password-changed.png"), caret: "initial", style: "nextjs-portal { display: none }",
+      mask: [recoveredAccountEmail],
     });
     expect(Boolean((await reader.auth.signInWithPassword({ email, password: previous })).error)).toBe(true);
     expect(Boolean((await reader.auth.signInWithPassword({ email, password })).data.session)).toBe(true);

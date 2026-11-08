@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getBackendMode, getCanonicalAppUrl } from "@/lib/config";
 import { normalizeLocale } from "@/lib/locale";
 import { clearRecoveryCookies, createRecoveryClient, preserveRecoveryVerifier } from "@/lib/supabase/recovery";
+import { createClient } from "@/lib/supabase/server";
 
 export async function requestPasswordReset(rawLocale: string, form: FormData) {
   const locale = normalizeLocale(rawLocale);
@@ -64,5 +65,22 @@ export async function saveRecoveredPassword(rawLocale: string, userId: string, f
   } finally {
     await clearRecoveryCookies();
   }
-  redirect(`${path}?status=complete`);
+
+  // Sign in through the normal session cookie namespace only after the
+  // recovery session has completed the password change.
+  const email = data.user.email;
+  let signedIn = false;
+  if (email) {
+    try {
+      const client = await createClient();
+      const { data: login, error: loginError } = await client.auth.signInWithPassword({ email, password });
+      signedIn = !loginError && Boolean(login.session) && login.user?.id === userId;
+      if (!signedIn && login.session) {
+        await client.auth.signOut({ scope: "local" });
+      }
+    } catch {
+      console.warn("[password-recovery] Automatic sign-in failed");
+    }
+  }
+  redirect(signedIn ? `/${locale}/account` : `${path}?status=complete`);
 }
