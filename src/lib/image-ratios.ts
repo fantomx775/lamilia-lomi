@@ -9,10 +9,32 @@ export type ImageDimensionValidation =
 const SQUARE_RATIO = 1;
 const PORTRAIT_RATIO = 8.5 / 11;
 const RATIO_TOLERANCE = 0.02;
+const GALLERY_TRIM_SIZES = [[8.5, 11], [8.5, 8.5], [6, 9], [8, 10]] as const;
+
+export function getGalleryTrimRatio({ width, height }: ImageDimensions): number | undefined {
+  const ratio = width / height;
+  let closest: number | undefined;
+  let closestDifference = Infinity;
+  for (const [trimWidth, trimHeight] of GALLERY_TRIM_SIZES) {
+    const possibleRatios = [
+      trimWidth / trimHeight,
+      (trimWidth + 0.125) / (trimHeight + 0.25),
+      (trimWidth + 0.25) / (trimHeight + 0.25),
+    ];
+    for (const candidate of possibleRatios) {
+      const difference = Math.abs(ratio - candidate) / candidate;
+      if (difference <= RATIO_TOLERANCE && difference < closestDifference) {
+        closest = trimWidth / trimHeight;
+        closestDifference = difference;
+      }
+    }
+  }
+  return closest;
+}
 
 const IMAGE_REQUIREMENTS: Record<ImageUse, string> = {
   cover: "Okładka: format 1:1 lub pionowy 8.5:11; minimum 600 px, a dla pionowego minimum 600 × 776 px.",
-  gallery: "Galeria: format 1:1 lub pionowy 8.5:11; krótszy bok minimum 500 px.",
+  gallery: "Galeria: format 8.5:11, 8.5:8.5, 6:9 lub 8:10 (ze spadem lub bez); krótszy bok minimum 500 px.",
   category: "Kategoria: kwadrat 1:1, minimum 480 × 480 px.",
 };
 
@@ -40,7 +62,7 @@ export function validateImageDimensions(
     return { ok: false, error: `${IMAGE_REQUIREMENTS.category} Wybrany obraz ma proporcje ${width}:${height}.` };
   }
 
-  if (use === "gallery" && !matchesSquare && !matchesPortrait) {
+  if (use === "gallery" && !getGalleryTrimRatio({ width, height })) {
     return { ok: false, error: `${IMAGE_REQUIREMENTS.gallery} Wybrany obraz ma proporcje ${width}:${height}.` };
   }
 

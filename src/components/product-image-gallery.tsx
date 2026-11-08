@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
 import type { ReactNode } from "react";
+import { getGalleryTrimRatio } from "@/lib/image-ratios";
 
 export type ProductGalleryImage = {
   id: string;
@@ -43,6 +44,7 @@ export function ProductImageGallery({
   visibleLimit = 4,
   sizes = "(min-width: 1280px) 600px, (min-width: 1024px) calc(50vw - 40px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)",
 }: ProductImageGalleryProps) {
+  const [trimRatios, setTrimRatios] = useState<Record<string, number>>({});
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -160,14 +162,23 @@ export function ProductImageGallery({
               }}
               className="group block w-full rounded-[1.25rem] text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
             >
-              <span className="relative block aspect-[8.5/11] overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
+              <span className="relative block aspect-[8.5/11] overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]" style={{ aspectRatio: trimRatios[image.path] }}>
                 <Image
                   src={image.path}
                   alt={image.alt}
                   fill
                   loading="lazy"
                   unoptimized={image.unoptimized}
-                  className="object-contain"
+                  className={trimRatios[image.path] ? "object-cover object-center" : "object-contain"}
+                  onLoad={({ currentTarget }) => {
+                    const ratio = getGalleryTrimRatio({
+                      width: currentTarget.naturalWidth,
+                      height: currentTarget.naturalHeight,
+                    });
+                    if (ratio) setTrimRatios((current) => current[image.path] === ratio
+                      ? current
+                      : { ...current, [image.path]: ratio });
+                  }}
                   sizes={sizes}
                 />
                 {index === thumbnailLimit - 1 && imageCount > thumbnailLimit ? (
