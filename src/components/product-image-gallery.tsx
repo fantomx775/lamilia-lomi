@@ -50,6 +50,14 @@ export function ProductImageGallery({
   const touchStartX = useRef<number | null>(null);
   const imageCount = images.length;
   const activeImage = activeIndex === null ? null : images[activeIndex];
+  // Keep adjacent previews mounted so navigation can reuse their in-flight requests.
+  const previewIndexes = activeIndex === null || !activeImage
+    ? []
+    : Array.from(new Set([
+        activeIndex,
+        (activeIndex + 1) % imageCount,
+        (activeIndex + imageCount - 1) % imageCount,
+      ]));
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -233,10 +241,7 @@ export function ProductImageGallery({
       >
         {activeImage && activeIndex !== null ? (
           <div className="mx-auto flex h-full w-full max-w-[110rem] flex-col rounded-[1.5rem] border border-white/70 bg-[var(--color-bg)] p-3 shadow-[0_30px_100px_rgba(26,21,18,0.36)] sm:p-5">
-            <div className="mb-2 flex shrink-0 items-center justify-between gap-4 sm:mb-3">
-              <p className="min-w-0 truncate text-sm font-medium tracking-wide text-[var(--color-ink-soft)]">
-                {labels.previewTitle}
-              </p>
+            <div className="mb-2 flex shrink-0 items-center justify-end sm:mb-3">
               <div className="flex shrink-0 items-center gap-3">
                 <p
                   aria-live="polite"
@@ -264,15 +269,24 @@ export function ProductImageGallery({
                 onPointerUp={handlePointerUp}
                 className="relative col-span-2 row-start-1 mx-auto flex h-[min(76dvh,calc(100dvh-11rem))] max-h-full w-[min(90vw,calc((100dvh-11rem)*0.773))] max-w-full min-h-0 shrink touch-pan-y items-center justify-center overflow-hidden rounded-[1.1rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] md:col-span-1 md:col-start-2 md:h-[min(86dvh,calc(100dvh-8rem))] md:w-[min(75vw,calc((100dvh-8rem)*0.773))]"
               >
-                <Image
-                  src={activeImage.path}
-                  alt={activeImage.alt}
-                  fill
-                  loading="eager"
-                  unoptimized={activeImage.unoptimized}
-                  className="object-contain"
-                  sizes="(max-width: 768px) 90vw, 40rem"
-                />
+                {previewIndexes.map((index) => {
+                  const image = images[index];
+                  const isActive = index === activeIndex;
+                  return (
+                    <Image
+                      key={image.id}
+                      src={image.path}
+                      alt={isActive ? image.alt : ""}
+                      aria-hidden={!isActive}
+                      fill
+                      loading="eager"
+                      fetchPriority={isActive ? "high" : "low"}
+                      unoptimized={image.unoptimized}
+                      className={isActive ? "object-contain" : "invisible object-contain"}
+                      sizes="(max-width: 768px) 90vw, 40rem"
+                    />
+                  );
+                })}
               </div>
 
               {imageCount > 1 ? (
