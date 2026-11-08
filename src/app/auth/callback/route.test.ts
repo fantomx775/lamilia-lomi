@@ -7,6 +7,10 @@ const auth = {
   verifyOtp: vi.fn(),
   getUser: vi.fn(),
 };
+const recovery = vi.hoisted(() => ({
+  exchangeCodeForSession: vi.fn(),
+  clearCookies: vi.fn(),
+}));
 const resume = vi.hoisted(() => ({
   intent: null as null | Record<string, string | undefined>,
   callbackIntent: null as null | Record<string, string | undefined>,
@@ -24,6 +28,10 @@ vi.mock("@/lib/config", () => ({
 
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ auth }),
+}));
+vi.mock("@/lib/supabase/recovery", () => ({
+  createRecoveryClient: async () => ({ auth: recovery }),
+  clearRecoveryCookies: recovery.clearCookies,
 }));
 vi.mock("@/lib/auth-resume", () => ({
   authResumeIntentMatchesEmail: (
@@ -62,6 +70,8 @@ import { GET } from "./route";
 
 describe("Supabase auth callback", () => {
   beforeEach(() => {
+    recovery.exchangeCodeForSession.mockReset();
+    recovery.clearCookies.mockReset();
     auth.exchangeCodeForSession.mockReset();
     auth.verifyOtp.mockReset();
     auth.getUser.mockReset();
@@ -73,6 +83,32 @@ describe("Supabase auth callback", () => {
     resume.setUnlock.mockReset();
     resume.setAuthResume.mockReset();
     resume.redeem.mockResolvedValue(null);
+  });
+
+  it("opens password entry after a fresh recovery exchange without resuming account intents", async () => {
+    recovery.exchangeCodeForSession.mockResolvedValue({
+      data: { session: {}, redirectType: "recovery" }, error: null,
+    });
+    const response = await GET(new Request("https://app.example/auth/callback?recovery=1&code=valid"));
+    expect(recovery.exchangeCodeForSession).toHaveBeenCalledWith("valid");
+    expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
+    expect(resume.redeem).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBe(
+      "https://canonical.lamilialomi.example/en/reset-password?status=choose-password",
+    );
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
+  it("rejects a recovery link that cannot exchange its code, even with a regular session", async () => {
+    recovery.exchangeCodeForSession.mockResolvedValue({
+      data: { session: null }, error: new Error("invalid code"),
+    });
+    auth.getUser.mockResolvedValue({ data: { user: { email_confirmed_at: "today" } } });
+    const response = await GET(new Request("https://app.example/auth/callback?recovery=1&code=invalid"));
+    expect(auth.getUser).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBe(
+      "https://canonical.lamilialomi.example/en/reset-password?status=invalid-link",
+    );
   });
 
   it("exchanges a valid callback and redirects to the safe account target", async () => {
