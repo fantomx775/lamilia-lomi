@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     if (getBackendMode() === "supabase" &&
       request.headers.get("content-type")?.startsWith("application/x-www-form-urlencoded")) {
       const tokenHash = (await request.formData()).get("token_hash");
-      if (typeof tokenHash === "string" && /^(?:pkce_)?[a-f0-9]{64}$/i.test(tokenHash)) {
+      if (typeof tokenHash === "string" && /^[A-Za-z0-9_-]{32,256}$/.test(tokenHash)) {
         const supabase = await createRecoveryClient();
         const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: "recovery" });
         verified = !error && Boolean(data.session);

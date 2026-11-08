@@ -13,7 +13,7 @@ vi.mock("@/lib/supabase/recovery", () => ({
 import { GET, POST } from "./route";
 
 describe("cross-browser password recovery", () => {
-  const token = "pkce_" + "a".repeat(64);
+  const token = "pkce_" + "a".repeat(56);
   function request(origin: string, tokenHash: string) {
     return new Request("https://lamilia.example/auth/recovery", {
       method: "POST",
