@@ -73,7 +73,7 @@ describe("public media delivery", () => {
       });
     }
     const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
-    const fetchImage = vi.fn().mockResolvedValue(new Response(bytes, {
+    const fetchImage = vi.fn().mockImplementation(async () => new Response(bytes, {
       headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=14400", ETag: '"source-etag"' },
     }));
     vi.stubGlobal("fetch", fetchImage);
