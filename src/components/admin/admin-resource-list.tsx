@@ -11,7 +11,6 @@ import { AdminResourceTableShell } from "@/components/admin/admin-resource-table
 type AdminResourceListProps<T> = {
   title: string;
   description?: string;
-  searchPlaceholder: string;
   searchAriaLabel: string;
   caption: string;
   rows: T[];
@@ -35,7 +34,6 @@ type AdminResourceListProps<T> = {
 export function AdminResourceList<T>({
   title,
   description,
-  searchPlaceholder,
   searchAriaLabel,
   caption,
   rows,
@@ -75,7 +73,6 @@ export function AdminResourceList<T>({
       description={description}
       searchValue={searchValue}
       onSearchChange={setSearchValue}
-      searchPlaceholder={searchPlaceholder}
       searchAriaLabel={searchAriaLabel}
       resultsLabel={resultsLabel(filteredRows.length)}
       toolbarActions={toolbarActions}

@@ -14,11 +14,7 @@ import { GuestUnlockActions } from "@/components/guest-unlock-actions";
 afterEach(cleanup);
 
 describe("GuestUnlockActions", () => {
-  it("uses a neutral public hint while preserving a QR/deep-link code prefill", () => {
-    const hint = englishMessages.Funnel.codePlaceholder;
-    expect(hint).toBe("Enter the code from your book");
-    expect(hint).not.toMatch(/LOMI-BOOK-2026|demo|example/i);
-
+  it("preserves a QR/deep-link code prefill without placeholder text", () => {
     render(
       <GuestUnlockActions
         locale="en"
@@ -26,7 +22,6 @@ describe("GuestUnlockActions", () => {
         initialCode="REAL-BOOK-CODE"
         copy={{
           codeLabel: englishMessages.Funnel.codeLabel,
-          codePlaceholder: hint,
           login: englishMessages.Funnel.login,
           register: englishMessages.Funnel.register,
           pending: englishMessages.Funnel.pending,
@@ -35,7 +30,7 @@ describe("GuestUnlockActions", () => {
     );
 
     const codeInput = screen.getByRole("textbox", { name: "Premium code" });
-    expect(codeInput).toHaveAttribute("placeholder", hint);
+    expect(codeInput).not.toHaveAttribute("placeholder");
     expect(codeInput).toHaveValue("REAL-BOOK-CODE");
   });
 });

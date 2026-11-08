@@ -154,7 +154,7 @@ export default function CommunityModeration({ products, initialStatus = "pending
         </select>
       </label>
       <label className="grid gap-1.5 text-sm font-medium">Nazwa twórcy
-        <input data-testid="community-moderation-author-filter" value={creatorInput} onChange={(event) => setCreatorInput(event.target.value)} disabled={busy} maxLength={25} placeholder="@nazwa" className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 disabled:opacity-50" />
+        <input data-testid="community-moderation-author-filter" value={creatorInput} onChange={(event) => setCreatorInput(event.target.value)} disabled={busy} maxLength={25} className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 disabled:opacity-50" />
       </label>
       <button type="submit" disabled={busy} className="min-h-11 rounded-xl bg-[var(--color-ink)] px-5 text-sm font-semibold text-white disabled:opacity-50">Filtruj</button>
     </form>

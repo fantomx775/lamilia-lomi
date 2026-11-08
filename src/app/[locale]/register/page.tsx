@@ -64,11 +64,11 @@ export default async function RegisterPage({ params, searchParams }: Props) {
             <input type="hidden" name="code" value={code} />
             <div className="grid gap-2">
               <Label htmlFor="email">{t("email")}</Label>
-              <Input id="email" name="email" type="email" placeholder="reader@example.com" autoComplete="email" required />
+              <Input id="email" name="email" type="email" autoComplete="email" required />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">{t("password")}</Label>
-              <Input id="password" name="password" type="password" placeholder="At least 8 characters" autoComplete="new-password" required minLength={8} />
+              <Input id="password" name="password" type="password" autoComplete="new-password" required minLength={8} />
             </div>
             <label className="flex gap-3 text-sm leading-6">
               <input className="mt-1 size-4" type="checkbox" name="termsAccepted" required />

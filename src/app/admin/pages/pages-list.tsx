@@ -41,7 +41,6 @@ export function PagesResourceList({ rows }: { rows: AdminPageListRow[] }) {
     <AdminResourceList
       title="Strony"
       description="Przeglądaj strony informacyjne."
-      searchPlaceholder="Szukaj stron…"
       searchAriaLabel="Szukaj stron"
       caption="Lista stron"
       rows={rows}

@@ -69,7 +69,7 @@ export default async function ResetPasswordPage({
               <form className="grid gap-4" action={requestPasswordReset.bind(null, locale)}>
                 <div className="grid gap-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input id="email" name="email" type="email" autoComplete="email" placeholder="reader@example.com" maxLength={254} required />
+                  <Input id="email" name="email" type="email" autoComplete="email" maxLength={254} required />
                 </div>
                 <SubmitButton pendingLabel="Sending reset link…">Send reset link</SubmitButton>
               </form>
