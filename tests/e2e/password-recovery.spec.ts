@@ -70,6 +70,7 @@ test("resets a password through the real local email and rejects a reused link",
     completedActions.add(response.request());
   };
 
+  let separateContext: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   try {
     await page.goto("/en/reset-password");
     await page.getByRole("button", { name: "Essential only" }).click();
@@ -126,9 +127,8 @@ test("resets a password through the real local email and rejects a reused link",
     if (crossBrowser && (link.origin !== app.origin || link.pathname !== "/auth/recovery")) {
       throw new Error("Unexpected cross-browser recovery link target.");
     }
-    const recoveryTab = crossBrowser
-      ? await browser.newPage({ ignoreHTTPSErrors: true })
-      : await page.context().newPage();
+    if (crossBrowser) separateContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    const recoveryTab = await (separateContext ?? page.context()).newPage();
     monitor(recoveryTab);
     if (crossBrowser) {
       const scanner = await recoveryTab.request.get(new URL(link.pathname, app).href);
@@ -187,6 +187,7 @@ test("resets a password through the real local email and rejects a reused link",
     testInfo.annotations.push({ type: "canceled background Next.js prefetches", description: String(canceledPrefetches) });
     testInfo.annotations.push({ type: "canceled streams after successful action response", description: String(canceledActionStreams.length) });
   } finally {
+    await separateContext?.close();
     const { error: cleanupError } = await admin.auth.admin.deleteUser(data.user.id);
     if (cleanupError) throw new Error("Could not clean up the local recovery fixture.");
   }
