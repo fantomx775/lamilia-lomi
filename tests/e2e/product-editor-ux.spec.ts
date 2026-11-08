@@ -1206,9 +1206,12 @@ test("saves a title-only draft and highlights missing publication fields", async
   collectBrowserDiagnostics(page, diagnostics);
   const contentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
   const previousContent = fs.existsSync(contentPath) ? fs.readFileSync(contentPath) : undefined;
-  await withExpectedNavigation(diagnostics, "sign in", () => signInAsAdmin(page));
-  await page.goto("/admin/products/new");
-  await waitForProductEditorReady(page);
+  await withExpectedNavigation(diagnostics, "sign in and open new product", async () => {
+    await signInAsAdmin(page);
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    await page.goto("/admin/products/new");
+    await waitForProductEditorReady(page);
+  });
   const productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
 
   try {
@@ -1228,9 +1231,11 @@ test("saves a title-only draft and highlights missing publication fields", async
     await page.screenshot({ path: testInfo.outputPath("publication-validation.png"), fullPage: true, caret: "initial" });
 
     await page.getByLabel("Status", { exact: true }).selectOption("draft");
-    await save.click();
-    await expect(page).toHaveURL(editorUrlRegex("/admin/products/" + productId));
-    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
+    await withExpectedNavigation(diagnostics, "initial post-create editor hydration", async () => {
+      await save.click();
+      await expect(page).toHaveURL(editorUrlRegex("/admin/products/" + productId));
+      await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
+    });
     await withExpectedNavigation(diagnostics, "reload saved draft", () => page.reload());
     await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
     await expect(titleField).toHaveValue(title);
