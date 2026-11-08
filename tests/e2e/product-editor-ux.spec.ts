@@ -572,6 +572,8 @@ test("product editor keeps submitted values after a no-JavaScript save error", a
     await expect(noJsPage.getByLabel("Adres produktu")).toHaveValue(slug);
     await expect(noJsPage.getByLabel("Pozycja w katalogu")).toHaveValue("73");
     await expect(noJsPage.getByLabel("Status")).toHaveValue("published");
+    await expect(noJsPage.locator("#media-section-cover")).toContainText("Dodaj okładkę, aby opublikować produkt.");
+    await expect(noJsPage.getByRole("group", { name: "Linki do Amazona" })).toContainText("Dodaj link do Amazona, aby opublikować produkt.");
     expect(readLocalProduct(submittedProductId)).toBeUndefined();
   } catch (error) {
     testFailed = true;
@@ -1197,3 +1199,55 @@ function escapeRegex(value: string) {
 function editorUrlRegex(productPath: string) {
   return new RegExp(`${escapeRegex(productPath)}(?:\\?[^#]*)?$`);
 }
+
+test("saves a title-only draft and highlights missing publication fields", async ({ page }, testInfo) => {
+  const title = `Draft validation ${Date.now()}-${testInfo.project.name}`;
+  const diagnostics = createBrowserDiagnostics();
+  collectBrowserDiagnostics(page, diagnostics);
+  const contentPath = path.resolve(process.cwd(), "data", "lamilialomi-content.local.json");
+  const previousContent = fs.existsSync(contentPath) ? fs.readFileSync(contentPath) : undefined;
+  await withExpectedNavigation(diagnostics, "sign in and open new product", async () => {
+    await signInAsAdmin(page);
+    await page.evaluate(() => document.fonts.ready.then(() => undefined));
+    await page.goto("/admin/products/new");
+    await waitForProductEditorReady(page);
+  });
+  const productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
+
+  try {
+    const save = page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ });
+    const titleField = page.getByLabel("Tytuł", { exact: true });
+    await save.click();
+    await expect(titleField).toHaveAttribute("aria-invalid", "true");
+    await expect(titleField).toBeFocused();
+    await titleField.fill(title);
+    await page.getByLabel("Status", { exact: true }).selectOption("published");
+    await save.click();
+    await expect(page.getByLabel("Krótki opis")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByLabel("Krótki opis")).toBeFocused();
+    await expect(page.locator("#media-section-cover")).toContainText("Dodaj okładkę, aby opublikować produkt.");
+    await expect(page.getByRole("group", { name: "Linki do Amazona" })).toContainText("Dodaj link do Amazona, aby opublikować produkt.");
+    await expect(page.getByRole("alert").filter({ has: page.getByRole("button", { name: "Zamknij powiadomienie" }) }).filter({ hasText: /Uzupełnij krótki opis.*Dodaj link do Amazona/ })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("publication-validation.png"), fullPage: true, caret: "initial" });
+
+    await page.getByLabel("Status", { exact: true }).selectOption("draft");
+    await withExpectedNavigation(diagnostics, "initial post-create editor hydration", async () => {
+      await save.click();
+      await expect(page).toHaveURL(editorUrlRegex("/admin/products/" + productId));
+      await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
+    });
+    await withExpectedNavigation(diagnostics, "reload saved draft", () => page.reload());
+    await expect(page.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
+    await expect(titleField).toHaveValue(title);
+    await expect(page.getByLabel("Status", { exact: true })).toHaveValue("draft");
+    await expect(page.getByLabel("Krótki opis")).toHaveValue("");
+    await expect(page.getByRole("group", { name: "Linki do Amazona" })).toContainText("Nie dodano jeszcze rynku.");
+    assertBrowserDiagnosticsClean(diagnostics);
+    await page.screenshot({ path: testInfo.outputPath("title-only-draft.png"), fullPage: true, caret: "initial" });
+  } finally {
+    // The suite holds the local store lock. Restore its exact previous state
+    // without exercising the unrelated product deletion flow.
+    if (previousContent) fs.writeFileSync(contentPath, previousContent);
+    else fs.rmSync(contentPath, { force: true });
+  }
+});

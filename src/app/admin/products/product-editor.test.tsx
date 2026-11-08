@@ -309,10 +309,7 @@ describe("ProductEditor V2", () => {
 
   it("points the publish requirement at Amazon after removing the last link", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(readerArtworkGetResponse()));
-    const saveAction = vi.fn().mockResolvedValue({
-      ok: false,
-      errors: [ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS],
-    });
+    const saveAction = vi.fn();
     const user = userEvent.setup();
     const editorProduct = {
       ...product,
@@ -334,14 +331,14 @@ describe("ProductEditor V2", () => {
     await user.click(within(amazonSection!).getByRole("button", { name: "Usuń" }));
     await user.click(view.getByRole("button", { name: /Zapisz/ }));
 
-    await waitFor(() => expect(saveAction).toHaveBeenCalled());
-    expect(amazonSection).toHaveTextContent("Opublikowany produkt wymaga tytułu EN, krótkiego opisu, okładki i linku Amazon.");
+    expect(saveAction).not.toHaveBeenCalled();
+    expect(amazonSection).toHaveTextContent("Dodaj link do Amazona, aby opublikować produkt.");
     expect(view.getByLabelText("Status")).not.toHaveAttribute("aria-invalid", "true");
 
     await user.type(view.getByLabelText("Krótki opis"), " updated");
 
     expect(view.queryByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).not.toBeInTheDocument();
-    expect(amazonSection).not.toHaveTextContent("Opublikowany produkt wymaga tytułu EN, krótkiego opisu, okładki i linku Amazon.");
+    expect(amazonSection).not.toHaveTextContent("Dodaj link do Amazona, aby opublikować produkt.");
   });
 
   it("reveals and collapses SEO details without leaving the native disclosure open", async () => {
@@ -499,10 +496,7 @@ describe("ProductEditor V2", () => {
   });
 
   it("clears a title-required summary after the missing title is corrected", async () => {
-    const saveAction = vi.fn().mockResolvedValue({
-      ok: false,
-      errors: [ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED],
-    });
+    const saveAction = vi.fn();
     const user = userEvent.setup();
     const view = render(
       <ProductEditor
@@ -514,7 +508,7 @@ describe("ProductEditor V2", () => {
     );
 
     await user.click(view.getByRole("button", { name: /Zapisz/ }));
-    await waitFor(() => expect(saveAction).toHaveBeenCalled());
+    expect(saveAction).not.toHaveBeenCalled();
     expect(view.getByText("Nie udało się zapisać. Twoje wpisane wartości są zachowane.")).toBeInTheDocument();
     expect(view.getByLabelText("Tytuł")).toHaveAttribute("aria-invalid", "true");
 
@@ -963,6 +957,7 @@ describe("ProductEditor V2", () => {
     );
     const input = view.container.querySelector<HTMLInputElement>("#media-upload-cover");
 
+    await user.type(view.getByLabelText("Tytuł"), "Draft with an uploaded cover");
     await user.upload(input!, new File(["cover"], "cover-cleanup-retry.jpg", { type: "image/jpeg" }));
     await waitFor(() => expect(view.getByText("Przesłano")).toBeInTheDocument());
     await user.click(view.getByRole("button", { name: /Zapisz/ }));

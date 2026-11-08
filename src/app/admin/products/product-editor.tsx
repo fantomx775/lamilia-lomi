@@ -21,6 +21,7 @@ import {
   PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH,
   PRODUCT_TEXT_WARNING_THRESHOLD,
   PRODUCT_TITLE_MAX_LENGTH,
+  validateProductCompleteness,
   validateProductTextLengths,
 } from "@/lib/product-text";
 import { emptyProductSaveFormState, type ProductSaveFormState } from "@/lib/product-save-form-state";
@@ -154,7 +155,7 @@ export function ProductEditor({
     if (!signature) { lastNativeToast.current = ""; return; }
     if (lastNativeToast.current === signature) return;
     lastNativeToast.current = signature;
-    publishToast("error", nativeSaveState.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+    publishToast("error", productSaveErrorMessage(nativeSaveState.errors));
   }, [nativeSaveState.errors, publishToast]);
   const submittedValues = nativeSaveState.values;
   const [content, setContent] = useState<ProductContentDraft>(() => buildProductContent(product, submittedValues));
@@ -168,7 +169,9 @@ export function ProductEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [saveErrorCodes, setSaveErrorCodes] = useState<AdminErrorCode[]>(() => nativeSaveState.errors);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>(() =>
+    submittedValues ? mapProductSaveErrors(nativeSaveState.errors, formDataFromProductSaveValues(submittedValues)).fieldErrors : {},
+  );
   const [mediaErrors, setMediaErrors] = useState<Partial<Record<ProductAsset["kind"], string>>>({});
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product, submittedValues));
   const formRef = useRef<HTMLFormElement>(null);
@@ -291,7 +294,7 @@ export function ProductEditor({
     const formData = formDataFromProductSaveValues(submittedValues);
     const nextAssets = buildAssets(product, submittedValues);
     const nextAmazonLinks = buildAmazonLinks(product, submittedValues);
-    const errorMapping = mapProductSaveErrors(nativeSaveState.errors, formData, nextAmazonLinks);
+    const errorMapping = mapProductSaveErrors(nativeSaveState.errors, formData);
 
     setContent(buildProductContent(product, submittedValues));
     setAssets(nextAssets);
@@ -305,6 +308,7 @@ export function ProductEditor({
     savedFormSignatureRef.current = "";
     isDirtyRef.current = true;
     setIsDirty(true);
+    scheduleAfterRender(() => focusFirstError(errorMapping.focusTarget));
   }, [nativeSaveState, product, submittedValues]);
 
   useEffect(() => {
@@ -823,10 +827,21 @@ export function ProductEditor({
 
     const form = event.currentTarget;
     const formData = new FormData(form);
-    if (productTextErrors.length) {
-      const mapped = mapProductSaveErrors(productTextErrors, formData, amazonLinks);
+    const validationErrors = [
+      ...validateProductCompleteness({
+        status: productStatus,
+        title: content.title,
+        shortDescription: content.shortDescription,
+        hasCover: Boolean(coverAsset?.id),
+        hasAmazonLink: activeAmazonLinks.some((link) => Boolean(link.url.trim())),
+      }),
+      ...productTextErrors,
+    ];
+    if (validationErrors.length) {
+      const mapped = mapProductSaveErrors(validationErrors, formData);
+      publishToast("error", productSaveErrorMessage(validationErrors));
       setSaveStatus("error");
-      setSaveErrorCodes(productTextErrors);
+      setSaveErrorCodes(validationErrors);
       setFieldErrors(mapped.fieldErrors);
       scheduleAfterRender(() => focusFirstError(mapped.focusTarget));
       return;
@@ -841,8 +856,8 @@ export function ProductEditor({
       try {
         const result = await saveAction(formData);
         if (!result.ok) {
-          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
-          const mapped = mapProductSaveErrors(result.errors, formData, amazonLinks);
+          publishToast("error", productSaveErrorMessage(result.errors));
+          const mapped = mapProductSaveErrors(result.errors, formData);
           const cleanupFailures = new Map((result.mediaCleanupFailures ?? []).map((failure) => [failure.assetId, failure]));
           setAssets((current) => current.map((asset) => {
             if (!asset.uploaded) return asset;
@@ -932,7 +947,7 @@ export function ProductEditor({
               <div className="grid min-w-0 gap-5">
                 <div className="grid min-w-0 gap-4">
                   <Field label="Tytuł" htmlFor="product-title" error={titleError}>
-                    <Input id="product-title" name="title" value={content.title} maxLength={PRODUCT_TITLE_MAX_LENGTH} onChange={(event) => updateContent("title", event.target.value)} aria-invalid={Boolean(titleError)} aria-describedby={`product-title-help product-title-counter${titleLimitWarning ? " product-title-warning" : ""}${titleError ? " product-title-error" : ""}`} />
+                    <Input id="product-title" name="title" aria-required="true" className="aria-invalid:border-red-600 aria-invalid:focus:ring-red-100" value={content.title} maxLength={PRODUCT_TITLE_MAX_LENGTH} onChange={(event) => updateContent("title", event.target.value)} aria-invalid={Boolean(titleError)} aria-describedby={`product-title-help product-title-counter${titleLimitWarning ? " product-title-warning" : ""}${titleError ? " product-title-error" : ""}`} />
                     <div className="flex items-start justify-between gap-3 text-sm">
                       <p id="product-title-help" className="min-w-0 leading-5 text-[var(--color-muted)]">Używany w katalogu i na stronie produktu.</p>
                       <p id="product-title-counter" className={`shrink-0 ${titleOverLimit ? "text-red-800" : titleLimitWarning ? "text-amber-800" : "text-[var(--color-muted)]"}`}>{content.title.length} / {PRODUCT_TITLE_MAX_LENGTH} znaków</p>
@@ -940,7 +955,7 @@ export function ProductEditor({
                     {titleLimitWarning ? <p id="product-title-warning" role="status" className="text-sm text-amber-800">{titleLimitWarning}</p> : null}
                   </Field>
                   <Field label="Krótki opis" htmlFor="product-short-description" error={shortDescriptionError}>
-                    <Textarea id="product-short-description" name="shortDescription" value={content.shortDescription} rows={4} maxLength={PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH} onChange={(event) => updateContent("shortDescription", event.target.value)} className="min-h-28 resize-y" aria-invalid={Boolean(shortDescriptionError)} aria-describedby={`product-short-description-help product-short-description-counter${shortDescriptionLimitWarning ? " product-short-description-warning" : ""}${shortDescriptionError ? " product-short-description-error" : ""}`} />
+                    <Textarea id="product-short-description" name="shortDescription" value={content.shortDescription} rows={4} maxLength={PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH} onChange={(event) => updateContent("shortDescription", event.target.value)} className="min-h-28 resize-y aria-invalid:border-red-600 aria-invalid:focus:ring-red-100" aria-required={productStatus === "published"} aria-invalid={Boolean(shortDescriptionError)} aria-describedby={`product-short-description-help product-short-description-counter${shortDescriptionLimitWarning ? " product-short-description-warning" : ""}${shortDescriptionError ? " product-short-description-error" : ""}`} />
                     <div className="flex items-start justify-between gap-3 text-sm">
                       <p id="product-short-description-help" className="min-w-0 leading-5 text-[var(--color-muted)]">Wyświetlany na kartach i w podglądzie produktu. Używany też jako opis SEO, gdy osobne pole SEO jest puste.</p>
                       <p id="product-short-description-counter" className={`shrink-0 ${shortDescriptionOverLimit ? "text-red-800" : shortDescriptionLimitWarning ? "text-amber-800" : "text-[var(--color-muted)]"}`}>{content.shortDescription.length} / {PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH} znaków</p>
@@ -974,7 +989,7 @@ export function ProductEditor({
             <MediaSections productId={product?.id} assets={assets} errors={mediaErrors} fieldErrors={fieldErrors} onUpload={uploadFiles} onRemove={removeAsset} onUndo={(asset) => updateAsset(asset.clientId, "removed", false)} onRetry={(asset) => void retryUpload(asset)} onMove={reorderGallery} />
 
             <AdminEditorSection title="Sprzedaż na Amazon" description="Dodaj maksymalnie jeden link dla każdego rynku i wybierz jeden domyślny.">
-              <div id="product-amazon-links" className="grid gap-3">
+              <div id="product-amazon-links" role="group" aria-label="Linki do Amazona" aria-describedby={fieldErrors["product-amazon-links"]?.length ? "product-amazon-links-error" : undefined} className={`grid gap-3 ${fieldErrors["product-amazon-links"]?.length ? "rounded-md border border-red-300 bg-red-50 p-3" : ""}`}>
                 {amazonLinks.length === 0 ? <p className="text-sm text-[var(--color-muted)]">Nie dodano jeszcze rynku.</p> : null}
                 {amazonLinks.map((link, index) => (
                   <AmazonEditor
@@ -990,7 +1005,7 @@ export function ProductEditor({
                 ))}
                 <Button type="button" variant="outline" onClick={addAmazon} disabled={!canAddAmazonMarket} className="w-fit"><Plus className="size-4" aria-hidden />Dodaj rynek</Button>
                 {!canAddAmazonMarket ? <p className="text-sm text-[var(--color-muted)]">Dodano wszystkie dostępne rynki.</p> : null}
-                {fieldErrors["product-amazon-links"]?.map((message) => <p key={message} className="text-sm text-red-800">{message}</p>)}
+                {fieldErrors["product-amazon-links"]?.length ? <p id="product-amazon-links-error" className="text-sm text-red-800">{fieldErrors["product-amazon-links"].join(" ")}</p> : null}
               </div>
             </AdminEditorSection>
 
@@ -1006,9 +1021,9 @@ export function ProductEditor({
                   <option value="draft">Szkic</option><option value="published">Opublikowany</option><option value="archived">Zarchiwizowany</option>
                 </select>
               </Field>
-              <p className="text-xs leading-5 text-[var(--color-muted)]">Produkt opublikowany jest widoczny w katalogu. Szkic i archiwum pozostają ukryte.</p>
+              <p className="text-xs leading-5 text-[var(--color-muted)]">Do zapisu szkicu wystarczy tytuł. Przed publikacją uzupełnij też krótki opis, okładkę i link do Amazona. Opublikowany produkt będzie widoczny w katalogu.</p>
               <Field label="Adres produktu" htmlFor="product-slug" error={fieldErrors["product-slug"]?.[0]}>
-                <Input id="product-slug" name="slug" value={productSlug} onChange={(event) => setProductSlug(event.target.value)} placeholder="wygenerujemy-z-tytulu-angielskiego" aria-invalid={Boolean(fieldErrors["product-slug"]?.length)} aria-describedby={fieldErrors["product-slug"]?.length ? "product-slug-error" : undefined} />
+                <Input id="product-slug" name="slug" className="aria-invalid:border-red-600 aria-invalid:focus:ring-red-100" value={productSlug} onChange={(event) => setProductSlug(event.target.value)} placeholder="wygenerujemy-z-tytulu-angielskiego" aria-invalid={Boolean(fieldErrors["product-slug"]?.length)} aria-describedby={fieldErrors["product-slug"]?.length ? "product-slug-error" : undefined} />
                 <p className="text-xs leading-5 text-[var(--color-muted)]">Zostaw puste, aby utworzyć adres z angielskiego tytułu. {productSlug ? `/products/${productSlug}` : "Adres zostanie pokazany po zapisaniu."}</p>
               </Field>
               <Field label="Pozycja w katalogu" htmlFor="product-sort-order">
@@ -1106,7 +1121,7 @@ function MediaSection({
 
   const serverError = fieldErrors[`media-section-${kind}`]?.[0];
 
-  return <div id={`media-section-${kind}`} className="min-w-0"><AdminEditorSection title={title} description={description}>
+  return <div id={`media-section-${kind}`} className={`min-w-0 ${serverError ? "rounded-lg ring-2 ring-red-300" : ""}`}><AdminEditorSection title={title} description={description}>
     <div className="grid min-w-0 gap-4">
       <UploadDropzone kind={kind} accept={spec.accept} multiple={spec.multiple} onFiles={(files) => onUpload(kind, files)} />
       <p className="text-xs leading-5 text-[var(--color-muted)]">{uploadHint(kind)}</p>
@@ -1328,10 +1343,13 @@ type ProductSaveErrorMapping = {
   focusTarget?: string;
 };
 
+function productSaveErrorMessage(errors: AdminErrorCode[]) {
+  return Array.from(new Set(errors)).map((code) => getAdminErrorMessage(code, "pl")).join(" ");
+}
+
 function mapProductSaveErrors(
   errors: AdminErrorCode[],
   formData: FormData,
-  amazonLinks: AmazonDraft[],
 ): ProductSaveErrorMapping {
   const fieldErrors: Record<string, string[]> = {};
   let focusTarget: string | undefined;
@@ -1348,6 +1366,7 @@ function mapProductSaveErrors(
       case ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_TOO_LONG:
         addFieldError("product-title", code);
         break;
+      case ADMIN_ERROR_CODES.VALIDATION_PUBLISH_SHORT_DESCRIPTION_REQUIRED:
       case ADMIN_ERROR_CODES.VALIDATION_PRODUCT_SHORT_DESCRIPTION_TOO_LONG:
         addFieldError("product-short-description", code);
         break;
@@ -1355,30 +1374,11 @@ function mapProductSaveErrors(
       case ADMIN_ERROR_CODES.CONFLICT_SLUG:
         addFieldError("product-slug", code);
         break;
-      case ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS: {
-        let foundTarget = false;
-        if (!String(formData.get("title") ?? "").trim()) {
-          addFieldError("product-title", code);
-          foundTarget = true;
-        }
-        if (!String(formData.get("shortDescription") ?? "").trim()) {
-          addFieldError("product-short-description", code);
-          foundTarget = true;
-        }
-        if (!String(formData.get("coverAssetId") ?? "").trim()) {
-          addFieldError("media-section-cover", code);
-          foundTarget = true;
-        }
-        if (!amazonLinks.some((link) => !link.removed && link.url.trim())) {
-          addFieldError("product-amazon-links", code);
-          foundTarget = true;
-        }
-        if (!foundTarget) addFieldError("product-status", code);
-        break;
-      }
+      case ADMIN_ERROR_CODES.VALIDATION_PUBLISH_AMAZON_LINK_REQUIRED:
       case ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE:
         addFieldError("product-amazon-links", code);
         break;
+      case ADMIN_ERROR_CODES.VALIDATION_PUBLISH_COVER_REQUIRED:
       case ADMIN_ERROR_CODES.VALIDATION_COVER_DUPLICATE:
         addFieldError("media-section-cover", code);
         break;
@@ -1404,10 +1404,6 @@ function mapProductSaveErrors(
       default:
         break;
     }
-  }
-
-  if (errors.includes(ADMIN_ERROR_CODES.CONFLICT_AMAZON_MARKET_DUPLICATE) && amazonLinks.every((link) => link.removed)) {
-    focusTarget ??= "product-amazon-links";
   }
 
   return { fieldErrors, focusTarget };
@@ -1471,7 +1467,8 @@ function focusFirstError(targetId?: string) {
   target.scrollIntoView?.({ behavior: "smooth", block: "center" });
   const focusable = target.matches("input, select, textarea, button, [tabindex]")
     ? target
-    : target.querySelector<HTMLElement>("input, select, textarea, button, [tabindex]");
+    : target.querySelector<HTMLElement>('input[name="amazonUrl"]:not([type="hidden"])') ??
+      target.querySelector<HTMLElement>('input:not([type="hidden"]):not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled), [tabindex]');
   focusable?.focus({ preventScroll: true });
 }
 
