@@ -11,7 +11,6 @@ type Props = {
   initialCode?: string;
   copy: {
     codeLabel: string;
-    codePlaceholder: string;
     login: string;
     register: string;
     pending: string;
@@ -30,7 +29,6 @@ export function GuestUnlockActions({ locale, productSlug, initialCode, copy }: P
             id="guest-premium-code"
             name="code"
             defaultValue={initialCode ?? ""}
-            placeholder={copy.codePlaceholder}
             autoComplete="one-time-code"
           />
         </div>

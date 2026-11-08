@@ -197,7 +197,6 @@ describe("AdminResourceList", () => {
     const { getByRole, getByText } = render(
       <AdminResourceList
         title="Records"
-        searchPlaceholder="Search records"
         searchAriaLabel="Search records"
         caption="Records"
         rows={[

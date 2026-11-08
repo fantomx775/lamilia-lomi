@@ -110,7 +110,6 @@ export function ProductsResourceList({ rows }: { rows: AdminProductListRow[] }) 
     <AdminResourceList
       title="Produkty"
       description="Przeglądaj katalog produktów i ich aktualny status."
-      searchPlaceholder="Szukaj produktów…"
       searchAriaLabel="Szukaj produktów"
       caption="Lista produktów"
       desktopBreakpoint="xl"

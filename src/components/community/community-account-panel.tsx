@@ -185,7 +185,6 @@ export function CommunityAccountPanel({
                   minLength={3}
                   onChange={(event) => setUsername(event.target.value)}
                   pattern="[A-Za-z0-9_]{3,24}"
-                  placeholder="garden_artist"
                   required
                   value={username}
                 />

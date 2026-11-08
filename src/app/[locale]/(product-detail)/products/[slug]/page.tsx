@@ -174,7 +174,6 @@ async function ProductUnlockSection({
                   continueDemoVerification: copy("continueDemoVerification"),
                   verifyDemo: copy("verifyDemo"),
                   codeLabel: copy("codeLabel"),
-                  codePlaceholder: copy("codePlaceholder"),
                   unlock: copy("unlock"),
                   pending: copy("pending"),
                   login: copy("login"),

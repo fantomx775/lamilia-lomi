@@ -348,7 +348,6 @@ export function RichTextEditor({
                 value={linkHref}
                 onChange={(event) => setLinkHref(event.target.value)}
                 onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); applyLink(); } }}
-                placeholder="https://example.com lub /terms"
                 className="min-h-11 w-full rounded-md border border-[var(--color-border)] px-3 font-normal focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-terracotta)]"
               />
             </label>
