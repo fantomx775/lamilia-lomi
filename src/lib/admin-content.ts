@@ -21,7 +21,7 @@ import { mediaBucketForKind, validateMediaFile } from "./media-upload";
 import { ADMIN_ERROR_CODES, type AdminErrorCode, type AdminMutationResult } from "./admin-errors";
 import { normalizePremiumCode, validatePremiumCodeEntries } from "./premium-code";
 import { blocksStaleRichTextWrite, sanitizeRichTextValue } from "./rich-text";
-import { validateProductTextLengths } from "./product-text";
+import { validateProductCompleteness, validateProductTextLengths } from "./product-text";
 import { slugify } from "./utils";
 import { isSafeCollectionImagePath } from "./collection-image-path";
 
@@ -511,13 +511,14 @@ export function validateProductForPublish(
   product: Pick<Product, "translations" | "amazonLinks" | "assets" | "coverAssetId">,
 ) {
   const english = product.translations.find((translation) => translation.locale === "en");
-  const cover = product.assets.find((asset) => asset.id === product.coverAssetId);
-  const missing = [
-    english?.title ? null : "English title",
-    english?.shortDescription ? null : "English short description",
-    product.amazonLinks.length > 0 ? null : "Amazon link",
-    cover ? null : "Cover asset",
-  ].filter((item): item is string => Boolean(item));
+  const labels: Partial<Record<AdminErrorCode, string>> = {
+    [ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED]: "English title",
+    [ADMIN_ERROR_CODES.VALIDATION_PUBLISH_SHORT_DESCRIPTION_REQUIRED]: "English short description",
+    [ADMIN_ERROR_CODES.VALIDATION_PUBLISH_COVER_REQUIRED]: "Cover asset",
+    [ADMIN_ERROR_CODES.VALIDATION_PUBLISH_AMAZON_LINK_REQUIRED]: "Amazon link",
+  };
+  const errors = productCompletenessErrors(product, "published");
+  const missing = errors.flatMap((code) => labels[code] ?? []);
 
   return {
     ok: missing.length === 0,
@@ -713,7 +714,7 @@ function parseAmazonLinks(
       continue;
     }
 
-    const url = valueAt(urls, index) || existingLink?.url || "";
+    const url = index < urls.length ? valueAt(urls, index) : existingLink?.url ?? "";
 
     if (!url) {
       continue;
@@ -836,6 +837,21 @@ function normalizePrimaryAmazonLink(links: AmazonLink[]) {
   }));
 }
 
+function productCompletenessErrors(
+  product: Pick<Product, "translations" | "amazonLinks" | "assets" | "coverAssetId">,
+  status: Product["status"],
+) {
+  const english = product.translations.find((translation) => translation.locale === "en");
+  return validateProductCompleteness({
+    status,
+    title: english?.title ?? "",
+    shortDescription: english?.shortDescription ?? "",
+    hasCover: product.assets.some((asset) =>
+      asset.id === product.coverAssetId && asset.kind === "cover" && asset.isActive !== false),
+    hasAmazonLink: product.amazonLinks.some((link) => Boolean(link.url.trim())),
+  });
+}
+
 function validateProductDraft(product: Product, snapshot: ContentSnapshot) {
   const errors: AdminErrorCode[] = [];
   const english = product.translations.find((translation) => translation.locale === "en");
@@ -850,17 +866,8 @@ function validateProductDraft(product: Product, snapshot: ContentSnapshot) {
     errors.push(ADMIN_ERROR_CODES.NOT_FOUND_COLLECTION);
   }
 
-  if (!english?.title) {
-    errors.push(ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED);
-  }
-
+  errors.push(...productCompletenessErrors(product, product.status));
   errors.push(...validateProductTextLengths(english?.title ?? "", english?.shortDescription ?? ""));
-
-  if (product.status === "published") {
-    if (!validateProductForPublish(product).ok) {
-      errors.push(ADMIN_ERROR_CODES.VALIDATION_PUBLISH_REQUIREMENTS);
-    }
-  }
 
   product.assets.forEach((asset) => {
     const classification = validateAssetClassification(asset);

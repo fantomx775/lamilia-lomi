@@ -1197,3 +1197,46 @@ function escapeRegex(value: string) {
 function editorUrlRegex(productPath: string) {
   return new RegExp(`${escapeRegex(productPath)}(?:\\?[^#]*)?$`);
 }
+
+test("saves a title-only draft and highlights missing publication fields", async ({ page }, testInfo) => {
+  const title = `Draft validation ${Date.now()}-${testInfo.project.name}`;
+  const unexpectedErrors: string[] = [];
+  page.on("pageerror", (error) => unexpectedErrors.push(error.message));
+  page.on("response", (response) => {
+    if (response.status() >= 500) unexpectedErrors.push(`${response.status()} ${response.url()}`);
+  });
+  await signInAsAdmin(page);
+  await page.goto("/admin/products/new");
+  await waitForProductEditorReady(page);
+  const productId = await page.locator('#product-editor-form input[name="id"]').inputValue();
+
+  try {
+    const save = page.getByTestId("product-save-bar").getByRole("button", { name: /Zapisz/ });
+    const titleField = page.getByLabel("Tytuł", { exact: true });
+    await save.click();
+    await expect(titleField).toHaveAttribute("aria-invalid", "true");
+    await expect(titleField).toBeFocused();
+    await titleField.fill(title);
+    await page.getByLabel("Status", { exact: true }).selectOption("published");
+    await save.click();
+    await expect(page.getByLabel("Krótki opis")).toHaveAttribute("aria-invalid", "true");
+    await expect(page.getByLabel("Krótki opis")).toBeFocused();
+    await expect(page.locator("#media-section-cover")).toContainText("Dodaj okładkę, aby opublikować produkt.");
+    await expect(page.getByRole("group", { name: "Linki do Amazona" })).toContainText("Dodaj link do Amazona, aby opublikować produkt.");
+    await expect(page.getByRole("alert").filter({ has: page.getByRole("button", { name: "Zamknij powiadomienie" }) }).filter({ hasText: /Uzupełnij krótki opis.*Dodaj link do Amazona/ })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("publication-validation.png"), fullPage: true });
+
+    await page.getByLabel("Status", { exact: true }).selectOption("draft");
+    await save.click();
+    await expect(page).toHaveURL(editorUrlRegex("/admin/products/" + productId));
+    await page.reload();
+    await expect(titleField).toHaveValue(title);
+    await expect(page.getByLabel("Status", { exact: true })).toHaveValue("draft");
+    await expect(page.getByLabel("Krótki opis")).toHaveValue("");
+    await expect(page.getByRole("group", { name: "Linki do Amazona" })).toContainText("Nie dodano jeszcze rynku.");
+    expect(unexpectedErrors).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath("title-only-draft.png"), fullPage: true });
+  } finally {
+    if (readLocalProduct(productId)) await deleteProductFixture(page, productId);
+  }
+});

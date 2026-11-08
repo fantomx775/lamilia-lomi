@@ -106,6 +106,42 @@ describe("admin behavior", () => {
     );
   });
 
+  it("accepts a title-only draft and reports each missing publication field", () => {
+    const snapshot = getSeedContentSnapshot();
+    const form = new FormData();
+    form.set("status", "draft");
+    form.set("title", "   ");
+    expect(buildProductFromFormData(form, { snapshot }).errors).toEqual([
+      ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED,
+    ]);
+
+    form.set("title", "A work in progress");
+    form.append("amazonMarket", "amazon.com");
+    form.append("amazonUrl", "   ");
+    const draft = buildProductFromFormData(form, { snapshot });
+    expect(draft.errors).toEqual([]);
+    expect(draft.product).toMatchObject({ status: "draft", slug: "a-work-in-progress", amazonLinks: [] });
+
+    form.set("status", "published");
+    expect(buildProductFromFormData(form, { snapshot }).errors).toEqual([
+      ADMIN_ERROR_CODES.VALIDATION_PUBLISH_SHORT_DESCRIPTION_REQUIRED,
+      ADMIN_ERROR_CODES.VALIDATION_PUBLISH_COVER_REQUIRED,
+      ADMIN_ERROR_CODES.VALIDATION_PUBLISH_AMAZON_LINK_REQUIRED,
+    ]);
+  });
+
+  it("does not restore a cleared Amazon URL when validating a publication", () => {
+    const snapshot = getSeedContentSnapshot();
+    const existing = snapshot.products[0];
+    const form = new FormData();
+    form.set("status", "published");
+    form.append("amazonId", existing.amazonLinks[0].id);
+    form.append("amazonUrl", "");
+    const result = buildProductFromFormData(form, { existing, snapshot });
+    expect(result.product.amazonLinks).toEqual([]);
+    expect(result.errors).toContain(ADMIN_ERROR_CODES.VALIDATION_PUBLISH_AMAZON_LINK_REQUIRED);
+  });
+
   it("requires English title and Amazon link before publishing", () => {
     expect(validateProductForPublish(products[0])).toMatchObject({ ok: true });
     expect(
@@ -118,8 +154,8 @@ describe("admin behavior", () => {
       missing: [
         "English title",
         "English short description",
-        "Amazon link",
         "Cover asset",
+        "Amazon link",
       ],
     });
   });
