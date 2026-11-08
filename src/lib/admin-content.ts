@@ -510,7 +510,6 @@ export function buildStaticPagesFromFormData(
 export function validateProductForPublish(
   product: Pick<Product, "translations" | "amazonLinks" | "assets" | "coverAssetId">,
 ) {
-  const english = product.translations.find((translation) => translation.locale === "en");
   const labels: Partial<Record<AdminErrorCode, string>> = {
     [ADMIN_ERROR_CODES.VALIDATION_PRODUCT_TITLE_REQUIRED]: "English title",
     [ADMIN_ERROR_CODES.VALIDATION_PUBLISH_SHORT_DESCRIPTION_REQUIRED]: "English short description",

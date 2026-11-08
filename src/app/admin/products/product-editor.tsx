@@ -1467,7 +1467,8 @@ function focusFirstError(targetId?: string) {
   target.scrollIntoView?.({ behavior: "smooth", block: "center" });
   const focusable = target.matches("input, select, textarea, button, [tabindex]")
     ? target
-    : target.querySelector<HTMLElement>("input, select, textarea, button, [tabindex]");
+    : target.querySelector<HTMLElement>('input[name="amazonUrl"]:not([type="hidden"])') ??
+      target.querySelector<HTMLElement>('input:not([type="hidden"]):not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled), [tabindex]');
   focusable?.focus({ preventScroll: true });
 }
 
