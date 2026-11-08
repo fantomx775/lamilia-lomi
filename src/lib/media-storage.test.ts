@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getR2StorageConfig: vi.fn(),
   getRequiredSupabaseEnv: vi.fn(),
   promoteR2PrivateObject: vi.fn(),
+  purgeProductImageCache: vi.fn(),
   r2StagingPath: vi.fn(),
   verifyPublicDelivery: vi.fn(),
 }));
@@ -27,6 +28,10 @@ vi.mock("./config", () => ({
 vi.mock("./supabase/admin", () => ({ createServiceRoleClient: mocks.createServiceRoleClient }));
 vi.mock("./supabase/server", () => ({ createClient: mocks.createClient }));
 vi.mock("./media-r2-config", () => ({ getR2StorageConfig: mocks.getR2StorageConfig }));
+vi.mock("./product-image-cache", () => ({
+  assertProductImageCachePurgeAvailable: vi.fn(),
+  purgeProductImageCache: mocks.purgeProductImageCache,
+}));
 vi.mock("./media-r2", () => ({
   assertR2PrivateObject: mocks.assertR2PrivateObject,
   assertR2PublicObject: mocks.assertR2PublicObject,
@@ -308,6 +313,7 @@ describe("R2 public media revocation", () => {
     mocks.rpc.mockResolvedValue({ data: true, error: null });
     mocks.demoteR2PublicObject.mockResolvedValue(undefined);
     mocks.deleteR2PublicMedia.mockResolvedValue(undefined);
+    mocks.purgeProductImageCache.mockResolvedValue(undefined);
     mocks.promoteR2PrivateObject.mockResolvedValue(undefined);
     mocks.assertR2PrivateObject.mockResolvedValue({ ContentLength: 1024, ContentType: "image/jpeg" });
     mocks.assertR2PublicObject.mockResolvedValue({ ContentLength: 1024, ContentType: "image/jpeg" });
@@ -333,6 +339,7 @@ describe("R2 public media revocation", () => {
     mocks.createServiceRoleClient.mockReturnValue({ rpc: serviceRoleRpc });
     mocks.demoteR2PublicObject.mockImplementation(async () => { events.push("private-copy-verified"); });
     mocks.deleteR2PublicMedia.mockImplementation(async () => { events.push("public-copy-deleted"); });
+    mocks.purgeProductImageCache.mockImplementation(async () => { events.push("cdn-purged"); });
 
     await expect(revokeR2PublicAssetsBeforeMutation({
       previousAssets: previous,
@@ -344,6 +351,7 @@ describe("R2 public media revocation", () => {
       "provider-r2_public_revoking",
       "private-copy-verified",
       "public-copy-deleted",
+      "cdn-purged",
       "provider-r2_private",
     ]);
     expect(adminRpc).toHaveBeenCalledTimes(1);
@@ -355,6 +363,21 @@ describe("R2 public media revocation", () => {
       requested_provider: "r2_private",
       requested_path: previous[0].storagePath,
     });
+  });
+
+  it("holds the revocation fence if the CDN purge fails after deleting the public copy", async () => {
+    const previous = [{ ...asset("public-image", `products/${productId}/cover/public.jpg`), storageProvider: "r2_public" as const }];
+    mocks.purgeProductImageCache.mockRejectedValue(new Error("cache purge failed"));
+
+    await expect(revokeR2PublicAssetsBeforeMutation({
+      previousAssets: previous,
+      nextAssets: [],
+      status: "published",
+    })).rejects.toThrow("cache purge failed");
+
+    expect(mocks.deleteR2PublicMedia).toHaveBeenCalledWith(previous[0].storagePath);
+    expect(mocks.purgeProductImageCache).toHaveBeenCalledWith(previous[0].id, previous[0].storagePath);
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the private-serving pending marker when deletion fails", async () => {

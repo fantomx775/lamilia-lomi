@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 const mocks = vi.hoisted(() => ({
   getAssetByIdForRequest: vi.fn(),
   getDemoSession: vi.fn(),
@@ -38,6 +40,7 @@ const assetId = "11111111-1111-4111-8111-111111111199";
 describe("public media delivery", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   beforeEach(() => {
@@ -60,9 +63,17 @@ describe("public media delivery", () => {
     expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
   });
 
-  it("serves current UUID-versioned public R2 bytes to Next Image", async () => {
+  it.each([false, true])("serves current UUID-versioned public R2 bytes (extended cache: %s)", async (extendedCache) => {
+    if (extendedCache) {
+      vi.stubEnv("PRODUCT_IMAGE_CLOUDFLARE_PURGE_TOKEN", "test");
+      vi.stubEnv("PRODUCT_IMAGE_CLOUDFLARE_ZONE_ID", "test");
+      vi.stubEnv("VERCEL", "1");
+      vi.stubGlobal(Symbol.for("@vercel/request-context"), {
+        get: () => ({ purge: { dangerouslyDeleteBySrcImage: vi.fn() } }),
+      });
+    }
     const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
-    const fetchImage = vi.fn().mockResolvedValue(new Response(bytes, {
+    const fetchImage = vi.fn().mockImplementation(async () => new Response(bytes, {
       headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=14400", ETag: '"source-etag"' },
     }));
     vi.stubGlobal("fetch", fetchImage);
@@ -91,7 +102,10 @@ describe("public media delivery", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/jpeg");
-    expect(response.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
+    expect(response.headers.get("cache-control")).toBe(
+      extendedCache ? "public, max-age=60, s-maxage=86400" : "public, max-age=60, s-maxage=60",
+    );
+    expect(response.headers.get("vercel-cdn-cache-control")).toBe(extendedCache ? "no-store" : null);
     expect(response.headers.get("etag")).toBe('"source-etag"');
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
     const [sourceUrl, fetchOptions] = fetchImage.mock.calls[0] ?? [];
@@ -103,6 +117,13 @@ describe("public media delivery", () => {
     expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
     expect(mocks.getProductByIdForRequest).not.toHaveBeenCalled();
     expect(mocks.createServiceRoleClient).not.toHaveBeenCalled();
+    if (extendedCache) {
+      const alternate = await GET(
+        new Request(`https://lamilialomi.com/api/media/${assetId}?v=${assetId}&extra=1`),
+        { params: Promise.resolve({ assetId }) },
+      );
+      expect(alternate.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=60");
+    }
   });
 
   it("keeps legacy public R2 media URLs as redirects", async () => {

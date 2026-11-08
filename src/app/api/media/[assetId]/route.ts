@@ -9,6 +9,7 @@ import { defaultLocale } from "@/lib/locale";
 import { isMediaKind, mediaBucketForKind, mediaFilenameForDisplay } from "@/lib/media-upload";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "@/lib/media-r2-config";
 import { createSignedR2ReadUrl } from "@/lib/media-r2";
+import { hasProductImageCachePurge, versionedProductImagePath } from "@/lib/product-image-cache";
 import { versionedPublicImageResponse } from "@/lib/versioned-public-image-response";
 import { getAssetByIdForRequest, getProductByIdForRequest } from "@/lib/products-request";
 import { getDemoSession } from "@/lib/session.server";
@@ -18,7 +19,8 @@ type Props = { params: Promise<{ assetId: string }> };
 
 export async function GET(request: Request, { params }: Props) {
   const { assetId } = await params;
-  const requestedVersion = new URL(request.url).searchParams.get("v");
+  const requestUrl = new URL(request.url);
+  const requestedVersion = requestUrl.searchParams.get("v");
   if (
     requestedVersion !== null &&
     (requestedVersion !== assetId || (getBackendMode() !== "local" && !isUuid(requestedVersion)))
@@ -125,7 +127,15 @@ export async function GET(request: Request, { params }: Props) {
     if (publicUrl) {
       if (requestedVersion !== null && !isDownload) {
         try {
+          const extendedCache = hasProductImageCachePurge();
+          const canonicalSource = `${requestUrl.pathname}${requestUrl.search}` === versionedProductImagePath(assetId);
           const imageResponse = await versionedPublicImageResponse(request, publicUrl);
+          if (imageResponse && extendedCache && canonicalSource && !adminPreviewAuthorized) {
+            imageResponse.headers.set("Cache-Control", "public, max-age=60, s-maxage=86400");
+            // Keep the source route out of shared caches so a purged transform
+            // must recheck publication before it can fetch the original again.
+            imageResponse.headers.set("Vercel-CDN-Cache-Control", "no-store");
+          }
           return imageResponse ?? notFoundMediaResponse();
         } catch (error) {
           return unavailableMediaResponse(assetId, asset, error);

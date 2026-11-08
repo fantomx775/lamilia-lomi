@@ -22,6 +22,28 @@ Category images use the provider-aware reference and upload flow added by PR #46
 
 ## Cloudflare setup
 
+The 24-hour CDN policy for versioned product covers and gallery images requires
+`PRODUCT_IMAGE_CLOUDFLARE_PURGE_TOKEN` and `PRODUCT_IMAGE_CLOUDFLARE_ZONE_ID`
+on Vercel. Use a Cloudflare token with only Cache Purge for the media domain's
+zone. The canonical source advertises `s-maxage=86400` for the image optimizer
+and `max-age=60` for browsers. The source route bypasses Vercel's HTTP cache
+so the optimizer checks publication again after a purge. Alternate source
+URLs keep the 60-second policy. Vercel clears transformed variants through its
+function runtime. Provision the zone and token before
+deploying this policy to Production. A Production revocation stops before
+changing storage when its purge configuration or runtime support is missing.
+
+Revocation checks the private copy, removes the public object, and purges
+Cloudflare by the full object path to include query variants before removing
+Vercel variants. A shared R2 source stays available
+for other published assets and only the retiring asset's versioned Vercel
+source is purged. On a purge failure the mutation stops with the revocation
+marker held. Clear the exact affected CDN keys successfully before reconciling
+the incomplete revocation. Copies in a visitor's browser expire independently.
+Keep purge enabled across subsequent releases until extended-cache entries
+have been cleared. An older deployment that predates these hooks cannot
+revoke optimized variants on its own.
+
 Create two Lamilia-specific R2 buckets in the intended Cloudflare account:
 
 1. A private bucket with no public development URL or custom domain.

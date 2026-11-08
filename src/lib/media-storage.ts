@@ -8,6 +8,7 @@ import { createServiceRoleClient } from "./supabase/admin";
 import { createClient } from "./supabase/server";
 import type { AssetKind, ProductAsset, ProductStatus } from "./types";
 import { getR2StorageConfig, type MediaStorageProvider } from "./media-r2-config";
+import { assertProductImageCachePurgeAvailable, purgeProductImageCache } from "./product-image-cache";
 import {
   assertR2PrivateObject,
   assertR2PublicObject,
@@ -445,6 +446,7 @@ async function revokeR2PublicAsset(
   asset: ProductAsset,
   options: { restoreIfEligible?: boolean } = {},
 ) {
+  assertProductImageCachePurgeAvailable();
   const storagePath = asset.storagePath ?? asset.path;
   const acquired = await beginR2PublicRevocation(asset.id, storagePath);
   if (!acquired) return false;
@@ -454,6 +456,7 @@ async function revokeR2PublicAsset(
   // check existing references before changing the shared R2 object.
   let currentRows = await readRowsForStoragePath(storagePath);
   if (hasOtherEligiblePublicReference(currentRows, asset.id)) {
+    await purgeProductImageCache(asset.id);
     await setProductAssetStorageProvider(asset.id, storagePath, "r2_private");
     if (options.restoreIfEligible) await restoreR2PublicAssetIfEligible(asset);
     return true;
@@ -464,11 +467,13 @@ async function revokeR2PublicAsset(
   if (hasOtherEligiblePublicReference(currentRows, asset.id)) {
     // A same-key published image still needs this public object. Release only
     // the fence acquired above and leave the shared object in place.
+    await purgeProductImageCache(asset.id);
     await setProductAssetStorageProvider(asset.id, storagePath, "r2_private");
     if (options.restoreIfEligible) await restoreR2PublicAssetIfEligible(asset);
     return true;
   }
   await deleteR2PublicMedia(storagePath);
+  await purgeProductImageCache(asset.id, storagePath);
   await setProductAssetStorageProvider(asset.id, storagePath, "r2_private");
   if (options.restoreIfEligible) await restoreR2PublicAssetIfEligible(asset);
   return true;
