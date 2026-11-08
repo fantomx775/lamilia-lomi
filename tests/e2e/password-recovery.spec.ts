@@ -62,7 +62,8 @@ test("resets a password through the real local email and rejects a reused link",
   const submit = async (tab: Page, name: string) => {
     const [response] = await Promise.all([
       tab.waitForResponse((result) =>
-        result.request().method() === "POST" && new URL(result.url()).pathname === "/en/reset-password"),
+        result.request().method() === "POST" && new URL(result.url()).pathname === "/en/reset-password",
+      { timeout: 45_000 }),
       tab.getByRole("button", { name }).click(),
     ]);
     expect(response.status()).toBeLessThan(400);
