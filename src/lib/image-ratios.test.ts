@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { imageRatioRequirement, validateImageDimensions } from "./image-ratios";
+import { getGalleryTrimRatio, imageRatioRequirement, validateImageDimensions } from "./image-ratios";
 
 describe("image ratio requirements", () => {
   it("accepts square category images at a useful display size", () => {
@@ -18,6 +18,19 @@ describe("image ratio requirements", () => {
     expect(validateImageDimensions("gallery", { width: 900, height: 900 })).toEqual({ ok: true });
     expect(validateImageDimensions("gallery", { width: 850, height: 1100 })).toEqual({ ok: true });
     expect(validateImageDimensions("gallery", { width: 900, height: 1200 })).toMatchObject({ ok: false });
+  });
+
+  it.each([
+    [8.5, 11, 8.625, 11.25, 8.75, 11.25],
+    [8.5, 8.5, 8.625, 8.75, 8.75, 8.75],
+    [6, 9, 6.125, 9.25, 6.25, 9.25],
+    [8, 10, 8.125, 10.25, 8.25, 10.25],
+  ])("accepts %s by %s pages with either bleed or no bleed", (trimWidth, trimHeight, kdpWidth, kdpHeight, bleedWidth, bleedHeight) => {
+    for (const [width, height] of [[trimWidth, trimHeight], [kdpWidth, kdpHeight], [bleedWidth, bleedHeight]]) {
+      const dimensions = { width: width * 200, height: height * 200 };
+      expect(validateImageDimensions("gallery", dimensions)).toEqual({ ok: true });
+      expect(getGalleryTrimRatio(dimensions)).toBe(trimWidth / trimHeight);
+    }
   });
 
   it("returns a clear message for unusable dimensions and too-small images", () => {
