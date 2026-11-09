@@ -1269,7 +1269,7 @@ function mediaTitle(kind: ProductAsset["kind"]) {
 }
 
 function uploadHint(kind: ProductAsset["kind"]) {
-  return { cover: "1 obraz · PNG, JPG lub WEBP · maks. 20 MB · akceptujemy 1:1 i 8.5:11", gallery: "Maks. 20 obrazów · PNG, JPG lub WEBP · maks. 20 MB każdy", video: "1 plik · MP4 lub WebM · maks. 50 MB", public_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 20 MB każdy", premium_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 50 MB każdy" }[kind];
+  return { cover: "1 obraz · PNG, JPG lub WEBP · maks. 20 MB", gallery: "Maks. 20 obrazów · PNG, JPG lub WEBP · maks. 20 MB każdy", video: "1 plik · MP4 lub WebM · maks. 50 MB", public_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 20 MB każdy", premium_download: "Wiele plików · PDF, PNG, JPG lub WEBP · maks. 50 MB każdy" }[kind];
 }
 
 function AmazonEditor({
