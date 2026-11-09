@@ -14,6 +14,18 @@ describe("image ratio requirements", () => {
     expect(imageRatioRequirement("cover")).toContain("8.5:11");
   });
 
+  it.each([[600, 600], [600, 900], [600, 750]])("accepts a cover at %s by %s pixels", (width, height) => {
+    expect(validateImageDimensions("cover", { width, height })).toEqual({ ok: true });
+    expect(validateImageDimensions("cover", { width, height: height - 1 })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("za mały"),
+    });
+  });
+
+  it("accepts a cover when any matching format meets its minimum dimensions", () => {
+    expect(validateImageDimensions("cover", { width: 600, height: 763 })).toEqual({ ok: true });
+  });
+
   it("supports square and portrait gallery assets and rejects unsupported ratios", () => {
     expect(validateImageDimensions("gallery", { width: 900, height: 900 })).toEqual({ ok: true });
     expect(validateImageDimensions("gallery", { width: 850, height: 1100 })).toEqual({ ok: true });

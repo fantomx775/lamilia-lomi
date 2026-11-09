@@ -1303,7 +1303,7 @@ describe("Supabase content admin mutations", () => {
 
   it("rejects a newly uploaded cover with a forged invalid ratio before saving product metadata", async () => {
     const invalidRatioJpeg = new Uint8Array(await sharp({
-      create: { width: 800, height: 1000, channels: 3, background: { r: 50, g: 60, b: 70 } },
+      create: { width: 800, height: 1600, channels: 3, background: { r: 50, g: 60, b: 70 } },
     }).jpeg().toBuffer());
     const storagePath = `products/${productId}/cover/${assetId}-cover.jpg`;
     const form = uploadedCoverForm("invalid-ratio-product", "Invalid ratio product");

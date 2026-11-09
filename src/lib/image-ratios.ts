@@ -7,7 +7,12 @@ export type ImageDimensionValidation =
   | { ok: false; error: string };
 
 const SQUARE_RATIO = 1;
-const PORTRAIT_RATIO = 8.5 / 11;
+const COVER_FORMATS = [
+  { ratio: SQUARE_RATIO, minHeight: 600 },
+  { ratio: 8.5 / 11, minHeight: 776 },
+  { ratio: 6 / 9, minHeight: 900 },
+  { ratio: 8 / 10, minHeight: 750 },
+];
 const RATIO_TOLERANCE = 0.02;
 const GALLERY_TRIM_SIZES = [[8.5, 11], [8.5, 8.5], [6, 9], [8, 10]] as const;
 
@@ -33,7 +38,7 @@ export function getGalleryTrimRatio({ width, height }: ImageDimensions): number 
 }
 
 const IMAGE_REQUIREMENTS: Record<ImageUse, string> = {
-  cover: "Okładka: format 1:1 lub pionowy 8.5:11; minimum 600 px, a dla pionowego minimum 600 × 776 px.",
+  cover: "Okładka: format 1:1, 8.5:11, 6:9 lub 8:10. Minimalne wymiary to odpowiednio 600 × 600, 600 × 776, 600 × 900 lub 600 × 750 px.",
   gallery: "Galeria: format 8.5:11, 8.5:8.5, 6:9 lub 8:10 (ze spadem lub bez); krótszy bok minimum 500 px.",
   category: "Kategoria: kwadrat 1:1, minimum 480 × 480 px.",
 };
@@ -52,10 +57,14 @@ export function validateImageDimensions(
 
   const ratio = width / height;
   const matchesSquare = isCloseToRatio(ratio, SQUARE_RATIO);
-  const matchesPortrait = isCloseToRatio(ratio, PORTRAIT_RATIO);
-
-  if (use === "cover" && !matchesSquare && !matchesPortrait) {
-    return { ok: false, error: `${IMAGE_REQUIREMENTS.cover} Wybrany obraz ma proporcje ${width}:${height}.` };
+  if (use === "cover") {
+    const matchingFormats = COVER_FORMATS.filter((format) => isCloseToRatio(ratio, format.ratio));
+    if (!matchingFormats.length) {
+      return { ok: false, error: `${IMAGE_REQUIREMENTS.cover} Wybrany obraz ma proporcje ${width}:${height}.` };
+    }
+    if (width < 600 || !matchingFormats.some((format) => height >= format.minHeight)) {
+      return { ok: false, error: `${IMAGE_REQUIREMENTS.cover} Wybrany obraz jest za mały.` };
+    }
   }
 
   if (use === "category" && !matchesSquare) {
@@ -64,10 +73,6 @@ export function validateImageDimensions(
 
   if (use === "gallery" && !getGalleryTrimRatio({ width, height })) {
     return { ok: false, error: `${IMAGE_REQUIREMENTS.gallery} Wybrany obraz ma proporcje ${width}:${height}.` };
-  }
-
-  if (use === "cover" && (width < 600 || (matchesPortrait && height < 776) || (matchesSquare && height < 600))) {
-    return { ok: false, error: `${IMAGE_REQUIREMENTS.cover} Wybrany obraz jest za mały.` };
   }
 
   if (use === "category" && (width < 480 || height < 480)) {
