@@ -58,11 +58,11 @@ export function validateImageDimensions(
   const ratio = width / height;
   const matchesSquare = isCloseToRatio(ratio, SQUARE_RATIO);
   if (use === "cover") {
-    const format = COVER_FORMATS.find((format) => isCloseToRatio(ratio, format.ratio));
-    if (!format) {
+    const matchingFormats = COVER_FORMATS.filter((format) => isCloseToRatio(ratio, format.ratio));
+    if (!matchingFormats.length) {
       return { ok: false, error: `${IMAGE_REQUIREMENTS.cover} Wybrany obraz ma proporcje ${width}:${height}.` };
     }
-    if (width < 600 || height < format.minHeight) {
+    if (width < 600 || !matchingFormats.some((format) => height >= format.minHeight)) {
       return { ok: false, error: `${IMAGE_REQUIREMENTS.cover} Wybrany obraz jest za mały.` };
     }
   }

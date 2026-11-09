@@ -22,6 +22,10 @@ describe("image ratio requirements", () => {
     });
   });
 
+  it("accepts a cover when any matching format meets its minimum dimensions", () => {
+    expect(validateImageDimensions("cover", { width: 600, height: 763 })).toEqual({ ok: true });
+  });
+
   it("supports square and portrait gallery assets and rejects unsupported ratios", () => {
     expect(validateImageDimensions("gallery", { width: 900, height: 900 })).toEqual({ ok: true });
     expect(validateImageDimensions("gallery", { width: 850, height: 1100 })).toEqual({ ok: true });
