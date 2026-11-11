@@ -11,6 +11,7 @@ const actionMocks = vi.hoisted(() => ({
   createAuthResumeIntent: vi.fn(),
   createClient: vi.fn(),
   createServiceRoleClient: vi.fn(),
+  revalidatePath: vi.fn(),
   createDemoSession: vi.fn(),
   getBackendMode: vi.fn(),
   getDemoSession: vi.fn(),
@@ -33,6 +34,10 @@ const actionMocks = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   redirect: actionMocks.redirect,
+}));
+
+vi.mock("next/cache", () => ({
+  revalidatePath: actionMocks.revalidatePath,
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -204,14 +209,13 @@ describe("marketing preference action", () => {
       marketingConsent: true,
     });
 
-    await expectRedirect(
-      updateMarketingConsentAction(marketingConsentForm(false)),
-      "/en/account?preferences=updated",
-    );
+    await expect(updateMarketingConsentAction({ status: "idle" }, marketingConsentForm(false)))
+      .resolves.toMatchObject({ status: "updated", marketingConsent: false });
 
     expect(actionMocks.setDemoSession).toHaveBeenCalledWith(
       expect.objectContaining({ marketingConsent: false }),
     );
+    expect(actionMocks.revalidatePath).toHaveBeenCalledWith("/en/account");
   });
 
   it("updates only the profile belonging to the verified Supabase user", async () => {
@@ -230,7 +234,8 @@ describe("marketing preference action", () => {
 
     const formData = marketingConsentForm(true);
     formData.set("userId", "attacker-selected-user");
-    await expectRedirect(updateMarketingConsentAction(formData), "/en/account?preferences=updated");
+    await expect(updateMarketingConsentAction({ status: "idle" }, formData))
+      .resolves.toMatchObject({ status: "updated", marketingConsent: true });
 
     expect(getUser).toHaveBeenCalledTimes(1);
     expect(from).toHaveBeenCalledWith("profiles");
@@ -244,10 +249,8 @@ describe("marketing preference action", () => {
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }) },
     });
 
-    await expectRedirect(
-      updateMarketingConsentAction(marketingConsentForm(true)),
-      "/en/login?returnTo=%2Fen%2Faccount",
-    );
+    await expect(updateMarketingConsentAction({ status: "idle" }, marketingConsentForm(true)))
+      .resolves.toMatchObject({ status: "error", marketingConsent: true });
 
     expect(actionMocks.createServiceRoleClient).not.toHaveBeenCalled();
   });

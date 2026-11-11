@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
 import { getBackendMode } from "@/lib/config";
 import {
@@ -671,17 +672,34 @@ export async function logoutAction(formData: FormData) {
   redirect(`/${locale}`);
 }
 
-export async function updateMarketingConsentAction(formData: FormData) {
+type MarketingConsentActionState = {
+  status: "idle" | "updated" | "error";
+  marketingConsent?: boolean;
+};
+
+export async function updateMarketingConsentAction(
+  _previousState: MarketingConsentActionState,
+  formData: FormData,
+): Promise<MarketingConsentActionState> {
   const locale = normalizeLocale(text(formData, "locale"));
   const marketingConsent = formData.get("marketingConsent") === "on";
   const accountPath = `/${locale}/account`;
 
   if (getBackendMode() === "supabase") {
-    const supabase = await createClient();
-    const { data, error } = await supabase.auth.getUser();
+    let userId: string;
 
-    if (error || !data.user) {
-      redirect(`/${locale}/login?returnTo=${encodeURIComponent(accountPath)}`);
+    try {
+      const supabase = await createClient();
+      const { data, error } = await supabase.auth.getUser();
+
+      if (error || !data.user) {
+        return { status: "error", marketingConsent };
+      }
+
+      userId = data.user.id;
+    } catch (error) {
+      logUnexpectedFailure("Marketing preference authentication failed", error);
+      return { status: "error", marketingConsent };
     }
 
     let updated = false;
@@ -690,7 +708,7 @@ export async function updateMarketingConsentAction(formData: FormData) {
       const result = await createServiceRoleClient()
         .from("profiles")
         .update({ marketing_consent: marketingConsent })
-        .eq("id", data.user.id)
+        .eq("id", userId)
         .select("id")
         .maybeSingle();
       updated = !result.error && Boolean(result.data);
@@ -699,19 +717,25 @@ export async function updateMarketingConsentAction(formData: FormData) {
     }
 
     if (!updated) {
-      redirect(`${accountPath}?preferences=error`);
+      return { status: "error", marketingConsent };
     }
   } else {
     const session = await getDemoSession();
 
     if (!session) {
-      redirect(`/${locale}/login?returnTo=${encodeURIComponent(accountPath)}`);
+      return { status: "error", marketingConsent };
     }
 
-    await setDemoSession({ ...session, marketingConsent });
+    try {
+      await setDemoSession({ ...session, marketingConsent });
+    } catch (error) {
+      logUnexpectedFailure("Marketing preference update failed", error);
+      return { status: "error", marketingConsent };
+    }
   }
 
-  redirect(`${accountPath}?preferences=updated`);
+  revalidatePath(accountPath);
+  return { status: "updated", marketingConsent };
 }
 
 export async function unlockPremiumAction(formData: FormData) {

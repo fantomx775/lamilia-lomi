@@ -1,10 +1,11 @@
-import { logoutAction, updateMarketingConsentAction, verifyDemoEmailAction } from "@/app/actions";
+import { logoutAction, verifyDemoEmailAction } from "@/app/actions";
 import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
 import { SubmitButton } from "@/components/submit-button";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CommunityAccountPanel } from "@/components/community/community-account-panel";
 import { AccountDeletionPanel } from "@/components/account/account-deletion-panel";
+import { MarketingPreferenceForm } from "@/components/account/marketing-preference-form";
 import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 import { getCommunityFlags } from "@/lib/community-flags";
@@ -14,7 +15,6 @@ import { getAccountSessionForRequest } from "@/lib/session.server";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
-  searchParams: Promise<{ preferences?: string | string[] }>;
 };
 
 export const metadata = {
@@ -22,9 +22,8 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function AccountPage({ params, searchParams }: Props) {
+export default async function AccountPage({ params }: Props) {
   const { locale } = await params;
-  const query = await searchParams;
   const session = await getAccountSessionForRequest();
   const communityFlags = getCommunityFlags();
   const communityProfile = session?.emailVerified ? await getMyCommunityProfile() : null;
@@ -123,18 +122,7 @@ export default async function AccountPage({ params, searchParams }: Props) {
           <section aria-labelledby="account-preferences-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <h2 id="account-preferences-title" className="font-serif text-xl font-semibold text-[var(--color-ink)]">Communication preferences</h2>
             <p className="mt-2 text-sm text-[var(--color-muted)]">Choose whether to receive marketing emails. This is optional and does not affect your account or My Library access.</p>
-            <form action={updateMarketingConsentAction} className="mt-4 grid gap-4">
-              <input type="hidden" name="locale" value={locale} />
-              <label className="flex items-start gap-3 text-sm text-[var(--color-ink)]">
-                <input className="mt-0.5 size-4 accent-[var(--color-terracotta)]" type="checkbox" name="marketingConsent" defaultChecked={session.marketingConsent} />
-                <span>I agree to receive marketing emails.</span>
-              </label>
-              <div>
-                <SubmitButton pendingLabel="Saving…">Save preferences</SubmitButton>
-              </div>
-              {query.preferences === "updated" ? <p role="status" className="text-sm text-emerald-800">Your marketing preference has been saved.</p> : null}
-              {query.preferences === "error" ? <p role="alert" className="text-sm text-red-700">We could not save your preference. Please try again.</p> : null}
-            </form>
+            <MarketingPreferenceForm locale={locale} initialConsent={session.marketingConsent} />
           </section>
           {communityFlags.publicEnabled || communityFlags.uploadsEnabled || communityProfile ? <CommunityAccountPanel
             profile={communityProfile}
