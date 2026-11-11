@@ -1,3 +1,5 @@
+import { getImageProps } from "next/image";
+import { isMediaProxyPath } from "@/lib/media-upload";
 import type { ProductAsset } from "@/lib/types";
 
 type VideoPreviewAsset = Pick<ProductAsset, "contentType" | "path" | "title">;
@@ -26,13 +28,21 @@ export function ProductVideoPreview({
     return null;
   }
 
+  const { props: { src: posterSrc } } = getImageProps({
+    src: poster,
+    alt: "",
+    width: 384,
+    height: 497,
+    unoptimized: isMediaProxyPath(poster),
+  });
+
   return (
     <figure className="group">
       <div className="relative aspect-video overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
         <video
           data-flipthrough
           src={playableVideo.path}
-          poster={poster}
+          poster={posterSrc}
           controls
           preload="none"
           playsInline
