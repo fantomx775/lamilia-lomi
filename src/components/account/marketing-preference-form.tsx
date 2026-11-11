@@ -6,11 +6,10 @@ import { updateMarketingConsentAction } from "@/app/actions";
 import { SubmitButton } from "@/components/submit-button";
 
 type Props = {
-  locale: string;
   initialConsent: boolean;
 };
 
-export function MarketingPreferenceForm({ locale, initialConsent }: Props) {
+export function MarketingPreferenceForm({ initialConsent }: Props) {
   const [state, formAction] = useActionState(updateMarketingConsentAction, {
     status: "idle" as const,
     marketingConsent: initialConsent,
@@ -21,7 +20,6 @@ export function MarketingPreferenceForm({ locale, initialConsent }: Props) {
     <PreferenceForm
       key={`${state.status}:${consent}`}
       action={formAction}
-      locale={locale}
       initialConsent={consent}
       status={state.status}
     />
@@ -30,7 +28,6 @@ export function MarketingPreferenceForm({ locale, initialConsent }: Props) {
 
 function PreferenceForm({
   action,
-  locale,
   initialConsent,
   status,
 }: Props & {
@@ -38,24 +35,28 @@ function PreferenceForm({
   status: "idle" | "updated" | "error";
 }) {
   const [marketingConsent, setMarketingConsent] = useState(initialConsent);
+  const [dirty, setDirty] = useState(false);
 
   return (
     <form action={action} className="mt-4 grid gap-4">
-      <input type="hidden" name="locale" value={locale} />
       <label className="flex items-start gap-3 text-sm text-[var(--color-ink)]">
         <input
           className="mt-0.5 size-4 accent-[var(--color-terracotta)]"
           type="checkbox"
           name="marketingConsent"
           checked={marketingConsent}
-          onChange={(event) => setMarketingConsent(event.currentTarget.checked)}
+          onChange={(event) => {
+            const nextConsent = event.currentTarget.checked;
+            setMarketingConsent(nextConsent);
+            setDirty(nextConsent !== initialConsent);
+          }}
         />
         <span>I agree to receive marketing emails.</span>
       </label>
       <div>
         <SubmitButton pendingLabel="Saving…">Save preferences</SubmitButton>
       </div>
-      {status === "updated" ? (
+      {status === "updated" && !dirty ? (
         <p role="status" className="text-sm text-emerald-800">
           Your marketing preference has been saved.
         </p>

@@ -11,7 +11,6 @@ const actionMocks = vi.hoisted(() => ({
   createAuthResumeIntent: vi.fn(),
   createClient: vi.fn(),
   createServiceRoleClient: vi.fn(),
-  revalidatePath: vi.fn(),
   createDemoSession: vi.fn(),
   getBackendMode: vi.fn(),
   getDemoSession: vi.fn(),
@@ -34,10 +33,6 @@ const actionMocks = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   redirect: actionMocks.redirect,
-}));
-
-vi.mock("next/cache", () => ({
-  revalidatePath: actionMocks.revalidatePath,
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -215,7 +210,6 @@ describe("marketing preference action", () => {
     expect(actionMocks.setDemoSession).toHaveBeenCalledWith(
       expect.objectContaining({ marketingConsent: false }),
     );
-    expect(actionMocks.revalidatePath).toHaveBeenCalledWith("/en/account");
   });
 
   it("updates only the profile belonging to the verified Supabase user", async () => {

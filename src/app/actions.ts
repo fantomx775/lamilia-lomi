@@ -1,7 +1,6 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 
 import { getBackendMode } from "@/lib/config";
 import {
@@ -681,9 +680,7 @@ export async function updateMarketingConsentAction(
   _previousState: MarketingConsentActionState,
   formData: FormData,
 ): Promise<MarketingConsentActionState> {
-  const locale = normalizeLocale(text(formData, "locale"));
   const marketingConsent = formData.get("marketingConsent") === "on";
-  const accountPath = `/${locale}/account`;
 
   if (getBackendMode() === "supabase") {
     let userId: string;
@@ -734,7 +731,6 @@ export async function updateMarketingConsentAction(
     }
   }
 
-  revalidatePath(accountPath);
   return { status: "updated", marketingConsent };
 }
 

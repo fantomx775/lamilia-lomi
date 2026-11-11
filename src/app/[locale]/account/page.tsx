@@ -122,7 +122,7 @@ export default async function AccountPage({ params }: Props) {
           <section aria-labelledby="account-preferences-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <h2 id="account-preferences-title" className="font-serif text-xl font-semibold text-[var(--color-ink)]">Communication preferences</h2>
             <p className="mt-2 text-sm text-[var(--color-muted)]">Choose whether to receive marketing emails. This is optional and does not affect your account or My Library access.</p>
-            <MarketingPreferenceForm locale={locale} initialConsent={session.marketingConsent} />
+            <MarketingPreferenceForm initialConsent={session.marketingConsent} />
           </section>
           {communityFlags.publicEnabled || communityFlags.uploadsEnabled || communityProfile ? <CommunityAccountPanel
             profile={communityProfile}
