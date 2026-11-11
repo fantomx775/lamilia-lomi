@@ -16,6 +16,7 @@ import { RichTextEditor } from "@/components/admin/rich-text-editor";
 import { ADMIN_ERROR_CODES, getAdminErrorMessage, type AdminErrorCode, type AdminMutationResult } from "@/lib/admin-errors";
 import { imageRatioRequirement, readImageDimensions, validateImageDimensions } from "@/lib/image-ratios";
 import { MAX_GALLERY_ASSETS, MEDIA_UPLOAD_SPECS, formatBytes, validateMediaFile } from "@/lib/media-upload";
+import { optimizeProductMedia } from "@/lib/product-media-optimization";
 import { getMediaErrorMessage, getMediaUploadErrorMessage, uploadMedia, type SignedMediaUploadTarget } from "@/lib/media-upload-client";
 import {
   PRODUCT_SHORT_DESCRIPTION_MAX_LENGTH,
@@ -56,6 +57,7 @@ type AssetDraft = {
   status: UploadStatus;
   error?: string;
   file?: File;
+  optimized?: boolean;
   uploaded?: boolean;
   upload?: SignedMediaUploadTarget;
   progress?: number;
@@ -595,13 +597,18 @@ export function ProductEditor({
       const nextAssets = [...assetsRef.current, ...newDrafts];
       assetsRef.current = nextAssets;
       setAssets(nextAssets);
-      await Promise.all(newDrafts.map((draft) => uploadAsset(draft)));
+      if (kind === "gallery") {
+        for (const draft of newDrafts) await uploadAsset(draft);
+      } else {
+        await Promise.all(newDrafts.map((draft) => uploadAsset(draft)));
+      }
     }
   };
 
   const uploadAsset = async (draft: AssetDraft, version = uploadVersionsRef.current.get(draft.kind) ?? 0) => {
-    const currentDraft = assetsRef.current.find((asset) => asset.clientId === draft.clientId) ?? draft;
-    const file = currentDraft.file ?? draft.file;
+    const currentDraft = assetsRef.current.find((asset) => asset.clientId === draft.clientId);
+    if (!currentDraft || currentDraft.removed) return;
+    let file = currentDraft.file;
 
     if (!file) {
       updateAsset(draft.clientId, "status", "failed");
@@ -615,8 +622,28 @@ export function ProductEditor({
 
     try {
       let uploadTarget = currentDraft.upload;
+      let contentType = currentDraft.contentType;
 
       if (!uploadTarget) {
+        try {
+          if (!currentDraft.optimized) file = await optimizeProductMedia(draft.kind, file);
+        } catch {
+          updateAsset(draft.clientId, "status", "failed");
+          updateAsset(draft.clientId, "error", "Optymalizacja pliku nie powiodła się. Sprawdź plik i spróbuj ponownie.");
+          return;
+        }
+        const currentState = assetsRef.current.find((asset) => asset.clientId === draft.clientId);
+        if (!isCurrentUpload(draft.kind, version) || !currentState || currentState.removed) {
+          setAssets((current) => current.filter((asset) => asset.clientId !== draft.clientId));
+          return;
+        }
+        const validation = validateMediaFile(draft.kind, file);
+        if (!validation.ok) {
+          updateAsset(draft.clientId, "status", "failed");
+          updateAsset(draft.clientId, "error", validation.error);
+          return;
+        }
+        contentType = validation.contentType;
         let response = await fetch("/api/admin/assets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -625,7 +652,7 @@ export function ProductEditor({
             kind: draft.kind,
             filename: file.name,
             sizeBytes: file.size,
-            contentType: currentDraft.contentType,
+            contentType,
           }),
         });
         let payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string; errorCode?: string };
@@ -651,6 +678,8 @@ export function ProductEditor({
             ...payload.asset,
             sortOrder: asset.kind === "gallery" ? asset.sortOrder : payload.asset?.sortOrder ?? asset.sortOrder,
             upload: payload.upload,
+            file,
+            optimized: true,
             status: "uploading",
             progress: 0,
             error: undefined,
@@ -659,7 +688,7 @@ export function ProductEditor({
       }
 
       if (uploadTarget) {
-        await uploadMedia(file, uploadTarget, currentDraft.contentType, (progress) => {
+        await uploadMedia(file, uploadTarget, contentType, (progress) => {
           updateAsset(draft.clientId, "progress", progress);
         });
       }

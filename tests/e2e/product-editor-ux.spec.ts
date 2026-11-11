@@ -262,7 +262,7 @@ test("product editor preserves work, saves all statuses, and keeps Save reachabl
         storagePath: uploadedPath,
         storageProvider: uploadedProvider,
       };
-      expect(uploadedPath).toBe("/uploads/" + persistedProductId + "/cover/ux-cover.png");
+      expect(uploadedPath).toBe("/uploads/" + persistedProductId + "/cover/ux-cover.webp");
       await expect(page.locator('#product-editor-form input[name="assetUploaded"]').last()).toHaveValue("1");
       await page.getByRole("button", { name: "Dodaj rynek" }).click();
       await page.locator('#product-editor-form input[name="amazonUrl"]').last().fill("https://www.amazon.com/dp/B0UXTEST25");
