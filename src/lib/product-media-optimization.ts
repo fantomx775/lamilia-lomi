@@ -7,27 +7,13 @@ const CORE_FILES = [
   ["ffmpeg-core.wasm", "sha384-U1VDhkPYrM3wTCT4/vjSpSsKqG/UjljYrYCI4hBSJ02svbCkxuCi6U6u/peg5vpW", "application/wasm"],
 ] as const;
 
+let imageEncoding = Promise.resolve();
+
 export async function optimizeProductMedia(kind: AssetKind, file: File): Promise<File> {
   if (kind === "cover" || kind === "gallery") {
-    if (file.type === "image/webp") return file;
-    const image = await createImageBitmap(file);
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = image.width;
-      canvas.height = image.height;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("Nie udało się otworzyć obrazu do optymalizacji.");
-      context.drawImage(image, 0, 0);
-      const webp = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.88));
-      if (!webp || webp.type !== "image/webp") {
-        throw new Error("Przeglądarka nie mogła zapisać obrazu WebP.");
-      }
-      return webp.size < file.size
-        ? new File([webp], withExtension(file.name, "webp"), { type: "image/webp" })
-        : file;
-    } finally {
-      image.close();
-    }
+    const result = imageEncoding.then(() => optimizeProductImage(file));
+    imageEncoding = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   if (kind !== "video") return file;
@@ -66,6 +52,26 @@ export async function optimizeProductMedia(kind: AssetKind, file: File): Promise
   } finally {
     encoder.terminate();
     coreObjectUrls.forEach((url) => URL.revokeObjectURL(url));
+  }
+}
+
+async function optimizeProductImage(file: File): Promise<File> {
+  if (file.type === "image/webp" || typeof createImageBitmap !== "function") return file;
+  const image = await createImageBitmap(file).catch(() => null);
+  if (!image) return file;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.drawImage(image, 0, 0);
+    const webp = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.88));
+    return webp?.type === "image/webp" && webp.size < file.size
+      ? new File([webp], withExtension(file.name, "webp"), { type: "image/webp" })
+      : file;
+  } finally {
+    image.close();
   }
 }
 

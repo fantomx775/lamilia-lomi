@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const editorMocks = vi.hoisted(() => {
   const uploadMedia = vi.fn();
-  return { uploadMedia, uploadMediaWithTus: uploadMedia, routerReplace: vi.fn(), readImageDimensions: vi.fn() };
+  return { uploadMedia, uploadMediaWithTus: uploadMedia, routerReplace: vi.fn(), readImageDimensions: vi.fn(), optimizeProductMedia: vi.fn() };
 });
+
+vi.mock("@/lib/product-media-optimization", () => ({ optimizeProductMedia: editorMocks.optimizeProductMedia }));
 
 vi.mock("@/lib/image-ratios", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/image-ratios")>();
@@ -132,6 +134,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
+  editorMocks.optimizeProductMedia.mockReset().mockImplementation(async (_kind, file: File) => file);
   editorMocks.uploadMedia.mockReset();
   editorMocks.uploadMediaWithTus.mockReset();
   editorMocks.routerReplace.mockReset();
@@ -855,7 +858,8 @@ describe("ProductEditor V2", () => {
     }
   });
 
-  it("uploads a selected file through the admin binary endpoint and keeps its filename", async () => {
+  it("uploads the optimized file with its converted metadata", async () => {
+    editorMocks.optimizeProductMedia.mockResolvedValue(new File(["webp"], "moon-garden-cover.webp", { type: "image/webp" }));
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ asset: {
@@ -863,12 +867,12 @@ describe("ProductEditor V2", () => {
         productId: "product-upload",
         kind: "cover",
         bucket: "public-media",
-        path: "/uploads/product-upload/cover/moon-garden-cover.jpg",
-        storagePath: "/uploads/product-upload/cover/moon-garden-cover.jpg",
-        filename: "moon-garden-cover.jpg",
-        contentType: "image/jpeg",
-        sizeBytes: 12,
-        title: "moon-garden-cover.jpg",
+        path: "/uploads/product-upload/cover/moon-garden-cover.webp",
+        storagePath: "/uploads/product-upload/cover/moon-garden-cover.webp",
+        filename: "moon-garden-cover.webp",
+        contentType: "image/webp",
+        sizeBytes: 4,
+        title: "moon-garden-cover.webp",
         sortOrder: 1,
         isPublic: true,
         isActive: true,
@@ -888,12 +892,15 @@ describe("ProductEditor V2", () => {
     expect(input).not.toBeNull();
     await user.upload(input!, new File(["cover"], "moon-garden-cover.jpg", { type: "image/jpeg" }));
 
-    await waitFor(() => expect(view.getByText("moon-garden-cover.jpg")).toBeInTheDocument());
-    expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({ method: "POST" }));
+    await waitFor(() => expect(view.getByText("moon-garden-cover.webp")).toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({
+      method: "POST",
+      body: expect.stringContaining('"filename":"moon-garden-cover.webp","sizeBytes":4,"contentType":"image/webp"'),
+    }));
     expect(view.getByText("Przesłano")).toBeInTheDocument();
 
     await user.click(view.getByRole("button", { name: "Usuń" }));
-    await waitFor(() => expect(view.queryByText("moon-garden-cover.jpg")).not.toBeInTheDocument());
+    await waitFor(() => expect(view.queryByText("moon-garden-cover.webp")).not.toBeInTheDocument());
     expect(fetch).toHaveBeenCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
   });
 

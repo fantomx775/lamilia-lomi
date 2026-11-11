@@ -597,11 +597,7 @@ export function ProductEditor({
       const nextAssets = [...assetsRef.current, ...newDrafts];
       assetsRef.current = nextAssets;
       setAssets(nextAssets);
-      if (kind === "gallery") {
-        for (const draft of newDrafts) await uploadAsset(draft);
-      } else {
-        await Promise.all(newDrafts.map((draft) => uploadAsset(draft)));
-      }
+      await Promise.all(newDrafts.map((draft) => uploadAsset(draft)));
     }
   };
 
