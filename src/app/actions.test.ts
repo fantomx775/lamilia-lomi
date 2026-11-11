@@ -10,6 +10,7 @@ const actionMocks = vi.hoisted(() => ({
   clearUnlockIntent: vi.fn(),
   createAuthResumeIntent: vi.fn(),
   createClient: vi.fn(),
+  createServiceRoleClient: vi.fn(),
   createDemoSession: vi.fn(),
   getBackendMode: vi.fn(),
   getDemoSession: vi.fn(),
@@ -76,6 +77,10 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: actionMocks.createClient,
 }));
 
+vi.mock("@/lib/supabase/admin", () => ({
+  createServiceRoleClient: actionMocks.createServiceRoleClient,
+}));
+
 vi.mock("@/lib/products-request", () => ({
   getProductBySlugForRequest: actionMocks.getProductBySlugForRequest,
 }));
@@ -90,6 +95,7 @@ import {
   loginDemoAction,
   registerDemoAction,
   resendSupabaseVerificationEmailAction,
+  updateMarketingConsentAction,
   unlockPremiumAction,
 } from "./actions";
 
@@ -183,6 +189,69 @@ function loginForm(email: string, password: string, returnTo?: string, code?: st
   }
   return formData;
 }
+
+function marketingConsentForm(consent: boolean, locale = "en") {
+  const formData = new FormData();
+  formData.set("locale", locale);
+  if (consent) formData.set("marketingConsent", "on");
+  return formData;
+}
+
+describe("marketing preference action", () => {
+  it("withdraws marketing consent in the local account session", async () => {
+    actionMocks.getDemoSession.mockResolvedValue({
+      email: "reader@example.com",
+      marketingConsent: true,
+    });
+
+    await expectRedirect(
+      updateMarketingConsentAction(marketingConsentForm(false)),
+      "/en/account?preferences=updated",
+    );
+
+    expect(actionMocks.setDemoSession).toHaveBeenCalledWith(
+      expect.objectContaining({ marketingConsent: false }),
+    );
+  });
+
+  it("updates only the profile belonging to the verified Supabase user", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    const getUser = vi.fn().mockResolvedValue({
+      data: { user: { id: "verified-user" } },
+      error: null,
+    });
+    actionMocks.createClient.mockResolvedValue({ auth: { getUser } });
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: "verified-user" }, error: null });
+    const select = vi.fn(() => ({ maybeSingle }));
+    const eq = vi.fn(() => ({ select }));
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    actionMocks.createServiceRoleClient.mockReturnValue({ from });
+
+    const formData = marketingConsentForm(true);
+    formData.set("userId", "attacker-selected-user");
+    await expectRedirect(updateMarketingConsentAction(formData), "/en/account?preferences=updated");
+
+    expect(getUser).toHaveBeenCalledTimes(1);
+    expect(from).toHaveBeenCalledWith("profiles");
+    expect(update).toHaveBeenCalledWith({ marketing_consent: true });
+    expect(eq).toHaveBeenCalledWith("id", "verified-user");
+  });
+
+  it("does not call the privileged database client without an authenticated user", async () => {
+    actionMocks.getBackendMode.mockReturnValue("supabase");
+    actionMocks.createClient.mockResolvedValue({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }) },
+    });
+
+    await expectRedirect(
+      updateMarketingConsentAction(marketingConsentForm(true)),
+      "/en/login?returnTo=%2Fen%2Faccount",
+    );
+
+    expect(actionMocks.createServiceRoleClient).not.toHaveBeenCalled();
+  });
+});
 
 async function expectRedirect(action: Promise<void>, location: string) {
   try {

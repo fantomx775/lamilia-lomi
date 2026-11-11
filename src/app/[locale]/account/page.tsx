@@ -1,4 +1,4 @@
-import { logoutAction, verifyDemoEmailAction } from "@/app/actions";
+import { logoutAction, updateMarketingConsentAction, verifyDemoEmailAction } from "@/app/actions";
 import { DashboardShell, type DashboardNavItem } from "@/components/dashboard-shell";
 import { SubmitButton } from "@/components/submit-button";
 import { Button, buttonClassName } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { getAccountSessionForRequest } from "@/lib/session.server";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
+  searchParams: Promise<{ preferences?: string | string[] }>;
 };
 
 export const metadata = {
@@ -21,8 +22,9 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function AccountPage({ params }: Props) {
+export default async function AccountPage({ params, searchParams }: Props) {
   const { locale } = await params;
+  const query = await searchParams;
   const session = await getAccountSessionForRequest();
   const communityFlags = getCommunityFlags();
   const communityProfile = session?.emailVerified ? await getMyCommunityProfile() : null;
@@ -120,9 +122,19 @@ export default async function AccountPage({ params }: Props) {
           </form>
           <section aria-labelledby="account-preferences-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <h2 id="account-preferences-title" className="font-serif text-xl font-semibold text-[var(--color-ink)]">Communication preferences</h2>
-            <p className="mt-2 text-sm text-[var(--color-muted)]">
-              Marketing emails: <span className="font-medium text-[var(--color-ink)]">{session.marketingConsent ? "Subscribed" : "Not subscribed"}</span>
-            </p>
+            <p className="mt-2 text-sm text-[var(--color-muted)]">Choose whether to receive marketing emails. This is optional and does not affect your account or My Library access.</p>
+            <form action={updateMarketingConsentAction} className="mt-4 grid gap-4">
+              <input type="hidden" name="locale" value={locale} />
+              <label className="flex items-start gap-3 text-sm text-[var(--color-ink)]">
+                <input className="mt-0.5 size-4 accent-[var(--color-terracotta)]" type="checkbox" name="marketingConsent" defaultChecked={session.marketingConsent} />
+                <span>I agree to receive marketing emails.</span>
+              </label>
+              <div>
+                <SubmitButton pendingLabel="Saving…">Save preferences</SubmitButton>
+              </div>
+              {query.preferences === "updated" ? <p role="status" className="text-sm text-emerald-800">Your marketing preference has been saved.</p> : null}
+              {query.preferences === "error" ? <p role="alert" className="text-sm text-red-700">We could not save your preference. Please try again.</p> : null}
+            </form>
           </section>
           {communityFlags.publicEnabled || communityFlags.uploadsEnabled || communityProfile ? <CommunityAccountPanel
             profile={communityProfile}

@@ -27,6 +27,7 @@ import { redeemPremiumCodeForRequest } from "@/lib/premium-request";
 import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
 import { scheduleReviewReminder } from "@/lib/reminders";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getProductBySlugForRequest } from "@/lib/products-request";
 import { normalizePremiumCodeForRequest } from "@/lib/premium-code";
 import {
@@ -668,6 +669,49 @@ export async function logoutAction(formData: FormData) {
   await clearUnlockIntent();
   await clearAuthResumeIntent();
   redirect(`/${locale}`);
+}
+
+export async function updateMarketingConsentAction(formData: FormData) {
+  const locale = normalizeLocale(text(formData, "locale"));
+  const marketingConsent = formData.get("marketingConsent") === "on";
+  const accountPath = `/${locale}/account`;
+
+  if (getBackendMode() === "supabase") {
+    const supabase = await createClient();
+    const { data, error } = await supabase.auth.getUser();
+
+    if (error || !data.user) {
+      redirect(`/${locale}/login?returnTo=${encodeURIComponent(accountPath)}`);
+    }
+
+    let updated = false;
+
+    try {
+      const result = await createServiceRoleClient()
+        .from("profiles")
+        .update({ marketing_consent: marketingConsent })
+        .eq("id", data.user.id)
+        .select("id")
+        .maybeSingle();
+      updated = !result.error && Boolean(result.data);
+    } catch (error) {
+      logUnexpectedFailure("Marketing preference update failed", error);
+    }
+
+    if (!updated) {
+      redirect(`${accountPath}?preferences=error`);
+    }
+  } else {
+    const session = await getDemoSession();
+
+    if (!session) {
+      redirect(`/${locale}/login?returnTo=${encodeURIComponent(accountPath)}`);
+    }
+
+    await setDemoSession({ ...session, marketingConsent });
+  }
+
+  redirect(`${accountPath}?preferences=updated`);
 }
 
 export async function unlockPremiumAction(formData: FormData) {
