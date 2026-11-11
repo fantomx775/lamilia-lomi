@@ -30,7 +30,7 @@ describe("ProductVideoPreview", () => {
   it("keeps unversioned media posters on the access-checked route", () => {
     const markup = renderToStaticMarkup(
       <ProductVideoPreview
-        video={{ path: "/api/media/asset-video", title: null, contentType: "video/mp4" }}
+        video={{ path: "/api/media/asset-video", contentType: "video/mp4" }}
         poster="/api/media/product-cover"
       />,
     );
