@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import { ProductVideoPreview } from "@/components/product-video-preview";
 
 describe("ProductVideoPreview", () => {
-  it("shows the product cover as a native poster and keeps the video controls", () => {
+  it("shows an optimized product cover as a native poster and keeps the video controls", () => {
+    const id = "ada86552-da0a-4ea4-acbc-a5a06a04d1b0";
     const markup = renderToStaticMarkup(
       <ProductVideoPreview
         video={{
@@ -12,18 +13,29 @@ describe("ProductVideoPreview", () => {
           title: "Flipthrough preview",
           contentType: "video/mp4",
         }}
-        poster="/api/media/product-cover"
+        poster={`/api/media/${id}?v=${id}`}
       />,
     );
 
     expect(markup).toContain("<video");
-    expect(markup).toContain('poster="/api/media/product-cover"');
+    expect(markup).toContain(`poster="/_next/image?url=%2Fapi%2Fmedia%2F${id}%3Fv%3D${id}`);
     expect(markup).toContain('controls=""');
     expect(markup).toContain('preload="none"');
     expect(markup).toContain('playsInline=""');
     expect(markup).toContain('aria-label="Flipthrough preview"');
     expect(markup).not.toContain("Flip-through · 8 sec");
     expect(markup).not.toContain("Public flipthrough video");
+  });
+
+  it("keeps unversioned media posters on the access-checked route", () => {
+    const markup = renderToStaticMarkup(
+      <ProductVideoPreview
+        video={{ path: "/api/media/asset-video", contentType: "video/mp4" }}
+        poster="/api/media/product-cover"
+      />,
+    );
+
+    expect(markup).toContain('poster="/api/media/product-cover"');
   });
 
   it("does not render an empty player for a non-video placeholder asset", () => {
