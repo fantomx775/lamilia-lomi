@@ -33,16 +33,16 @@ export async function optimizeProductMedia(kind: AssetKind, file: File): Promise
       coreURL: coreObjectUrls[0],
       wasmURL: coreObjectUrls[1],
     }, { signal });
-    const encodingSignal = AbortSignal.timeout(300_000);
+    const encodingSignal = AbortSignal.timeout(420_000);
     await encoder.writeFile("input", new Uint8Array(await file.arrayBuffer()), { signal: encodingSignal });
     const result = await encoder.exec([
       "-i", "input",
       "-map", "0:v:0", "-map", "0:a:0?",
       "-vf", "scale='trunc(iw*min(1,min(1280/iw,720/ih))/2)*2':'trunc(ih*min(1,min(1280/iw,720/ih))/2)*2'",
-      "-c:v", "libx264", "-preset", "fast", "-crf", "24",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
       "-maxrate", "1800k", "-bufsize", "1800k", "-pix_fmt", "yuv420p",
       "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", "preview.mp4",
-    ], 240_000, { signal: encodingSignal });
+    ], 360_000, { signal: encodingSignal });
     if (result !== 0) throw new Error("Nie udało się przygotować podglądu wideo MP4.");
     const output = await encoder.readFile("preview.mp4", "binary", { signal: encodingSignal });
     if (typeof output === "string" || output.byteLength === 0) {
