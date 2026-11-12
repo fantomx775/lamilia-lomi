@@ -19,35 +19,16 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
 
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
-  const failedRequests: Array<{ path: string; method: string; error: string; responseStatus?: number; nextServerAction: boolean; disposition: "unrelated" | "unresolved"; reason?: string }> = [];
-  const serverActionResponses = new Map<object, number>();
-  page.on("response", (response) => {
-    const request = response.request();
-    if (request.method() === "POST" && request.headers()["next-action"]) {
-      serverActionResponses.set(request, response.status());
-    }
-  });
+  const failedRequests: Array<{ path: string; method: string; error: string }> = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("requestfailed", (request) => {
-    const error = request.failure()?.errorText ?? "unknown";
-    const nextServerAction = Boolean(request.headers()["next-action"]);
-    const requestPath = new URL(request.url()).pathname;
-    const expectedServerActionCancellation = error === "net::ERR_ABORTED"
-      && request.method() === "POST"
-      && requestPath === "/en/account"
-      && nextServerAction
-      && serverActionResponses.get(request) === 200;
     failedRequests.push({
-      path: requestPath,
+      path: new URL(request.url()).pathname,
       method: request.method(),
-      error,
-      ...(serverActionResponses.has(request) ? { responseStatus: serverActionResponses.get(request) } : {}),
-      nextServerAction,
-      disposition: expectedServerActionCancellation ? "unrelated" : "unresolved",
-      ...(expectedServerActionCancellation ? { reason: "Next.js canceled the Server Action fetch after its HTTP 200 response; the test also verifies the success message and saved preference after reload." } : {}),
+      error: request.failure()?.errorText ?? "unknown",
     });
   });
 
@@ -61,10 +42,13 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
   const preference = page.getByRole("checkbox", { name: "I agree to receive marketing emails." });
   await expect(preference).toBeChecked();
   await preference.uncheck();
-  const withdrawalResponse = page.waitForResponse((response) => response.request().method() === "POST" && Boolean(response.request().headers()["next-action"]));
+  const withdrawalResponse = page.waitForResponse((response) => response.request().method() === "POST"
+    && new URL(response.url()).pathname === "/api/account/marketing-consent");
   await page.getByRole("button", { name: "Save preferences", exact: true }).click();
+  const withdrawalResult = await withdrawalResponse;
+  expect(withdrawalResult.status()).toBe(200);
+  expect(await withdrawalResult.json()).toEqual({ ok: true, marketingConsent: false });
   await expect(page.locator('p[role="status"]')).toHaveText("Your marketing preference has been saved.");
-  expect((await withdrawalResponse).status()).toBe(200);
   await expect(preference).not.toBeChecked();
   await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
   const cookieNotice = page.getByRole("button", { name: "Essential only", exact: true });
@@ -83,13 +67,15 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
     const form = page.locator('form').filter({ has: preference });
     return form.evaluate((element) => new FormData(element as HTMLFormElement).get("marketingConsent"));
   }).toBe("on");
-  const updateRequest = page.waitForRequest((request) => request.method() === "POST" && Boolean(request.headers()["next-action"]));
-  const updateResponse = page.waitForResponse((response) => response.request().method() === "POST" && Boolean(response.request().headers()["next-action"]));
+  const updateRequest = page.waitForRequest((request) => request.method() === "POST"
+    && new URL(request.url()).pathname === "/api/account/marketing-consent");
+  const updateResponse = page.waitForResponse((response) => response.request().method() === "POST"
+    && new URL(response.url()).pathname === "/api/account/marketing-consent");
   await page.getByRole("button", { name: "Save preferences", exact: true }).click();
-  const requestBody = (await updateRequest).postData() ?? "";
-  expect(requestBody.includes("marketingConsent")).toBe(true);
-  expect(/marketingConsent[\s\S]{0,100}on/.test(requestBody)).toBe(true);
-  await updateResponse;
+  expect((await updateRequest).postDataJSON()).toEqual({ marketingConsent: true });
+  const updateResult = await updateResponse;
+  expect(updateResult.status()).toBe(200);
+  expect(await updateResult.json()).toEqual({ ok: true, marketingConsent: true });
   await expect(page.locator('p[role="status"]')).toHaveText("Your marketing preference has been saved.");
   await expect(preference).toBeChecked();
   expect((await updateResponse).status()).toBe(200);
@@ -106,5 +92,5 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
   });
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
-  expect(failedRequests.filter(({ disposition }) => disposition !== "unrelated"), JSON.stringify(failedRequests, null, 2)).toEqual([]);
+  expect(failedRequests).toEqual([]);
 });

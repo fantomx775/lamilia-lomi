@@ -27,7 +27,6 @@ import { redeemPremiumCodeForRequest } from "@/lib/premium-request";
 import { getDemoSession, setDemoSession, clearDemoSession } from "@/lib/session.server";
 import { scheduleReviewReminder } from "@/lib/reminders";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getProductBySlugForRequest } from "@/lib/products-request";
 import { normalizePremiumCodeForRequest } from "@/lib/premium-code";
 import {
@@ -669,69 +668,6 @@ export async function logoutAction(formData: FormData) {
   await clearUnlockIntent();
   await clearAuthResumeIntent();
   redirect(`/${locale}`);
-}
-
-type MarketingConsentActionState = {
-  status: "idle" | "updated" | "error";
-  marketingConsent?: boolean;
-};
-
-export async function updateMarketingConsentAction(
-  _previousState: MarketingConsentActionState,
-  formData: FormData,
-): Promise<MarketingConsentActionState> {
-  const marketingConsent = formData.get("marketingConsent") === "on";
-
-  if (getBackendMode() === "supabase") {
-    let userId: string;
-
-    try {
-      const supabase = await createClient();
-      const { data, error } = await supabase.auth.getUser();
-
-      if (error || !data.user) {
-        return { status: "error", marketingConsent };
-      }
-
-      userId = data.user.id;
-    } catch (error) {
-      logUnexpectedFailure("Marketing preference authentication failed", error);
-      return { status: "error", marketingConsent };
-    }
-
-    let updated = false;
-
-    try {
-      const result = await createServiceRoleClient()
-        .from("profiles")
-        .update({ marketing_consent: marketingConsent })
-        .eq("id", userId)
-        .select("id")
-        .maybeSingle();
-      updated = !result.error && Boolean(result.data);
-    } catch (error) {
-      logUnexpectedFailure("Marketing preference update failed", error);
-    }
-
-    if (!updated) {
-      return { status: "error", marketingConsent };
-    }
-  } else {
-    const session = await getDemoSession();
-
-    if (!session) {
-      return { status: "error", marketingConsent };
-    }
-
-    try {
-      await setDemoSession({ ...session, marketingConsent });
-    } catch (error) {
-      logUnexpectedFailure("Marketing preference update failed", error);
-      return { status: "error", marketingConsent };
-    }
-  }
-
-  return { status: "updated", marketingConsent };
 }
 
 export async function unlockPremiumAction(formData: FormData) {
