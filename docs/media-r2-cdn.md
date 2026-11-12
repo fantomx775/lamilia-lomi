@@ -22,10 +22,10 @@ Category images use the provider-aware reference and upload flow added by PR #46
 
 ## Cloudflare setup
 
-The 24-hour CDN policy for versioned product covers and gallery images requires
+The seven-day CDN policy for versioned product covers and gallery images requires
 `PRODUCT_IMAGE_CLOUDFLARE_PURGE_TOKEN` and `PRODUCT_IMAGE_CLOUDFLARE_ZONE_ID`
 on Vercel. Use a Cloudflare token with only Cache Purge for the media domain's
-zone. The canonical source advertises `s-maxage=86400` for the image optimizer
+zone. The canonical source advertises `s-maxage=604800` for the image optimizer
 and `max-age=60` for browsers. The source route bypasses Vercel's HTTP cache
 so the optimizer checks publication again after a purge. Alternate source
 URLs keep the 60-second policy. Vercel clears transformed variants through its
