@@ -5,6 +5,7 @@ import { Button, buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CommunityAccountPanel } from "@/components/community/community-account-panel";
 import { AccountDeletionPanel } from "@/components/account/account-deletion-panel";
+import { MarketingPreferenceForm } from "@/components/account/marketing-preference-form";
 import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 import { getCommunityFlags } from "@/lib/community-flags";
@@ -120,9 +121,8 @@ export default async function AccountPage({ params }: Props) {
           </form>
           <section aria-labelledby="account-preferences-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <h2 id="account-preferences-title" className="font-serif text-xl font-semibold text-[var(--color-ink)]">Communication preferences</h2>
-            <p className="mt-2 text-sm text-[var(--color-muted)]">
-              Marketing emails: <span className="font-medium text-[var(--color-ink)]">{session.marketingConsent ? "Subscribed" : "Not subscribed"}</span>
-            </p>
+            <p className="mt-2 text-sm text-[var(--color-muted)]">Choose whether to receive marketing emails. This is optional and does not affect your account or My Library access.</p>
+            <MarketingPreferenceForm initialConsent={session.marketingConsent} />
           </section>
           {communityFlags.publicEnabled || communityFlags.uploadsEnabled || communityProfile ? <CommunityAccountPanel
             profile={communityProfile}
