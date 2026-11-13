@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ access: vi.fn(), products: vi.fn() }));
 vi.mock("@/lib/community/admin-http", () => ({ getCommunityAdminAccess: mocks.access }));
+vi.mock("@/lib/community/avatar-repository", () => ({ supportsCommunityAvatars: () => false }));
 vi.mock("@/lib/community/repository", () => ({ listCommunityModerationProductOptions: mocks.products }));
 vi.mock("./community-moderation", () => ({ default: (props: { products: unknown[] }) => ({ type: "CommunityModeration", props }) }));
 
@@ -16,7 +17,7 @@ describe("AdminCommunityPage", () => {
     const result = await AdminCommunityPage();
     expect(mocks.access).toHaveBeenCalledOnce();
     expect(mocks.products).toHaveBeenCalledOnce();
-    expect(result.props).toMatchObject({ products: [option] });
+    expect(result.props.children[1].props).toMatchObject({ products: [option] });
   });
 
   it("does not read product options for a denied request", async () => {
