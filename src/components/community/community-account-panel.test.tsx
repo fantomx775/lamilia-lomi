@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { ToastProvider } from "@/components/ui/toast";
 import { CommunityAccountPanel } from "./community-account-panel";
 
 const activeProfile = {
@@ -43,7 +44,7 @@ describe("CommunityAccountPanel", () => {
       guidelinesHref="/en/community-guidelines"
       creatorProfileBaseHref="/en/club/creators"
       contactHref="/en/contact"
-    />);
+    />, { wrapper: ToastProvider });
 
     const adult = screen.getByLabelText(/I confirm that I am 18 years or older/);
     const rules = screen.getByLabelText(/I accept the current community guidelines/);
@@ -91,7 +92,7 @@ describe("CommunityAccountPanel", () => {
       guidelinesHref="/en/community-guidelines"
       creatorProfileBaseHref="/en/club/creators"
       contactHref="/en/contact"
-    />);
+    />, { wrapper: ToastProvider });
     expect(screen.queryByRole("link", { name: "View profile" })).toBeNull();
     view.unmount();
     render(<CommunityAccountPanel
@@ -102,7 +103,7 @@ describe("CommunityAccountPanel", () => {
       guidelinesHref="/en/community-guidelines"
       creatorProfileBaseHref="/en/club/creators"
       contactHref="/en/contact"
-    />);
+    />, { wrapper: ToastProvider });
     expect(screen.getByRole("link", { name: "View profile" })).toHaveAttribute("href", "/en/club/creators/garden_user");
     const usernameInput = screen.getByLabelText("Change public username");
     await user.clear(usernameInput);
@@ -123,7 +124,7 @@ describe("CommunityAccountPanel", () => {
       guidelinesHref="/en/community-guidelines"
       creatorProfileBaseHref="/en/club/creators"
       contactHref="/en/contact"
-    />);
+    />, { wrapper: ToastProvider });
     const link = screen.getByRole("link", { name: "View profile" });
     expect(link.parentElement).toHaveClass("flex-col", "sm:flex-row");
     expect(link.previousElementSibling).toHaveClass("sm:flex-1");
@@ -138,7 +139,7 @@ describe("CommunityAccountPanel", () => {
       guidelinesHref="/en/community-guidelines"
       creatorProfileBaseHref="/en/club/creators"
       contactHref="/en/contact"
-    />);
+    />, { wrapper: ToastProvider });
     expect(screen.getByText("Verify your email before joining or changing community settings.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Join the Coloring Club" })).toBeNull();
   });
@@ -153,7 +154,7 @@ describe("CommunityAccountPanel", () => {
       guidelinesHref="/en/community-guidelines"
       creatorProfileBaseHref="/en/club/creators"
       contactHref="/en/contact"
-    />);
+    />, { wrapper: ToastProvider });
     const rejoinUsername = screen.getByLabelText("Public username");
     expect(rejoinUsername).toHaveValue("garden_user");
     expect(rejoinUsername).toHaveAttribute("readonly");
@@ -168,7 +169,7 @@ describe("CommunityAccountPanel", () => {
       guidelinesHref="/en/community-guidelines"
       creatorProfileBaseHref="/en/club/creators"
       contactHref="/en/contact"
-    />);
+    />, { wrapper: ToastProvider });
     expect(screen.queryByRole("button", { name: "Join the Coloring Club" })).toBeNull();
     expect(screen.getByRole("link", { name: "Contact us" })).toHaveAttribute("href", "/en/contact");
   });

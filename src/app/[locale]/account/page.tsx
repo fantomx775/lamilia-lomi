@@ -4,6 +4,7 @@ import { SubmitButton } from "@/components/submit-button";
 import { Button, buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CommunityAccountPanel } from "@/components/community/community-account-panel";
+import { AccountDeletionToast } from "@/components/account/account-deletion-toast";
 import { AccountDeletionPanel } from "@/components/account/account-deletion-panel";
 import { MarketingPreferenceForm } from "@/components/account/marketing-preference-form";
 import { NavigationLink } from "@/components/navigation-link";
@@ -39,6 +40,7 @@ export default async function AccountPage({ params }: Props) {
   if (!session) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-12">
+        <AccountDeletionToast />
         <Card>
           <CardHeader>
             <h1 className="font-serif text-3xl font-semibold">
@@ -71,19 +73,21 @@ export default async function AccountPage({ params }: Props) {
 
   return (
     <DashboardShell
+      hideMobileNav
       nav={nav}
       title="LamiliaLomi"
       subtitle="User dashboard"
     >
       <Card>
         <CardHeader>
-          <p className="text-sm font-medium text-[var(--color-terracotta)]">
+          <p className="hidden text-sm font-medium text-[var(--color-terracotta)] lg:block">
             User dashboard
           </p>
           <h1 className="mt-2 font-serif text-4xl font-semibold">
             Account
           </h1>
-          <p className="break-all text-base font-medium text-[var(--color-ink)]">{session.email}</p>
+          <h2 className="font-serif text-xl font-semibold">Account details</h2>
+          <p className="break-words text-base font-medium text-[var(--color-ink)]">{session.email}</p>
         </CardHeader>
         <CardContent className="grid gap-4">
           <p className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold ${session.emailVerified ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
@@ -107,33 +111,39 @@ export default async function AccountPage({ params }: Props) {
             </NavigationLink>
           ) : null}
           <NavigationLink
-            className={buttonClassName({ variant: "secondary", className: "w-full sm:w-fit" })}
+            className={buttonClassName({ variant: "secondary", className: "hidden w-fit lg:inline-flex" })}
             href={`/${locale}/library`}
             pendingLabel="Opening your library"
           >
             My Library
           </NavigationLink>
-          <form action={logoutAction}>
+          <form action={logoutAction} className="hidden lg:block">
             <input type="hidden" name="locale" value={locale} />
             <Button type="submit" variant="outline">
               Log out
             </Button>
           </form>
-          <section aria-labelledby="account-preferences-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-            <h2 id="account-preferences-title" className="font-serif text-xl font-semibold text-[var(--color-ink)]">Communication preferences</h2>
-            <p className="mt-2 text-sm text-[var(--color-muted)]">Choose whether to receive marketing emails. This is optional and does not affect your account or My Library access.</p>
-            <MarketingPreferenceForm initialConsent={session.marketingConsent} />
-          </section>
           {communityFlags.publicEnabled || communityFlags.uploadsEnabled || communityProfile ? <CommunityAccountPanel
             profile={communityProfile}
             enabled={communityFlags.publicEnabled || communityFlags.uploadsEnabled}
             publicEnabled={communityFlags.publicEnabled}
+            avatarEditingEnabled={!session.isDemo}
+            avatarUploadsEnabled={communityFlags.uploadsEnabled}
             emailVerified={session.emailVerified}
             guidelinesHref={`/${locale}/community-guidelines`}
             creatorProfileBaseHref={`/${locale}/club/creators`}
             contactHref={`/${locale}/contact`}
           /> : null}
-          <AccountDeletionPanel locale={locale} />
+          <section aria-labelledby="account-preferences-title" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+            <h2 id="account-preferences-title" className="font-serif text-xl font-semibold text-[var(--color-ink)]">Communication preferences</h2>
+            <p className="mt-2 text-sm text-[var(--color-muted)]">Choose whether to receive marketing emails. This is optional and does not affect your account or My Library access.</p>
+            <MarketingPreferenceForm initialConsent={session.marketingConsent} />
+          </section>
+          <section aria-labelledby="account-privacy-title" className="grid gap-3">
+            <h2 id="account-privacy-title" className="font-serif text-xl font-semibold">Privacy &amp; account</h2>
+            <NavigationLink href={`/${locale}/privacy`} pendingLabel="Opening privacy policy" className="w-fit underline underline-offset-4">Privacy policy</NavigationLink>
+            <AccountDeletionPanel locale={locale} />
+          </section>
         </CardContent>
       </Card>
     </DashboardShell>

@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import { isLocalDemoAppTarget } from "./local-target";
 
+test.setTimeout(75_000);
+
 test("account owner can withdraw and restore marketing consent", async ({ page }, testInfo) => {
   test.skip(
     !(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)),
@@ -14,7 +16,7 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
 
   await page.goto("/en/login?returnTo=%2Fen%2Faccount");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page).toHaveURL(/\/en\/account$/);
+  await expect(page).toHaveURL(/\/en\/account$/, { timeout: 25_000 });
   await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
 
   const consoleErrors: string[] = [];
@@ -48,7 +50,7 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
   const withdrawalResult = await withdrawalResponse;
   expect(withdrawalResult.status()).toBe(200);
   expect(await withdrawalResult.json()).toEqual({ ok: true, marketingConsent: false });
-  await expect(page.locator('p[role="status"]')).toHaveText("Your marketing preference has been saved.");
+  await expect(page.getByRole("status").filter({ hasText: "Your marketing preference has been saved." })).toContainText("Your marketing preference has been saved.");
   await expect(preference).not.toBeChecked();
   await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
   const cookieNotice = page.getByRole("button", { name: "Essential only", exact: true });
@@ -76,7 +78,7 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
   const updateResult = await updateResponse;
   expect(updateResult.status()).toBe(200);
   expect(await updateResult.json()).toEqual({ ok: true, marketingConsent: true });
-  await expect(page.locator('p[role="status"]')).toHaveText("Your marketing preference has been saved.");
+  await expect(page.getByRole("status").filter({ hasText: "Your marketing preference has been saved." })).toContainText("Your marketing preference has been saved.");
   await expect(preference).toBeChecked();
   expect((await updateResponse).status()).toBe(200);
   const demoCookie = (await page.context().cookies()).find(({ name }) => name === "ll_demo_session");

@@ -303,16 +303,19 @@ test("three previews become independent private creations with persistent status
     await readyArtworkPreviews(page);
     screenshots.push(...await communityScreenshots(page, "cc03", "my-creations-reviewed", runId));
     const published = cards.filter({ hasText: "Published" });
+    await published.getByTestId("community-artwork-actions").click();
     await published.getByTestId("community-artwork-edit-description").click();
     await published.getByTestId("community-artwork-description").fill("A revised rose garden afternoon");
     await published.getByTestId("community-artwork-save-description").click();
     await expect(page.getByRole("status").filter({ hasText: "pending review again" })).toContainText("pending review again");
     expect((await fixtures.service.from("community_artworks").select("status,revision").eq("id", rose.id).single()).data).toMatchObject({ status: "pending", revision: 3 });
     const removed = cards.filter({ hasText: "Removed" });
+    await removed.getByTestId("community-artwork-actions").click();
     await removed.getByTestId("community-artwork-delete").click();
-    await expect(removed.getByRole("group", { name: "Confirm artwork deletion" })).toBeVisible();
+    const deleteDialog = page.getByRole("dialog", { name: "Delete artwork?" });
+    await expect(deleteDialog).toBeVisible();
     screenshots.push(...await communityScreenshots(page, "cc03", "delete-confirmation", runId));
-    await removed.getByTestId("community-artwork-confirm-delete").click();
+    await deleteDialog.getByTestId("community-artwork-confirm-delete").click();
     await expect(cards).toHaveCount(2);
     await page.reload();
     await expect(cards).toHaveCount(2);
@@ -378,6 +381,93 @@ test("authorized maintenance drains a real queued deletion without another owner
     expect((await fixtures.service.storage.from("collection-media").download(storagePath)).error).toBeTruthy();
     expect((await fixtures.service.from("community_upload_reservations").select("state").eq("author_id", owner.id)
       .eq("idempotency_key", key).single()).data?.state).toBe("cleaned");
+  } finally {
+    await fixtures.cleanup();
+  }
+});
+
+test("upload stays in the viewport with long names and mobile-sized fields", async ({ page }, testInfo) => {
+  test.skip(process.env.RUN_COMMUNITY_UPLOADS_E2E !== "1" || !["chromium", "webkit-mobile"].includes(testInfo.project.name),
+    "Requires the isolated real Supabase upload application.");
+  test.setTimeout(120_000);
+  const fixtures = await communityFixtures(testInfo);
+  try {
+    const owner = await fixtures.actor("responsive-owner", { username: "cc_responsive_artist" });
+    const book = await fixtures.product("The Little Garden of Moonflowers and Other Enchanting Things to Color on Quiet Afternoons");
+    await fixtures.unlock(owner.id, book.id);
+    await fixtures.login(page, owner);
+    const open = page.getByTestId("community-upload-open");
+    await open.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Share your art", exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("heading")).toHaveCount(1);
+    await page.getByTestId("community-product-select").selectOption(book.id);
+    const chooser = page.waitForEvent("filechooser");
+    await dialog.getByRole("button", { name: "Add photos" }).click();
+    const image = await sharp({ create: { width: 120, height: 160, channels: 3, background: "#8b9c87" } }).png().toBuffer();
+    await (await chooser).setFiles({ name: `${"longfilename".repeat(10)}.png`, mimeType: "image/png", buffer: image });
+    const description = dialog.getByRole("textbox");
+    await description.fill("Draft saved while the drawer is closed.");
+    await expect(dialog.getByTestId("community-upload-submit")).toBeDisabled();
+    for (const width of [320, 375, 390, 430, 768, 1440]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expect.poll(() => dialog.evaluate((element) => {
+        const panel = element.getBoundingClientRect();
+        const form = element.querySelector("form")!;
+        const select = form.querySelector("select")!;
+        const footerButton = element.querySelector<HTMLButtonElement>("button[type=submit]")!;
+        const viewportWidth = document.documentElement.clientWidth;
+        return {
+          panelInBounds: panel.left >= -1 && panel.right <= viewportWidth + 1,
+          overflowingForm: form.scrollWidth <= form.clientWidth + 1 ? null : {
+            form: [form.scrollWidth, form.clientWidth],
+            elements: [...form.querySelectorAll("*")].flatMap((child) => {
+              const bounds = child.getBoundingClientRect();
+              return bounds.right > form.getBoundingClientRect().right + 1
+                ? [{ tag: child.tagName, classes: child.className, right: bounds.right }]
+                : [];
+            }),
+          },
+          selectInBounds: select.getBoundingClientRect().right <= panel.right,
+          footerInBounds: footerButton.getBoundingClientRect().bottom <= window.innerHeight + 1,
+          mobilePanelFullWidth: viewportWidth >= 768 || panel.width >= viewportWidth - 1,
+          mobileFieldsReadable: viewportWidth >= 1024
+            || [...form.querySelectorAll("select, textarea")].every((field) => parseFloat(getComputedStyle(field).fontSize) >= 16),
+        };
+      }), `upload geometry at ${width}px`).toEqual({
+        panelInBounds: true,
+        overflowingForm: null,
+        selectInBounds: true,
+        footerInBounds: true,
+        mobilePanelFullWidth: true,
+        mobileFieldsReadable: true,
+      });
+      if (process.env.COMMUNITY_ARTIFACT_DIR && [390, 1440].includes(width)) {
+        const screenshot = await communityArtifactPath("issue-121", `upload-${testInfo.project.name}-${width}.png`);
+        await dialog.locator(".overflow-y-auto").evaluate((element) => { element.scrollTop = 0; });
+        await page.screenshot({ path: screenshot, animations: "disabled", style: "nextjs-portal { display: none !important; }" });
+      }
+    }
+    await dialog.getByRole("button", { name: "Close upload" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(open).toBeFocused();
+    await open.press("Enter");
+    await expect(description).toHaveValue("Draft saved while the drawer is closed.");
+    await dialog.getByTestId("community-upload-rules").check();
+    await dialog.getByTestId("community-upload-submit").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "Artwork was sent for review" })).toBeVisible();
+    await expect(page.getByTestId("community-artwork-card")).toContainText("Pending review");
+    await expect(page.getByTestId("community-artwork-card")).not.toContainText("Revision");
+    if (process.env.COMMUNITY_ARTIFACT_DIR) {
+      await page.setViewportSize({ width: 390, height: 800 });
+      const dismiss = page.getByRole("button", { name: "Dismiss notification" });
+      if (await dismiss.isVisible()) await dismiss.click();
+      await readyArtworkPreviews(page);
+      const screenshot = await communityArtifactPath("issue-121", `my-creations-${testInfo.project.name}-390.png`);
+      await page.screenshot({ path: screenshot, animations: "disabled", style: "nextjs-portal { display: none !important; }", fullPage: true });
+    }
   } finally {
     await fixtures.cleanup();
   }

@@ -41,7 +41,7 @@ export default defineConfig({
     },
     {
       name: "webkit-mobile",
-      testMatch: "**/issue-30-supabase-auth.spec.ts",
+      testMatch: ["**/issue-30-supabase-auth.spec.ts", "**/mobile-storefront-121.spec.ts", "**/community-uploads.spec.ts", "**/community-avatars.spec.ts"],
       use: { ...devices["iPhone 13"], browserName: "webkit" },
     },
   ],

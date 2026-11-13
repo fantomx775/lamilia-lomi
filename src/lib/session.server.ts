@@ -124,7 +124,7 @@ export const getHeaderAccountStateForRequest = cache(async () => {
     const session = await getDemoSession();
 
     return session
-      ? { isSignedIn: true, isAdmin: session.role === "admin" }
+      ? { isSignedIn: true, isAdmin: session.role === "admin", emailVerified: session.emailVerified }
       : null;
   }
 
@@ -136,9 +136,9 @@ export const getHeaderAccountStateForRequest = cache(async () => {
 
   try {
     const profile = await getSupabaseProfileForRequest();
-    return { isSignedIn: true, isAdmin: profile?.role === "admin" };
+    return { isSignedIn: true, isAdmin: profile?.role === "admin", emailVerified: Boolean(context.user.email_confirmed_at) };
   } catch {
-    return { isSignedIn: true, isAdmin: false };
+    return { isSignedIn: true, isAdmin: false, emailVerified: Boolean(context.user.email_confirmed_at) };
   }
 });
 

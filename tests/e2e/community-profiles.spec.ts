@@ -129,7 +129,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await panel.getByRole("checkbox", { name: /18|adult/i }).check();
     await panel.getByRole("checkbox", { name: /I accept the current community guidelines/ }).check();
     await panel.getByRole("button", { name: "Join the Coloring Club", exact: true }).click();
-    await expect(panel.getByRole("status")).toContainText("You joined");
+    await expect(page.getByRole("status").filter({ hasText: "You joined" })).toBeVisible();
     const profile = await service.from("community_profiles").select("username,accepted_at,rules_version").eq("user_id", owner.id).single();
     expect(profile.error).toBeNull();
     expect(profile.data).toMatchObject({ username: "p0_artist_fixture", rules_version: COMMUNITY_RULES_VERSION });

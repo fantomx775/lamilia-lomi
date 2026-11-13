@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useId, useRef, useState, type FormEvent } from "react";
 
+import { CommunityAvatarEditor } from "@/components/community/community-avatar-editor";
+import { useToast } from "@/components/ui/toast";
 import { CommunityAvatar } from "@/components/community/community-avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -26,6 +28,8 @@ export function CommunityAccountPanel({
   profile: initialProfile,
   enabled,
   publicEnabled,
+  avatarEditingEnabled = false,
+  avatarUploadsEnabled = false,
   emailVerified,
   guidelinesHref,
   creatorProfileBaseHref,
@@ -34,6 +38,8 @@ export function CommunityAccountPanel({
   profile: CommunityProfileView | null;
   enabled: boolean;
   publicEnabled: boolean;
+  avatarEditingEnabled?: boolean;
+  avatarUploadsEnabled?: boolean;
   emailVerified: boolean;
   guidelinesHref: string;
   creatorProfileBaseHref: string;
@@ -48,7 +54,7 @@ export function CommunityAccountPanel({
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const { showToast } = useToast();
   const active = Boolean(profile && profile.isAdult && profile.adultAttestedAt && profile.optedInAt
     && !profile.participationRevokedAt && !profile.suspendedAt
     && profile.rulesVersion === COMMUNITY_RULES_VERSION);
@@ -57,7 +63,6 @@ export function CommunityAccountPanel({
   async function submitJoin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setNotice("");
     if (!adultAttested || !rulesAccepted) {
       setError("Confirm both requirements before joining.");
       return;
@@ -75,7 +80,7 @@ export function CommunityAccountPanel({
       setUsername(nextProfile.username);
       setAdultAttested(false);
       setRulesAccepted(false);
-      setNotice("You joined the Coloring Club. Your artwork stays private until approved.");
+      showToast("success", "You joined the Coloring Club. Your artwork stays private until approved.");
     } catch (caught) {
       setError(toMessage(caught));
       usernameRef.current?.focus();
@@ -87,14 +92,13 @@ export function CommunityAccountPanel({
   async function submitUsername(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setNotice("");
     setBusy(true);
     try {
       const result = await sendCommunityRequest("/api/community/profile", "PATCH", { username });
       const nextProfile = result.profile as CommunityProfileView;
       setProfile(nextProfile);
       setUsername(nextProfile.username);
-      setNotice("Your public username was updated.");
+      showToast("success", "Your public username was updated.");
     } catch (caught) {
       setError(toMessage(caught));
       usernameRef.current?.focus();
@@ -105,15 +109,14 @@ export function CommunityAccountPanel({
 
   async function leaveClub() {
     setError("");
-    setNotice("");
     setBusy(true);
     try {
       const result = await sendCommunityRequest("/api/community/profile", "DELETE");
       setProfile(result.profile as CommunityProfileView | null);
       setConfirmLeave(false);
-      setNotice("You left the Coloring Club. Your profile and work are no longer public.");
+      showToast("success", "You left the Coloring Club. Your profile and work are no longer public.");
     } catch (caught) {
-      setError(toMessage(caught));
+      showToast("error", toMessage(caught));
     } finally {
       setBusy(false);
     }
@@ -123,19 +126,18 @@ export function CommunityAccountPanel({
     <Card data-testid="community-account-panel">
       <CardHeader>
         <p className="text-sm font-medium uppercase tracking-[0.14em] text-[var(--color-terracotta)]">Coloring Club</p>
-        <h2 className="font-serif text-2xl font-semibold text-[var(--color-ink)]">{profile ? "Community settings" : "Join the Coloring Club"}</h2>
+        <h2 className="font-serif text-2xl font-semibold text-[var(--color-ink)]">{profile ? "Coloring Club profile" : "Join the Coloring Club"}</h2>
         <p className="text-sm leading-6 text-[var(--color-muted)]">
           Share your coloring with the community. Joining is separate from marketing consent.
         </p>
       </CardHeader>
       <CardContent className="grid gap-5">
         {error ? <p id={`${idPrefix}-error`} className="rounded-md bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error)]" role="alert">{error}</p> : null}
-        {notice ? <p className="rounded-md bg-[var(--color-sage)] p-3 text-sm text-[var(--color-ink)]" role="status" aria-live="polite">{notice}</p> : null}
 
         {profile ? (
           <div className="flex min-w-0 flex-col gap-3 rounded-md border border-[var(--color-border)] bg-white p-4 sm:flex-row sm:items-center">
             <div className="flex min-w-0 items-center gap-3 sm:flex-1">
-              <CommunityAvatar username={profile.username} seed={profile.avatarSeed} />
+              {!(avatarEditingEnabled && active) ? <CommunityAvatar username={profile.username} seed={profile.avatarSeed} /> : null}
               <div className="min-w-0 flex-1">
                 <p className="break-all font-semibold text-[var(--color-ink)]">@{profile.username}</p>
                 <p className="text-sm text-[var(--color-muted)]">
@@ -225,6 +227,8 @@ export function CommunityAccountPanel({
             </div>
           </form>
         ) : null}
+
+        {avatarEditingEnabled && emailVerified && active && profile ? <CommunityAvatarEditor username={profile.username} seed={profile.avatarSeed} canUpload={avatarUploadsEnabled} /> : null}
 
         {enabled && emailVerified && active ? (
           <>
