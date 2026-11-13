@@ -111,7 +111,7 @@ test("disabled switches block real public images and mutations while preserving 
     expect((await fixtures.service.storage.from("collection-media").download(storagePath)).error).toBeTruthy();
     await panel.getByRole("button", { name: "Leave the Coloring Club", exact: true }).click();
     await panel.getByRole("button", { name: "Confirm leave", exact: true }).click();
-    await expect(panel.getByRole("status")).toContainText("You left");
+    await expect(page.getByRole("status").filter({ hasText: "You left" })).toBeVisible();
     const cronSecret = readCommunityCronSecret();
     const maintenance = await page.request.get(`${origin}/api/internal/community/cleanup`, { headers: { Authorization: `Bearer ${cronSecret}` } });
     expect(maintenance.status()).toBe(503);

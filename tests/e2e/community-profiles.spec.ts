@@ -144,7 +144,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     expect(longUsername.length).toBe(24);
     await panel.getByLabel("Change public username").fill(longUsername);
     await panel.getByRole("button", { name: "Save username", exact: true }).click();
-    await expect(panel.getByRole("status")).toContainText("updated");
+    await expect(page.getByRole("status").filter({ hasText: "updated" })).toBeVisible();
     expect((await service.from("community_profiles").update({ avatar_seed: "12345678-1234-4234-8234-123456789abc" }).eq("user_id", owner.id)).error).toBeNull();
     await page.reload();
     await expect(panel.getByLabel("Change public username")).toHaveValue(longUsername);
@@ -261,7 +261,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await page.goto(`${appOrigin}/en/account`);
     await panel.getByRole("button", { name: "Leave the Coloring Club", exact: true }).click();
     await panel.getByRole("button", { name: "Confirm leave", exact: true }).click();
-    await expect(panel.getByRole("status")).toContainText("You left");
+    await expect(page.getByRole("status").filter({ hasText: "You left" })).toBeVisible();
     expect((await visitor.request.get(`${appOrigin}/en/club/creators/${longUsername}`)).status()).toBe(404);
     await page.reload();
     await expect(panel.getByLabel("Public username", { exact: true })).toHaveValue(longUsername);
