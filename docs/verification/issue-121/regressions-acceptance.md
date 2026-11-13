@@ -1,0 +1,21 @@
+# Post-PR #122 regression acceptance
+
+This follow-up implements the owner's acceptance report against main `d2886cb8aba87fab6272d3efb2cae54d708a9292`. Exact-head verification, independent review, CI and Production migration evidence are published on the corrective PR before merge. This document maps the requirements to durable coverage; it does not substitute for those final checks.
+
+| Requirement | Implementation and evidence |
+| --- | --- |
+| Artwork menu usable with touch, mouse and keyboard | Outside pointer/focus dismissal replaces null-target blur dismissal; `community-creation-manager.test.tsx` and real Chromium/mobile WebKit `community-creations-regressions.spec.ts`. |
+| Edit/save/reload and delete/confirm/reload | The real isolated test checks API responses, persisted database fields/revision/status, success/error toasts, stale-edit draft retention, foreign-owner denial and removed media. Public owner detail links to the matching card in My Creations. |
+| Moderation unknown/loading/empty/error/refresh/stale safety | Server streamed first queue/detail plus scoped retained client state. Unit tests cover failures, retries and stale responses; real browser checks delayed refresh, filter scope, successful empty and no initial client queue fetch. See `regressions-moderation.md`. |
+| Actual backend improvement | Four counts become one service-only aggregate; page and counts/history run concurrently. Repeatable benchmark compares identical real PostgREST queries and SQL plans; tiny-loopback limitations are documented. |
+| Hamburger entrance/exit, native modal lifecycle | 220 ms leftward animations with event completion/fallback, retained scroll lock, reduced motion, X/Escape/Back/link, current-transform continuity and consumed history. Mobile WebKit checks real animation lifecycle; real Supabase login/logout checks deferred submission and history length. |
+| Immediate profile-photo publication | Server-normalized uploads publish immediately; preview/crop/replace/remove persist. Public profile, artwork detail and gallery consume the photo through a bounded batch projection. Historical rejected/pending photos stay private. |
+| Avatar safety and reactive moderation | Existing MIME/size/pixel/decode/reencode/metadata/rate/ownership/private-storage/revocation/cleanup gates remain. Private reports and an administrator takedown queue replace approval UX. Real isolated Auth/Storage/RLS and image tests cover these boundaries; see `regressions-avatars.md`. |
+| Additional regression audit | `mobile-storefront-121`, `community-profiles`, `community-uploads`, avatar and owner CRUD browser suites exercise responsive header/account, login/register/reset field fonts, profiles, upload/retry/quotas, toasts, private data, moderation and persisted CRUD. |
+| Delivery | One corrective PR; final exact-head typecheck/lint/unit/integration/build/browser/CI/review and compatible Production migrations precede the normal GitHub merge. The user's explicit instruction overrides the harness's post-merge deployment/smoke workflow: merge is the last action affecting release. |
+
+Interim findings from the independent review were fixed: deferred logout surviving canceled exit, Back/Forward transform discontinuity, lost product filters on moderation failure, and a missing isolated-test opt-in guard. No application behavior is weakened to make tests pass. The broad profile audit waits for the avatar editor's first read before intentionally navigating away; ordinary component-unmount request cancellation remains in application code.
+
+The first maintenance audit ran without its private local cron configuration and correctly returned `scheduler_unconfigured`; after configuring the local runner it passed the real authorization and queued-deletion scenario. No production fixture accounts or destructive production test cases were used.
+
+Physical iPhone Safari keyboard/pinch testing is NOT RUN. Playwright iPhone 13 WebKit supplies the required mobile browser-engine evidence. No Terms, Privacy, Guidelines or feature flags are published or changed. Existing unrelated database advisory notices remain outside this regression fix; new migration privileges are verified separately.

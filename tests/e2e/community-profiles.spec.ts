@@ -130,6 +130,9 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await panel.getByRole("checkbox", { name: /I accept the current community guidelines/ }).check();
     await panel.getByRole("button", { name: "Join the Coloring Club", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "You joined" })).toBeVisible();
+    // Joining mounts the photo editor; let its real authenticated bootstrap finish
+    // before the reload rather than deliberately aborting a pending API request.
+    await expect(panel.getByRole("region", { name: "Profile photo" })).toBeVisible();
     const profile = await service.from("community_profiles").select("username,accepted_at,rules_version").eq("user_id", owner.id).single();
     expect(profile.error).toBeNull();
     expect(profile.data).toMatchObject({ username: "p0_artist_fixture", rules_version: COMMUNITY_RULES_VERSION });
@@ -138,6 +141,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     expect(accountConsent.error).toBeNull();
     expect(accountConsent.data?.marketing_consent).toBe(false);
     await page.reload();
+    await expect(panel.getByRole("region", { name: "Profile photo" })).toBeVisible();
     await expect(panel.getByLabel("Change public username")).toHaveValue("p0_artist_fixture");
 
     const longUsername = "p0_artist_abcdefghijklmn";
@@ -147,6 +151,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await expect(page.getByRole("status").filter({ hasText: "updated" })).toBeVisible();
     expect((await service.from("community_profiles").update({ avatar_seed: "12345678-1234-4234-8234-123456789abc" }).eq("user_id", owner.id)).error).toBeNull();
     await page.reload();
+    await expect(panel.getByRole("region", { name: "Profile photo" })).toBeVisible();
     await expect(panel.getByLabel("Change public username")).toHaveValue(longUsername);
     await capture(page, "account-settings");
 
@@ -259,6 +264,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     expect((await service.from("community_profiles").select("user_id").eq("user_id", unverified.id)).data).toEqual([]);
 
     await page.goto(`${appOrigin}/en/account`);
+    await expect(panel.getByRole("region", { name: "Profile photo" })).toBeVisible();
     await panel.getByRole("button", { name: "Leave the Coloring Club", exact: true }).click();
     await panel.getByRole("button", { name: "Confirm leave", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "You left" })).toBeVisible();
