@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import sharp from "sharp";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { communityArtifactPath, communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true });
@@ -11,6 +12,8 @@ test("owner actions survive touch blur and persist edit/delete after reload", as
   test.setTimeout(120_000);
   const fixtures = await communityFixtures(testInfo);
   const errors: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   const unexpectedHttp: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("response", (response) => {
@@ -60,7 +63,8 @@ test("owner actions survive touch blur and persist edit/delete after reload", as
       p_artwork_id: artwork.id, p_expected_revision: 2, p_action: "remove", p_reason: "Controlled stale revision test" })).error).toBeNull();
     const failedSave = page.waitForResponse((response) => response.request().method() === "PATCH");
     await activate("community-artwork-save-description");
-    expect((await failedSave).status()).toBe(409);
+    const conflictResponse = await failedSave;
+    expect(conflictResponse.status()).toBe(409);
     await expect(draft).toHaveValue("Saved on a real isolated database");
     await expect(page.getByRole("alert").filter({ hasText: "This artwork changed" })).toBeVisible();
     // Reload to obtain a fresh revision, restore publication, then verify the full success path.
@@ -113,6 +117,9 @@ test("owner actions survive touch blur and persist edit/delete after reload", as
     expect((await page.request.get(`${COMMUNITY_TEST_ORIGIN}/api/community/artworks/${artwork.id}/media`)).status()).toBe(404);
     expect(errors).toEqual([]);
     expect(unexpectedHttp).toEqual([]);
+    expect(consoleErrors.filter((message) => !/^Failed to load resource:.*(?:409|Conflict)/i.test(message))).toEqual([]);
+    console.log(JSON.stringify({ ownerCrud: { testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+      consoleErrors, expectedConflict: { url: conflictResponse.url(), method: "PATCH", status: conflictResponse.status(), statusText: conflictResponse.statusText() } } }));
   } finally {
     await fixtures.cleanup();
   }
