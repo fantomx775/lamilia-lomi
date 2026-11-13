@@ -13,15 +13,6 @@ test("profile photo crop, moderation, private replacement and removal through re
   const photoIds = new Set<string>();
   const bucket = fixtures.service.storage.from("community-avatars");
   const origin = COMMUNITY_TEST_ORIGIN;
-  const screenshot = async (name: string) => {
-    if (!process.env.COMMUNITY_ARTIFACT_DIR) return;
-    await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({
-      path: await communityArtifactPath("issue-121", `avatar-${name}-${testInfo.project.name}.png`),
-      animations: "disabled", style: "nextjs-portal { display: none !important; }",
-    });
-  };
-
   try {
     const owner = await fixtures.actor("avatar-owner", { username });
     const admin = await fixtures.actor("avatar-admin", { admin: true });
@@ -40,7 +31,12 @@ test("profile photo crop, moderation, private replacement and removal through re
       await photoSection.locator("input[type=file]").setInputFiles({ name: "fixture.png", mimeType: "image/png", buffer: png });
       await expect(photoSection.getByRole("img", { name: "Circular crop preview" })).toBeVisible();
       await photoSection.getByRole("slider", { name: "Zoom", exact: true }).fill("1.5");
-      if (capture) await screenshot("crop");
+      if (capture && process.env.COMMUNITY_ARTIFACT_DIR) {
+        await photoSection.screenshot({
+          path: await communityArtifactPath("issue-121", `avatar-crop-${testInfo.project.name}.png`),
+          animations: "disabled", style: "nextjs-portal { display: none !important; }",
+        });
+      }
       const completed = page.waitForResponse((response) => response.request().method() === "POST"
         && new URL(response.url()).pathname === "/api/community/avatars");
       await photoSection.getByRole("button", { name: "Send photo for review" }).click();

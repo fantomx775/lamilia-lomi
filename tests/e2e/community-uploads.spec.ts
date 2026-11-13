@@ -420,24 +420,17 @@ test("upload stays in the viewport with long names and mobile-sized fields", asy
         const viewportWidth = document.documentElement.clientWidth;
         return {
           panelInBounds: panel.left >= -1 && panel.right <= viewportWidth + 1,
-          overflowingForm: form.scrollWidth <= form.clientWidth + 1 ? null : {
-            form: [form.scrollWidth, form.clientWidth],
-            elements: [...form.querySelectorAll("*")].flatMap((child) => {
-              const bounds = child.getBoundingClientRect();
-              return bounds.right > form.getBoundingClientRect().right + 1
-                ? [{ tag: child.tagName, classes: child.className, right: bounds.right }]
-                : [];
-            }),
-          },
+          formWidth: form.clientWidth,
+          formOverflow: Math.max(0, form.scrollWidth - form.clientWidth - 1),
           selectInBounds: select.getBoundingClientRect().right <= panel.right,
           footerInBounds: footerButton.getBoundingClientRect().bottom <= window.innerHeight + 1,
           mobilePanelFullWidth: viewportWidth >= 768 || panel.width >= viewportWidth - 1,
           mobileFieldsReadable: viewportWidth >= 1024
             || [...form.querySelectorAll("select, textarea")].every((field) => parseFloat(getComputedStyle(field).fontSize) >= 16),
         };
-      }), `upload geometry at ${width}px`).toEqual({
+      }), `upload geometry at ${width}px`).toMatchObject({
         panelInBounds: true,
-        overflowingForm: null,
+        formOverflow: 0,
         selectInBounds: true,
         footerInBounds: true,
         mobilePanelFullWidth: true,

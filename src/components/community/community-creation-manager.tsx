@@ -354,10 +354,12 @@ export function CommunityCreationManager({
         <form id={UPLOAD_FORM_ID} className="grid min-w-0 grid-cols-1 gap-5" onSubmit={submit} data-testid="community-upload-form" aria-busy={busy}>
           <div className="grid min-w-0 gap-2">
             <label className="text-sm font-medium text-[var(--color-ink)]" htmlFor="community-product">Book</label>
-            <select id="community-product" required value={productId} disabled={busy || pendingImages.some((item) => Boolean(item.retryPayload))} onChange={(event) => setProductId(event.currentTarget.value)} className={`min-h-11 w-full min-w-0 max-w-full truncate rounded-md border border-[var(--color-border)] bg-white px-3 text-base lg:text-sm ${FOCUS_STYLE}`} data-testid="community-product-select">
-              <option value="">Choose an unlocked book</option>
-              {products.map((product) => <option key={product.id} value={product.id}>{product.title}</option>)}
-            </select>
+            <div className="min-w-0 overflow-hidden rounded-md focus-within:ring-2 focus-within:ring-[var(--color-terracotta)] focus-within:ring-offset-2">
+              <select id="community-product" required value={productId} disabled={busy || pendingImages.some((item) => Boolean(item.retryPayload))} onChange={(event) => setProductId(event.currentTarget.value)} className="min-h-11 w-full min-w-0 max-w-full truncate rounded-md border border-[var(--color-border)] bg-white px-3 text-base focus:outline-none lg:text-sm" data-testid="community-product-select">
+                <option value="">Choose an unlocked book</option>
+                {products.map((product) => <option key={product.id} value={product.id}>{product.title}</option>)}
+              </select>
+            </div>
             <p className="text-sm text-[var(--color-muted)]">{products.length ? "Choose a book you’ve unlocked in My Library." : "No unlocked books are available for sharing."}</p>
           </div>
 
@@ -399,7 +401,7 @@ export function CommunityCreationManager({
                       /* eslint-disable-next-line @next/next/no-img-element */
                       <img src={item.previewUrl} alt={`Preview of ${item.file.name}`} className="size-16 shrink-0 rounded-md bg-[var(--color-bg-alt)] object-contain" />
                     ) : null}
-                    <p className="line-clamp-2 min-w-0 flex-1 break-all text-sm font-medium text-[var(--color-ink)]">{item.file.name}</p>
+                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-ink)]" title={item.file.name}>{item.file.name}</p>
                     <button type="button" disabled={busy} onClick={() => removePending(item.idempotencyKey)} className={`grid size-11 shrink-0 place-items-center rounded-full bg-[var(--color-bg-alt)] text-[var(--color-ink)] disabled:opacity-50 ${FOCUS_STYLE}`} aria-label={`Remove image ${item.file.name}`}>
                       <X className="size-4" aria-hidden />
                     </button>
