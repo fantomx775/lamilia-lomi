@@ -18,3 +18,7 @@ Use the existing Community Guidelines checkbox for the candidate. Obtain approva
 - Review Terms, Privacy and Guidelines for publication, profile photos, adult account operation, reporting and moderation. Confirm the process for privacy reports and requests involving children.
 - Confirm the retention and removal commitments for pending and rejected photos, superseded profile photos, deleted accounts, moderation records and backups. Confirm the actual recipients, services and processing arrangements.
 - Approve final wording and the migration or audit requirements for any new publication permission before enabling public launch.
+
+## Avatar decision after PR #122
+
+The owner has approved immediate publication of new profile photos without a prior administrator decision. The artwork moderation rules above continue to apply to coloring submissions. Profile-photo reporting and administrator takedown remain available; rejected historical profile photos are not automatically published. This is an internal product/release note. This change does not publish or alter Terms, Privacy, Guidelines or feature flags.

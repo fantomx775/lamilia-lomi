@@ -16,21 +16,21 @@ export default async function AdminAvatarModerationPage({
   if (access.response || !supportsCommunityAvatars()) notFound();
 
   const query = await searchParams;
-  const status = query.status === "approved" ? "approved" : "pending";
+  const status = query.status === "approved" ? "approved" : "reported";
   const page = typeof query.page === "string" && /^\d{1,5}$/.test(query.page) ? Number(query.page) : 0;
   const username = typeof query.creator === "string" && /^[a-z0-9_]{3,24}$/.test(query.creator) ? query.creator : undefined;
   const { items, hasNext } = await listCommunityAvatarModeration(page, status, username);
-  const href = (target: "pending" | "approved", index = 0) =>
+  const href = (target: "reported" | "approved", index = 0) =>
     `?status=${target}&page=${index}${username ? `&creator=${encodeURIComponent(username)}` : ""}`;
 
   return (
     <section className="mx-auto grid max-w-5xl gap-5 p-4 sm:p-6">
       <Link href="/admin/community" className="w-fit underline">Moderacja prac</Link>
       <h1 className="font-serif text-3xl font-semibold">Zdjęcia profilowe Coloring Club</h1>
-      <p className="text-sm text-[var(--color-muted)]">Odrzuć zdjęcia identyfikujące dzieci oraz zdjęcia zawierające dane osobowe lub informacje o lokalizacji.</p>
+      <p className="text-sm text-[var(--color-muted)]">Usuń zgłoszone zdjęcia identyfikujące dzieci oraz zdjęcia zawierające dane osobowe lub informacje o lokalizacji.</p>
       <nav aria-label="Stan zdjęcia" className="flex gap-4">
-        <Link className="underline" aria-current={status === "pending" ? "page" : undefined} href={href("pending")}>Oczekujące</Link>
-        <Link className="underline" aria-current={status === "approved" ? "page" : undefined} href={href("approved")}>Zatwierdzone</Link>
+        <Link className="underline" aria-current={status === "reported" ? "page" : undefined} href={href("reported")}>Zgłoszone</Link>
+        <Link className="underline" aria-current={status === "approved" ? "page" : undefined} href={href("approved")}>Publiczne</Link>
       </nav>
       <form className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="status" value={status} />
@@ -50,7 +50,8 @@ export default async function AdminAvatarModerationPage({
               <time className="text-sm text-[var(--color-muted)]" dateTime={item.createdAt}>
                 {new Intl.DateTimeFormat("pl", { dateStyle: "medium" }).format(new Date(item.createdAt))}
               </time>
-              <AvatarModerationActions id={item.id} status={status} />
+              {item.reports.length ? <ul aria-label="Zgłoszenia zdjęcia" className="grid gap-2 text-sm">{item.reports.map((report, index) => <li key={index} className="break-words rounded border border-[var(--color-border)] p-2"><strong>{report.reason}</strong>{report.details ? <p>{report.details}</p> : null}</li>)}</ul> : null}
+              <AvatarModerationActions id={item.id}  />
             </li>
           ))}
         </ul>

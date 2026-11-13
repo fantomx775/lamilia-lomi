@@ -13,7 +13,7 @@ const reasons = [
   ["other", "Other concern"],
 ] as const;
 
-export function CommunityArtworkReport({ artworkId, access, returnTo }: { artworkId: string; access: CommunityHeartAccess; returnTo: string }) {
+export function CommunityArtworkReport({ artworkId, access, returnTo, subject = "artwork" }: { artworkId: string; access: CommunityHeartAccess; returnTo: string; subject?: "artwork" | "avatar" }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState("");
@@ -44,8 +44,8 @@ export function CommunityArtworkReport({ artworkId, access, returnTo }: { artwor
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = previousOverflow; trigger?.focus(); };
   }, [open]);
 
-  if (access === "guest") return <div className="mt-4 border-t border-[var(--color-border)] pt-4"><p className="text-sm text-[var(--color-muted)]">Report a concern about this artwork.</p><Link data-testid="community-artwork-report-login" href={`/en/login?returnTo=${encodeURIComponent(returnTo)}`} className="mt-2 inline-flex min-h-10 items-center text-sm font-semibold underline">Sign in to report</Link><p className="mt-1 text-xs text-[var(--color-muted)]">You can also contact us through the <Link href="/en/contact" className="underline">contact form</Link>.</p></div>;
-  if (access === "verify") return <p className="mt-4 border-t border-[var(--color-border)] pt-4 text-sm text-[var(--color-muted)]">Verify your email address to report this artwork.</p>;
+  if (access === "guest") return <div className="mt-4 border-t border-[var(--color-border)] pt-4"><p className="text-sm text-[var(--color-muted)]">Report a concern about this {subject === "avatar" ? "profile photo" : "artwork"}.</p><Link data-testid="community-artwork-report-login" href={`/en/login?returnTo=${encodeURIComponent(returnTo)}`} className="mt-2 inline-flex min-h-10 items-center text-sm font-semibold underline">Sign in to report</Link><p className="mt-1 text-xs text-[var(--color-muted)]">You can also contact us through the <Link href="/en/contact" className="underline">contact form</Link>.</p></div>;
+  if (access === "verify") return <p className="mt-4 border-t border-[var(--color-border)] pt-4 text-sm text-[var(--color-muted)]">Verify your email address to report this {subject === "avatar" ? "profile photo" : "artwork"}.</p>;
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -53,13 +53,13 @@ export function CommunityArtworkReport({ artworkId, access, returnTo }: { artwor
     busyRef.current = true;
     setBusy(true);
     try {
-      const response = await fetch(`/api/community/artworks/${artworkId}/report`, {
+      const response = await fetch(subject === "avatar" ? `/api/community/avatars/${artworkId}/report` : `/api/community/artworks/${artworkId}/report`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason, ...(details.trim() ? { details: details.trim() } : {}) }),
       });
       const payload = await response.json();
       if (response.status === 201 || (response.ok && payload.ok)) {
-        showToast("success", payload.duplicate ? "You have already submitted a report for this artwork. Thank you." : "Thank you. Your report has been sent to the moderation team.");
+        showToast("success", payload.duplicate ? "You have already submitted this report. Thank you." : "Thank you. Your report has been sent to the moderation team.");
         setOpen(false);
         return;
       }
@@ -69,13 +69,13 @@ export function CommunityArtworkReport({ artworkId, access, returnTo }: { artwor
   };
 
   return <div className="mt-4 border-t border-[var(--color-border)] pt-4">
-    <button ref={triggerRef} data-testid="community-artwork-report-open" type="button" onClick={() => setOpen(true)} className="min-h-10 text-sm font-semibold underline underline-offset-2">Report this artwork</button>
+    <button ref={triggerRef} data-testid="community-artwork-report-open" type="button" onClick={() => setOpen(true)} className="min-h-10 text-sm font-semibold underline underline-offset-2">Report this {subject === "avatar" ? "profile photo" : "artwork"}</button>
     {open && <div className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-black/55 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="community-report-title" data-testid="community-artwork-report-dialog" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-7">
-        <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-terracotta)]">Private report</p><h2 id="community-report-title" className="mt-1 font-serif text-2xl font-semibold">Report artwork</h2></div><button ref={closeRef} type="button" disabled={busy} onClick={() => setOpen(false)} aria-label="Close report form" className="min-h-10 min-w-10 rounded-md border border-[var(--color-border)] disabled:opacity-50">×</button></div>
+        <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-terracotta)]">Private report</p><h2 id="community-report-title" className="mt-1 font-serif text-2xl font-semibold">Report {subject === "avatar" ? "profile photo" : "artwork"}</h2></div><button ref={closeRef} type="button" disabled={busy} onClick={() => setOpen(false)} aria-label="Close report form" className="min-h-10 min-w-10 rounded-md border border-[var(--color-border)] disabled:opacity-50">×</button></div>
         <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">Only administrators can see your report. Do not include contact details or information about a child.</p>
         <form onSubmit={submit} className="mt-5 space-y-4">
-          <fieldset className="grid gap-2"><legend className="mb-2 text-sm font-semibold">Why are you reporting this artwork?</legend>{reasons.map(([value, label]) => <label key={value} className="flex min-h-11 items-center gap-3 rounded-lg border border-[var(--color-border)] p-3 text-sm"><input type="radio" name="community-report-reason" value={value} checked={reason === value} onChange={() => setReason(value)} required />{label}</label>)}</fieldset>
+          <fieldset className="grid gap-2"><legend className="mb-2 text-sm font-semibold">Why are you reporting this {subject === "avatar" ? "profile photo" : "artwork"}?</legend>{reasons.map(([value, label]) => <label key={value} className="flex min-h-11 items-center gap-3 rounded-lg border border-[var(--color-border)] p-3 text-sm"><input type="radio" name="community-report-reason" value={value} checked={reason === value} onChange={() => setReason(value)} required />{label}</label>)}</fieldset>
           <label className="grid gap-1.5 text-sm font-medium">Additional details (optional)
             <textarea data-testid="community-artwork-report-details" value={details} onChange={(event) => setDetails(event.target.value)} maxLength={500} rows={4} aria-describedby="community-report-details-help" className="rounded-lg border border-[var(--color-border)] p-3" />
           </label>

@@ -3,7 +3,7 @@
 import { BookOpen, Images, Info, Library, LogIn, LogOut, Menu, Palette, UserRound, X } from "lucide-react";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { mobileActionClass } from "@/components/mobile-header-styles";
 import { NavigationLink } from "@/components/navigation-link";
@@ -26,12 +26,50 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
   const openedPath = useRef<string | null>(null);
   const pendingClose = useRef<{ destination?: string } | null>(null);
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exitAction = useRef<(() => void) | null>(null);
+  const pendingLogout = useRef<(() => void) | null>(null);
+  const submittingLogout = useRef(false);
+  const finishExit = useCallback(() => {
+    if (!exitAction.current) return;
+    const action = exitAction.current;
+    exitAction.current = null;
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+    exitTimer.current = null;
+    dialogRef.current?.close();
+    setOpen(false);
+    setClosing(false);
+    action();
+    const logoutAction = pendingLogout.current;
+    pendingLogout.current = null;
+    logoutAction?.();
+  }, []);
+  const beginExit = useCallback((action: () => void) => {
+    if (exitAction.current) return;
+    exitAction.current = action;
+    const dialog = dialogRef.current;
+    if (dialog) dialog.style.setProperty("--navigation-exit-start", getComputedStyle(dialog).transform);
+    setClosing(true);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) finishExit();
+    else exitTimer.current = setTimeout(finishExit, 280);
+  }, [finishExit]);
+  useEffect(() => () => {
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+  }, []);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     const trigger = triggerRef.current;
     function syncHistory() {
       if (history.state?.[mobileHistoryKey] && trigger?.getClientRects().length) {
+        if (exitTimer.current) clearTimeout(exitTimer.current);
+        exitTimer.current = null;
+        exitAction.current = null;
+        pendingLogout.current = null;
+        if (dialog?.open) dialog.style.setProperty("--navigation-enter-start", getComputedStyle(dialog).transform);
+        else dialog?.style.removeProperty("--navigation-enter-start");
+        setClosing(false);
         if (!dialog?.open) {
           dialog?.showModal();
           openedPath.current = window.location.pathname;
@@ -39,12 +77,13 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
         }
         return;
       }
-      if (dialog?.open) dialog.close();
       const destination = pendingClose.current?.destination;
       pendingClose.current = null;
-      if (destination && window.location.pathname === openedPath.current) router.push(destination);
-      else if (openedPath.current === window.location.pathname) trigger?.focus();
-      openedPath.current = null;
+      if (dialog?.open) beginExit(() => {
+        if (destination && window.location.pathname === openedPath.current && destination !== window.location.pathname) router.push(destination);
+        else if (openedPath.current === window.location.pathname) trigger?.focus();
+        openedPath.current = null;
+      });
     }
     const desktop = window.matchMedia("(min-width: 64rem)");
     function onDesktop(event: MediaQueryListEvent) {
@@ -59,20 +98,29 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
       window.removeEventListener("popstate", syncHistory);
       desktop.removeEventListener("change", onDesktop);
     };
-  }, [router]);
+  }, [router, beginExit]);
 
   useEffect(() => {
     if (dialogRef.current?.open && openedPath.current !== pathname) dialogRef.current.close();
   }, [pathname]);
 
-  function closeForLogout() {
-    if (history.state?.[mobileHistoryKey]) history.replaceState({}, "");
-    dialogRef.current?.close();
+  function closeForLogout(event: FormEvent<HTMLDivElement>) {
+    if (submittingLogout.current || !(event.target instanceof HTMLFormElement)) return;
+    event.preventDefault();
+    const form = event.target;
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    pendingLogout.current = () => {
+      submittingLogout.current = true;
+      form.requestSubmit(submitter instanceof HTMLButtonElement || submitter instanceof HTMLInputElement ? submitter : undefined);
+      submittingLogout.current = false;
+    };
+    closeMenu();
   }
 
   function openMenu() {
     if (dialogRef.current?.open) return;
-    history.pushState({ [mobileHistoryKey]: true }, "");
+    history.pushState({ ...history.state, [mobileHistoryKey]: true }, "");
+    dialogRef.current?.style.removeProperty("--navigation-enter-start");
     dialogRef.current?.showModal();
     openedPath.current = pathname;
     setOpen(true);
@@ -85,11 +133,12 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
       pendingClose.current = { destination };
       history.back();
     } else {
-      dialogRef.current.close();
-      if (destination) router.push(destination);
-      else triggerRef.current?.focus();
+      beginExit(() => {
+        if (destination && destination !== window.location.pathname) router.push(destination);
+        else triggerRef.current?.focus();
+      });
     }
-  }, [router]);
+  }, [router, beginExit]);
 
   const links = [
     { label: "Catalog", href: `/${locale}/products`, icon: BookOpen },
@@ -111,6 +160,10 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
         <Menu className="size-5" aria-hidden />
       </button>
       <dialog ref={dialogRef} id="mobile-primary-navigation" aria-label="Mobile primary navigation"
+        data-closing={closing || undefined}
+        onAnimationEnd={(event) => {
+          if (event.target === event.currentTarget && event.animationName === "mobile-navigation-exit") finishExit();
+        }}
         className="mobile-navigation-dialog fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overflow-y-auto overscroll-contain bg-[var(--color-bg)] text-[var(--color-ink)]"
         onKeyDown={(event) => {
           if (event.key !== "Tab") return;

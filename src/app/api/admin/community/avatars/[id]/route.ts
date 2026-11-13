@@ -33,7 +33,7 @@ export async function PATCH(request: Request, { params }: Context) {
   }
 }
 
-function isReview(value: unknown): value is { decision: "approved" | "rejected" | "removed" } {
+function isReview(value: unknown): value is { decision: "removed" } {
   return typeof value === "object" && value !== null && "decision" in value
-    && (value.decision === "approved" || value.decision === "rejected" || value.decision === "removed");
+    && value.decision === "removed";
 }

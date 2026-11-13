@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import CommunityModeration from "./community-moderation";
@@ -15,6 +16,63 @@ const artwork = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("admin community moderation UI", () => {
+  it("shows unknown counts and skeleton until a successful read, never false empty on failure", async () => {
+    let resolve!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
+    render(<CommunityModeration products={[]} />);
+    expect(screen.getAllByTestId("community-count-skeleton")).toHaveLength(4);
+    expect(screen.getByTestId("community-count-pending")).not.toHaveTextContent("0");
+    expect(screen.getByTestId("community-queue-skeleton")).toBeTruthy();
+    await waitFor(() => expect(resolve).toBeTypeOf("function"));
+    await act(async () => resolve(new Response(JSON.stringify({ ok: false, message: "Read unavailable" }), { status: 503 })));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Read unavailable");
+    expect(screen.queryByText(/Brak prac w tej kolejce/)).toBeNull();
+    expect(screen.getAllByTestId("community-count-skeleton")).toHaveLength(4);
+  });
+
+  it("hydrates server data without a queue/detail waterfall and retains it during same-scope refresh", async () => {
+    let resolve!: (response: Response) => void;
+    const fetchMock = vi.fn(() => new Promise<Response>((done) => { resolve = done; }));
+    vi.stubGlobal("fetch", fetchMock);
+    const queue = { items: [artwork], nextCursor: null, counts: { pending: 7, approved: 2, rejected: 0, removed: 0 } };
+    render(<StrictMode><CommunityModeration products={[]} initialQueue={queue} initialDetail={{ artwork, history: [] }} /></StrictMode>);
+    expect(screen.getByTestId("community-moderation-preview")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Filtruj" }));
+    expect(screen.getByText("Odświeżanie prac…")).toBeTruthy();
+    expect(screen.getByTestId("community-count-pending")).toHaveTextContent("7");
+    expect(screen.getByTestId("community-moderation-item")).toBeTruthy();
+    await act(async () => resolve(new Response(JSON.stringify({ ok: true, ...queue }))));
+    expect(screen.queryByText("Odświeżanie prac…")).toBeNull();
+    fireEvent.change(screen.getByTestId("community-moderation-product-filter"), { target: { value: "" } });
+    expect(screen.getByTestId("community-count-pending")).toHaveTextContent("7");
+  });
+
+  it("shows real empty and zero only after success", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, items: [], nextCursor: null, counts: { pending: 0, approved: 0, rejected: 0, removed: 0 } }))));
+    render(<CommunityModeration products={[]} />);
+    expect(await screen.findByText(/Brak prac w tej kolejce/)).toBeTruthy();
+    expect(screen.getByTestId("community-count-pending")).toHaveTextContent("0");
+    expect(screen.queryByTestId("community-count-skeleton")).toBeNull();
+  });
+
+  it("reports detail read errors with retry rather than an endless loading message", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith(`/${id}`)) {
+        calls += 1;
+        if (calls === 1) return new Response(JSON.stringify({ ok: false, message: "Detail unavailable" }), { status: 503 });
+        return new Response(JSON.stringify({ ok: true, artwork, history: [] }));
+      }
+      return new Response(JSON.stringify({ ok: true, items: [artwork], nextCursor: null, counts: { pending: 1, approved: 0, rejected: 0, removed: 0 } }));
+    }));
+    render(<CommunityModeration products={[]} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Detail unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Ponów wczytanie szczegółów" }));
+    expect(await screen.findByTestId("community-moderation-preview")).toBeTruthy();
+    expect(calls).toBe(2);
+  });
+
   it("shows private preview/history and requires a reason before a reject request", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       void init;

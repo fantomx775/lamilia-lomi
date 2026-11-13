@@ -106,11 +106,18 @@ export function CommunityCreationManager({
   useEffect(() => {
     if (!actionId) return;
     const group = artworkActions.current.get(actionId)?.parentElement;
-    function dismissOnOutsidePress(event: PointerEvent) {
+    function dismissOutside(event: Event) {
       if (event.target instanceof Node && !group?.contains(event.target)) setActionId(null);
     }
-    document.addEventListener("pointerdown", dismissOnOutsidePress);
-    return () => document.removeEventListener("pointerdown", dismissOnOutsidePress);
+    // Safari may blur a focused button with relatedTarget=null during a tap.
+    // Dismiss on the actual outside pointer/focus target, before it can race
+    // with the action button click. A null blur is not evidence of leaving.
+    document.addEventListener("pointerdown", dismissOutside);
+    document.addEventListener("focusin", dismissOutside);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside);
+      document.removeEventListener("focusin", dismissOutside);
+    };
   }, [actionId]);
 
   useEffect(() => {
@@ -454,7 +461,7 @@ export function CommunityCreationManager({
               const description = descriptionDrafts[artwork.id] ?? artwork.description;
               return (
                 <li key={artwork.id} className="min-w-0">
-                  <article className="grid min-w-0 grid-cols-1 rounded-xl border border-[var(--color-border)] bg-white" data-testid="community-artwork-card">
+                  <article id={`creation-${artwork.id}`} className="scroll-mt-24 grid min-w-0 grid-cols-1 rounded-xl border border-[var(--color-border)] bg-white" data-testid="community-artwork-card">
                     <div className="relative aspect-[4/3] w-full max-h-[220px] overflow-hidden rounded-t-xl bg-[var(--color-bg-alt)] lg:max-h-none">
                       {/* The app media route rechecks current visibility on every byte request. */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -470,9 +477,6 @@ export function CommunityCreationManager({
                         {canEdit || canDelete ? (
                           <div
                             className="relative shrink-0"
-                            onBlur={(event) => {
-                              if (!event.currentTarget.contains(event.relatedTarget)) setActionId((current) => current === artwork.id ? null : current);
-                            }}
                             onKeyDown={(event) => {
                               if (event.key !== "Escape" || actionId !== artwork.id) return;
                               event.stopPropagation();

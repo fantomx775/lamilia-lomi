@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { useAdminToast } from "@/components/admin/admin-toast";
 import { Button } from "@/components/ui/button";
 
-export function AvatarModerationActions({ id, status }: { id: string; status: "pending" | "approved" }) {
+export function AvatarModerationActions({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const router = useRouter();
   const toast = useAdminToast();
 
-  async function review(decision: "approved" | "rejected" | "removed") {
+  async function review(decision: "removed") {
     setBusy(true);
     try {
       const response = await fetch(`/api/admin/community/avatars/${id}`, {
@@ -28,14 +28,7 @@ export function AvatarModerationActions({ id, status }: { id: string; status: "p
 
   return (
     <div className="flex flex-wrap gap-2">
-      {status === "pending" ? (
-        <>
-          <Button disabled={busy} onClick={() => { void review("approved"); }}>Zatwierdź</Button>
-          <Button disabled={busy} variant="outline" onClick={() => { void review("rejected"); }}>Odrzuć</Button>
-        </>
-      ) : (
-        <Button disabled={busy} variant="outline" onClick={() => { void review("removed"); }}>Usuń publiczne zdjęcie</Button>
-      )}
+      <Button disabled={busy} variant="outline" onClick={() => { void review("removed"); }}>Usuń publiczne zdjęcie</Button>
     </div>
   );
 }

@@ -10,7 +10,8 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); document.body.style.overflow
 
 describe("community artwork reports", () => {
   it("sends an identified report without putting reporter data in the body", async () => {
-    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const init = args[1];
       expect(JSON.parse(String(init?.body))).toEqual({ reason: "privacy", details: "Please review the background." });
       return new Response(JSON.stringify({ ok: true, duplicate: false }), { status: 201 });
     });
@@ -33,4 +34,18 @@ describe("community artwork reports", () => {
     expect(screen.getByTestId("community-artwork-report-login")).toHaveAttribute("href", expect.stringContaining("returnTo="));
     expect(screen.getByRole("link", { name: "contact form" })).toHaveAttribute("href", "/en/contact");
   });
+  it("reports a profile photo through the avatar endpoint and retains entered details on failure", async () => {
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ message: "Try again" }), { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<CommunityArtworkReport artworkId="22222222-2222-4222-8222-222222222222" subject="avatar" access="member" returnTo="/en/club/creators/test" />, { wrapper: ToastProvider });
+    await user.click(screen.getByRole("button", { name: "Report this profile photo" }));
+    await user.click(screen.getByLabelText("Personal information or privacy"));
+    await user.type(screen.getByTestId("community-artwork-report-details"), "Background concern");
+    await user.click(screen.getByTestId("community-artwork-report-submit"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Try again");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/community/avatars/22222222-2222-4222-8222-222222222222/report");
+    expect(screen.getByTestId("community-artwork-report-details")).toHaveValue("Background concern");
+  });
+
 });

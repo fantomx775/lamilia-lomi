@@ -125,6 +125,9 @@ describe("CommunityCreationManager", () => {
     expect(actions).toHaveFocus();
     expect(actions).toHaveAttribute("aria-expanded", "false");
     await user.click(actions);
+    // Safari taps can blur the trigger without identifying the next target.
+    fireEvent.blur(actions, { relatedTarget: null });
+    expect(screen.getByTestId("community-artwork-edit-description")).toBeInTheDocument();
     await user.click(screen.getByTestId("community-artwork-edit-description"));
     const description = screen.getByTestId("community-artwork-description");
     await user.clear(description);
@@ -178,6 +181,8 @@ describe("CommunityCreationManager", () => {
     resolveSave(new Response(JSON.stringify({ ok: true, artwork: updatedArtwork }), { status: 200 }));
     await screen.findByText("Your description was saved. This artwork is pending review again.");
     await user.click(actions);
+    fireEvent.blur(actions, { relatedTarget: null });
+    expect(screen.getByTestId("community-artwork-delete")).toBeInTheDocument();
     await user.click(screen.getByTestId("community-artwork-delete"));
     const dialog = screen.getByRole("dialog", { name: "Delete artwork?" });
     expect(within(dialog).getByRole("button", { name: "Keep artwork" })).toHaveFocus();

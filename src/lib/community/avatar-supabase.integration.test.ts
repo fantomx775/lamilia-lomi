@@ -9,7 +9,7 @@ vi.mock("server-only", () => ({}));
 import { GET as publicMedia } from "@/app/api/community/avatars/[id]/route";
 import {
   getCommunityPublicAvatarUrl, getOwnerAvatarView, readCommunityAvatar,
-  removeCommunityAvatar, reviewCommunityAvatar, uploadCommunityAvatar, consumeAvatarUploadRateLimit,
+  removeCommunityAvatar, reviewCommunityAvatar, uploadCommunityAvatar, consumeAvatarUploadRateLimit, submitCommunityAvatarReport,
 } from "./avatar-repository";
 import { normalizeAvatarImage } from "./avatar-image";
 import { processCommunityAccountMediaCleanup } from "./repository";
@@ -87,7 +87,7 @@ describe.skipIf(process.env.RUN_COMMUNITY_AVATAR_SUPABASE_TESTS !== "1")("profil
   async function upload() {
     await uploadCommunityAvatar(ownerId, image);
     const { data, error } = await service.from("community_profile_avatars").select("id")
-      .eq("user_id", ownerId).eq("status", "pending").single();
+      .eq("user_id", ownerId).eq("status", "approved").single();
     expect(error).toBeNull();
     const id = String(data?.id);
     objects.add(id);
@@ -98,16 +98,18 @@ describe.skipIf(process.env.RUN_COMMUNITY_AVATAR_SUPABASE_TESTS !== "1")("profil
     return publicMedia(new Request(`https://127.0.0.1:3443/api/community/avatars/${id}`), { params: Promise.resolve({ id }) });
   }
 
-  it("denies direct access and preserves only the previous approved photo across moderation and removal", async () => {
+  it("denies direct access and publishes immediately, replaces safely, reports privately and removes", async () => {
     const first = await upload();
-    expect(await getOwnerAvatarView(ownerId)).toEqual({ approvedId: null, pending: true, rejected: false });
-    expect(await getCommunityPublicAvatarUrl(username)).toBeUndefined();
-    expect((await getPublicMedia(first)).status).toBe(404);
-    expect(await readCommunityAvatar(first, "owner", ownerId)).toBeNull();
+    expect(await getOwnerAvatarView(ownerId)).toEqual({ approvedId: first, pending: false, rejected: false });
+    expect(await getCommunityPublicAvatarUrl(username)).toBe(`/api/community/avatars/${first}`);
+    expect((await getPublicMedia(first)).status).toBe(200);
+    expect((await readCommunityAvatar(first, "owner", ownerId))?.status).toBe(200);
     expect((await readCommunityAvatar(first, "admin"))?.status).toBe(200);
 
     for (const client of [anon, owner, stranger, admin]) {
       expect((await client.from("community_profile_avatars").select("id")).error).toBeTruthy();
+      expect((await client.rpc("community_public_avatar_ids", { p_usernames: [username] })).error).toBeTruthy();
+      expect((await client.rpc("community_avatar_report", { p_actor: strangerId, p_id: first, p_reason: "privacy", p_details: "" })).error).toBeTruthy();
       expect((await client.rpc("community_avatar_review", {
         p_admin: adminId, p_id: first, p_decision: "approved",
       })).error).toBeTruthy();
@@ -117,9 +119,9 @@ describe.skipIf(process.env.RUN_COMMUNITY_AVATAR_SUPABASE_TESTS !== "1")("profil
     expect((await anon.storage.from(BUCKET).getPublicUrl(first)).data.publicUrl).toContain("/public/");
     const direct = await fetch(anon.storage.from(BUCKET).getPublicUrl(first).data.publicUrl);
     expect(direct.ok).toBe(false);
-    await expect(reviewCommunityAvatar(strangerId, first, "approved")).rejects.toMatchObject({ name: "CommunityAuthorizationError" });
+    await expect(reviewCommunityAvatar(strangerId, first, "removed")).rejects.toMatchObject({ name: "CommunityAuthorizationError" });
 
-    await reviewCommunityAvatar(adminId, first, "approved");
+
     const response = await getPublicMedia(first);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
@@ -128,18 +130,21 @@ describe.skipIf(process.env.RUN_COMMUNITY_AVATAR_SUPABASE_TESTS !== "1")("profil
     expect((await readCommunityAvatar(first, "owner", ownerId))?.status).toBe(200);
 
     const second = await upload();
-    expect((await getPublicMedia(first)).status).toBe(200);
-    expect((await getPublicMedia(second)).status).toBe(404);
-    await reviewCommunityAvatar(adminId, second, "rejected");
-    expect(await getOwnerAvatarView(ownerId)).toEqual({ approvedId: first, pending: false, rejected: true });
+    expect((await getPublicMedia(first)).status).toBe(404);
+    expect((await getPublicMedia(second)).status).toBe(200);
+    expect(await submitCommunityAvatarReport(strangerId, second, "privacy", "Concern")).toEqual({ duplicate: false });
+    expect(await submitCommunityAvatarReport(strangerId, second, "privacy", "Concern")).toEqual({ duplicate: true });
+    expect((await stranger.from("community_avatar_reports").select("*")).error).toBeTruthy();
+    await reviewCommunityAvatar(adminId, second, "removed");
+    expect(await getOwnerAvatarView(ownerId)).toEqual({ approvedId: null, pending: false, rejected: false });
     expect((await getPublicMedia(second)).status).toBe(404);
 
     vi.stubEnv("COLORING_CLUB_PUBLIC_ENABLED", "false");
-    expect((await getPublicMedia(first)).status).toBe(404);
+    expect((await getPublicMedia(second)).status).toBe(404);
     vi.stubEnv("COLORING_CLUB_PUBLIC_ENABLED", "true");
 
     const third = await upload();
-    const results = await Promise.allSettled([reviewCommunityAvatar(adminId, third, "approved"), removeCommunityAvatar(ownerId)]);
+    const results = await Promise.allSettled([reviewCommunityAvatar(adminId, third, "removed"), removeCommunityAvatar(ownerId)]);
     expect(results[1].status).toBe("fulfilled");
     expect(await getOwnerAvatarView(ownerId)).toEqual({ approvedId: null, pending: false, rejected: false });
     expect((await getPublicMedia(first)).status).toBe(404);
@@ -148,6 +153,32 @@ describe.skipIf(process.env.RUN_COMMUNITY_AVATAR_SUPABASE_TESTS !== "1")("profil
     await processCommunityAccountMediaCleanup();
     for (const id of [first, second, third]) expect((await service.storage.from(BUCKET).download(id)).error).toBeTruthy();
   }, 35_000);
+
+  it("keeps historical pending and rejected photos private and cleans them up on replacement", async () => {
+    const historical: string[] = [];
+    for (const status of ["pending", "rejected"]) {
+      const reserved = await service.rpc("community_avatar_reserve", { p_user: ownerId });
+      expect(reserved.error).toBeNull();
+      const id = String(reserved.data);
+      objects.add(id);
+      historical.push(id);
+      expect((await service.storage.from(BUCKET).upload(id, image, { contentType: "image/webp" })).error).toBeNull();
+      // A real historical upload is outside the five-minute late-write fence.
+      expect((await service.from("community_profile_avatars").update({ created_at: new Date(Date.now() - 600_000).toISOString() }).eq("id", id)).error).toBeNull();
+      expect((await service.from("community_profile_avatars").update({ status }).eq("id", id)).error).toBeNull();
+      expect((await getPublicMedia(id)).status).toBe(404);
+      expect(await readCommunityAvatar(id, "owner", strangerId)).toBeNull();
+    }
+    expect(await getOwnerAvatarView(ownerId)).toEqual({ approvedId: null, pending: true, rejected: true });
+    const published = await upload();
+    expect((await getPublicMedia(published)).status).toBe(200);
+    expect(await getOwnerAvatarView(ownerId)).toEqual({ approvedId: published, pending: false, rejected: false });
+    await processCommunityAccountMediaCleanup();
+    for (const id of historical) {
+      expect((await getPublicMedia(id)).status).toBe(404);
+      expect((await service.storage.from(BUCKET).download(id)).error).toBeTruthy();
+    }
+  }, 30_000);
 
   it("fences late finalization and erases objects on account deletion", async () => {
     const reserved = await service.rpc("community_avatar_reserve", { p_user: ownerId });
@@ -162,7 +193,7 @@ describe.skipIf(process.env.RUN_COMMUNITY_AVATAR_SUPABASE_TESTS !== "1")("profil
     expect(new Date(fenced.data!.not_before).getTime()).toBeGreaterThan(Date.now());
 
     const approved = await upload();
-    await reviewCommunityAvatar(adminId, approved, "approved");
+
     const pending = await upload();
     expect((await service.auth.admin.deleteUser(ownerId)).error).toBeNull();
     ids.delete(ownerId);
@@ -181,11 +212,11 @@ describe.skipIf(process.env.RUN_COMMUNITY_AVATAR_SUPABASE_TESTS !== "1")("profil
     })).error).toBeNull();
     await uploadCommunityAvatar(strangerId, image);
     const { data, error } = await service.from("community_profile_avatars").select("id")
-      .eq("user_id", strangerId).eq("status", "pending").single();
+      .eq("user_id", strangerId).eq("status", "approved").single();
     expect(error).toBeNull();
     const id = String(data?.id);
     objects.add(id);
-    await reviewCommunityAvatar(adminId, id, "approved");
+
     expect((await getPublicMedia(id)).status).toBe(200);
     expect((await service.auth.admin.deleteUser(strangerId, true)).error).toBeNull();
     expect((await getPublicMedia(id)).status).toBe(404);
