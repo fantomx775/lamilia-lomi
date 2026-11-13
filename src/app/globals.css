@@ -242,7 +242,7 @@ body:has(.mobile-navigation-dialog[open]) {
   }
 
   @keyframes mobile-navigation-enter {
-    from { transform: translateX(-100%); }
+    from { transform: var(--navigation-enter-start, translateX(-100%)); }
     to { transform: translateX(0); }
   }
 }
@@ -251,5 +251,16 @@ body:has(.mobile-navigation-dialog[open]) {
 @media (width < 64rem) {
   body:has([data-public-storefront]) :is(select, textarea, input:not([type="hidden"], [type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="button"], [type="reset"], [type="submit"], [type="image"])) {
     font-size: max(16px, 1rem);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mobile-navigation-dialog[open][data-closing] {
+    animation: mobile-navigation-exit 220ms ease-in forwards;
+    pointer-events: none;
+  }
+  @keyframes mobile-navigation-exit {
+    from { transform: var(--navigation-exit-start, translateX(0)); }
+    to { transform: translateX(-100%); }
   }
 }

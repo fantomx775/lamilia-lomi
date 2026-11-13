@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { getBackendMode } from "../config";
 import { getCommunityFlags } from "../community-flags";
 import { getContentSnapshot } from "../content-store";
-import { removeCommunityAvatarObject } from "./avatar-repository";
+import { getCommunityPublicAvatarUrls, removeCommunityAvatarObject } from "./avatar-repository";
 import { assertCommunityActor, getCommunityActorForRequest } from "./session";
 import type { CommunityActor } from "./session";
 import {
@@ -65,13 +65,18 @@ export async function listCommunityPublicArtworks(input: {
   if (getBackendMode() === "local") {
     return localStore.listPublicArtworks({ ...input, viewerUserId: input.viewer?.userId, limit, products: getContentSnapshot().products });
   }
-  return supabase.listPublicArtworks({ ...input, viewerUserId: input.viewer?.userId, limit });
+  const page = await supabase.listPublicArtworks({ ...input, viewerUserId: input.viewer?.userId, limit });
+  const photos = await getCommunityPublicAvatarUrls(page.items.map((artwork) => artwork.creator.username));
+  return { ...page, items: page.items.map((artwork) => ({ ...artwork, creator: { ...artwork.creator, photoSrc: photos[artwork.creator.username] } })) };
 }
 
 export async function getCommunityPublicArtwork(id: string, viewer?: CommunityActor) {
   if (!getCommunityFlags().publicEnabled || !isUuid(id)) return null;
   if (getBackendMode() === "local") return localStore.getPublicArtwork(id, getContentSnapshot().products, viewer?.userId);
-  return supabase.getPublicArtwork(id, viewer?.userId);
+  const artwork = await supabase.getPublicArtwork(id, viewer?.userId);
+  if (!artwork) return null;
+  const photos = await getCommunityPublicAvatarUrls([artwork.creator.username]);
+  return { ...artwork, creator: { ...artwork.creator, photoSrc: photos[artwork.creator.username] } };
 }
 
 export async function listCommunityPublicProductOptions(): Promise<CommunityPublicProductOption[]> {

@@ -170,7 +170,7 @@ export function CommunityArtworkCard({ artwork, heartAccess = "guest" }: { artwo
       {artwork.description ? <p className="line-clamp-2 min-h-[2.5rem] break-words text-sm leading-5 text-[var(--color-ink)]">{artwork.description}</p> : <p className="min-h-[2.5rem] text-sm text-[var(--color-muted)]">A coloring-club creation</p>}
       <div className="flex min-w-0 items-center gap-2">
         <Link href={`/en/club/creators/${encodeURIComponent(artwork.creator.username)}`} aria-label={`View @${artwork.creator.username}’s profile`} className="flex min-w-0 items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-[var(--color-terracotta)]">
-          <CommunityAvatar username={artwork.creator.username} seed={artwork.creator.avatarSeed} className="size-8 text-xs" />
+          <CommunityAvatar username={artwork.creator.username} seed={artwork.creator.avatarSeed} photoSrc={artwork.creator.photoSrc} className="size-8 text-xs" />
           <span className="truncate text-sm font-medium text-[var(--color-ink)]">@{artwork.creator.username}</span>
         </Link>
       </div>

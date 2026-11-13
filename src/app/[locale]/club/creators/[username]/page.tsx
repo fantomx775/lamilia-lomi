@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
+import { CommunityArtworkReport } from "@/components/community/community-artwork-report";
 import { CommunityAvatar } from "@/components/community/community-avatar";
 import { CommunityHeartControl } from "@/components/community/community-heart-control";
 import { Card, CardContent } from "@/components/ui/card";
@@ -54,6 +55,7 @@ export default async function CreatorProfilePage({ params }: PageProps) {
           <h1 className="mt-1 wrap-anywhere font-serif text-3xl font-semibold text-[var(--color-ink)]">@{creator.username}</h1>
         </div>
       </header>
+      {photoSrc ? <CommunityArtworkReport artworkId={photoSrc.split("/").pop()!} subject="avatar" access={heartContext.access} returnTo={`/${locale}/club/creators/${encodeURIComponent(creator.username)}`} /> : null}
       {creator.artworks.length ? (
         <section aria-labelledby="creator-artworks-heading">
           <h2 id="creator-artworks-heading" className="mb-4 font-serif text-2xl font-semibold text-[var(--color-ink)]">Approved creations</h2>

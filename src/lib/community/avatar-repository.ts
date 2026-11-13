@@ -65,13 +65,15 @@ function activeAvatarProfiles() {
     .eq("community_profiles.rules_version", COMMUNITY_RULES_VERSION);
 }
 
+export async function getCommunityPublicAvatarUrls(usernames: string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(usernames)].slice(0, 100);
+  if (!unique.length || !supportsCommunityAvatars() || !getCommunityFlags().publicEnabled) return {};
+  const rows = await avatarRpc("community_public_avatar_ids", { p_usernames: unique }) as { username: string; avatar_id: string }[];
+  return Object.fromEntries(rows.map((row) => [row.username, `/api/community/avatars/${row.avatar_id}`]));
+}
+
 export async function getCommunityPublicAvatarUrl(username: string) {
-  if (!supportsCommunityAvatars() || !getCommunityFlags().publicEnabled) return undefined;
-  const { data, error } = await activeAvatarProfiles()
-    .eq("community_profiles.username", username).eq("status", "approved").maybeSingle();
-  if (error || !data) return undefined;
-  const verified = await avatarRpc("community_avatar_owner_is_verified", { p_user: data.user_id }).catch(() => false);
-  return verified === true ? `/api/community/avatars/${data.id}` : undefined;
+  return (await getCommunityPublicAvatarUrls([username]))[username];
 }
 
 export async function readCommunityAvatar(id: string, access: "public" | "owner" | "admin", userId?: string) {
@@ -103,9 +105,13 @@ export async function readCommunityAvatar(id: string, access: "public" | "owner"
   });
 }
 
-export async function listCommunityAvatarModeration(page: number, status: "pending" | "approved", username?: string) {
+export async function listCommunityAvatarModeration(page: number, status: "reported" | "approved", username?: string) {
   const pageSize = 24;
-  const query = activeAvatarProfiles().eq("status", status).order("created_at", { ascending: true })
+  // Filter reported photos in SQL, avoiding an unbounded preliminary report-ID fetch.
+  const projection = status === "reported"
+    ? "id,user_id,created_at,status,community_profiles!inner(username),community_avatar_reports!inner(reason,details,created_at)"
+    : "id,user_id,created_at,status,community_profiles!inner(username),community_avatar_reports(reason,details,created_at)";
+  const query = activeAvatarProfiles().select(projection).eq("status", "approved").order("created_at", { ascending: true })
     .order("id", { ascending: true }).range(page * pageSize, (page + 1) * pageSize);
   if (username) query.eq("community_profiles.username", username);
   const { data, error } = await query;
@@ -113,13 +119,13 @@ export async function listCommunityAvatarModeration(page: number, status: "pendi
   return {
     items: data.slice(0, pageSize).map((row) => {
       const profile = Array.isArray(row.community_profiles) ? row.community_profiles[0] : row.community_profiles;
-      return { id: String(row.id), username: String(profile?.username), createdAt: String(row.created_at) };
+      return { id: String(row.id), username: String(profile?.username), createdAt: String(row.created_at), reports: row.community_avatar_reports ?? [] };
     }),
     hasNext: data.length > pageSize,
   };
 }
 
-export async function reviewCommunityAvatar(adminId: string, id: string, decision: "approved" | "rejected" | "removed") {
+export async function reviewCommunityAvatar(adminId: string, id: string, decision: "removed") {
   await avatarRpc("community_avatar_review", { p_admin: adminId, p_id: id, p_decision: decision });
 }
 
@@ -128,4 +134,15 @@ export async function removeCommunityAvatarObject(id: string, signal?: AbortSign
   const { error } = await createServiceRoleClient({ storageRequestTimeoutMs: 15_000, requestSignal: signal })
     .storage.from(BUCKET).remove([id]);
   if (error) throw new Error("Profile photo deletion will retry.");
+}
+
+export async function submitCommunityAvatarReport(userId: string, id: string, reason: string, details: string) {
+  if (!isAvatarId(id)) throw new Error("Invalid profile photo.");
+  const accepted = await avatarRpc("community_consume_rate_limit", {
+    p_bucket_key: hashCommunityRateLimitKey("avatar-report", userId), p_window_seconds: 3600, p_max_hits: 10,
+  });
+  if (!accepted) throw new CommunityRateLimitError("Too many reports. Try again later.");
+  return { duplicate: await avatarRpc("community_avatar_report", {
+    p_actor: userId, p_id: id, p_reason: reason, p_details: details,
+  }) === true };
 }

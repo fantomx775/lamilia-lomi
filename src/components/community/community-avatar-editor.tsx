@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -23,6 +24,7 @@ function drawCrop(canvas: HTMLCanvasElement, image: HTMLImageElement, crop: Crop
 export function CommunityAvatarEditor({ username, seed, canUpload = true }: {
   username: string; seed: string; canUpload?: boolean;
 }) {
+  const router = useRouter();
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
@@ -115,8 +117,9 @@ export function CommunityAvatarEditor({ username, seed, canUpload = true }: {
       if (!response.ok || !payload?.avatar) throw new Error(payload?.message || "Your profile photo could not be updated. Try again.");
       setAvatar(payload.avatar);
       clearCrop();
+      router.refresh();
       setConfirmRemove(false);
-      showToast("success", method === "POST" ? "Profile photo sent for review." : "Profile photo removed.");
+      showToast("success", method === "POST" ? "Profile photo saved." : "Profile photo removed.");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Your profile photo could not be updated.";
       setError(message);
@@ -140,8 +143,8 @@ export function CommunityAvatarEditor({ username, seed, canUpload = true }: {
         <CommunityAvatar username={username} seed={seed} photoSrc={avatar.approvedId ? `${ENDPOINT}/${avatar.approvedId}?owner=1` : undefined} />
         <div className="min-w-0">
           <h3 id={`${id}-title`} className="font-medium">Profile photo</h3>
-          {avatar.pending ? <p className="text-sm text-[var(--color-muted)]" role="status">New photo awaiting review. Your current avatar stays visible.</p> : null}
-          {avatar.rejected ? <p className="text-sm text-[var(--color-muted)]" role="status">Your latest photo was not approved. You can submit another.</p> : null}
+          {avatar.pending ? <p className="text-sm text-[var(--color-muted)]" role="status">Your previous photo is unpublished. Choose a photo to publish it immediately.</p> : null}
+          {avatar.rejected ? <p className="text-sm text-[var(--color-muted)]" role="status">Your previous photo is unavailable. You can choose another.</p> : null}
         </div>
       </div>
       {canUpload ? (
@@ -152,7 +155,7 @@ export function CommunityAvatarEditor({ username, seed, canUpload = true }: {
             onClick={() => inputRef.current?.click()}>
             {avatar.approvedId || avatar.pending ? "Change photo" : "Choose a photo"}
           </Button>
-          <p className="text-sm text-[var(--color-muted)]">Approved photos are visible on your public creator profile. Choose an image without children’s faces, names, or location details.</p>
+          <p className="text-sm text-[var(--color-muted)]">Saved photos are immediately visible on your public creator profile. Choose an image without children’s faces, names, or location details.</p>
         </>
       ) : null}
       {source ? (
@@ -172,7 +175,7 @@ export function CommunityAvatarEditor({ username, seed, canUpload = true }: {
             </label>
           ))}
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => { void mutate("POST"); }}>{busy ? "Sending…" : "Send photo for review"}</Button>
+            <Button type="button" onClick={() => { void mutate("POST"); }}>{busy ? "Sending…" : "Save photo"}</Button>
             <Button type="button" variant="ghost" onClick={clearCrop}>Cancel</Button>
           </div>
         </fieldset>
@@ -180,7 +183,7 @@ export function CommunityAvatarEditor({ username, seed, canUpload = true }: {
       {avatar.approvedId || avatar.pending || avatar.rejected ? (
         confirmRemove ? (
           <div className="grid gap-2">
-            <p className="text-sm">Remove your profile photo and cancel any photo awaiting review?</p>
+            <p className="text-sm">Remove your profile photo?</p>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" disabled={busy} onClick={() => { void mutate("DELETE"); }}>{busy ? "Removing…" : "Confirm removal"}</Button>
               <Button type="button" variant="ghost" disabled={busy} onClick={() => setConfirmRemove(false)}>Cancel</Button>
