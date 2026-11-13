@@ -173,7 +173,7 @@ test("real private reports, admin decisions, notification intent and account med
     const submitted = page.waitForResponse((response) => response.url() === reportUrl && response.request().method() === "POST");
     await page.getByTestId("community-artwork-report-submit").click();
     expect((await submitted).status()).toBe(201);
-    await expect(page.getByTestId("community-artwork-report-message")).toContainText("Thank you");
+    await expect(page.getByRole("status").filter({ hasText: "Thank you" })).toContainText("Thank you");
     const duplicate = await page.request.post(reportUrl, { headers: { Origin: origin }, data: { reason: "rights", details: "Must not overwrite the first report." } });
     expect(duplicate.status()).toBe(200);
     expect(await duplicate.json()).toMatchObject({ ok: true, duplicate: true });

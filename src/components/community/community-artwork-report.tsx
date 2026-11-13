@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
+import { useToast } from "@/components/ui/toast";
 import type { CommunityHeartAccess } from "@/lib/community/types";
 
 const reasons = [
@@ -17,7 +18,7 @@ export function CommunityArtworkReport({ artworkId, access, returnTo }: { artwor
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const { showToast } = useToast();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -50,7 +51,7 @@ export function CommunityArtworkReport({ artworkId, access, returnTo }: { artwor
     event.preventDefault();
     if (!reason || busy) return;
     busyRef.current = true;
-    setBusy(true); setMessage("");
+    setBusy(true);
     try {
       const response = await fetch(`/api/community/artworks/${artworkId}/report`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -58,18 +59,17 @@ export function CommunityArtworkReport({ artworkId, access, returnTo }: { artwor
       });
       const payload = await response.json();
       if (response.status === 201 || (response.ok && payload.ok)) {
-        setMessage(payload.duplicate ? "You have already submitted a report for this artwork. Thank you." : "Thank you. Your report has been sent to the moderation team.");
+        showToast("success", payload.duplicate ? "You have already submitted a report for this artwork. Thank you." : "Thank you. Your report has been sent to the moderation team.");
         setOpen(false);
         return;
       }
-      setMessage(payload.message || "We could not send your report. Please try again.");
-    } catch { setMessage("We could not reach the server. Please try again."); }
+      showToast("error", payload.message || "We could not send your report. Please try again.");
+    } catch { showToast("error", "We could not reach the server. Please try again."); }
     finally { busyRef.current = false; setBusy(false); }
   };
 
   return <div className="mt-4 border-t border-[var(--color-border)] pt-4">
-    <button ref={triggerRef} data-testid="community-artwork-report-open" type="button" onClick={() => { setMessage(""); setOpen(true); }} className="min-h-10 text-sm font-semibold underline underline-offset-2">Report this artwork</button>
-    {message && <p data-testid="community-artwork-report-message" role="status" className="mt-2 text-sm text-[var(--color-muted)]">{message}</p>}
+    <button ref={triggerRef} data-testid="community-artwork-report-open" type="button" onClick={() => setOpen(true)} className="min-h-10 text-sm font-semibold underline underline-offset-2">Report this artwork</button>
     {open && <div className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-black/55 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setOpen(false); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="community-report-title" data-testid="community-artwork-report-dialog" className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-7">
         <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-terracotta)]">Private report</p><h2 id="community-report-title" className="mt-1 font-serif text-2xl font-semibold">Report artwork</h2></div><button ref={closeRef} type="button" disabled={busy} onClick={() => setOpen(false)} aria-label="Close report form" className="min-h-10 min-w-10 rounded-md border border-[var(--color-border)] disabled:opacity-50">×</button></div>

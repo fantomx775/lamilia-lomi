@@ -1,106 +1,154 @@
 "use client";
 
-import { BookOpen, Info, Library, Menu, Palette, X } from "lucide-react";
-import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { BookOpen, Images, Info, Library, LogIn, LogOut, Menu, Palette, UserRound, X } from "lucide-react";
+import Image from "next/image";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
+import { mobileActionClass } from "@/components/mobile-header-styles";
 import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 
-type MobileNavigationProps = {
-  locale: Locale;
-  children: ReactNode;
-  communityEnabled?: boolean;
-};
+const mobileHistoryKey = "lamiliaMobileNavigation";
+const menuLinkClass = "flex min-h-11 items-center gap-3 rounded-md px-3 py-2 font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-[var(--color-terracotta)]";
 
-export function MobileNavigation({ locale, children, communityEnabled = false }: MobileNavigationProps) {
-  const [openOnPathname, setOpenOnPathname] = useState<string | null>(null);
+export function MobileNavigation({ locale, communityEnabled, accountHref, showCreations, logout }: {
+  locale: Locale;
+  communityEnabled: boolean;
+  accountHref?: string;
+  showCreations?: boolean;
+  logout?: ReactNode;
+}) {
+  const router = useRouter();
   const pathname = usePathname();
-  const isOpen = openOnPathname === pathname;
-  const rootRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuId = "mobile-primary-navigation";
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const openedPath = useRef<string | null>(null);
+  const pendingClose = useRef<{ destination?: string } | null>(null);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!isOpen) return;
-
-    const dismissOnOutsidePress = (event: PointerEvent) => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) {
-        setOpenOnPathname(null);
+    const dialog = dialogRef.current;
+    const trigger = triggerRef.current;
+    function syncHistory() {
+      if (history.state?.[mobileHistoryKey] && trigger?.getClientRects().length) {
+        if (!dialog?.open) {
+          dialog?.showModal();
+          openedPath.current = window.location.pathname;
+          setOpen(true);
+        }
+        return;
       }
-    };
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-
-      event.preventDefault();
-      setOpenOnPathname(null);
-      buttonRef.current?.focus();
-    };
-
-    document.addEventListener("pointerdown", dismissOnOutsidePress);
-    document.addEventListener("keydown", dismissOnEscape);
-
+      if (dialog?.open) dialog.close();
+      const destination = pendingClose.current?.destination;
+      pendingClose.current = null;
+      if (destination && window.location.pathname === openedPath.current) router.push(destination);
+      else if (openedPath.current === window.location.pathname) trigger?.focus();
+      openedPath.current = null;
+    }
+    const desktop = window.matchMedia("(min-width: 64rem)");
+    function onDesktop(event: MediaQueryListEvent) {
+      if (event.matches && dialog?.open) {
+        if (history.state?.[mobileHistoryKey]) history.back();
+        else syncHistory();
+      }
+    }
+    window.addEventListener("popstate", syncHistory);
+    desktop.addEventListener("change", onDesktop);
     return () => {
-      document.removeEventListener("pointerdown", dismissOnOutsidePress);
-      document.removeEventListener("keydown", dismissOnEscape);
+      window.removeEventListener("popstate", syncHistory);
+      desktop.removeEventListener("change", onDesktop);
     };
-  }, [isOpen]);
+  }, [router]);
 
-  const closeMenu = () => setOpenOnPathname(null);
+  useEffect(() => {
+    if (dialogRef.current?.open && openedPath.current !== pathname) dialogRef.current.close();
+  }, [pathname]);
+
+  function closeForLogout() {
+    if (history.state?.[mobileHistoryKey]) history.replaceState({}, "");
+    dialogRef.current?.close();
+  }
+
+  function openMenu() {
+    if (dialogRef.current?.open) return;
+    history.pushState({ [mobileHistoryKey]: true }, "");
+    dialogRef.current?.showModal();
+    openedPath.current = pathname;
+    setOpen(true);
+  }
+
+  const closeMenu = useCallback((destination?: string) => {
+    if (!dialogRef.current?.open) return;
+    if (history.state?.[mobileHistoryKey]) {
+      if (pendingClose.current) return;
+      pendingClose.current = { destination };
+      history.back();
+    } else {
+      dialogRef.current.close();
+      if (destination) router.push(destination);
+      else triggerRef.current?.focus();
+    }
+  }, [router]);
+
+  const links = [
+    { label: "Catalog", href: `/${locale}/products`, icon: BookOpen },
+    ...(communityEnabled ? [{ label: "Coloring Club", href: "/en/club", icon: Palette }] : []),
+    { label: "About", href: `/${locale}/about`, icon: Info },
+    { label: "My Library", href: `/${locale}/library`, icon: Library },
+    ...(showCreations ? [{ label: "My Creations", href: `/${locale}/library/creations`, icon: Images }] : []),
+    ...(accountHref ? [{ label: "Account", href: accountHref, icon: UserRound }] : []),
+  ];
+  if (!accountHref) links.push(
+    { label: "Log in", href: `/${locale}/login`, icon: LogIn },
+    { label: "Sign up", href: `/${locale}/register`, icon: UserRound },
+  );
 
   return (
-    <div ref={rootRef} className="relative lg:hidden">
-      <button
-        ref={buttonRef}
-        type="button"
-        aria-label={isOpen ? "Close navigation menu" : "Open navigation menu"}
-        aria-expanded={isOpen}
-        aria-controls={menuId}
-        onClick={() => setOpenOnPathname(isOpen ? null : pathname)}
-        className="inline-flex size-11 min-h-11 min-w-11 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-ink)] transition-colors hover:bg-[var(--color-blush)] focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100"
-      >
-        {isOpen ? <X className="size-5" aria-hidden /> : <Menu className="size-5" aria-hidden />}
+    <div className="lg:hidden">
+      <button ref={triggerRef} type="button" aria-label="Open navigation menu" aria-expanded={open}
+        aria-controls="mobile-primary-navigation" aria-haspopup="dialog" onClick={openMenu} className={mobileActionClass}>
+        <Menu className="size-5" aria-hidden />
       </button>
-
-      <nav
-        id={menuId}
-        aria-label="Mobile primary navigation"
-        hidden={!isOpen}
-        className="absolute right-0 top-[calc(100%+0.75rem)] z-50 grid w-[min(18rem,calc(100vw-2rem))] gap-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2 text-sm text-[var(--color-ink)] shadow-[0_18px_48px_rgba(46,68,58,0.18)]"
-      >
-        <NavigationLink
-          href={`/${locale}/products`}
-          pendingLabel="Opening catalog"
-          onClick={closeMenu}
-          className="flex min-h-11 items-center gap-3 rounded-lg px-3 font-medium hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
-        >
-          <BookOpen className="size-4" aria-hidden />
-          Catalog
-        </NavigationLink>
-        <NavigationLink
-          href={`/${locale}/about`}
-          pendingLabel="Opening about page"
-          showPendingBar={false}
-          onClick={closeMenu}
-          className="flex min-h-11 items-center gap-3 rounded-lg px-3 font-medium hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
-        >
-          <Info className="size-4" aria-hidden />
-          About
-        </NavigationLink>
-        {communityEnabled && locale === "en" ? <NavigationLink href="/en/club" pendingLabel="Opening Coloring Club" onClick={closeMenu} className="flex min-h-11 items-center gap-3 rounded-lg px-3 font-medium hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"><Palette className="size-4" aria-hidden />Coloring Club</NavigationLink> : null}
-        <NavigationLink
-          href={`/${locale}/library`}
-          pendingLabel="Opening library"
-          onClick={closeMenu}
-          className="flex min-h-11 items-center gap-3 rounded-lg px-3 font-medium hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
-        >
-          <Library className="size-4" aria-hidden />
-          My Library
-        </NavigationLink>
-        <div className="my-1 border-t border-[var(--color-border)] pt-1">
-          {children}
+      <dialog ref={dialogRef} id="mobile-primary-navigation" aria-label="Mobile primary navigation"
+        className="mobile-navigation-dialog fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none overflow-y-auto overscroll-contain bg-[var(--color-bg)] text-[var(--color-ink)]"
+        onKeyDown={(event) => {
+          if (event.key !== "Tab") return;
+          const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("a[href],button:not(:disabled)"));
+          const index = controls.indexOf(document.activeElement as HTMLElement);
+          const offset = event.shiftKey ? -1 : 1;
+          event.preventDefault();
+          controls[(index + offset + controls.length) % controls.length]?.focus();
+        }}
+        onCancel={(event) => { event.preventDefault(); closeMenu(); }}
+        onClose={() => { if (!dialogRef.current?.open) setOpen(false); }}>
+        <div className="flex min-h-full flex-col px-4 pt-[env(safe-area-inset-top)] pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="flex min-h-16 items-center justify-between gap-3 border-b border-[var(--color-border)]">
+            <div className="flex min-w-0 items-center gap-2 font-serif text-xl font-semibold">
+              <Image src="/assets/home/lamilia-lomi-logo.webp" width={48} height={48} alt="" unoptimized />
+              LamiliaLomi
+            </div>
+            <button type="button" aria-label="Close navigation menu" onClick={() => closeMenu()} className={mobileActionClass}>
+              <X className="size-5" aria-hidden />
+            </button>
+          </div>
+          <nav className="flex flex-1 flex-col gap-1 py-4" aria-label="Storefront">
+            {links.map(({ href, label, icon: Icon }) => (
+              <NavigationLink key={href} href={href} pendingLabel={`Opening ${label}`}
+                className={`${menuLinkClass}${label === "Log in" ? " mt-auto border-t border-[var(--color-border)]" : ""}`}
+                aria-current={pathname === href ? "page" : undefined}
+                onNavigate={(event) => { event.preventDefault(); closeMenu(href); }}>
+                <Icon className="size-5" aria-hidden />{label}
+              </NavigationLink>
+            ))}
+          </nav>
+          {logout ? (
+            <div className="flex items-center gap-2 border-t border-[var(--color-border)] pt-4" onSubmit={closeForLogout}>
+              <LogOut className="ml-3 size-5" aria-hidden />{logout}
+            </div>
+          ) : null}
         </div>
-      </nav>
+      </dialog>
     </div>
   );
 }

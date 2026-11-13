@@ -2,18 +2,18 @@
 
 import { useState } from "react";
 
+import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 
 export function AccountDeletionPanel({ locale }: { locale: string }) {
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const { showToast } = useToast();
   const [error, setError] = useState("");
 
   async function deleteAccount() {
     setBusy(true);
     setError("");
-    setMessage("");
     try {
       const response = await fetch("/api/account/delete", {
         method: "POST",
@@ -22,15 +22,21 @@ export function AccountDeletionPanel({ locale }: { locale: string }) {
       });
       const result = await response.json() as { ok?: boolean; message?: string };
       if (!response.ok || !result.ok) {
-        setError(result.message ?? "We could not delete your account. Try again later.");
+        const message = result.message ?? "We could not delete your account. Try again later.";
+        if (response.status === 400) setError(message);
+        else showToast("error", message);
         return;
       }
-      setMessage(result.message ?? "Your account was deleted.");
+      try {
+        sessionStorage.setItem("lamilia-account-deleted", "1");
+      } catch {
+        // The identity cache must still be cleared when storage is unavailable.
+      }
       // Drop the document and its client/router identity cache after deleting
       // the account; the next document reads the cleared session cookie.
       globalThis.location.replace(`/${locale}/account`);
     } catch {
-      setError("We could not reach the account service. Try again.");
+      showToast("error", "We could not reach the account service. Try again.");
     } finally {
       setBusy(false);
     }
@@ -69,7 +75,6 @@ export function AccountDeletionPanel({ locale }: { locale: string }) {
           {busy ? "Deleting account…" : "Delete account permanently"}
         </Button>
         {error ? <p id="account-deletion-error" role="alert" className="mt-3 text-sm text-red-800">{error}</p> : null}
-        {message ? <p role="status" className="mt-3 text-sm text-green-800">{message}</p> : null}
       </section>
     </details>
   );

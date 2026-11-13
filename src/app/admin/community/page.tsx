@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { getCommunityAdminAccess } from "@/lib/community/admin-http";
+import { supportsCommunityAvatars } from "@/lib/community/avatar-repository";
 import { listCommunityModerationProductOptions } from "@/lib/community/repository";
 import CommunityModeration from "./community-moderation";
 
@@ -13,5 +15,16 @@ export default async function AdminCommunityPage({ searchParams }: { searchParam
   const query = searchParams ? await searchParams : {};
   const status = ["pending", "approved", "rejected", "removed", "all"].includes(query.status ?? "") ? query.status as "pending" | "approved" | "rejected" | "removed" | "all" : undefined;
   const creator = typeof query.creator === "string" ? query.creator.replace(/^@/, "").slice(0, 24) : undefined;
-  return <CommunityModeration products={productOptions} initialStatus={status} initialCreator={creator} />;
+  return (
+    <>
+      {supportsCommunityAvatars() && access.actor.backend === "supabase" ? (
+        <div className="px-4 pt-4 sm:px-6">
+          <Link href="/admin/community/avatars" className="inline-flex min-h-11 items-center rounded-md border border-[var(--color-border)] px-3 text-sm font-medium underline-offset-4 hover:underline">
+            Moderuj zdjęcia profilowe
+          </Link>
+        </div>
+      ) : null}
+      <CommunityModeration products={productOptions} initialStatus={status} initialCreator={creator} />
+    </>
+  );
 }

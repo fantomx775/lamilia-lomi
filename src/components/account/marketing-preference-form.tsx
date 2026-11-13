@@ -2,18 +2,18 @@
 
 import { useState, type FormEvent } from "react";
 
+import { useToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 
 type Props = {
   initialConsent: boolean;
 };
 
-type SaveStatus = "idle" | "saving" | "updated" | "error";
+type SaveStatus = "idle" | "saving";
 
 export function MarketingPreferenceForm({ initialConsent }: Props) {
-  const [savedConsent, setSavedConsent] = useState(initialConsent);
   const [marketingConsent, setMarketingConsent] = useState(initialConsent);
-  const [dirty, setDirty] = useState(false);
+  const { showToast } = useToast();
   const [status, setStatus] = useState<SaveStatus>("idle");
 
   async function savePreference(event: FormEvent<HTMLFormElement>) {
@@ -32,15 +32,14 @@ export function MarketingPreferenceForm({ initialConsent }: Props) {
       } | null;
 
       if (!response.ok || result?.ok !== true || result.marketingConsent !== marketingConsent) {
-        setStatus("error");
-        return;
+        throw new Error("Preference not saved");
       }
 
-      setSavedConsent(marketingConsent);
-      setDirty(false);
-      setStatus("updated");
+      showToast("success", "Your marketing preference has been saved.");
     } catch {
-      setStatus("error");
+      showToast("error", "We could not save your preference. Please try again.");
+    } finally {
+      setStatus("idle");
     }
   }
 
@@ -53,11 +52,7 @@ export function MarketingPreferenceForm({ initialConsent }: Props) {
           name="marketingConsent"
           checked={marketingConsent}
           disabled={status === "saving"}
-          onChange={(event) => {
-            const nextConsent = event.currentTarget.checked;
-            setMarketingConsent(nextConsent);
-            setDirty(nextConsent !== savedConsent);
-          }}
+          onChange={(event) => setMarketingConsent(event.currentTarget.checked)}
         />
         <span>I agree to receive marketing emails.</span>
       </label>
@@ -66,16 +61,6 @@ export function MarketingPreferenceForm({ initialConsent }: Props) {
           {status === "saving" ? "Saving…" : "Save preferences"}
         </Button>
       </div>
-      {status === "updated" && !dirty ? (
-        <p role="status" className="text-sm text-emerald-800">
-          Your marketing preference has been saved.
-        </p>
-      ) : null}
-      {status === "error" ? (
-        <p role="alert" className="text-sm text-red-700">
-          We could not save your preference. Please try again.
-        </p>
-      ) : null}
     </form>
   );
 }

@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { getBackendMode } from "../config";
 import { getCommunityFlags } from "../community-flags";
 import { getContentSnapshot } from "../content-store";
+import { removeCommunityAvatarObject } from "./avatar-repository";
 import { assertCommunityActor, getCommunityActorForRequest } from "./session";
 import type { CommunityActor } from "./session";
 import {
@@ -398,8 +399,12 @@ async function removeAccountMediaCleanupCandidate(candidate: CommunityAccountMed
   const leaseToken = local ? candidate.leaseToken : candidate.lease_token;
   const match = /^community\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.exec(storagePath);
   try {
-    if (!match) throw new Error("Invalid account cleanup object key.");
-    await removeCommunityArtworkImage({ authorId: match[1]!, storagePath, storageProvider: provider, ...(signal ? { signal } : {}) });
+    if (!local && provider === "supabase" && storagePath.startsWith("avatars/")) {
+      await removeCommunityAvatarObject(storagePath.slice("avatars/".length), signal);
+    } else {
+      if (!match) throw new Error("Invalid account cleanup object key.");
+      await removeCommunityArtworkImage({ authorId: match[1]!, storagePath, storageProvider: provider, ...(signal ? { signal } : {}) });
+    }
     if (local) await localStore.finishAccountMediaCleanup(candidate, "deleted");
     else await supabase.finishAccountMediaCleanup(Number(candidate.id), leaseToken, "deleted", signal);
   } catch {

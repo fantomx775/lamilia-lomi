@@ -1,10 +1,21 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { CommunityCreationManager } from "./community-creation-manager";
+import { ToastProvider } from "@/components/ui/toast";
+
+beforeEach(() => {
+  // jsdom has the dialog element but lacks the browser's modal methods.
+  if (!HTMLDialogElement.prototype.showModal) {
+    Object.defineProperties(HTMLDialogElement.prototype, {
+      showModal: { configurable: true, value(this: HTMLDialogElement) { this.open = true; } },
+      close: { configurable: true, value(this: HTMLDialogElement) { this.open = false; } },
+    });
+  }
+});
 
 afterEach(() => {
   cleanup();
@@ -22,7 +33,7 @@ function renderManager(initialArtworks: Array<{
   createdAt: string;
   updatedAt: string;
 }> = []) {
-  return render(<CommunityCreationManager
+  return render(<ToastProvider><CommunityCreationManager
     initialArtworks={initialArtworks}
     products={[{ id: "11111111-1111-4111-8111-111111111111", slug: "moon-garden", title: "Moon Garden" }]}
     uploadsEnabled
@@ -34,7 +45,7 @@ function renderManager(initialArtworks: Array<{
     accountHref="/en/account"
     libraryHref="/en/library"
     preselectedProductId=""
-  />);
+  /></ToastProvider>);
 }
 
 function uploadResponse(artworkId: string) {
@@ -105,6 +116,15 @@ describe("CommunityCreationManager", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderManager([artwork]);
 
+    expect(screen.queryByText(/Revision/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("community-artwork-edit-description")).not.toBeInTheDocument();
+    const actions = screen.getByRole("button", { name: "Actions for Moon Garden" });
+    await user.click(actions);
+    expect(actions).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{Escape}");
+    expect(actions).toHaveFocus();
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+    await user.click(actions);
     await user.click(screen.getByTestId("community-artwork-edit-description"));
     const description = screen.getByTestId("community-artwork-description");
     await user.clear(description);
@@ -142,19 +162,28 @@ describe("CommunityCreationManager", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderManager([artwork]);
 
+    const actions = screen.getByTestId("community-artwork-actions");
+    await user.click(actions);
     await user.click(screen.getByTestId("community-artwork-edit-description"));
     await user.clear(screen.getByTestId("community-artwork-description"));
     await user.type(screen.getByTestId("community-artwork-description"), "Updated description");
     await user.click(screen.getByTestId("community-artwork-save-description"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
-    const deleteButton = screen.getByTestId("community-artwork-delete");
-    expect(deleteButton).toBeDisabled();
-    await user.click(deleteButton);
-    expect(screen.queryByRole("group", { name: "Confirm artwork deletion" })).toBeNull();
+    expect(actions).toHaveAttribute("aria-disabled", "true");
+    await user.click(actions);
+    expect(screen.queryByTestId("community-artwork-delete")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Delete artwork?" })).toBeNull();
 
     resolveSave(new Response(JSON.stringify({ ok: true, artwork: updatedArtwork }), { status: 200 }));
     await screen.findByText("Your description was saved. This artwork is pending review again.");
+    await user.click(actions);
+    await user.click(screen.getByTestId("community-artwork-delete"));
+    const dialog = screen.getByRole("dialog", { name: "Delete artwork?" });
+    expect(within(dialog).getByRole("button", { name: "Keep artwork" })).toHaveFocus();
+    await user.click(within(dialog).getByRole("button", { name: "Keep artwork" }));
+    expect(actions).toHaveFocus();
+    await user.click(actions);
     await user.click(screen.getByTestId("community-artwork-delete"));
     await user.click(screen.getByTestId("community-artwork-confirm-delete"));
     await screen.findByText("Deleting…");
@@ -166,6 +195,7 @@ describe("CommunityCreationManager", () => {
 
     resolveDelete(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     await waitFor(() => expect(screen.queryByTestId("community-artwork-card")).toBeNull());
+    expect(screen.getByRole("status")).toHaveTextContent("Your artwork was deleted.");
   });
 
   it("sends three files sequentially and retries a failed item with its stable key and frozen payload", async () => {
@@ -197,6 +227,8 @@ describe("CommunityCreationManager", () => {
     await user.click(screen.getByTestId("community-upload-submit"));
 
     await screen.findByRole("button", { name: "Retry this image" });
+    expect(screen.getByText("2 sent for review. Retry the images that could not be sent.")).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
     expect(callOrder).toEqual(["first.png", "second.png", "third.png"]);
     expect(screen.getAllByTestId("community-artwork-card")).toHaveLength(2);
     const failedForm = fetchMock.mock.calls[1]?.[1]?.body as FormData;
@@ -204,12 +236,17 @@ describe("CommunityCreationManager", () => {
     expect(failedForm.get("description")).toBe("A small garden");
     expect(screen.getAllByLabelText(/Description Optional/)[0]).toBeDisabled();
 
+    await user.click(screen.getByTestId("community-upload-rules"));
+    expect(screen.getByTestId("community-artwork-retry")).toBeDisabled();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await user.click(screen.getByTestId("community-upload-rules"));
     await user.click(screen.getByTestId("community-artwork-retry"));
     await waitFor(() => expect(screen.queryByTestId("community-selected-artworks")).toBeNull());
     const retriedForm = fetchMock.mock.calls[3]?.[1]?.body as FormData;
     expect(retriedForm.get("idempotencyKey")).toBe(originalIdempotencyKey);
     expect(retriedForm.get("description")).toBe("A small garden");
     expect(screen.getAllByTestId("community-artwork-card")).toHaveLength(3);
+    expect(screen.getByRole("status")).toHaveTextContent("Artwork was sent for review.");
   });
 
   it("does not block a valid file because a different selected file fails client validation", async () => {

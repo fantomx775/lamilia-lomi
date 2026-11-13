@@ -129,7 +129,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await panel.getByRole("checkbox", { name: /18|adult/i }).check();
     await panel.getByRole("checkbox", { name: /I accept the current community guidelines/ }).check();
     await panel.getByRole("button", { name: "Join the Coloring Club", exact: true }).click();
-    await expect(panel.getByRole("status")).toContainText("You joined");
+    await expect(page.getByRole("status").filter({ hasText: "You joined" })).toBeVisible();
     const profile = await service.from("community_profiles").select("username,accepted_at,rules_version").eq("user_id", owner.id).single();
     expect(profile.error).toBeNull();
     expect(profile.data).toMatchObject({ username: "p0_artist_fixture", rules_version: COMMUNITY_RULES_VERSION });
@@ -144,7 +144,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     expect(longUsername.length).toBe(24);
     await panel.getByLabel("Change public username").fill(longUsername);
     await panel.getByRole("button", { name: "Save username", exact: true }).click();
-    await expect(panel.getByRole("status")).toContainText("updated");
+    await expect(page.getByRole("status").filter({ hasText: "updated" })).toBeVisible();
     expect((await service.from("community_profiles").update({ avatar_seed: "12345678-1234-4234-8234-123456789abc" }).eq("user_id", owner.id)).error).toBeNull();
     await page.reload();
     await expect(panel.getByLabel("Change public username")).toHaveValue(longUsername);
@@ -261,7 +261,7 @@ test("real club membership, concurrency, privacy and responsive account/profile 
     await page.goto(`${appOrigin}/en/account`);
     await panel.getByRole("button", { name: "Leave the Coloring Club", exact: true }).click();
     await panel.getByRole("button", { name: "Confirm leave", exact: true }).click();
-    await expect(panel.getByRole("status")).toContainText("You left");
+    await expect(page.getByRole("status").filter({ hasText: "You left" })).toBeVisible();
     expect((await visitor.request.get(`${appOrigin}/en/club/creators/${longUsername}`)).status()).toBe(404);
     await page.reload();
     await expect(panel.getByLabel("Public username", { exact: true })).toHaveValue(longUsername);
