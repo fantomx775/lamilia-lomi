@@ -474,7 +474,6 @@ function ProductCombobox({
         aria-activedescendant={open && options[activeIndex] ? `${listboxId}-option-${activeIndex}` : undefined}
         aria-invalid={duplicate || unavailable}
         autoComplete="off"
-        placeholder="Szukaj produktu po nazwie"
         value={open ? query : selectedTitle}
         onFocus={() => {
           setQuery("");

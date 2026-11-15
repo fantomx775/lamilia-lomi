@@ -291,7 +291,7 @@ function TaxonomyEditorForm({
                   name="description"
                   value={values.description}
                   onChange={(event) => updateValue("description", event.target.value)}
-                  className="min-h-28 w-full resize-y rounded-md border border-[var(--color-border)] bg-white px-3 py-3 text-sm leading-6 outline-none transition placeholder:text-[var(--color-muted)] focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]"
+                  className="min-h-28 w-full resize-y rounded-md border border-[var(--color-border)] bg-white px-3 py-3 text-sm leading-6 outline-none transition focus:border-[var(--color-terracotta)] focus:ring-4 focus:ring-[var(--color-terracotta-ring)]"
                 />
               </Field>
             </div>
@@ -300,7 +300,7 @@ function TaxonomyEditorForm({
           <AdminEditorSection title="Ustawienia" description="Slug jest używany w adresach i publicznym katalogu.">
             <div className="grid gap-4">
               <Field label="Slug">
-                <Input name="slug" defaultValue={item?.slug ?? ""} placeholder={isCategory ? "coloring-books" : "calm-evening"} />
+                <Input name="slug" defaultValue={item?.slug ?? ""} />
               </Field>
               {isCategory ? (
                 <Field label="Kolejność">

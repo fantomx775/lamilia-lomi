@@ -102,7 +102,6 @@ export function CategoriesResourceList({
       <AdminResourceList
         title="Kategorie"
         description="Przeglądaj kategorie przypisane do katalogu produktów."
-        searchPlaceholder="Szukaj kategorii…"
         searchAriaLabel="Szukaj kategorii"
         caption="Lista kategorii"
         rows={rows}

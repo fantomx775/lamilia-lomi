@@ -74,7 +74,6 @@ export function UsersResourceList({
       <AdminResourceList
         title="Użytkownicy"
         description="Przeglądaj konta, role i zgody marketingowe użytkowników."
-        searchPlaceholder="Szukaj użytkowników…"
         searchAriaLabel="Szukaj użytkowników"
         caption="Lista użytkowników"
         rows={rows}

@@ -75,7 +75,6 @@ export function TagsResourceList({
       <AdminResourceList
         title="Tagi"
         description="Przeglądaj tagi używane do porządkowania produktów."
-        searchPlaceholder="Szukaj tagów…"
         searchAriaLabel="Szukaj tagów"
         caption="Lista tagów"
         rows={rows}

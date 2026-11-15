@@ -189,7 +189,6 @@ export function CollectionsResourceList({
       <AdminResourceList
         title="Kolekcje"
         description="Twórz kolekcje i przypisuj do nich produkty w edytorze produktu."
-        searchPlaceholder="Szukaj kolekcji…"
         searchAriaLabel="Szukaj kolekcji"
         caption="Lista kolekcji"
         rows={rows}
@@ -401,7 +400,7 @@ function CollectionEditorForm({
             </div>
             <div className="grid gap-2">
               <Label htmlFor="collection-slug">Slug</Label>
-              <Input id="collection-slug" name="slug" value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="wygenerujemy-z-nazwy" />
+              <Input id="collection-slug" name="slug" value={slug} onChange={(event) => setSlug(event.target.value)} />
               <p className="text-xs leading-5 text-[var(--color-muted)]">Slug musi być unikalny. Pozostaw puste, aby utworzyć go z nazwy.</p>
             </div>
           </section>

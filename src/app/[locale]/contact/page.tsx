@@ -33,15 +33,15 @@ export default async function ContactPage({ params }: Props) {
             <input type="hidden" name="locale" value={locale} />
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>
-              <Input id="name" name="name" placeholder="Your name" />
+              <Input id="name" name="name" />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" placeholder="you@example.com" />
+              <Input id="email" name="email" type="email" />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="message">Message</Label>
-              <Textarea id="message" name="message" placeholder="How can we help?" />
+              <Textarea id="message" name="message" />
             </div>
             <Button type="submit">
               <Send className="size-4" aria-hidden />

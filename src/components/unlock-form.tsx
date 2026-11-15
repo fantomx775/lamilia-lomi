@@ -23,7 +23,6 @@ export type UnlockCopy = {
   continueDemoVerification: string;
   verifyDemo: string;
   codeLabel: string;
-  codePlaceholder: string;
   unlock: string;
   pending: string;
   login: string;
@@ -103,7 +102,6 @@ export function UnlockForm({
           initialCode={initialCode}
           copy={{
             codeLabel: copy.codeLabel,
-            codePlaceholder: copy.codePlaceholder,
             login: copy.login,
             register: copy.register,
             pending: copy.pending,
@@ -171,7 +169,6 @@ export function UnlockForm({
           id="premium-code"
           name="code"
           defaultValue={initialCode ?? ""}
-          placeholder={copy.codePlaceholder}
           autoComplete="one-time-code"
           aria-describedby={errorMessage ? "premium-code-error" : undefined}
           aria-invalid={Boolean(errorMessage)}

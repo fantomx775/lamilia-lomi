@@ -12,7 +12,6 @@ type AdminResourceTableShellProps = {
   description?: string;
   searchValue: string;
   onSearchChange: (value: string) => void;
-  searchPlaceholder: string;
   searchAriaLabel: string;
   resultsLabel: string;
   toolbarActions?: React.ReactNode;
@@ -26,7 +25,6 @@ export function AdminResourceTableShell({
   description,
   searchValue,
   onSearchChange,
-  searchPlaceholder,
   searchAriaLabel,
   resultsLabel,
   toolbarActions,
@@ -61,7 +59,6 @@ export function AdminResourceTableShell({
                 id={searchId}
                 value={searchValue}
                 onChange={(event) => onSearchChange(event.target.value)}
-                placeholder={searchPlaceholder}
                 aria-label={searchAriaLabel}
                 className="pl-9"
               />
