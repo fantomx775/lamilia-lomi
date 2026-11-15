@@ -4,12 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { ToastProvider } from "@/components/ui/toast";
 import { AccountDeletionPanel } from "./account-deletion-panel";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  sessionStorage.clear();
 });
 
 describe("AccountDeletionPanel", () => {
@@ -23,7 +25,7 @@ describe("AccountDeletionPanel", () => {
       return new Response(JSON.stringify({ ok: true, message: "Your account was deleted." }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<AccountDeletionPanel locale="en" />);
+    render(<AccountDeletionPanel locale="en" />, { wrapper: ToastProvider });
 
     expect(screen.getByText(/removes your login and access to product unlocks/)).toBeInTheDocument();
     expect(screen.getByText(/single-use code you redeemed stays consumed/)).toBeInTheDocument();
@@ -37,7 +39,7 @@ describe("AccountDeletionPanel", () => {
     await user.type(screen.getByLabelText("Type DELETE to confirm"), "DELETE");
     await user.click(submit);
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Your account was deleted.");
+    expect(sessionStorage.getItem("lamilia-account-deleted")).toBe("1");
     expect(fetchMock).toHaveBeenCalledWith("/api/account/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -53,7 +55,7 @@ describe("AccountDeletionPanel", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       ok: false, message: "We could not delete the account right now. Try again later.",
     }), { status: 503 })));
-    render(<AccountDeletionPanel locale="en" />);
+    render(<AccountDeletionPanel locale="en" />, { wrapper: ToastProvider });
     await user.type(screen.getByLabelText("Type DELETE to confirm"), "DELETE");
     await user.click(screen.getByTestId("account-deletion-submit"));
     expect(await screen.findByRole("alert")).toHaveTextContent("We could not delete the account right now.");

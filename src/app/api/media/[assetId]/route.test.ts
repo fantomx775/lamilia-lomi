@@ -103,7 +103,7 @@ describe("public media delivery", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/jpeg");
     expect(response.headers.get("cache-control")).toBe(
-      extendedCache ? "public, max-age=60, s-maxage=86400" : "public, max-age=60, s-maxage=60",
+      extendedCache ? "public, max-age=60, s-maxage=604800" : "public, max-age=60, s-maxage=60",
     );
     expect(response.headers.get("vercel-cdn-cache-control")).toBe(extendedCache ? "no-store" : null);
     expect(response.headers.get("etag")).toBe('"source-etag"');

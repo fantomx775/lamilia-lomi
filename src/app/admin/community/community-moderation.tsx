@@ -7,28 +7,33 @@ import type { CommunityAdminArtwork, CommunityArtworkStatus, CommunityModeration
 import { trackEvent } from "@/lib/analytics-client";
 
 type ProductOption = { id: string; title: string };
-type QueueResponse = { items: CommunityAdminArtwork[]; nextCursor: string | null; counts: CommunityModerationCounts };
-type DetailResponse = { artwork: CommunityAdminArtwork; history: CommunityModerationHistoryItem[] };
+export type QueueResponse = { items: CommunityAdminArtwork[]; nextCursor: string | null; counts: CommunityModerationCounts };
+export type DetailResponse = { artwork: CommunityAdminArtwork; history: CommunityModerationHistoryItem[] };
 type StatusFilter = CommunityArtworkStatus | "all";
 
 const labels: Record<StatusFilter, string> = { pending: "Do sprawdzenia", approved: "Opublikowane", rejected: "Odrzucone", removed: "Usunięte", all: "Wszystkie" };
 const actionLabels: Record<CommunityModerationAction, string> = { approve: "Zatwierdź i opublikuj", reject: "Odrzuć", remove: "Usuń z galerii", restore: "Przywróć do sprawdzenia" };
 const statusOrder: CommunityArtworkStatus[] = ["pending", "approved", "rejected", "removed"];
 
-export default function CommunityModeration({ products, initialStatus = "pending", initialCreator = "" }: { products: ProductOption[]; initialStatus?: StatusFilter; initialCreator?: string }) {
+export default function CommunityModeration({ products, initialStatus = "pending", initialCreator = "", initialQueue = null, initialDetail = null, initialError = "" }: { products: ProductOption[]; initialStatus?: StatusFilter; initialCreator?: string; initialQueue?: QueueResponse | null; initialDetail?: DetailResponse | null; initialError?: string }) {
   const [status, setStatus] = useState<StatusFilter>(initialStatus);
   const [productId, setProductId] = useState("");
   const [creatorInput, setCreatorInput] = useState(initialCreator);
   const [creator, setCreator] = useState(initialCreator);
-  const [queue, setQueue] = useState<QueueResponse>({ items: [], nextCursor: null, counts: { pending: 0, approved: 0, rejected: 0, removed: 0 } });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<DetailResponse | null>(null);
+  const [queue, setQueue] = useState<QueueResponse | null>(initialQueue);
+  const [selectedId, setSelectedId] = useState<string | null>(initialQueue?.items[0]?.id ?? null);
+  const [detail, setDetail] = useState<DetailResponse | null>(initialDetail);
   const [detailRefreshToken, setDetailRefreshToken] = useState(0);
   const [cursor, setCursor] = useState<string | null>(null);
   const [previousCursors, setPreviousCursors] = useState<Array<string | null>>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialQueue && !initialError);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
+  const [detailError, setDetailError] = useState("");
+  const initialQueueScope = useRef(Boolean(initialQueue) || Boolean(initialError));
+  const initialDetailScope = useRef(Boolean(initialDetail));
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [loadedScope, setLoadedScope] = useState(JSON.stringify(["", initialCreator]));
   const [pendingAction, setPendingAction] = useState<CommunityModerationAction | null>(null);
   const [reason, setReason] = useState("");
   const [reasonError, setReasonError] = useState("");
@@ -45,12 +50,16 @@ export default function CommunityModeration({ products, initialStatus = "pending
 
   const loadQueue = useCallback(async (url = listUrl) => {
     const requestId = ++queueRequestRef.current;
+    setLoading(true); setError("");
     try {
       const response = await fetch(url, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok || !payload.ok) throw new Error(payload.message || "Nie udało się wczytać kolejki.");
       if (requestId !== queueRequestRef.current) return null;
       setQueue({ items: payload.items, nextCursor: payload.nextCursor, counts: payload.counts });
+      setLoadedUrl(url);
+      const params = new URL(url, "http://localhost").searchParams;
+      setLoadedScope(JSON.stringify([params.get("productId") ?? "", params.get("creator") ?? ""]));
       setSelectedId((current) => current && payload.items.some((item: CommunityAdminArtwork) => item.id === current) ? current : payload.items[0]?.id ?? null);
       setPendingAction(null); setReason(""); setReasonError("");
       return payload.items as CommunityAdminArtwork[];
@@ -60,25 +69,33 @@ export default function CommunityModeration({ products, initialStatus = "pending
     } finally { if (requestId === queueRequestRef.current) setLoading(false); }
   }, [listUrl]);
 
-  useEffect(() => { void Promise.resolve().then(() => loadQueue()); }, [loadQueue]);
+  useEffect(() => {
+    if (initialQueueScope.current && status === initialStatus && creator === initialCreator && productId === "" && cursor === null) return;
+    initialQueueScope.current = false;
+    void Promise.resolve().then(() => loadQueue());
+    return () => { queueRequestRef.current += 1; };
+  }, [loadQueue, status, initialStatus, creator, initialCreator, productId, cursor]);
 
   useEffect(() => {
     if (!selectedId) return;
+    if (initialDetailScope.current && selectedId === initialDetail?.artwork.id && detailRefreshToken === 0) return;
+    initialDetailScope.current = false;
     let active = true;
     const requestId = ++detailRequestRef.current;
     const controller = new AbortController();
+    void Promise.resolve().then(() => { if (active) setDetailError(""); });
     fetch(`/api/admin/community/artworks/${selectedId}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok || !payload.ok) throw new Error(payload.message || "Nie udało się wczytać szczegółów.");
         if (active && requestId === detailRequestRef.current) setDetail({ artwork: payload.artwork, history: payload.history });
       })
-      .catch((caught) => { if (active && requestId === detailRequestRef.current && !controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Nie udało się wczytać szczegółów."); });
+      .catch((caught) => { if (active && requestId === detailRequestRef.current && !controller.signal.aborted) setDetailError(caught instanceof Error ? caught.message : "Nie udało się wczytać szczegółów."); });
     return () => { active = false; controller.abort(); };
-  }, [selectedId, detailRefreshToken]);
+  }, [selectedId, detailRefreshToken, initialDetail]);
 
   const runAction = async () => {
-    if (!detail || !pendingAction || busy) return;
+    if (!detail || !pendingAction || busy || loading) return;
     const trimmed = reason.trim();
     if ((pendingAction === "reject" || pendingAction === "remove") && (trimmed.length < 1 || trimmed.length > 500)) {
       setReasonError("Wpisz powód (maksymalnie 500 znaków).");
@@ -111,19 +128,25 @@ export default function CommunityModeration({ products, initialStatus = "pending
   };
   const submitFilters = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setLoading(true); setError("");
+    setError("");
+    const normalizedCreator = creatorInput.trim().replace(/^@/, "").toLowerCase();
+    if (normalizedCreator === creator && cursor === null) { void loadQueue(); return; }
+    setLoading(true);
     setCursor(null);
     setPreviousCursors([]);
     setCreator(creatorInput.trim().replace(/^@/, "").toLowerCase());
   };
   const refreshQueueAndDetail = async () => {
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setDetail(null);
     const items = await loadQueue();
     if (items && selectedId && items.some((item) => item.id === selectedId)) {
       setDetailRefreshToken((token) => token + 1);
     }
   };
-  const visibleDetail = detail?.artwork.id === selectedId ? detail : null;
+  const sameQueue = queue && (loadedUrl === listUrl || (loadedUrl === null && status === initialStatus && productId === "" && creator === initialCreator && cursor === null));
+  const visibleQueue = sameQueue ? queue : null;
+  const counts = queue && loadedScope === JSON.stringify([productId, creator]) ? queue.counts : null;
+  const visibleDetail = sameQueue && detail?.artwork.id === selectedId ? detail : null;
   const current = visibleDetail?.artwork;
   const allowedActions: CommunityModerationAction[] = current?.status === "pending" ? ["approve", "reject"]
     : current?.status === "approved" ? ["remove"] : current?.status === "removed" ? ["restore"] : [];
@@ -136,9 +159,9 @@ export default function CommunityModeration({ products, initialStatus = "pending
       <Link href="/admin/community/reports" data-testid="community-reports-link" className="inline-flex min-h-10 items-center text-sm font-semibold underline">Przejdź do prywatnych zgłoszeń</Link>
     </header>
 
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Liczba prac według statusu">
-      {statusOrder.map((key) => <button key={key} type="button" data-testid={`community-count-${key}`} disabled={busy} onClick={() => { setLoading(true); setError(""); setStatus(key); setCursor(null); setPreviousCursors([]); }} className={`rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${status === key ? "border-[var(--color-ink)] bg-[var(--color-blush)]" : "border-[var(--color-border)] bg-white"}`}>
-        <span className="block text-xs text-[var(--color-muted)]">{labels[key]}</span><span className="mt-1 block text-2xl font-semibold tabular-nums">{queue.counts[key]}</span>
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Liczba prac według statusu" aria-busy={loading}>
+      {statusOrder.map((key) => <button key={key} type="button" data-testid={`community-count-${key}`} disabled={busy} onClick={() => { if (status === key && cursor === null) return; setLoading(true); setError(""); setStatus(key); setCursor(null); setPreviousCursors([]); }} className={`rounded-2xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${status === key ? "border-[var(--color-ink)] bg-[var(--color-blush)]" : "border-[var(--color-border)] bg-white"}`}>
+        <span className="block text-xs text-[var(--color-muted)]">{labels[key]}</span><span className="mt-1 block text-2xl font-semibold tabular-nums">{counts ? counts[key] : <span data-testid="community-count-skeleton" aria-label="Wczytywanie liczby prac" className="inline-block h-7 w-12 animate-pulse rounded bg-[var(--color-border)]" />}</span>
       </button>)}
     </div>
 
@@ -162,13 +185,14 @@ export default function CommunityModeration({ products, initialStatus = "pending
     {error && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-900"><span>{error}</span><button type="button" onClick={() => void refreshQueueAndDetail()} className="font-semibold underline">Odśwież</button></div>}
 
     <div className="grid gap-5 lg:grid-cols-[minmax(15rem,0.8fr)_minmax(0,1.5fr)]">
-      <section data-testid="community-moderation-queue" aria-label="Kolejka prac" className="min-w-0 rounded-2xl border border-[var(--color-border)] bg-white p-3 sm:p-4">
-        <div className="mb-3 flex items-center justify-between gap-2"><h2 className="font-serif text-xl font-semibold">{labels[status]}</h2><span className="text-sm text-[var(--color-muted)]">{queue.items.length}</span></div>
-        {loading ? <p role="status" className="p-4 text-sm text-[var(--color-muted)]">Wczytywanie prac…</p>
-          : queue.items.length === 0 ? <p className="rounded-xl bg-[var(--color-bg)] p-5 text-sm leading-6 text-[var(--color-muted)]">Brak prac w tej kolejce. Zmień filtry, aby sprawdzić inne zgłoszenia.</p>
+      <section data-testid="community-moderation-queue" aria-label="Kolejka prac" aria-busy={loading} className="min-w-0 rounded-2xl border border-[var(--color-border)] bg-white p-3 sm:p-4">
+        <div className="mb-3 flex items-center justify-between gap-2"><h2 className="font-serif text-xl font-semibold">{labels[status]}</h2><span className="text-sm text-[var(--color-muted)]">{visibleQueue ? visibleQueue.items.length : "—"}</span></div>
+        {loading && <p role="status" className="p-2 text-sm text-[var(--color-muted)]">{visibleQueue ? "Odświeżanie prac…" : "Wczytywanie prac…"}</p>}
+        {!visibleQueue ? (loading ? <div data-testid="community-queue-skeleton" className="h-48 animate-pulse rounded-xl bg-[var(--color-bg)]" /> : null)
+          : visibleQueue.items.length === 0 ? <p className="rounded-xl bg-[var(--color-bg)] p-5 text-sm leading-6 text-[var(--color-muted)]">Brak prac w tej kolejce. Zmień filtry, aby sprawdzić inne zgłoszenia.</p>
             : <ul className="flex gap-2 overflow-x-auto pb-2 lg:grid lg:overflow-visible">
-              {queue.items.map((item) => <li key={item.id} className="min-w-[13rem] flex-1 lg:min-w-0">
-                <button data-testid="community-moderation-item" type="button" aria-pressed={selectedId === item.id} disabled={busy} onClick={() => { if (selectedId !== item.id) { setSelectedId(item.id); setDetail(null); } setPendingAction(null); setReason(""); setReasonError(""); }} className={`flex w-full gap-3 rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${selectedId === item.id ? "border-[var(--color-ink)] bg-[var(--color-blush)]" : "border-[var(--color-border)] hover:bg-[var(--color-bg)]"}`}>
+              {visibleQueue.items.map((item) => <li key={item.id} className="min-w-[13rem] flex-1 lg:min-w-0">
+                <button data-testid="community-moderation-item" type="button" aria-pressed={selectedId === item.id} disabled={busy || loading} onClick={() => { if (selectedId !== item.id) { setSelectedId(item.id); setDetail(null); } setPendingAction(null); setReason(""); setReasonError(""); }} className={`flex w-full gap-3 rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${selectedId === item.id ? "border-[var(--color-ink)] bg-[var(--color-blush)]" : "border-[var(--color-border)] hover:bg-[var(--color-bg)]"}`}>
                   <span className="size-16 shrink-0 overflow-hidden rounded-lg bg-[var(--color-bg)]">
                     {/* Private media is served through the live status-checked endpoint. */}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -184,14 +208,14 @@ export default function CommunityModeration({ products, initialStatus = "pending
                 </button>
               </li>)}
             </ul>}
-        {(previousCursors.length > 0 || queue.nextCursor) && <div className="mt-3 flex gap-2">
+        {(previousCursors.length > 0 || visibleQueue?.nextCursor) && <div className="mt-3 flex gap-2">
           {previousCursors.length > 0 && <button data-testid="community-moderation-previous-page" type="button" onClick={() => { setLoading(true); setCursor(previousCursors[previousCursors.length - 1]); setPreviousCursors((items) => items.slice(0, -1)); }} disabled={loading || busy} className="min-h-11 flex-1 rounded-xl border border-[var(--color-border)] text-sm font-semibold disabled:opacity-50">Poprzednie</button>}
-          {queue.nextCursor && <button data-testid="community-moderation-next-page" type="button" onClick={() => { setLoading(true); setPreviousCursors((items) => [...items, cursor]); setCursor(queue.nextCursor); }} disabled={loading || busy} className="min-h-11 flex-1 rounded-xl border border-[var(--color-border)] text-sm font-semibold disabled:opacity-50">Następne prace</button>}
+          {visibleQueue?.nextCursor && <button data-testid="community-moderation-next-page" type="button" onClick={() => { setLoading(true); setPreviousCursors((items) => [...items, cursor]); setCursor(visibleQueue?.nextCursor); }} disabled={loading || busy} className="min-h-11 flex-1 rounded-xl border border-[var(--color-border)] text-sm font-semibold disabled:opacity-50">Następne prace</button>}
         </div>}
       </section>
 
       <section data-testid="community-moderation-detail" aria-label="Szczegóły pracy" className="min-w-0 rounded-2xl border border-[var(--color-border)] bg-white p-4 sm:p-5">
-        {!current || !detail ? <div className="grid min-h-72 place-items-center text-center text-sm text-[var(--color-muted)]">{selectedId ? "Wczytywanie szczegółów…" : "Wybierz pracę z kolejki, aby zobaczyć podgląd i historię."}</div> : <div className="space-y-5">
+        {detailError && sameQueue ? <div role="alert" className="p-4 text-sm"><p>{detailError}</p><button type="button" className="min-h-11 underline" onClick={() => { setDetail(null); setDetailRefreshToken((token) => token + 1); }}>Ponów wczytanie szczegółów</button></div> : !current || !detail ? <div className="grid min-h-72 place-items-center text-center text-sm text-[var(--color-muted)]">{selectedId ? "Wczytywanie szczegółów…" : "Wybierz pracę z kolejki, aby zobaczyć podgląd i historię."}</div> : <div className="space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h2 className="break-words font-serif text-2xl font-semibold">{current.creatorUsername ? `@${current.creatorUsername}` : "Twórca niedostępny"}</h2><p className="mt-1 break-words text-sm text-[var(--color-muted)]">{current.product.title}</p></div><span className="rounded-full bg-[var(--color-bg)] px-3 py-1 text-sm">{labels[current.status]} · wersja {current.revision}</span></div>
           <div className="overflow-hidden rounded-2xl bg-[var(--color-bg)]">
             {/* Private media bypasses the public image optimizer so every view rechecks moderation status. */}
@@ -202,7 +226,7 @@ export default function CommunityModeration({ products, initialStatus = "pending
           {current.rejectionReason && <div className="rounded-xl border border-[var(--color-border)] p-3"><p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">Ostatni powód moderacji</p><p className="mt-1 whitespace-pre-wrap break-words text-sm">{current.rejectionReason}</p></div>}
 
           {allowedActions.length > 0 && <div className="flex flex-wrap gap-2" aria-label="Działania moderacyjne">
-            {allowedActions.map((action) => <button key={action} data-testid={`community-moderation-${action}`} type="button" disabled={busy} onClick={() => startAction(action)} className={`min-h-11 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 ${action === "approve" ? "bg-[var(--color-ink)] text-white" : "border border-[var(--color-border)]"}`}>{actionLabels[action]}</button>)}
+            {allowedActions.map((action) => <button key={action} data-testid={`community-moderation-${action}`} type="button" disabled={busy || loading} onClick={() => startAction(action)} className={`min-h-11 rounded-xl px-4 text-sm font-semibold disabled:opacity-50 ${action === "approve" ? "bg-[var(--color-ink)] text-white" : "border border-[var(--color-border)]"}`}>{actionLabels[action]}</button>)}
           </div>}
 
           {pendingAction && <div className="space-y-3 rounded-xl border border-[var(--color-border)] p-4">

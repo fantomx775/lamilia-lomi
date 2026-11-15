@@ -316,8 +316,6 @@ export async function communityScreenshots(page: Page, folderName: string, view:
   if (set && !/^[a-z0-9_-]+$/i.test(set)) throw new Error("Unsafe screenshot set.");
   if (set) folderName = `${set}-${folderName}`;
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  const folder = path.resolve("docs/verification/issue-77", folderName);
-  await mkdir(folder, { recursive: true });
   const screenshots = [];
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
@@ -350,8 +348,9 @@ export async function communityScreenshots(page: Page, folderName: string, view:
     }));
     expect(overflow.contentWidth, JSON.stringify(overflow)).toBeLessThanOrEqual(width + 1);
     const filename = `${view}-${width}.png`;
-    await page.screenshot({ path: path.join(folder, filename), fullPage: !dialogOpen, caret: "hide", animations: "disabled" });
-    screenshots.push({ path: `docs/verification/issue-77/${folderName}/${filename}`, testedSha, runId });
+    const screenshotPath = await communityArtifactPath(folderName, filename);
+    await page.screenshot({ path: screenshotPath, fullPage: !dialogOpen, caret: "hide", animations: "disabled" });
+    screenshots.push({ path: process.env.COMMUNITY_ARTIFACT_DIR ? screenshotPath : `docs/verification/issue-77/${folderName}/${filename}`, testedSha, runId });
   }
   return screenshots;
 }

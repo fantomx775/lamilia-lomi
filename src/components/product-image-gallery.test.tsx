@@ -6,8 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/image", () => ({
-  default: ({ src, alt, loading, className }: { src: string; alt: string; loading?: string; className?: string }) =>
-    createElement("img", { src, alt, loading, className }),
+  default: ({ src, alt, loading, className, onLoad }: React.ImgHTMLAttributes<HTMLImageElement>) =>
+    createElement("img", { src, alt, loading, className, onLoad }),
 }));
 
 import { ProductImageGallery } from "@/components/product-image-gallery";
@@ -121,6 +121,19 @@ describe("ProductImageGallery", () => {
 
     await user.click(within(dialog).getByRole("button", { name: "Close image preview" }));
     await waitFor(() => expect(dialog).not.toHaveAttribute("open"));
+  });
+
+  it("uses the loaded thumbnail URL for the first frame of the preview", async () => {
+    const user = userEvent.setup();
+    render(<ProductImageGallery images={images} labels={labels} />);
+    const thumbnail = screen.getByRole("img", { name: images[0].alt });
+    const selectedSource = "/_next/image?url=%2Fpage-one.png&w=640&q=75";
+    Object.defineProperty(thumbnail, "currentSrc", { value: selectedSource });
+    fireEvent.load(thumbnail);
+
+    await user.click(screen.getByRole("button", { name: "Open image 1" }));
+    const dialog = screen.getByRole("dialog", { name: "Image preview" });
+    expect(within(dialog).getByRole("img", { name: images[0].alt })).toHaveAttribute("src", selectedSource);
   });
 
   it("supports touch swiping and wraps around the image sequence", async () => {

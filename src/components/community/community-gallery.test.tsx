@@ -26,6 +26,13 @@ const artwork: CommunityPublicArtwork = {
 };
 
 describe("public Coloring Club gallery", () => {
+  it("keeps gallery filters within their responsive columns when book titles are long", () => {
+    render(<CommunityGallery initialPage={{ items: [], nextCursor: null }} products={[{ ...product, title: "A Very Long Coloring Book Title That Should Not Expand the Filter" }]} />);
+    expect(screen.getByTestId("community-gallery-audience-filter")).toHaveClass("w-full", "min-w-0");
+    expect(screen.getByTestId("community-gallery-product-filter")).toHaveClass("w-full", "min-w-0");
+    expect(screen.getByTestId("community-gallery-sort")).toHaveClass("w-full", "min-w-0");
+  });
+
   it("keeps SSR filters disabled until mounted, then sends the selected sort request", async () => {
     const props = { initialPage: { items: [], nextCursor: null }, products: [product] };
     const html = renderToString(<CommunityGallery {...props} />);

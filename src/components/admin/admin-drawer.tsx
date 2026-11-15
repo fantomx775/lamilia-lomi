@@ -25,6 +25,9 @@ export function AdminDrawer({
   children,
   className,
   bodyClassName,
+  footer,
+  fitVisualViewport = false,
+  closeDisabled = false,
   restoreFocusElement,
 }: {
   open: boolean;
@@ -35,6 +38,9 @@ export function AdminDrawer({
   children: React.ReactNode;
   className?: string;
   bodyClassName?: string;
+  footer?: React.ReactNode;
+  fitVisualViewport?: boolean;
+  closeDisabled?: boolean;
   restoreFocusElement?: HTMLElement | null;
 }) {
   const [isRendered, setIsRendered] = useState(open);
@@ -97,6 +103,32 @@ export function AdminDrawer({
 
   const isMounted = isRendered || open;
   const isExitActive = !open && isMounted;
+
+  useEffect(() => {
+    const backdrop = backdropRef.current;
+    if (!open || !fitVisualViewport || !backdrop) return;
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    function fitViewport() {
+      if (!backdrop || !viewport) return;
+      if (viewport.scale !== 1) {
+        backdrop.style.removeProperty("--drawer-viewport-height");
+        backdrop.style.removeProperty("--drawer-viewport-top");
+        return;
+      }
+      backdrop.style.setProperty("--drawer-viewport-height", `${viewport.height}px`);
+      backdrop.style.setProperty("--drawer-viewport-top", `${viewport.offsetTop}px`);
+    }
+
+    fitViewport();
+    viewport.addEventListener("resize", fitViewport);
+    viewport.addEventListener("scroll", fitViewport);
+    return () => {
+      viewport.removeEventListener("resize", fitViewport);
+      viewport.removeEventListener("scroll", fitViewport);
+    };
+  }, [open, fitVisualViewport]);
 
   useEffect(() => {
     if (!isExitActive || !backdropRef.current) {
@@ -183,6 +215,7 @@ export function AdminDrawer({
       ref={backdropRef}
       className={cn(
         "admin-drawer-backdrop fixed inset-0 z-50",
+        fitVisualViewport && "max-md:top-[var(--drawer-viewport-top,0px)] max-md:bottom-auto max-md:h-[var(--drawer-viewport-height,100dvh)]",
         isExitActive && "admin-drawer-exiting",
       )}
       data-slot="admin-drawer"
@@ -190,7 +223,9 @@ export function AdminDrawer({
       <button
         type="button"
         aria-label={closeLabel}
-        tabIndex={isExitActive ? -1 : undefined}
+        tabIndex={isExitActive || fitVisualViewport ? -1 : undefined}
+        aria-hidden={fitVisualViewport || undefined}
+        disabled={closeDisabled}
         className="absolute inset-0 h-full w-full cursor-default bg-[rgb(62_52_47_/_0.28)]"
         onClick={onClose}
       />
@@ -203,11 +238,13 @@ export function AdminDrawer({
         inert={isExitActive || undefined}
         className={cn(
           "admin-drawer-panel absolute inset-y-0 right-0 flex h-dvh w-full max-w-2xl flex-col border-l border-[var(--color-border)] bg-[var(--color-bg)] shadow-2xl sm:rounded-l-2xl",
+          fitVisualViewport && "max-md:h-full max-md:max-w-none max-md:rounded-none max-md:border-l-0",
           isExitActive && "admin-drawer-exiting",
           className,
         )}
       >
-        <div className="sticky top-0 z-20 flex shrink-0 items-start justify-between gap-4 border-b border-[var(--color-border)] bg-white/95 px-4 py-3 shadow-[0_4px_16px_rgba(62,52,47,0.05)] backdrop-blur sm:px-6 sm:py-4">
+        <div className={cn("sticky top-0 z-20 flex shrink-0 items-start justify-between gap-4 border-b border-[var(--color-border)] bg-white/95 px-4 py-3 shadow-[0_4px_16px_rgba(62,52,47,0.05)] backdrop-blur sm:px-6 sm:py-4",
+          fitVisualViewport && "items-center max-md:pt-[max(0.75rem,env(safe-area-inset-top))]")}>
           <div className="min-w-0">
             <h2 id={titleId} className="font-serif text-xl font-semibold sm:text-2xl">
               {title}
@@ -219,14 +256,17 @@ export function AdminDrawer({
           <button
             ref={closeButtonRef}
             type="button"
+            disabled={closeDisabled}
             onClick={onClose}
-            className="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--color-border)] bg-white text-[var(--color-ink)] transition hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
+            className={cn("inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-[var(--color-border)] bg-white text-[var(--color-ink)] transition hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] disabled:opacity-50",
+              fitVisualViewport && "size-11")}
           >
             <X className="size-4" aria-hidden />
             <span className="sr-only">{closeLabel}</span>
           </button>
         </div>
         <div className={cn("min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-pb-8 px-4 py-5 sm:px-6", bodyClassName)}>{children}</div>
+        {footer}
       </aside>
     </div>
   );
@@ -244,7 +284,7 @@ function getFocusableElements(dialog: HTMLElement | null) {
   }
 
   return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (element) => !element.hidden && !element.hasAttribute("aria-hidden"),
+    (element) => !element.hidden && !element.hasAttribute("aria-hidden") && element.tabIndex >= 0,
   );
 }
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const historicalProjectId = "lamilia-coloring-club-p0";
 const historicalStatusPath = "/tmp/lamilia-p0-preflight/local-supabase-status.json";
 const isolatedApiUrl = "http://127.0.0.1:55421";
+const issue121ProjectId = "lomi-121-isolated";
 
 export function assertLocalDockerEndpoint(endpoint) {
   if (typeof endpoint === "string" && /^npipe:\/\/\/\/\.\/pipe\/(docker_engine|dockerDesktopLinuxEngine|dockerDesktopWindowsEngine)$/i.test(endpoint)) {
@@ -67,9 +68,13 @@ export function readCommunityCronSecret(env = process.env) {
 /** Pure safety check used before creating any Auth, Storage, or SQL fixture. */
 export function validateIsolatedCommunityTarget(status, projectId, containers) {
   isolatedCommunityConfig({ COMMUNITY_SUPABASE_PROJECT_ID: projectId });
-  if (status?.API_URL !== isolatedApiUrl || typeof status.ANON_KEY !== "string" || !status.ANON_KEY.trim()
+  const issue121 = projectId === issue121ProjectId;
+  const apiUrl = issue121 ? "http://127.0.0.1:56521" : isolatedApiUrl;
+  const apiPort = issue121 ? "56521" : "55421";
+  const databasePort = issue121 ? "56522" : "55422";
+  if (status?.API_URL !== apiUrl || typeof status.ANON_KEY !== "string" || !status.ANON_KEY.trim()
     || typeof status.SERVICE_ROLE_KEY !== "string" || !status.SERVICE_ROLE_KEY.trim()) {
-    throw new Error("Community fixtures require private local Supabase status on API port 55421.");
+    throw new Error(`Community fixtures require private local Supabase status on API port ${apiPort}.`);
   }
   let databaseUrl;
   try { databaseUrl = new URL(status.DB_URL); } catch {
@@ -77,16 +82,16 @@ export function validateIsolatedCommunityTarget(status, projectId, containers) {
   }
   if (!["postgres:", "postgresql:"].includes(databaseUrl.protocol)
     || !["127.0.0.1", "localhost"].includes(databaseUrl.hostname)
-    || databaseUrl.port !== "55422" || databaseUrl.pathname !== "/postgres" || databaseUrl.search || databaseUrl.hash) {
-    throw new Error("The community fixture database must use its dedicated local port 55422.");
+    || databaseUrl.port !== databasePort || databaseUrl.pathname !== "/postgres" || databaseUrl.search || databaseUrl.hash) {
+    throw new Error(`The community fixture database must use its dedicated local port ${databasePort}.`);
   }
   const databaseContainer = `supabase_db_${projectId}`;
   const gatewayContainer = `supabase_kong_${projectId}`;
-  const network = `supabase_network_${projectId}`;
+  const network = issue121 ? "lomi-121-isolated-net" : `supabase_network_${projectId}`;
   if (!Array.isArray(containers)) {
     throw new Error("The community fixture API and database must belong to the selected running local project.");
   }
-  const expected = [[databaseContainer, "5432/tcp", "55422"], [gatewayContainer, "8000/tcp", "55421"]];
+  const expected = [[databaseContainer, "5432/tcp", databasePort], [gatewayContainer, "8000/tcp", apiPort]];
   for (const [name, internalPort, externalPort] of expected) {
     const container = containers.find((item) => item?.Name === `/${name}`);
     if (!container?.Running || !/^[a-f0-9]{64}$/.test(container.Id ?? "")
@@ -99,7 +104,7 @@ export function validateIsolatedCommunityTarget(status, projectId, containers) {
     }
   }
   return {
-    apiUrl: isolatedApiUrl,
+    apiUrl,
     publishableKey: status.ANON_KEY,
     serviceRoleKey: status.SERVICE_ROLE_KEY,
     databaseContainer,

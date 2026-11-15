@@ -1,11 +1,14 @@
-import { BookOpen, Info, Library, LogIn, Palette, UserPlus } from "lucide-react";
+import { BookOpen, Info, Library, LogIn, Palette, UserRound } from "lucide-react";
 import Image from "next/image";
-import { Suspense, type ReactNode } from "react";
+import { Suspense } from "react";
 
+import { logoutAction } from "@/app/actions";
+import { mobileActionClass } from "@/components/mobile-header-styles";
 import { MobileNavigation } from "@/components/mobile-navigation";
 import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 import { getHeaderAccountStateForRequest } from "@/lib/session.server";
+import { getMyCommunityProfile } from "@/lib/community/repository";
 import { getCommunityFlags } from "@/lib/community-flags";
 
 import { buttonClassName } from "./ui/button";
@@ -17,11 +20,10 @@ export function SiteHeader({ locale }: {
     products: "Catalog",
     library: "My Library",
     about: "About",
-    account: "Account",
-    login: "Log in",
     navigation: "Primary navigation",
   };
-  const communityEnabled = getCommunityFlags().publicEnabled;
+  const flags = getCommunityFlags();
+  const communityEnabled = flags.publicEnabled && locale === "en";
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
@@ -43,7 +45,7 @@ export function SiteHeader({ locale }: {
             loading="eager"
             className="size-14 shrink-0 object-contain sm:size-16"
           />
-          <span className="min-w-0 max-[360px]:hidden">
+          <span className="min-w-0">
             <span className="block font-serif text-lg font-semibold text-[var(--color-ink)] sm:text-xl">
               LamiliaLomi
             </span>
@@ -73,131 +75,60 @@ export function SiteHeader({ locale }: {
           </NavigationLink>
         </nav>
         <div className="flex shrink-0 items-center gap-2">
-          <Suspense fallback={<HeaderAccountFallback locale={locale} />}>
-            <HeaderAccountLink locale={locale} labels={labels} />
+          <Suspense fallback={<HeaderAccountControls locale={locale} communityEnabled={communityEnabled} />}>
+            <HeaderSessionControls locale={locale} communityEnabled={communityEnabled} uploadsEnabled={flags.uploadsEnabled} />
           </Suspense>
-          <MobileNavigation locale={locale} communityEnabled={communityEnabled}>
-            <Suspense fallback={<MobileGuestAccountLinks locale={locale} />}>
-              <MobileAccountLinks locale={locale} />
-            </Suspense>
-          </MobileNavigation>
         </div>
       </div>
     </header>
   );
 }
 
-async function HeaderAccountLink({
-  locale,
-  labels,
-}: {
+async function HeaderSessionControls({ locale, communityEnabled, uploadsEnabled }: {
   locale: Locale;
-  labels: {
-    account: string;
-    login: string;
-  };
+  communityEnabled: boolean;
+  uploadsEnabled: boolean;
 }) {
-  const accountState = await getHeaderAccountStateForRequest();
-  const isSignedIn = accountState?.isSignedIn ?? false;
-  const label = isSignedIn ? labels.account : labels.login;
-
-  return (
-    <NavigationLink
-      aria-label={label}
-      className={buttonClassName({
-        variant: isSignedIn ? "outline" : "default",
-        size: "sm",
-        className:
-          "min-h-10 gap-1.5 px-3 transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]",
-      })}
-      href={
-        isSignedIn
-          ? accountState?.isAdmin
-            ? "/admin"
-            : `/${locale}/account`
-          : `/${locale}/login`
-      }
-      pendingLabel={isSignedIn ? "Opening account" : "Opening login"}
-    >
-      <LogIn className="size-4" aria-hidden />
-      <span>{label}</span>
-    </NavigationLink>
-  );
+  const account = await getHeaderAccountStateForRequest();
+  const showCreations = Boolean(account?.emailVerified && (uploadsEnabled || await getMyCommunityProfile().catch(() => null)));
+  return <HeaderAccountControls locale={locale} communityEnabled={communityEnabled}
+    accountHref={account ? (account.isAdmin ? "/admin" : `/${locale}/account`) : undefined}
+    showCreations={showCreations} />;
 }
 
-function MobileAccountLink({
-  href,
-  label,
-  icon,
-  pendingLabel,
-}: {
-  href: string;
-  label: string;
-  icon: ReactNode;
-  pendingLabel: string;
+function HeaderAccountControls({ locale, communityEnabled, accountHref, showCreations }: {
+  locale: Locale;
+  communityEnabled: boolean;
+  accountHref?: string;
+  showCreations?: boolean;
 }) {
-  return (
-    <NavigationLink
-      href={href}
-      pendingLabel={pendingLabel}
-      className="flex min-h-11 items-center gap-3 rounded-lg px-3 font-medium hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]"
-    >
-      {icon}
-      {label}
-    </NavigationLink>
-  );
-}
+  const label = accountHref ? "Account" : "Log in";
+  const href = accountHref ?? `/${locale}/login`;
+  const pendingLabel = accountHref ? "Opening account" : "Opening login";
 
-async function MobileAccountLinks({ locale }: { locale: Locale }) {
-  const accountState = await getHeaderAccountStateForRequest();
-
-  if (!accountState?.isSignedIn) {
-    return <MobileGuestAccountLinks locale={locale} />;
-  }
-
-  return (
-    <MobileAccountLink
-      href={accountState.isAdmin ? "/admin" : `/${locale}/account`}
-      label="Account"
-      icon={<LogIn className="size-4" aria-hidden />}
-      pendingLabel="Opening account"
-    />
-  );
-}
-
-function MobileGuestAccountLinks({ locale }: { locale: Locale }) {
   return (
     <>
-      <MobileAccountLink
-        href={`/${locale}/login`}
-        label="Log in"
-        icon={<LogIn className="size-4" aria-hidden />}
-        pendingLabel="Opening login"
-      />
-      <MobileAccountLink
-        href={`/${locale}/register`}
-        label="Sign up"
-        icon={<UserPlus className="size-4" aria-hidden />}
-        pendingLabel="Opening sign up"
-      />
+      <NavigationLink href={href} pendingLabel={pendingLabel} aria-label={label}
+        className={`${mobileActionClass} lg:hidden`}>
+        <UserRound className="size-5" aria-hidden />
+      </NavigationLink>
+      <NavigationLink href={href} pendingLabel={pendingLabel} aria-label={label}
+        className={buttonClassName({
+          variant: accountHref ? "outline" : "default",
+          size: "sm",
+          className: "hidden min-h-10 gap-1.5 px-3 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] lg:inline-flex",
+        })}>
+        <LogIn className="size-4" aria-hidden />
+        <span>{label}</span>
+      </NavigationLink>
+      <MobileNavigation locale={locale} communityEnabled={communityEnabled} accountHref={accountHref}
+        showCreations={showCreations} logout={accountHref ? (
+          <form action={logoutAction} className="flex-1">
+            <input type="hidden" name="locale" value={locale} />
+            <button type="submit" className="min-h-11 w-full rounded-md px-2 text-left font-medium hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-[var(--color-terracotta)]">Log out</button>
+          </form>
+        ) : undefined} />
     </>
-  );
-}
-
-function HeaderAccountFallback({ locale }: { locale: Locale }) {
-  return (
-    <NavigationLink
-      href={`/${locale}/login`}
-      pendingLabel="Opening login"
-      aria-label="Log in"
-      className={buttonClassName({
-        size: "sm",
-        className: "min-h-10 gap-1.5 px-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]",
-      })}
-    >
-      <LogIn className="size-4" aria-hidden />
-      <span>Log in</span>
-    </NavigationLink>
   );
 }
 

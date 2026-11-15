@@ -38,7 +38,7 @@ beforeAll(async () => {
     create: { width: 800, height: 800, channels: 3, background: { r: 50, g: 60, b: 70 } },
   }).jpeg().toBuffer());
   invalidRatioJpeg = new Uint8Array(await sharp({
-    create: { width: 800, height: 1000, channels: 3, background: { r: 50, g: 60, b: 70 } },
+    create: { width: 800, height: 1600, channels: 3, background: { r: 50, g: 60, b: 70 } },
   }).jpeg().toBuffer());
 });
 

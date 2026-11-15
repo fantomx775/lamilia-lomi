@@ -16,21 +16,45 @@ test("product gallery opens a full-size image preview and supports navigation", 
   const catalogCover = catalog.getByRole("img").first();
   await expect(catalogCover).toBeVisible();
   await expect.poll(() => catalogCover.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-  await page.screenshot({ path: testInfo.outputPath("product-catalog.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("product-catalog.png"), fullPage: true, caret: "initial" });
 
+  const consoleErrors: string[] = [];
+  const failedResponses: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) failedResponses.push(response.url());
+  });
+
+  const bleedFixturePath = "/assets/gallery/moon-garden-page-1.svg";
+  await page.route((url) => url.pathname === bleedFixturePath || url.searchParams.get("url") === bleedFixturePath, (route) =>
+    route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="1725" height="1750"><rect width="100%" height="100%" fill="lightyellow"/><circle cx="50%" cy="50%" r="30%" fill="coral"/></svg>',
+    }),
+  );
   await page.goto("/en/products/moon-garden-coloring-book");
   await expect(page.getByRole("heading", { name: "Inside the book" })).toBeVisible();
   const productCover = page.getByRole("main").getByRole("img").first();
   await expect(productCover).toBeVisible();
   await expect.poll(() => productCover.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-  await page.screenshot({ path: testInfo.outputPath("product-detail-cover.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("product-detail-cover.png"), fullPage: true, caret: "initial" });
 
-  await page.getByRole("button", { name: "Open image 1" }).click();
+  const firstThumbnail = page.getByRole("button", { name: "Open image 1" });
+  await firstThumbnail.scrollIntoViewIfNeeded();
+  const thumbnailImage = firstThumbnail.getByRole("img");
+  await expect(thumbnailImage).toHaveCSS("object-fit", "cover");
+  await expect(thumbnailImage).toHaveCSS("object-position", "50% 50%");
+  await expect(thumbnailImage.locator("..")).toHaveCSS("aspect-ratio", "1 / 1");
+  await firstThumbnail.screenshot({ path: testInfo.outputPath("product-gallery-bleed.png") });
+  await firstThumbnail.click();
 
   const dialog = page.getByRole("dialog", { name: "Image preview" });
   await expect(dialog).toBeVisible();
   const firstImage = dialog.getByRole("img", { name: "Stars and little houses" });
   await expect(firstImage).toBeVisible();
+  await expect(firstImage).toHaveCSS("object-fit", "contain");
   await expect.poll(() => firstImage.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(dialog.getByText("1 of 2")).toBeVisible();
 
@@ -65,4 +89,6 @@ test("product gallery opens a full-size image preview and supports navigation", 
   await dialog.getByRole("button", { name: "Close image preview" }).click();
   await expect(dialog).not.toBeVisible();
   expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
+  expect(failedResponses).toEqual([]);
 });

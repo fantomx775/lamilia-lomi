@@ -13,6 +13,7 @@ export type CommunityPublicProduct = {
 export type CommunityPublicProductOption = Pick<CommunityPublicProduct, "id" | "slug" | "title" | "audience">;
 
 export type CommunityPublicCreator = {
+  photoSrc?: string;
   username: string;
   avatarSeed: string;
 };

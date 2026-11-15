@@ -39,6 +39,7 @@ vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND
 vi.mock("@/lib/community-flags", () => ({
   getCommunityFlags: () => ({ publicEnabled: state.publicEnabled, uploadsEnabled: false }),
 }));
+vi.mock("@/lib/community/avatar-repository", () => ({ getCommunityPublicAvatarUrl: vi.fn(async () => undefined) }));
 vi.mock("@/lib/community/repository", () => ({
   getCommunityPublicCreator: vi.fn(async () => state.creator),
   getCommunityHeartContext: vi.fn(async () => ({ access: "guest" })),
@@ -75,5 +76,6 @@ describe("public creator profile route", () => {
     state.creator = { username: "garden_user", avatarSeed: "public-safe-seed", artworks: [] };
     const node = await CreatorProfilePage(pageProps);
     expect(renderToStaticMarkup(node)).toContain("No approved creations yet");
+    expect((await generateMetadata(pageProps)).robots).toEqual({ index: false, follow: true });
   });
 });

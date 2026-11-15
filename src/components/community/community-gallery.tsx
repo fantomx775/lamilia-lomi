@@ -123,20 +123,20 @@ export function CommunityGallery({
   }
 
   return <>
-    <div className="mb-7 flex flex-wrap items-end gap-3 rounded-xl border border-[var(--color-border)] bg-white/75 p-4" aria-label="Gallery filters">
-      <label className="grid min-w-40 flex-1 gap-1.5 text-sm font-medium text-[var(--color-ink)]">
+    <div className="mb-7 grid grid-cols-1 gap-3 rounded-xl border border-[var(--color-border)] bg-white/75 p-4 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)]" aria-label="Gallery filters">
+      <label className="grid min-w-0 gap-1.5 text-sm font-medium text-[var(--color-ink)]">
         Audience
         <select data-testid="community-gallery-audience-filter" className={selectClass} value={audience} disabled={!mounted} onChange={(event) => changeFilters(event.target.value, productId)}>
           <option value="">All audiences</option><option value="kids">Kids</option><option value="adults">Adults</option>
         </select>
       </label>
-      <label className="grid min-w-48 flex-[2] gap-1.5 text-sm font-medium text-[var(--color-ink)]">
+      <label className="grid min-w-0 gap-1.5 text-sm font-medium text-[var(--color-ink)] sm:col-span-2 lg:col-span-1">
         Book
         <select data-testid="community-gallery-product-filter" className={selectClass} value={productId} disabled={!mounted} onChange={(event) => changeFilters(audience, event.target.value)}>
           <option value="">All books</option>{products.map((product) => <option key={product.id} value={product.id}>{product.title}</option>)}
         </select>
       </label>
-      <label className="grid min-w-36 flex-1 gap-1.5 text-sm font-medium text-[var(--color-ink)]">
+      <label className="grid min-w-0 gap-1.5 text-sm font-medium text-[var(--color-ink)]">
         Sort by
         <select data-testid="community-gallery-sort" className={selectClass} value={sort} disabled={!mounted} onChange={(event) => changeSort(event.target.value as "latest" | "popular")}>
           <option value="latest">Newest first</option><option value="popular">Most loved</option>
@@ -170,7 +170,7 @@ export function CommunityArtworkCard({ artwork, heartAccess = "guest" }: { artwo
       {artwork.description ? <p className="line-clamp-2 min-h-[2.5rem] break-words text-sm leading-5 text-[var(--color-ink)]">{artwork.description}</p> : <p className="min-h-[2.5rem] text-sm text-[var(--color-muted)]">A coloring-club creation</p>}
       <div className="flex min-w-0 items-center gap-2">
         <Link href={`/en/club/creators/${encodeURIComponent(artwork.creator.username)}`} aria-label={`View @${artwork.creator.username}’s profile`} className="flex min-w-0 items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-[var(--color-terracotta)]">
-          <CommunityAvatar username={artwork.creator.username} seed={artwork.creator.avatarSeed} className="size-8 text-xs" />
+          <CommunityAvatar username={artwork.creator.username} seed={artwork.creator.avatarSeed} photoSrc={artwork.creator.photoSrc} className="size-8 text-xs" />
           <span className="truncate text-sm font-medium text-[var(--color-ink)]">@{artwork.creator.username}</span>
         </Link>
       </div>
@@ -182,4 +182,4 @@ export function CommunityArtworkCard({ artwork, heartAccess = "guest" }: { artwo
   </article>;
 }
 
-const selectClass = "min-h-11 rounded-md border border-[var(--color-border)] bg-white px-3 text-sm text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] disabled:opacity-70";
+const selectClass = "min-h-11 w-full min-w-0 rounded-md border border-[var(--color-border)] bg-white px-3 text-sm text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] disabled:opacity-70";

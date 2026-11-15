@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Heart } from "lucide-react";
 import { useRef, useState } from "react";
 
+import { useToast } from "@/components/ui/toast";
 import type { CommunityHeartAccess } from "@/lib/community/types";
 import { trackEvent } from "@/lib/analytics-client";
 
@@ -17,6 +18,7 @@ type Props = {
 };
 
 export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access, returnTo = "/en/club", compact = false }: Props) {
+  const { showToast } = useToast();
   const [liked, setLiked] = useState(likedByMe);
   const [count, setCount] = useState(likesCount);
   const [pending, setPending] = useState(false);
@@ -43,10 +45,12 @@ export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access
       setLiked(result.liked);
       setCount(Math.max(0, result.likesCount!));
       if (!previousLiked && result.liked) trackEvent("like_created");
+      showToast("success", result.liked ? "Heart added." : "Heart removed.");
     } catch {
       setLiked(previousLiked);
       setCount(previousCount);
       setError(true);
+      showToast("error", "Your reaction was not saved.");
     } finally {
       busy.current = false;
       setPending(false);

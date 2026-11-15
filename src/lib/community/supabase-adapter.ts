@@ -188,19 +188,9 @@ export async function listAdminArtworks(actor: CommunityActor, input: { status?:
   if (actor.role !== "admin") throw new Error("Administrator access required.");
   const client = createServiceRoleClient();
   const cursor = parseAdminCursor(input.cursor);
-  const filterQuery = (status?: CommunityArtworkStatus) => {
-    let query = client.from("community_artworks").select(input.creator
-      ? "id,community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username)"
-      : "id", { count: "exact", head: true }).is("deleted_at", null);
-    if (status) query = query.eq("status", status);
-    if (input.productId) query = query.eq("product_id", input.productId);
-    if (input.creator) query = query.ilike("community_profiles.username", `${input.creator.replace(/[\\%_]/g, "\\$&")}%`);
-    return query;
-  };
-  const statuses: CommunityArtworkStatus[] = ["pending", "approved", "rejected", "removed"];
-  const countResults = await Promise.all(statuses.map((status) => filterQuery(status)));
-  if (countResults.some((result) => result.error)) throw new Error("Community moderation counts could not be loaded.");
-  const counts = Object.fromEntries(statuses.map((status, index) => [status, countResults[index].count ?? 0])) as CommunityModerationCounts;
+  const countRequest = client.rpc("community_moderation_counts", {
+    p_product_id: input.productId ?? null, p_creator_prefix: input.creator ?? null,
+  });
   const adminSelect = input.creator
     ? `${OWNER_ARTWORK_SELECT},community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username)`
     : ADMIN_ARTWORK_SELECT;
@@ -213,7 +203,10 @@ export async function listAdminArtworks(actor: CommunityActor, input: { status?:
   if (input.productId) query = query.eq("product_id", input.productId);
   if (input.creator) query = query.ilike("community_profiles.username", `${input.creator.replace(/[\\%_]/g, "\\$&")}%`);
   if (cursor) query = query.or(`created_at.gt.${cursor.timestamp},and(created_at.eq.${cursor.timestamp},id.gt.${cursor.id})`);
-  const { data, error } = await query.limit(input.limit + 1);
+  // Counts and page are independent: start both in the same network round trip.
+  const [countResult, { data, error }] = await Promise.all([countRequest, query.limit(input.limit + 1)]);
+  if (countResult.error || !countResult.data) throw new Error("Community moderation counts could not be loaded.");
+  const counts = countResult.data as CommunityModerationCounts;
   if (error) throw new Error("Community moderation queue could not be loaded.");
   const rows = ((data ?? []) as unknown as Row[]);
   const items = rows.slice(0, input.limit).map(mapAdminArtwork);
@@ -243,13 +236,15 @@ export async function listAdminProductOptions(actor: CommunityActor, limit = 500
 export async function getAdminArtwork(actor: CommunityActor, id: string): Promise<{ artwork: CommunityAdminArtwork; history: CommunityModerationHistoryItem[] } | null> {
   if (actor.role !== "admin") throw new Error("Administrator access required.");
   const client = createServiceRoleClient();
-  const { data, error } = await client.from("community_artworks").select(ADMIN_ARTWORK_SELECT)
-    .eq("id", id).is("deleted_at", null).maybeSingle();
+  const [{ data, error }, { data: events, error: historyError }] = await Promise.all([
+    client.from("community_artworks").select(ADMIN_ARTWORK_SELECT)
+      .eq("id", id).is("deleted_at", null).maybeSingle(),
+    client.from("community_moderation_events")
+      .select("id,revision,from_status,to_status,reason,created_at")
+      .eq("artwork_id", id).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(100),
+  ]);
   if (error) throw new Error("Community moderation detail could not be loaded.");
   if (!data) return null;
-  const { data: events, error: historyError } = await client.from("community_moderation_events")
-    .select("id,revision,from_status,to_status,reason,created_at")
-    .eq("artwork_id", id).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(100);
   if (historyError) throw new Error("Community moderation history could not be loaded.");
   const history = ((events ?? []) as unknown as Row[]).reverse().map((row): CommunityModerationHistoryItem => ({
     id: String(row.id), revision: Number(row.revision),
