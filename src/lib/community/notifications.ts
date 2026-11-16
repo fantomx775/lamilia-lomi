@@ -11,13 +11,12 @@ import * as supabase from "./supabase-adapter";
 const LEGACY_TEMPLATE_VERSION = "cc-status-2026-10-26-v2";
 const TEMPLATE_VERSION = "cc-moderation-2026-11-16-v1";
 const FROM = "LamiliaLomi <hello@lamilialomi.com>";
-const ADMIN_RECIPIENT = "owner@lamilialomi.com";
 
 type NotificationCounts = { claimed: number; sent: number; suppressed: number; retrying: number };
 export type CommunityNotificationResult = NotificationCounts & (
   | { status: "ready" }
   | { status: "disabled"; reason: "local_backend" }
-  | { status: "unconfigured"; reason: "email_provider" | "fingerprint_secret" }
+  | { status: "unconfigured"; reason: "email_provider" | "fingerprint_secret" | "admin_recipient" }
 );
 const emptyCounts: NotificationCounts = { claimed: 0, sent: 0, suppressed: 0, retrying: 0 };
 
@@ -46,6 +45,8 @@ export async function processCommunityModerationNotifications(limit = 10, signal
   if (!resend) return { ...emptyCounts, status: "unconfigured", reason: "email_provider" };
   const fingerprintSecret = process.env.AUTH_RESUME_SECRET;
   if (!fingerprintSecret || fingerprintSecret.length < 32) return { ...emptyCounts, status: "unconfigured", reason: "fingerprint_secret" };
+  const adminRecipient = process.env.COLORING_CLUB_ADMIN_EMAIL?.trim();
+  if (!adminRecipient) return { ...emptyCounts, status: "unconfigured", reason: "admin_recipient" };
 
   const leaseToken = randomUUID();
   const messages = await supabase.claimModerationEmailOutbox(leaseToken, Math.min(Math.max(limit, 1), 10), signal);
@@ -56,7 +57,7 @@ export async function processCommunityModerationNotifications(limit = 10, signal
     signal?.throwIfAborted();
     try {
       const recipient = item.notification_type === "admin_pending"
-        ? ADMIN_RECIPIENT
+        ? adminRecipient
         : item.author_user_id ? await supabase.getModerationEmailRecipient(item.author_user_id, signal) : null;
       if (!recipient) {
         if (await supabase.finishModerationEmailSend({ eventId: item.moderation_event_id, leaseToken, result: "suppressed" }, signal)) suppressed += 1;
