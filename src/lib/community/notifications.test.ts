@@ -72,17 +72,11 @@ describe("community moderation notification outbox", () => {
     }), { idempotencyKey: "community-moderation/42" });
   });
 
-  it("leaves an admin alert queued when its recipient is missing", async () => {
+  it("does not consume delivery attempts when the admin recipient is missing", async () => {
     delete process.env.COLORING_CLUB_ADMIN_EMAIL;
-    mocks.claims.mockResolvedValueOnce([{ moderation_event_id: 42, author_user_id: null, notification_type: "admin_pending", template_version: null }]);
-    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    try {
-      expect(await processCommunityModerationNotifications(1)).toMatchObject({ claimed: 1, retrying: 1 });
-      expect(mocks.resend?.emails.send).not.toHaveBeenCalled();
-      expect(mocks.prepare).not.toHaveBeenCalled();
-    } finally {
-      log.mockRestore();
-    }
+    expect(await processCommunityModerationNotifications(1)).toMatchObject({ status: "unconfigured", reason: "admin_recipient", claimed: 0 });
+    expect(mocks.claims).not.toHaveBeenCalled();
+    expect(mocks.resend?.emails.send).not.toHaveBeenCalled();
   });
 
   it.each([null, "cc-status-2026-10-26-v2"])("sends a rejection and preserves the plain-text payload on legacy retries (%s)", async (version) => {

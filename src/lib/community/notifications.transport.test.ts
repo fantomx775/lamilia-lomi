@@ -15,6 +15,7 @@ describe("actual Resend SDK cancellation contract", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_RESUME_SECRET", "isolated-fingerprint-secret-for-transport-only");
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://example.test");
+    vi.stubEnv("COLORING_CLUB_ADMIN_EMAIL", "moderation@example.test");
     backend.resend.mockReturnValue(new Resend("re_synthetic_never_sent"));
     backend.claims.mockResolvedValue([{ moderation_event_id: 41, author_user_id: "fixture-author", notification_type: "approved" }]);
     backend.recipient.mockResolvedValue("fixture@example.test");
