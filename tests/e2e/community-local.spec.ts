@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { randomBytes } from "node:crypto";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { essentials } from "./helpers/community-fixtures";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
@@ -46,7 +48,13 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(page.getByRole("heading", { name: "My Creations", exact: true })).toBeVisible();
     await page.getByTestId("community-upload-open").click();
     await page.getByTestId("community-product-select").selectOption("11111111-1111-4111-8111-111111111111");
-    await page.getByTestId("community-upload-file-input").setInputFiles(path.resolve("docs/design/coloring-club/assets/rose-fox.webp"));
+    const photo = await sharp(randomBytes(3000 * 2200 * 3), {
+      raw: { width: 3000, height: 2200, channels: 3 },
+    }).jpeg({ quality: 100 }).toBuffer();
+    expect(photo.length).toBeGreaterThan(4 * 1024 * 1024);
+    await page.getByTestId("community-upload-file-input").setInputFiles({
+      name: "phone-photo.jpg", mimeType: "image/jpeg", buffer: photo,
+    });
     await page.getByTestId("community-selected-artwork").getByRole("textbox").fill("Local private garden fixture");
     await page.getByTestId("community-upload-rules").check();
     await page.getByTestId("community-upload-submit").click();
@@ -59,6 +67,7 @@ test("local demo persists a private upload and safely edits and deletes its actu
     const image = cards.getByTestId("community-artwork-preview");
     await image.scrollIntoViewIfNeeded();
     await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await cards.screenshot({ path: testInfo.outputPath("large-jpg-pending.png") });
     const snapshot = JSON.parse(await readFile(file, "utf8"));
     expect(snapshot.artworks).toHaveLength(1);
     const storedFile = path.resolve("data/.collection-media", snapshot.artworks[0].storagePath);
@@ -74,6 +83,13 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(adminPage.getByTestId("community-count-approved")).toContainText("1");
     await page.reload();
     await expect(cards).toContainText("Published");
+    await page.goto("/en/products/moon-garden-coloring-book");
+    const readerGallery = page.getByRole("region", { name: "Colored by Our Readers" });
+    await expect(readerGallery.getByText("Local private garden fixture", { exact: true })).toBeVisible();
+    await readerGallery.getByRole("button", { name: /Open community artwork/ }).click();
+    const preview = page.getByRole("dialog", { name: "Reader artwork preview" });
+    await expect(preview.getByText("Local private garden fixture", { exact: true })).toBeVisible();
+    await preview.screenshot({ path: testInfo.outputPath("book-artwork-description.png") });
     const artworkId = snapshot.artworks[0].id;
     await page.goto(`http://127.0.0.1:3100/en/club/artworks/${artworkId}`);
     const heart = page.getByTestId("community-heart-toggle");

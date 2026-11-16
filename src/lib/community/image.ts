@@ -2,11 +2,10 @@ import crypto from "node:crypto";
 import sharp from "sharp";
 
 import { CommunityValidationError } from "./errors";
+import { COMMUNITY_IMAGE_MAX_BYTES, COMMUNITY_IMAGE_MAX_EDGE, COMMUNITY_IMAGE_MAX_PIXELS } from "./image-limits";
 import type { CommunityImageContentType } from "./types";
 
-export const COMMUNITY_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
-export const COMMUNITY_IMAGE_MAX_PIXELS = 40_000_000;
-export const COMMUNITY_IMAGE_MAX_EDGE = 2048;
+export { COMMUNITY_IMAGE_MAX_BYTES, COMMUNITY_IMAGE_MAX_EDGE, COMMUNITY_IMAGE_MAX_PIXELS } from "./image-limits";
 export const COMMUNITY_IMAGE_OUTPUT_TYPE: CommunityImageContentType = "image/webp";
 
 const formats: Record<CommunityImageContentType, string> = {

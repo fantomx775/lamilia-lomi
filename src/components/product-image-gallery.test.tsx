@@ -189,7 +189,8 @@ describe("ProductImageGallery", () => {
     expect(within(dialog).getByText("2 of 3")).toBeVisible();
   });
 
-  it("mixes curated and approved community work under one heading while preserving each source credit", () => {
+  it("shows the approved community description both under the photo and in its preview", async () => {
+    const user = userEvent.setup();
     const communityArtwork: CommunityPublicArtwork = {
       id: "community-work-id",
       product: { id: "product-id", slug: "spring-flowers", title: "Spring Flowers", audience: "kids" },
@@ -207,6 +208,9 @@ describe("ProductImageGallery", () => {
     expect(screen.getByRole("img", { name: "Blue flowers" })).toHaveAttribute("src", "/curated.webp");
     expect(screen.getByRole("img", { name: "Colored by @garden_artist: A bright spring page" })).toHaveAttribute("src", "/api/community/artworks/community-work-id/media");
     expect(screen.getByTestId("colored-by-our-readers-view-all")).toHaveAttribute("href", "/en/club?productId=product-id");
+    expect(screen.getByText("A bright spring page")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Open community artwork 1 by @garden_artist" }));
+    expect(within(screen.getByRole("dialog")).getByText("A bright spring page")).toBeVisible();
   });
 
   it("keeps a single image usable without carousel controls", async () => {
