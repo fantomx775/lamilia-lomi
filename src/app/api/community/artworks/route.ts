@@ -29,6 +29,7 @@ import { listCommunityPublicArtworks } from "@/lib/community/repository";
 import { decodeCommunityPopularCursor, decodeCommunityTimestampCursor } from "@/lib/community/cursor";
 import type { CommunityAudience } from "@/lib/community/types";
 import { getCommunityHeartContext } from "@/lib/community/repository";
+import { dispatchCommunityNotificationsAfterResponse } from "@/lib/community/notifications";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -230,6 +231,7 @@ export async function POST(request: Request) {
       }
     }
 
+    dispatchCommunityNotificationsAfterResponse();
     const artwork = await getMyCommunityArtwork(artworkId);
     if (!artwork) return communityJson({ ok: false, error: "unavailable", message: "Your upload was saved but could not be loaded yet." }, 503);
     return communityJson({ ok: true, artwork });

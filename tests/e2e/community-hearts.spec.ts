@@ -241,15 +241,17 @@ test("heart UI rolls back real denial, persists across tabs and renders bounded 
     await expect(button).toBeEnabled();
     await expect(button).toHaveAttribute("aria-pressed", "false");
     await expect(count).toHaveText("0");
-    await expect(control.getByRole("status")).toContainText("Your reaction was not saved");
+    await expect(page.getByRole("alert").filter({ hasText: "Your reaction was not saved" })).toBeVisible();
     await httpEvidence.assertOutcome(await denialResponse, { id: "current-verification-heart-denial", path: denialPath,
       method: "PUT", status: 403, error: "forbidden", details: "Current Auth verification was revoked during the held real PUT. The server returned forbidden; the optimistic heart reverted to unpressed/count zero and displayed the unsaved-reaction status. A successful retry is asserted after restoring verification." });
     screenshots.push(...await communityScreenshots(page, "cc06", "heart-denial-rollback", runId));
     fixtures.setEmailVerified(member.id, true);
-    await control.getByRole("button", { name: "Retry saving your reaction", exact: true }).click();
+    await page.getByRole("button", { name: "Dismiss notification", exact: true }).click();
+    await button.click();
     await expect(button).toBeEnabled();
     await expect(button).toHaveAttribute("aria-pressed", "true");
     await expect(count).toHaveText("1");
+    await expect(page.getByRole("status").filter({ hasText: /Heart (added|removed)/ })).toHaveCount(0);
     await page.unroute(endpoint(first.id));
     screenshots.push(...await communityScreenshots(page, "cc06", "artwork-hearted", runId));
 

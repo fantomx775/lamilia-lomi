@@ -19,11 +19,13 @@ const mocks = vi.hoisted(() => ({
   read: vi.fn(),
   listPublic: vi.fn(),
   heartContext: vi.fn(),
+  dispatchNotifications: vi.fn(),
   order: [] as string[],
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/community-flags", () => ({ getCommunityFlags: mocks.getCommunityFlags }));
+vi.mock("@/lib/community/notifications", () => ({ dispatchCommunityNotificationsAfterResponse: mocks.dispatchNotifications }));
 vi.mock("@/lib/config", () => ({ getBackendMode: mocks.getBackendMode }));
 vi.mock("@/lib/community/session", () => ({ getCommunityActorForRequest: mocks.getActor }));
 vi.mock("@/lib/community/image", () => ({
@@ -117,6 +119,8 @@ describe("community artwork upload API", () => {
       uploadFingerprint: "a".repeat(64),
     }));
     expect(mocks.finalize).toHaveBeenCalledWith(key, expect.any(String));
+    expect(mocks.dispatchNotifications).toHaveBeenCalledOnce();
+    expect(mocks.finalize.mock.invocationCallOrder[0]).toBeLessThan(mocks.dispatchNotifications.mock.invocationCallOrder[0]!);
   });
 
   it("rejects guests before reading the multipart body and rejects unverified users", async () => {
@@ -127,6 +131,7 @@ describe("community artwork upload API", () => {
     mocks.getActor.mockResolvedValueOnce({ ...actor, emailVerified: false });
     expect((await POST(uploadRequest())).status).toBe(403);
     expect(mocks.normalize).not.toHaveBeenCalled();
+    expect(mocks.dispatchNotifications).not.toHaveBeenCalled();
   });
 
   it("rejects unknown and duplicate multipart fields and oversized files", async () => {

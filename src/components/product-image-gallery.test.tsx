@@ -194,7 +194,7 @@ describe("ProductImageGallery", () => {
     const communityArtwork: CommunityPublicArtwork = {
       id: "community-work-id",
       product: { id: "product-id", slug: "spring-flowers", title: "Spring Flowers", audience: "kids" },
-      creator: { username: "garden_artist", avatarSeed: "seed" },
+      creator: { username: "garden_artist", avatarSeed: "seed", photoSrc: "/api/community/avatars/test-photo" },
       contentType: "image/webp",
       description: "A bright spring page",
       publishedAt: "2026-10-25T12:00:00.000Z",
@@ -205,6 +205,9 @@ describe("ProductImageGallery", () => {
     expect(screen.getAllByRole("heading", { name: "Colored by Our Readers" })).toHaveLength(1);
     expect(screen.getByText("Colored by Mira")).toBeVisible();
     expect(screen.getByText("Colored by @garden_artist")).toBeVisible();
+    const authorLink = screen.getByRole("link", { name: /Colored by @garden_artist/ });
+    expect(authorLink).toHaveAttribute("href", "/en/club/creators/garden_artist");
+    expect(within(authorLink).getByRole("img", { name: "Profile photo for @garden_artist" }).querySelector("img")).toHaveAttribute("src", "/api/community/avatars/test-photo");
     expect(screen.getByRole("img", { name: "Blue flowers" })).toHaveAttribute("src", "/curated.webp");
     expect(screen.getByRole("img", { name: "Colored by @garden_artist" })).toHaveAttribute("src", "/api/community/artworks/community-work-id/media");
     expect(screen.getByTestId("colored-by-our-readers-view-all")).toHaveAttribute("href", "/en/club?productId=product-id");

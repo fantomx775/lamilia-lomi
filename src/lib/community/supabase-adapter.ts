@@ -241,7 +241,10 @@ export async function getAdminArtwork(actor: CommunityActor, id: string): Promis
       .eq("id", id).is("deleted_at", null).maybeSingle(),
     client.from("community_moderation_events")
       .select("id,revision,from_status,to_status,reason,created_at")
-      .eq("artwork_id", id).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(100),
+      .eq("artwork_id", id)
+      // Pending submissions and caption edits are authored by readers. Restoration is an admin decision.
+      .or("to_status.neq.pending,from_status.eq.removed")
+      .order("created_at", { ascending: false }).order("id", { ascending: false }).limit(100),
   ]);
   if (error) throw new Error("Community moderation detail could not be loaded.");
   if (!data) return null;
@@ -598,8 +601,8 @@ export async function finishAccountMediaCleanup(id: number, leaseToken: string, 
 
 export type CommunityNotificationClaim = {
   moderation_event_id: number;
-  author_user_id: string;
-  notification_type: "approved" | "rejected";
+  author_user_id: string | null;
+  notification_type: "approved" | "rejected" | "admin_pending";
   attempt_count: number;
   first_attempt_at: string | null;
   payload_fingerprint: string | null;
@@ -607,7 +610,9 @@ export type CommunityNotificationClaim = {
 };
 
 export async function claimModerationEmailOutbox(leaseToken: string, limit: number, signal?: AbortSignal) {
-  const result = await rpc("community_claim_moderation_email_outbox", { p_lease_token: leaseToken, p_limit: limit }, signal);
+  const result = await rpc("community_claim_moderation_email_outbox", {
+    p_lease_token: leaseToken, p_limit: limit, p_include_pending_review: true,
+  }, signal);
   if (!Array.isArray(result)) throw new Error("Community notification queue could not be read.");
   return result as CommunityNotificationClaim[];
 }

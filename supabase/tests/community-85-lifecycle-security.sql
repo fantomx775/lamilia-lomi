@@ -3,7 +3,7 @@
 -- fixture set, including Auth deletion and hard-delete checks, rolls back.
 BEGIN;
 SET LOCAL search_path = public, extensions;
-SELECT plan(95);
+SELECT plan(96);
 
 INSERT INTO auth.users (id, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data)
 VALUES
@@ -191,14 +191,17 @@ INSERT INTO cc85_outbox_claim SELECT * FROM public.community_claim_moderation_em
 SELECT is((SELECT count(*) FROM cc85_outbox_claim), 1::bigint, 'worker claims a due notification under its lease token');
 SELECT is(public.community_finish_moderation_email_send((SELECT id FROM cc85_event_ids WHERE key='mail_event'),'85300000-0000-4000-8000-000000000002','sent','msg-stale',null), false, 'stale worker token cannot mark delivery');
 SELECT throws_ok($$SELECT public.community_prepare_moderation_email_send((SELECT id FROM cc85_event_ids WHERE key='mail_event'),'85300000-0000-4000-8000-000000000001',null,'community-v1')$$, '22023', 'invalid notification payload', 'null payload fingerprint is rejected');
-SELECT is(public.community_prepare_moderation_email_send((SELECT id FROM cc85_event_ids WHERE key='mail_event'),'85300000-0000-4000-8000-000000000001',repeat('a',64),'community-v1'), true, 'current worker freezes the notification payload');
+SELECT is(public.community_prepare_moderation_email_send((SELECT id FROM cc85_event_ids WHERE key='mail_event'),'85300000-0000-4000-8000-000000000001',repeat('a',64),'cc-moderation-2026-11-16-v1'), true, 'current worker freezes the new notification payload');
 SELECT is(public.community_finish_moderation_email_send((SELECT id FROM cc85_event_ids WHERE key='mail_event'),'85300000-0000-4000-8000-000000000001','retry',null,'provider_error'), true, 'provider failure schedules retry instead of rolling back moderation');
 SELECT ok((SELECT state='pending' AND attempt_count=1 AND next_attempt_at>now() FROM public.community_moderation_email_outbox WHERE moderation_event_id=(SELECT id FROM cc85_event_ids WHERE key='mail_event')), 'failed send returns to durable backoff queue');
 UPDATE public.community_moderation_email_outbox SET next_attempt_at=now()-interval '1 second' WHERE moderation_event_id=(SELECT id FROM cc85_event_ids WHERE key='mail_event');
 TRUNCATE cc85_outbox_claim;
-INSERT INTO cc85_outbox_claim SELECT * FROM public.community_claim_moderation_email_outbox('85300000-0000-4000-8000-000000000003',10);
+SELECT is((SELECT count(*) FROM public.community_claim_moderation_email_outbox('85300000-0000-4000-8000-000000000003',10)
+  WHERE moderation_event_id=(SELECT id FROM cc85_event_ids WHERE key='mail_event')),0::bigint,'the old worker cannot claim a decision prepared with the new template');
+INSERT INTO cc85_outbox_claim SELECT * FROM public.community_claim_moderation_email_outbox('85300000-0000-4000-8000-000000000003',10,true)
+  WHERE moderation_event_id=(SELECT id FROM cc85_event_ids WHERE key='mail_event');
 SELECT is((SELECT attempt_count FROM cc85_outbox_claim), 2, 'retry receives a fresh fenced lease');
-SELECT is(public.community_prepare_moderation_email_send((SELECT id FROM cc85_event_ids WHERE key='mail_event'),'85300000-0000-4000-8000-000000000003',repeat('a',64),'community-v1'), true, 'retry must preserve the frozen payload fingerprint');
+SELECT is(public.community_prepare_moderation_email_send((SELECT id FROM cc85_event_ids WHERE key='mail_event'),'85300000-0000-4000-8000-000000000003',repeat('a',64),'cc-moderation-2026-11-16-v1'), true, 'retry must preserve the frozen payload fingerprint');
 SELECT is(public.community_finish_moderation_email_send((SELECT id FROM cc85_event_ids WHERE key='mail_event'),'85300000-0000-4000-8000-000000000003','sent','provider-message-85',null), true, 'current lease can record provider acceptance');
 SELECT ok((SELECT state='sent' AND provider_message_id='provider-message-85' AND attempt_count=2 FROM public.community_moderation_email_outbox WHERE moderation_event_id=(SELECT id FROM cc85_event_ids WHERE key='mail_event')), 'outbox records delivered state without changing artwork revision');
 SELECT ok((SELECT revision=2 AND status='rejected' FROM public.community_artworks WHERE id=(SELECT id FROM cc85_ids WHERE key='mail_artwork')), 'notification retries never mutate moderation state');
@@ -260,7 +263,7 @@ SELECT ok((SELECT author_id IS NULL AND description='' AND moderation_reason IS 
 SELECT ok((SELECT reason IS NULL FROM public.community_moderation_events WHERE id=(SELECT id FROM cc85_event_ids WHERE key='erase_event')), 'account deletion clears historical private moderation reason');
 SELECT ok((SELECT state='suppressed' AND author_user_id IS NULL FROM public.community_moderation_email_outbox WHERE moderation_event_id=(SELECT id FROM cc85_event_ids WHERE key='erase_event')), 'account deletion suppresses and anonymizes pending notifications');
 SELECT throws_ok($$SELECT * FROM public.community_claim_account_media_cleanup(null,10)$$, '22023', 'invalid account cleanup claim', 'null cleanup lease token is rejected');
-SELECT throws_ok($$SELECT * FROM public.community_claim_account_media_cleanup('85500000-0000-4000-8000-000000000001',51)$$, '22023', 'invalid account cleanup claim', 'account cleanup claim is bounded');
+SELECT throws_ok($$SELECT * FROM public.community_claim_account_media_cleanup('85500000-0000-4000-8000-000000000001',51)$$, '22023', 'invalid avatar cleanup limit', 'account cleanup claim is bounded');
 TRUNCATE cc85_cleanup_claim;
 INSERT INTO cc85_cleanup_claim SELECT * FROM public.community_claim_account_media_cleanup('85500000-0000-4000-8000-000000000002',50);
 SELECT is((SELECT count(*) FROM cc85_cleanup_claim), 0::bigint, 'scheduler cannot delete bytes while the upload lease may still be active');

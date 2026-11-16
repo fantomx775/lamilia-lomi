@@ -30,9 +30,10 @@ describe("AccountDeletionPanel", () => {
     expect(screen.getByText(/removes your login and access to product unlocks/)).toBeInTheDocument();
     expect(screen.getByText(/single-use code you redeemed stays consumed/)).toBeInTheDocument();
     expect(screen.getByText(/Shared codes remain available to other accounts/)).toBeInTheDocument();
-    expect(screen.getByText("Danger Zone")).toBeInTheDocument();
+    expect(screen.getByText("Account management")).toBeVisible();
     const submit = screen.getByTestId("account-deletion-submit");
     expect(submit).toBeDisabled();
+    await user.click(screen.getByText("Account management"));
     await user.type(screen.getByLabelText("Type DELETE to confirm"), "delete");
     expect(submit).toBeDisabled();
     await user.clear(screen.getByLabelText("Type DELETE to confirm"));
@@ -56,6 +57,7 @@ describe("AccountDeletionPanel", () => {
       ok: false, message: "We could not delete the account right now. Try again later.",
     }), { status: 503 })));
     render(<AccountDeletionPanel locale="en" />, { wrapper: ToastProvider });
+    await user.click(screen.getByText("Account management"));
     await user.type(screen.getByLabelText("Type DELETE to confirm"), "DELETE");
     await user.click(screen.getByTestId("account-deletion-submit"));
     expect(await screen.findByRole("alert")).toHaveTextContent("We could not delete the account right now.");
