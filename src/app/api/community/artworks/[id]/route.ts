@@ -9,6 +9,7 @@ import {
   readBoundedJson,
 } from "@/lib/community/http";
 import { deleteMyCommunityArtwork, editMyCommunityArtworkDescription, getMyCommunityArtwork } from "@/lib/community/repository";
+import { dispatchCommunityNotificationsAfterResponse } from "@/lib/community/notifications";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,6 +30,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     await editMyCommunityArtworkDescription(id, body.value.revision, body.value.description);
     const artwork = await getMyCommunityArtwork(id);
     if (!artwork) return communityJson({ ok: false, error: "not_found", message: "This artwork is no longer available." }, 404);
+    if (artwork.status === "pending") dispatchCommunityNotificationsAfterResponse();
     return communityJson({ ok: true, artwork });
   } catch (error) {
     return communityErrorResponse(error, "This artwork changed or is unavailable. Refresh and try again.");

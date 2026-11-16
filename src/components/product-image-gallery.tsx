@@ -13,8 +13,10 @@ export type ProductGalleryImage = {
   path: string;
   alt: string;
   caption: string | null;
+  description?: string;
   unoptimized: boolean;
   captionHref?: string;
+  captionAvatar?: ReactNode;
   thumbnailAction?: ReactNode;
 };
 
@@ -138,7 +140,8 @@ export function ProductImageGallery({
 
   const thumbnailLimit = Math.max(1, Math.min(visibleLimit, images.length));
   const visibleImages = images.slice(0, thumbnailLimit);
-  const thumbnailGridClassName = layout === "reader-artworks"
+  const readerLayout = layout === "reader-artworks";
+  const thumbnailGridClassName = readerLayout
     ? "grid grid-cols-2 gap-5 sm:grid-cols-2 lg:grid-cols-4"
     : layout === "inside-book"
       ? "grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4"
@@ -146,9 +149,11 @@ export function ProductImageGallery({
 
   return (
     <>
-      <div className={thumbnailGridClassName} data-testid={layout === "reader-artworks" ? "reader-artwork-grid" : undefined}>
+      <div className={thumbnailGridClassName} data-testid={readerLayout ? "reader-artwork-grid" : undefined}>
         {visibleImages.map((image, index) => (
-          <figure key={image.id} className="group">
+          <figure key={image.id} className={readerLayout
+            ? `group min-w-0 rounded-[1.25rem] border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-sm sm:p-3 ${imageCount === 1 ? "col-span-full w-full max-w-sm justify-self-center" : ""}`
+            : "group"}>
             <div className="relative">
               <button
               type="button"
@@ -178,10 +183,11 @@ export function ProductImageGallery({
                         ? current
                         : { ...current, [image.path]: currentSrc });
                     }
-                    const ratio = getGalleryTrimRatio({
-                      width: currentTarget.naturalWidth,
-                      height: currentTarget.naturalHeight,
-                    });
+                    const { naturalWidth: width, naturalHeight: height } = currentTarget;
+                    const sourceRatio = width / height;
+                    const ratio = readerLayout && imageCount === 1 && sourceRatio >= 2 / 3 && sourceRatio <= 3 / 2
+                      ? sourceRatio
+                      : getGalleryTrimRatio({ width, height });
                     if (ratio) setTrimRatios((current) => current[image.path] === ratio
                       ? current
                       : { ...current, [image.path]: ratio });
@@ -204,11 +210,18 @@ export function ProductImageGallery({
                 </span>
               </span>
               </button>
-              {image.thumbnailAction ? <div className="absolute bottom-3 right-3 z-10">{image.thumbnailAction}</div> : null}
+              {!readerLayout && image.thumbnailAction ? <div className="absolute bottom-3 right-3 z-10">{image.thumbnailAction}</div> : null}
             </div>
-            {image.caption ? (
-              <figcaption className={`mt-3 min-w-0 px-1 text-sm leading-6 text-[var(--color-muted)] ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
-                {image.captionHref ? <Link href={image.captionHref} className="font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">{image.caption}</Link> : image.caption}
+            {image.caption || image.description || (readerLayout && image.thumbnailAction) ? (
+              <figcaption className={`mt-3 min-w-0 px-1 text-sm leading-6 text-[var(--color-muted)] ${readerLayout ? "grid gap-2 [overflow-wrap:anywhere]" : ""}`}>
+                <div className={readerLayout ? "flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1" : undefined}>
+                  {image.captionHref ? <Link href={image.captionHref} aria-label={image.captionAvatar ? image.caption ?? undefined : undefined} className={`rounded-sm font-medium text-[var(--color-ink)] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] ${readerLayout ? "inline-flex min-h-11 min-w-0 items-center gap-2" : "underline"}`}>
+                    {image.captionAvatar}
+                    <span className="min-w-0">{image.caption}</span>
+                  </Link> : image.caption}
+                  {readerLayout ? image.thumbnailAction : null}
+                </div>
+                {image.description ? <span className="block">{image.description}</span> : null}
               </figcaption>
             ) : null}
           </figure>
@@ -332,9 +345,10 @@ export function ProductImageGallery({
               ) : null}
             </div>
 
-            {activeImage.caption ? (
+            {activeImage.caption || activeImage.description ? (
               <p className={`mt-2 min-w-0 shrink-0 px-1 text-center text-sm leading-6 text-[var(--color-muted)] sm:mt-3 ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
                 {activeImage.caption}
+                {activeImage.description ? <span className="block">{activeImage.description}</span> : null}
               </p>
             ) : null}
           </div>

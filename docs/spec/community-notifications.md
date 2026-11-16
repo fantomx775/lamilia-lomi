@@ -2,13 +2,15 @@
 
 ## Delivery model
 
-Approve/reject audit events enqueue one private outbox row in the same database transaction. Other decisions do not send email. The decision response succeeds independently of delivery. A protected maintenance worker drains retries; the moderation request may also attempt one queued send after commit.
+New pending uploads and edits that change a description in the review queue enqueue an alert for the owner inbox. Approval and rejection enqueue a status email for the artwork author. Each email intent is written atomically with the associated state change. An upload replay reuses the same artwork and intent. A newer revision or deletion suppresses the previous review alert if it has not been prepared for the provider yet.
 
-Only the existing Resend client is used. No API key means the item remains queued. Local mode never sends external mail. The recipient is looked up at dispatch time and must still have a confirmed Auth email and active adult community profile with current rules acceptance. Deleted, unverified, revoked, suspended, or stale-rules profiles are suppressed.
+Requests try dispatch after committing. The protected maintenance worker handles queued work and retries. Only the existing Resend client is used. No API key means the item remains queued. Local mode never sends external mail. Admin alerts use the existing contact inbox `owner@lamilialomi.com`. An artwork author must still have a confirmed Auth email and active adult community profile with current rules acceptance when dispatch looks up the recipient. Deleted, unverified, revoked, suspended, or stale-rules profiles are suppressed.
 
 Dispatcher results distinguish `ready` (including an empty queue), `disabled` for the local backend, and `unconfigured` for a missing email provider or missing/short fingerprint secret. Missing configuration does not claim or mutate outbox rows. The authenticated maintenance endpoint completes its cleanup and retention work, then returns HTTP 503 with `notifications_unconfigured` and a safe reason enum when dispatch is unconfigured. Its result includes notification counts; these measure processing/provider acceptance, not inbox delivery. The response and log contain no configuration values or recipient data. Local mode remains a successful maintenance run with notification status `disabled`.
 
-Messages contain only the generic approval/review state and a My Creations link. They contain no moderation reason, user artwork, report text, storage path, or public file URL. The sender uses the existing LamiliaLomi sender identity.
+The application renders HTML and text together for the moderation template. Admin mail links to the moderation queue, and decision mail links to My Creations. Messages contain no moderation reason, caption, user artwork, report text, storage path, or public file URL. The sender uses the existing LamiliaLomi sender identity. Previously prepared plain-text decisions retain the original template on retry.
+
+Apply migration `20261116173725` before deploying the worker. The previous worker continues claiming only decision emails while the new worker supports both types. The migration leaves historical artwork alone.
 
 ## Retry and privacy bounds
 

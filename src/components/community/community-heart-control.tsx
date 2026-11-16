@@ -22,14 +22,13 @@ export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access
   const [liked, setLiked] = useState(likedByMe);
   const [count, setCount] = useState(likesCount);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState(false);
   const busy = useRef(false);
+  const padding = compact ? "px-2.5" : "px-3";
 
   async function toggle() {
     if (busy.current || access !== "member") return;
     busy.current = true;
     setPending(true);
-    setError(false);
     const previousLiked = liked;
     const previousCount = count;
     const nextLiked = !previousLiked;
@@ -45,11 +44,9 @@ export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access
       setLiked(result.liked);
       setCount(Math.max(0, result.likesCount!));
       if (!previousLiked && result.liked) trackEvent("like_created");
-      showToast("success", result.liked ? "Heart added." : "Heart removed.");
     } catch {
       setLiked(previousLiked);
       setCount(previousCount);
-      setError(true);
       showToast("error", "Your reaction was not saved.");
     } finally {
       busy.current = false;
@@ -66,16 +63,12 @@ export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access
         aria-pressed={liked}
         disabled={pending}
         onClick={toggle}
-        className="inline-flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-full border border-[var(--color-border)] bg-white/95 px-3 text-sm font-semibold text-[var(--color-ink)] shadow-sm hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] disabled:opacity-60"
+        className={`inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full border text-sm font-semibold text-[var(--color-ink)] shadow-sm transition-[background-color,border-color] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] motion-reduce:transition-none ${padding} ${liked ? "border-[var(--color-terracotta)] bg-[var(--color-blush)]" : "border-[var(--color-border)] bg-white/95 hover:border-[var(--color-terracotta)]"}`}
       >
         <Heart aria-hidden="true" className={liked ? "size-4 fill-current text-[var(--color-terracotta)]" : "size-4 text-[var(--color-muted)]"} strokeWidth={2} />
         <span data-testid="community-heart-count">{count}</span>
         {pending ? <span className="sr-only">Updating reaction</span> : null}
       </button>
-      {error ? <span role="status" className={`inline-flex items-center gap-1 rounded bg-white/95 px-2 py-1 text-xs text-[var(--color-error)] shadow-sm ${compact ? "max-w-32" : ""}`}>
-        <span>Your reaction was not saved.</span>
-        <button type="button" onClick={toggle} className="underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2" aria-label="Retry saving your reaction">Retry</button>
-      </span> : null}
     </div>;
   }
 
@@ -87,7 +80,7 @@ export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access
       : "/en/account";
   const label = access === "guest" ? "Log in to like" : access === "verify" ? "Verify email to like" : "Join the Coloring Club to like";
   return <div className="inline-flex items-center gap-1.5" data-testid="community-heart-control" data-artwork-id={artworkId}>
-    <Link href={href} aria-label={`${label}; ${count} ${count === 1 ? "heart" : "hearts"}`} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-full border border-[var(--color-border)] bg-white/95 px-3 text-sm font-semibold text-[var(--color-ink)] shadow-sm hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">
+    <Link href={href} aria-label={`${label}; ${count} ${count === 1 ? "heart" : "hearts"}`} className={`inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full border border-[var(--color-border)] bg-white/95 text-sm font-semibold text-[var(--color-ink)] shadow-sm hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] ${padding}`}>
       <Heart aria-hidden="true" className="size-4 text-[var(--color-muted)]" strokeWidth={2} /><span data-testid="community-heart-count">{count}</span>
     </Link>
   </div>;

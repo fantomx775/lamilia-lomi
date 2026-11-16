@@ -8,6 +8,7 @@ import { AdminDrawer } from "@/components/admin/admin-drawer";
 import { useToast } from "@/components/ui/toast";
 import type { CommunityOwnerArtwork } from "@/lib/community/types";
 import { trackEvent } from "@/lib/analytics-client";
+import { COMMUNITY_IMAGE_MAX_BYTES, COMMUNITY_IMAGE_MAX_EDGE, COMMUNITY_IMAGE_MAX_PIXELS } from "@/lib/community/image-limits";
 
 type CommunityBook = { id: string; slug: string; title: string };
 type PendingImage = {
@@ -33,7 +34,7 @@ type Props = {
   preselectedProductId: string;
 };
 
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const MAX_JPEG_SELECTION_BYTES = 20 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const UPLOAD_FORM_ID = "community-upload-form";
 const FOCUS_STYLE = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]";
@@ -43,6 +44,40 @@ const STATUS_STYLE: Record<CommunityOwnerArtwork["status"], string> = {
   rejected: "bg-[var(--color-error-bg)] text-[var(--color-error)]",
   removed: "bg-[var(--color-blush)] text-[var(--color-ink)]",
 };
+
+async function prepareArtworkFile(file: File): Promise<File> {
+  if (file.size <= COMMUNITY_IMAGE_MAX_BYTES) return file;
+
+  const header = new Uint8Array(await file.slice(0, 3).arrayBuffer());
+  if (header[0] !== 0xff || header[1] !== 0xd8 || header[2] !== 0xff) {
+    throw new Error("Choose a valid JPG image.");
+  }
+
+  if (typeof createImageBitmap !== "function") {
+    throw new Error("This browser could not resize the photo. Choose a JPG up to 4 MiB.");
+  }
+  const image = await createImageBitmap(file).catch(() => null);
+  if (!image) throw new Error("This JPG could not be opened. Choose another image.");
+  try {
+    if (image.width * image.height > COMMUNITY_IMAGE_MAX_PIXELS) {
+      throw new Error("This photo has too many pixels. Choose a smaller photo.");
+    }
+    const scale = Math.min(1, COMMUNITY_IMAGE_MAX_EDGE / Math.max(image.width, image.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("This photo could not be resized. Choose a smaller photo.");
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+    if (!blob?.size || blob.type !== "image/jpeg" || blob.size > COMMUNITY_IMAGE_MAX_BYTES) {
+      throw new Error("This photo could not be resized. Choose a smaller photo.");
+    }
+    return new File([blob], file.name, { type: blob.type });
+  } finally {
+    image.close();
+  }
+}
 
 export function CommunityCreationManager({
   initialArtworks,
@@ -153,7 +188,9 @@ export function CommunityCreationManager({
     const added = selected.map((file) => {
       let validationError: string | null = null;
       if (!ACCEPTED_TYPES.has(file.type)) validationError = "Use a JPG, PNG, or WebP image.";
-      else if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) validationError = "Choose an image no larger than 4 MiB.";
+      else if (file.size === 0) validationError = "Choose a non-empty image.";
+      else if (file.type === "image/jpeg" && file.size > MAX_JPEG_SELECTION_BYTES) validationError = "Choose a JPG image up to 20 MiB.";
+      else if (file.type !== "image/jpeg" && file.size > COMMUNITY_IMAGE_MAX_BYTES) validationError = "Choose a PNG or WebP image up to 4 MiB, or use JPG for a larger photo.";
       const previewUrl = validationError ? "" : URL.createObjectURL(file);
       if (previewUrl) previewUrls.current.add(previewUrl);
       return { file, idempotencyKey: crypto.randomUUID(), previewUrl, description: "", validationError, requestError: null };
@@ -177,13 +214,15 @@ export function CommunityCreationManager({
   }
 
   async function uploadOne(item: PendingImage, payload: { productId: string; description: string }) {
-    const form = new FormData();
-    form.set("file", item.file);
-    form.set("productId", payload.productId);
-    form.set("description", payload.description);
-    form.set("idempotencyKey", item.idempotencyKey);
-    form.set("rulesAccepted", "true");
+    let file = item.file;
     try {
+      file = await prepareArtworkFile(file);
+      const form = new FormData();
+      form.set("file", file);
+      form.set("productId", payload.productId);
+      form.set("description", payload.description);
+      form.set("idempotencyKey", item.idempotencyKey);
+      form.set("rulesAccepted", "true");
       const response = await fetch("/api/community/artworks", { method: "POST", body: form });
       const result = await response.json().catch(() => null) as { ok?: boolean; artwork?: CommunityOwnerArtwork; message?: string } | null;
       const artwork = result?.artwork;
@@ -200,7 +239,7 @@ export function CommunityCreationManager({
         ? error.message
         : "This image could not be submitted. Check your connection and try again.";
       setPendingImages((current) => current.map((candidate) => candidate.idempotencyKey === item.idempotencyKey
-        ? { ...candidate, requestError: message, retryPayload: candidate.retryPayload ?? payload }
+        ? { ...candidate, file, requestError: message, retryPayload: candidate.retryPayload ?? payload }
         : candidate));
       return false;
     }
@@ -394,7 +433,7 @@ export function CommunityCreationManager({
                 <Upload className="size-4" aria-hidden />
                 Add photos
               </button>
-              <p className="text-xs text-[var(--color-muted)]">Up to 3 photos, 4 MiB each. JPG, PNG, or WebP.</p>
+              <p className="text-xs text-[var(--color-muted)]">Up to 3 photos. JPG up to 20 MiB, PNG or WebP up to 4 MiB.</p>
             </div>
           </div>
           {uploadError ? <p className="text-sm text-[var(--color-error)]" role="alert">{uploadError}</p> : null}

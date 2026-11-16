@@ -163,7 +163,9 @@ SELECT throws_ok($$SELECT public.community_moderate_artwork('10000000-0000-4000-
 SELECT ok(EXISTS(SELECT 1 FROM public.community_moderation_events WHERE artwork_id=(SELECT id FROM erased_artwork) AND actor_user_id IS NULL AND reason IS NULL AND to_status='removed'), 'account erasure appends an anonymous removal audit event');
 RESET ROLE;
 
-SELECT ok((SELECT count(*) = 4 FROM public.community_moderation_events WHERE artwork_id=(SELECT id FROM community_artwork_result)), 'moderation decisions remain with the additional anonymous erasure event');
+SELECT ok((SELECT count(*) = 4 FROM public.community_moderation_events
+  WHERE artwork_id=(SELECT id FROM community_artwork_result)
+    AND (to_status <> 'pending' OR from_status = 'removed')), 'moderation decisions remain with the additional anonymous erasure event');
 SELECT ok(NOT has_table_privilege('service_role', 'public.community_moderation_events', 'UPDATE') AND NOT has_table_privilege('service_role', 'public.community_moderation_events', 'DELETE'), 'service role cannot update or delete moderation audit rows');
 
 SELECT * FROM finish();

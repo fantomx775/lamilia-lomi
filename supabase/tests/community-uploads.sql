@@ -2,7 +2,7 @@
 -- Run ONLY in supabase_db_lamilia-coloring-club-p0. All fixtures roll back.
 BEGIN;
 SET LOCAL search_path=public,extensions;
-SELECT plan(28);
+SELECT plan(36);
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='public.community_upload_reservations'::regclass),'upload reservations enforce RLS');
 SELECT ok(NOT has_table_privilege('anon','public.community_upload_reservations','SELECT,INSERT,UPDATE,DELETE'),'anon has no reservation grants');
 SELECT ok(NOT has_table_privilege('authenticated','public.community_upload_reservations','SELECT,INSERT,UPDATE,DELETE'),'authenticated has no reservation grants');
@@ -17,6 +17,7 @@ SET LOCAL ROLE anon;
 SELECT throws_ok($$SELECT * FROM public.community_upload_reservations$$,'42501','permission denied for table community_upload_reservations','anon cannot read upload identities');
 SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture')$$,'42501','permission denied for function community_reserve_upload','anon cannot acquire an upload lease');
 SELECT throws_ok($$SELECT * FROM public.community_claim_upload_cleanup(10)$$,'42501','permission denied for function community_claim_upload_cleanup','anon cannot trigger raw cleanup');
+SELECT throws_ok($$SELECT * FROM public.community_claim_moderation_email_outbox('30000000-0000-4000-8000-000000000001',10,true)$$,'42501','permission denied for function community_claim_moderation_email_outbox','anon cannot claim review mail');
 RESET ROLE;
 SET LOCAL ROLE authenticated;
 SELECT throws_ok($$SELECT * FROM public.community_upload_reservations$$,'42501','permission denied for table community_upload_reservations','authenticated cannot read upload identities');
@@ -37,8 +38,34 @@ SELECT is((public.community_reserve_upload('20000000-0000-4000-8000-000000000001
 INSERT INTO cc_upload_result SELECT public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001');
 SELECT ok((SELECT a.status='pending' AND a.revision=1 FROM public.community_artworks a JOIN cc_upload_result r ON r.id=a.id),'finalization creates exactly a private pending artwork');
 SELECT is(public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001'),(SELECT id FROM cc_upload_result),'finalization retries return the same artwork');
+SELECT is((SELECT count(*) FROM public.community_moderation_email_outbox mail
+  JOIN public.community_moderation_events event ON event.id=mail.moderation_event_id
+  JOIN cc_upload_result result ON result.id=event.artwork_id
+  WHERE mail.notification_type='admin_pending' AND mail.author_user_id IS NULL AND mail.state='pending'),
+  1::bigint,'finalization and replay queue one private admin notification without a recipient or author address');
+SELECT is((SELECT count(*) FROM public.community_claim_moderation_email_outbox('30000000-0000-4000-8000-000000000001',10)
+  WHERE notification_type='admin_pending'),0::bigint,'previous application workers cannot claim admin alerts');
+SELECT is(public.community_edit_artwork_description('20000000-0000-4000-8000-000000000001',(SELECT id FROM cc_upload_result),1,'Updated caption'),
+  2,'editing a pending description creates a new revision');
+SELECT is((SELECT count(*) FROM public.community_moderation_email_outbox mail
+  JOIN public.community_moderation_events event ON event.id=mail.moderation_event_id
+  JOIN cc_upload_result result ON result.id=event.artwork_id
+  WHERE mail.notification_type='admin_pending' AND event.revision=1 AND mail.state='suppressed'),
+  1::bigint,'superseded unsent alerts are suppressed');
+SELECT is((SELECT count(*) FROM public.community_claim_moderation_email_outbox('30000000-0000-4000-8000-000000000001',10,true) claim
+  JOIN public.community_moderation_events event ON event.id=claim.moderation_event_id
+  JOIN cc_upload_result result ON result.id=event.artwork_id
+  WHERE claim.notification_type='admin_pending' AND event.revision=2),
+  1::bigint,'updated worker can claim the most recent description alert');
+SELECT is((SELECT count(*) FROM public.community_claim_moderation_email_outbox('30000000-0000-4000-8000-000000000002',10,true)
+  WHERE notification_type='admin_pending'),0::bigint,'a second lease cannot claim the in-flight revision');
 SELECT is(public.community_schedule_upload_cleanup('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001'),false,'completed artwork cannot be cleaned as failed upload');
-SELECT is(public.community_delete_artwork('20000000-0000-4000-8000-000000000001',(SELECT id FROM cc_upload_result),1),true,'owner deletion tombstones before physical cleanup');
+SELECT is(public.community_delete_artwork('20000000-0000-4000-8000-000000000001',(SELECT id FROM cc_upload_result),2),true,'owner deletion tombstones before physical cleanup');
+SELECT is((SELECT count(*) FROM public.community_moderation_email_outbox mail
+  JOIN public.community_moderation_events event ON event.id=mail.moderation_event_id
+  JOIN cc_upload_result result ON result.id=event.artwork_id
+  WHERE mail.notification_type='admin_pending' AND event.revision=2 AND mail.state='suppressed'),
+  1::bigint,'deleting the artwork suppresses an unprepared admin alert');
 SELECT ok((SELECT deleted_at IS NOT NULL FROM public.community_artworks WHERE id=(SELECT id FROM cc_upload_result)),'deleted artwork is already inaccessible in data');
 UPDATE public.community_upload_reservations SET cleanup_expires_at=now()-interval '1 second' WHERE author_id='20000000-0000-4000-8000-000000000001' AND idempotency_key='40000000-0000-4000-8000-000000000001';
 INSERT INTO cc_cleanup_result SELECT * FROM public.community_claim_upload_cleanup(10) WHERE author_id='20000000-0000-4000-8000-000000000001';

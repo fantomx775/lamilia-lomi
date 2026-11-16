@@ -1,14 +1,23 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { essentials } from "./helpers/community-fixtures";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
+async function expectLoadedImage(image: Locator) {
+  await image.scrollIntoViewIfNeeded();
+  await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
+}
+
 test("local demo persists a private upload and safely edits and deletes its actual file", async ({ page, browser }, testInfo) => {
-  test.skip(process.env.RUN_COMMUNITY_LOCAL_E2E !== "1" || testInfo.project.name !== "chromium",
+  test.skip(process.env.RUN_COMMUNITY_LOCAL_E2E !== "1" || !["chromium", "webkit-mobile"].includes(testInfo.project.name),
     "Requires an explicitly isolated local-demo server with both community flags ON.");
   test.setTimeout(90_000);
+  if (testInfo.config.workers !== 1) {
+    throw new Error("Run with --workers=1 because both browsers share the local-demo store.");
+  }
   if (testInfo.project.use.baseURL !== "http://127.0.0.1:3100" || process.env.LAMILIA_BACKEND !== "local") {
     throw new Error("Unexpected local-demo test target.");
   }
@@ -29,6 +38,24 @@ test("local demo persists a private upload and safely edits and deletes its actu
   }
   const adminContext = await browser.newContext();
   const adminPage = await adminContext.newPage();
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const failedRequests: string[] = [];
+  for (const observed of [page, adminPage]) {
+    observed.on("pageerror", (error) => pageErrors.push(error.message));
+    observed.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    observed.on("requestfailed", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith("/api/community/")) failedRequests.push(`${request.failure()?.errorText} ${pathname}`);
+    });
+    observed.on("response", (response) => {
+      if (response.status() >= 400 && new URL(response.url()).pathname.startsWith("/api/community/")) {
+        failedRequests.push(`${response.status()} ${new URL(response.url()).pathname}`);
+      }
+    });
+  }
   try {
     await page.goto("/en/login?returnTo=%2Fen%2Faccount");
     await page.getByLabel("Email", { exact: true }).fill("demo@lamilialomi.test");
@@ -36,29 +63,44 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page).toHaveURL("http://127.0.0.1:3100/en/account");
     await essentials(page);
+    const accountManagement = page.locator("details").filter({ hasText: "Account management" });
+    await expect(accountManagement).not.toHaveAttribute("open");
+    await accountManagement.getByText("Account management", { exact: true }).click();
+    await expect(accountManagement.getByTestId("account-deletion-submit")).toBeDisabled();
+    await expect(accountManagement.getByLabel("Type DELETE to confirm")).toBeVisible();
+    await accountManagement.screenshot({ path: testInfo.outputPath("account-management.png"), scale: "css", caret: "initial", style: "nextjs-portal { display: none !important; }" });
     const panel = page.getByTestId("community-account-panel");
     await panel.getByLabel("Public username", { exact: true }).fill("cc_local_demo_artist");
     await panel.getByRole("checkbox", { name: /18|adult/i }).check();
     await panel.getByRole("checkbox", { name: /I accept the current community guidelines/ }).check();
     await panel.getByRole("button", { name: "Join the Coloring Club", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "You joined" })).toBeVisible();
-    await page.getByRole("link", { name: "My Creations", exact: true }).click();
+    await page.goto("/en/library/creations");
     await expect(page.getByRole("heading", { name: "My Creations", exact: true })).toBeVisible();
     await page.getByTestId("community-upload-open").click();
     await page.getByTestId("community-product-select").selectOption("11111111-1111-4111-8111-111111111111");
-    await page.getByTestId("community-upload-file-input").setInputFiles(path.resolve("docs/design/coloring-club/assets/rose-fox.webp"));
+    const artworkJpeg = await sharp("docs/design/coloring-club/assets/rose-fox.webp")
+      .resize({ width: 2800 }).jpeg({ quality: 95 }).toBuffer();
+    // Valid JPEG comment segments make this sample exceed the upload threshold.
+    const jpegComment = Buffer.alloc(65_537, 0x20);
+    jpegComment.writeUInt32BE(0xfffeffff);
+    const photo = Buffer.concat([artworkJpeg.subarray(0, 2), ...Array<Buffer>(64).fill(jpegComment), artworkJpeg.subarray(2)]);
+    expect(photo.length).toBeGreaterThan(4 * 1024 * 1024);
+    await page.getByTestId("community-upload-file-input").setInputFiles({
+      name: "phone-photo.jpg", mimeType: "image/jpeg", buffer: photo,
+    });
     await page.getByTestId("community-selected-artwork").getByRole("textbox").fill("Local private garden fixture");
     await page.getByTestId("community-upload-rules").check();
     await page.getByTestId("community-upload-submit").click();
     const cards = page.getByTestId("community-artwork-card");
-    await expect(cards).toHaveCount(1);
+    const image = cards.getByTestId("community-artwork-preview");
+    await expectLoadedImage(image);
     await expect(page.locator('[data-slot="admin-drawer"]')).toHaveCount(0);
     await page.reload();
     await expect(cards).toHaveCount(1);
     await expect(cards).toContainText("Pending review");
-    const image = cards.getByTestId("community-artwork-preview");
-    await image.scrollIntoViewIfNeeded();
-    await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await expectLoadedImage(image);
+    await cards.screenshot({ path: testInfo.outputPath("large-jpg-pending.png"), caret: "initial" });
     const snapshot = JSON.parse(await readFile(file, "utf8"));
     expect(snapshot.artworks).toHaveLength(1);
     const storedFile = path.resolve("data/.collection-media", snapshot.artworks[0].storagePath);
@@ -68,21 +110,61 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await adminPage.getByLabel("Password", { exact: true }).fill("demo-password");
     await adminPage.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(adminPage).toHaveURL("http://127.0.0.1:3100/admin/community");
-    await expect(adminPage.getByTestId("community-moderation-item")).toHaveCount(1);
+    const reviewItem = adminPage.getByTestId("community-moderation-item");
+    await expect(reviewItem).toHaveCount(1);
+    await expectLoadedImage(reviewItem.locator("img").first());
+    await expectLoadedImage(adminPage.getByTestId("community-moderation-preview"));
     await adminPage.getByTestId("community-moderation-approve").click();
     await adminPage.getByTestId("community-moderation-confirm").click();
     await expect(adminPage.getByTestId("community-count-approved")).toContainText("1");
     await page.reload();
     await expect(cards).toContainText("Published");
+    await expectLoadedImage(image);
+    await page.goto("/en/products/moon-garden-coloring-book");
+    const readerGallery = page.getByRole("region", { name: "Colored by Our Readers" });
+    await expect(readerGallery.getByText("Local private garden fixture", { exact: true })).toBeVisible();
+    const authorLink = readerGallery.getByRole("link", { name: /Colored by @cc_local_demo_artist/ });
+    await expect(authorLink.getByRole("img", { name: "Generated avatar for @cc_local_demo_artist" })).toBeVisible();
+    const readerPhoto = readerGallery.getByRole("img", { name: "Colored by @cc_local_demo_artist", exact: true });
+    await expectLoadedImage(readerPhoto);
+    await readerGallery.screenshot({
+      path: testInfo.outputPath("reader-gallery.png"),
+      scale: "css",
+      caret: "initial",
+      style: "header { visibility: hidden !important; } nextjs-portal { display: none !important; }",
+    });
+    await readerGallery.getByRole("button", { name: /Open community artwork/ }).click();
+    const preview = page.getByRole("dialog", { name: "Reader artwork preview" });
+    await expect(preview.getByText("Local private garden fixture", { exact: true })).toBeVisible();
+    await expectLoadedImage(preview.getByRole("img", { name: "Colored by @cc_local_demo_artist" }));
+    await preview.screenshot({ path: testInfo.outputPath("book-artwork-description.png"), caret: "initial" });
     const artworkId = snapshot.artworks[0].id;
     await page.goto(`http://127.0.0.1:3100/en/club/artworks/${artworkId}`);
     const heart = page.getByTestId("community-heart-toggle");
-    await heart.click();
+    const detailImage = page.getByTestId("community-artwork-media");
+    await expectLoadedImage(detailImage);
+    const heartPath = `/api/community/artworks/${artworkId}/heart`;
+    const allowLike = Promise.withResolvers<void>();
+    await page.route(heartPath, async (route) => {
+      await allowLike.promise;
+      await route.continue();
+    });
+    try {
+      await heart.click();
+      await expect(heart).toBeDisabled();
+      await expect(heart).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByTestId("community-heart-count")).toHaveText("1");
+    } finally {
+      allowLike.resolve();
+    }
     await expect(heart).toBeEnabled();
+    await page.unroute(heartPath);
     await expect(heart).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("community-heart-count")).toHaveText("1");
+    await expect(page.getByRole("status").filter({ hasText: /Heart (added|removed)/ })).toHaveCount(0);
     await page.reload();
     await expect(heart).toHaveAttribute("aria-pressed", "true");
+    await expectLoadedImage(detailImage);
     const repeated = await Promise.all([1, 2].map(() => page.request.put(`http://127.0.0.1:3100/api/community/artworks/${artworkId}/heart`, {
       headers: { Origin: "http://127.0.0.1:3100" },
     })));
@@ -94,7 +176,9 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(heart).toBeEnabled();
     await expect(heart).toHaveAttribute("aria-pressed", "false");
     await expect(page.getByTestId("community-heart-count")).toHaveText("0");
+    await expect(page.getByRole("status").filter({ hasText: /Heart (added|removed)/ })).toHaveCount(0);
     await page.goto("http://127.0.0.1:3100/en/library/creations");
+    await expectLoadedImage(image);
     await cards.getByTestId("community-artwork-actions").click();
     await cards.getByTestId("community-artwork-edit-description").click();
     await cards.getByTestId("community-artwork-description").fill("Updated local garden fixture");
@@ -115,6 +199,9 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(stat(storedFile)).rejects.toMatchObject({ code: "ENOENT" });
     await page.reload();
     await expect(cards).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+    expect(failedRequests).toEqual([]);
   } finally {
     await adminContext.close();
     const snapshot = await readFile(file, "utf8").then((text) => JSON.parse(text), () => null);

@@ -52,9 +52,38 @@ describe("community moderation notification outbox", () => {
     }), { idempotencyKey: "community-moderation/41" });
     expect(message?.text).toContain("Your Coloring Club artwork was approved. You can review its status in My Creations.");
     expect(message?.text).not.toMatch(/visible in the gallery/i);
-    expect(mocks.prepare).toHaveBeenCalledWith(41, expect.any(String), expect.stringMatching(/^[a-f0-9]{64}$/), "cc-status-2026-10-26-v2", undefined);
+    expect(message?.html).toContain('href="https://lamilialomi.example/en/library/creations"');
+    expect(mocks.prepare).toHaveBeenCalledWith(41, expect.any(String), expect.stringMatching(/^[a-f0-9]{64}$/), "cc-moderation-2026-11-16-v1", undefined);
     expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ eventId: 41, result: "sent", providerMessageId: "resend-id" }), undefined);
     expect(JSON.stringify(mocks.prepare.mock.calls)).not.toContain("author@example.test");
+  });
+
+  it("delivers pending-review mail to the admin inbox without exposing author or description", async () => {
+    mocks.claims.mockResolvedValueOnce([{ moderation_event_id: 42, author_user_id: null, notification_type: "admin_pending", template_version: null }]);
+    expect(await processCommunityModerationNotifications(1)).toMatchObject({ claimed: 1, sent: 1 });
+    expect(mocks.recipient).not.toHaveBeenCalled();
+    expect(mocks.resend?.emails.send).toHaveBeenCalledWith(expect.objectContaining({
+      to: ["owner@lamilialomi.com"],
+      subject: "Coloring Club artwork is ready for review",
+      html: expect.stringContaining('href="https://lamilialomi.example/admin/community"'),
+    }), { idempotencyKey: "community-moderation/42" });
+  });
+
+  it.each([null, "cc-status-2026-10-26-v2"])("sends a rejection and preserves the plain-text payload on legacy retries (%s)", async (version) => {
+    mocks.claims.mockResolvedValueOnce([{ moderation_event_id: 43, author_user_id: "author-private-id", notification_type: "rejected", template_version: version }]);
+    expect(await processCommunityModerationNotifications(1)).toMatchObject({ claimed: 1, sent: 1 });
+    const message = mocks.resend?.emails.send.mock.calls[0]?.[0];
+    expect(message).toMatchObject({
+      to: ["author@example.test"],
+      subject: "Your Coloring Club artwork was reviewed",
+      text: "Your Coloring Club artwork was not approved. You can review its status in My Creations.\n\nView your creations: https://lamilialomi.example/en/library/creations",
+    });
+    if (version) {
+      expect(message).not.toHaveProperty("html");
+      expect(mocks.prepare).toHaveBeenCalledWith(43, expect.any(String), expect.any(String), version, undefined);
+    } else {
+      expect(message.html).toContain("View your creations");
+    }
   });
 
   it("suppresses sends to deleted, unverified, withdrawn, or inactive recipients", async () => {

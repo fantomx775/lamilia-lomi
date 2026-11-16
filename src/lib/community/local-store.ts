@@ -1094,9 +1094,13 @@ function readSnapshot(filePath: string): LocalSnapshot {
 function writeSnapshot(filePath: string, snapshot: LocalSnapshot) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
   const tempPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  fs.writeFileSync(tempPath, `${JSON.stringify(snapshot, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-  const fd = fs.openSync(tempPath, "r");
-  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  const fd = fs.openSync(tempPath, "wx", 0o600);
+  try {
+    fs.writeFileSync(fd, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
   fs.renameSync(tempPath, filePath);
 }
 

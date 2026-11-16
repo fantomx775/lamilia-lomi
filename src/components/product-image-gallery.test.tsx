@@ -189,11 +189,12 @@ describe("ProductImageGallery", () => {
     expect(within(dialog).getByText("2 of 3")).toBeVisible();
   });
 
-  it("mixes curated and approved community work under one heading while preserving each source credit", () => {
+  it("shows the approved community description both under the photo and in its preview", async () => {
+    const user = userEvent.setup();
     const communityArtwork: CommunityPublicArtwork = {
       id: "community-work-id",
       product: { id: "product-id", slug: "spring-flowers", title: "Spring Flowers", audience: "kids" },
-      creator: { username: "garden_artist", avatarSeed: "seed" },
+      creator: { username: "garden_artist", avatarSeed: "seed", photoSrc: "/api/community/avatars/test-photo" },
       contentType: "image/webp",
       description: "A bright spring page",
       publishedAt: "2026-10-25T12:00:00.000Z",
@@ -204,9 +205,15 @@ describe("ProductImageGallery", () => {
     expect(screen.getAllByRole("heading", { name: "Colored by Our Readers" })).toHaveLength(1);
     expect(screen.getByText("Colored by Mira")).toBeVisible();
     expect(screen.getByText("Colored by @garden_artist")).toBeVisible();
+    const authorLink = screen.getByRole("link", { name: /Colored by @garden_artist/ });
+    expect(authorLink).toHaveAttribute("href", "/en/club/creators/garden_artist");
+    expect(within(authorLink).getByRole("img", { name: "Profile photo for @garden_artist" }).querySelector("img")).toHaveAttribute("src", "/api/community/avatars/test-photo");
     expect(screen.getByRole("img", { name: "Blue flowers" })).toHaveAttribute("src", "/curated.webp");
-    expect(screen.getByRole("img", { name: "Colored by @garden_artist: A bright spring page" })).toHaveAttribute("src", "/api/community/artworks/community-work-id/media");
+    expect(screen.getByRole("img", { name: "Colored by @garden_artist" })).toHaveAttribute("src", "/api/community/artworks/community-work-id/media");
     expect(screen.getByTestId("colored-by-our-readers-view-all")).toHaveAttribute("href", "/en/club?productId=product-id");
+    expect(screen.getByText("A bright spring page")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Open community artwork 1 by @garden_artist" }));
+    expect(within(screen.getByRole("dialog")).getByText("A bright spring page")).toBeVisible();
   });
 
   it("keeps a single image usable without carousel controls", async () => {

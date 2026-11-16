@@ -36,7 +36,7 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
   await expect(page.getByRole("heading", { name: "Communication preferences" })).toBeVisible();
   await expect(page.getByText("Marketing emails:")).toContainText("Subscribed");
   await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
-  await expect(page.getByText("Danger Zone")).toBeVisible();
+  await expect(page.getByText("Account management")).toBeVisible();
   await expect(page.locator("details")).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "Join the Coloring Club" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
