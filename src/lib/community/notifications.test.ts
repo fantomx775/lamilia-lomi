@@ -21,11 +21,13 @@ const originalEnv = {
   secret: process.env.AUTH_RESUME_SECRET,
   appUrl: process.env.NEXT_PUBLIC_APP_URL,
   publicEnabled: process.env.COLORING_CLUB_PUBLIC_ENABLED,
+  adminRecipient: process.env.COLORING_CLUB_ADMIN_EMAIL,
 };
 afterEach(() => {
   if (originalEnv.secret === undefined) delete process.env.AUTH_RESUME_SECRET; else process.env.AUTH_RESUME_SECRET = originalEnv.secret;
   if (originalEnv.appUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL; else process.env.NEXT_PUBLIC_APP_URL = originalEnv.appUrl;
   if (originalEnv.publicEnabled === undefined) delete process.env.COLORING_CLUB_PUBLIC_ENABLED; else process.env.COLORING_CLUB_PUBLIC_ENABLED = originalEnv.publicEnabled;
+  if (originalEnv.adminRecipient === undefined) delete process.env.COLORING_CLUB_ADMIN_EMAIL; else process.env.COLORING_CLUB_ADMIN_EMAIL = originalEnv.adminRecipient;
 });
 
 beforeEach(() => {
@@ -38,6 +40,7 @@ beforeEach(() => {
   mocks.finish.mockResolvedValue(true);
   process.env.AUTH_RESUME_SECRET = "stable-test-key-for-community-notification-fingerprint";
   process.env.NEXT_PUBLIC_APP_URL = "https://lamilialomi.example";
+  process.env.COLORING_CLUB_ADMIN_EMAIL = "moderation@example.test";
 });
 
 describe("community moderation notification outbox", () => {
@@ -63,10 +66,23 @@ describe("community moderation notification outbox", () => {
     expect(await processCommunityModerationNotifications(1)).toMatchObject({ claimed: 1, sent: 1 });
     expect(mocks.recipient).not.toHaveBeenCalled();
     expect(mocks.resend?.emails.send).toHaveBeenCalledWith(expect.objectContaining({
-      to: ["owner@lamilialomi.com"],
+      to: ["moderation@example.test"],
       subject: "Coloring Club artwork is ready for review",
       html: expect.stringContaining('href="https://lamilialomi.example/admin/community"'),
     }), { idempotencyKey: "community-moderation/42" });
+  });
+
+  it("leaves an admin alert queued when its recipient is missing", async () => {
+    delete process.env.COLORING_CLUB_ADMIN_EMAIL;
+    mocks.claims.mockResolvedValueOnce([{ moderation_event_id: 42, author_user_id: null, notification_type: "admin_pending", template_version: null }]);
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(await processCommunityModerationNotifications(1)).toMatchObject({ claimed: 1, retrying: 1 });
+      expect(mocks.resend?.emails.send).not.toHaveBeenCalled();
+      expect(mocks.prepare).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it.each([null, "cc-status-2026-10-26-v2"])("sends a rejection and preserves the plain-text payload on legacy retries (%s)", async (version) => {

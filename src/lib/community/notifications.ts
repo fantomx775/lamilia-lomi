@@ -11,7 +11,6 @@ import * as supabase from "./supabase-adapter";
 const LEGACY_TEMPLATE_VERSION = "cc-status-2026-10-26-v2";
 const TEMPLATE_VERSION = "cc-moderation-2026-11-16-v1";
 const FROM = "LamiliaLomi <hello@lamilialomi.com>";
-const ADMIN_RECIPIENT = "owner@lamilialomi.com";
 
 type NotificationCounts = { claimed: number; sent: number; suppressed: number; retrying: number };
 export type CommunityNotificationResult = NotificationCounts & (
@@ -55,8 +54,14 @@ export async function processCommunityModerationNotifications(limit = 10, signal
   for (const item of messages) {
     signal?.throwIfAborted();
     try {
+      const adminRecipient = process.env.COLORING_CLUB_ADMIN_EMAIL?.trim();
+      if (item.notification_type === "admin_pending" && !adminRecipient) {
+        console.error("[community-notification] Admin recipient is unconfigured.");
+        if (await supabase.finishModerationEmailSend({ eventId: item.moderation_event_id, leaseToken, result: "retry", errorCode: "provider_error" }, signal)) retrying += 1;
+        continue;
+      }
       const recipient = item.notification_type === "admin_pending"
-        ? ADMIN_RECIPIENT
+        ? adminRecipient
         : item.author_user_id ? await supabase.getModerationEmailRecipient(item.author_user_id, signal) : null;
       if (!recipient) {
         if (await supabase.finishModerationEmailSend({ eventId: item.moderation_event_id, leaseToken, result: "suppressed" }, signal)) suppressed += 1;
