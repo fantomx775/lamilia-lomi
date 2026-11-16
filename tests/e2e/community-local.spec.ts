@@ -8,7 +8,7 @@ import { essentials } from "./helpers/community-fixtures";
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
 test("local demo persists a private upload and safely edits and deletes its actual file", async ({ page, browser }, testInfo) => {
-  test.skip(process.env.RUN_COMMUNITY_LOCAL_E2E !== "1" || testInfo.project.name !== "chromium",
+  test.skip(process.env.RUN_COMMUNITY_LOCAL_E2E !== "1" || !["chromium", "webkit-mobile"].includes(testInfo.project.name),
     "Requires an explicitly isolated local-demo server with both community flags ON.");
   test.setTimeout(90_000);
   if (testInfo.project.use.baseURL !== "http://127.0.0.1:3100" || process.env.LAMILIA_BACKEND !== "local") {
@@ -31,6 +31,16 @@ test("local demo persists a private upload and safely edits and deletes its actu
   }
   const adminContext = await browser.newContext();
   const adminPage = await adminContext.newPage();
+  const pageErrors: string[] = [];
+  const failedRequests: string[] = [];
+  for (const observed of [page, adminPage]) {
+    observed.on("pageerror", (error) => pageErrors.push(error.message));
+    observed.on("response", (response) => {
+      if (response.status() >= 400 && new URL(response.url()).pathname.startsWith("/api/community/")) {
+        failedRequests.push(`${response.status()} ${new URL(response.url()).pathname}`);
+      }
+    });
+  }
   try {
     await page.goto("/en/login?returnTo=%2Fen%2Faccount");
     await page.getByLabel("Email", { exact: true }).fill("demo@lamilialomi.test");
@@ -44,7 +54,7 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await panel.getByRole("checkbox", { name: /I accept the current community guidelines/ }).check();
     await panel.getByRole("button", { name: "Join the Coloring Club", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "You joined" })).toBeVisible();
-    await page.getByRole("link", { name: "My Creations", exact: true }).click();
+    await page.goto("/en/library/creations");
     await expect(page.getByRole("heading", { name: "My Creations", exact: true })).toBeVisible();
     await page.getByTestId("community-upload-open").click();
     await page.getByTestId("community-product-select").selectOption("11111111-1111-4111-8111-111111111111");
@@ -131,6 +141,8 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(stat(storedFile)).rejects.toMatchObject({ code: "ENOENT" });
     await page.reload();
     await expect(cards).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+    expect(failedRequests).toEqual([]);
   } finally {
     await adminContext.close();
     const snapshot = await readFile(file, "utf8").then((text) => JSON.parse(text), () => null);

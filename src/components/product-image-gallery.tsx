@@ -210,7 +210,7 @@ export function ProductImageGallery({
             {image.caption || image.description ? (
               <figcaption className={`mt-3 min-w-0 px-1 text-sm leading-6 text-[var(--color-muted)] ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
                 {image.captionHref ? <Link href={image.captionHref} className="font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">{image.caption}</Link> : image.caption}
-                {image.description ? <span className="block whitespace-pre-line">{image.description}</span> : null}
+                {image.description ? <span className="block">{image.description}</span> : null}
               </figcaption>
             ) : null}
           </figure>
@@ -337,7 +337,7 @@ export function ProductImageGallery({
             {activeImage.caption || activeImage.description ? (
               <p className={`mt-2 min-w-0 shrink-0 px-1 text-center text-sm leading-6 text-[var(--color-muted)] sm:mt-3 ${layout === "reader-artworks" ? "[overflow-wrap:anywhere]" : ""}`}>
                 {activeImage.caption}
-                {activeImage.description ? <span className="block whitespace-pre-line">{activeImage.description}</span> : null}
+                {activeImage.description ? <span className="block">{activeImage.description}</span> : null}
               </p>
             ) : null}
           </div>

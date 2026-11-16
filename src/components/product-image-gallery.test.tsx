@@ -206,7 +206,7 @@ describe("ProductImageGallery", () => {
     expect(screen.getByText("Colored by Mira")).toBeVisible();
     expect(screen.getByText("Colored by @garden_artist")).toBeVisible();
     expect(screen.getByRole("img", { name: "Blue flowers" })).toHaveAttribute("src", "/curated.webp");
-    expect(screen.getByRole("img", { name: "Colored by @garden_artist: A bright spring page" })).toHaveAttribute("src", "/api/community/artworks/community-work-id/media");
+    expect(screen.getByRole("img", { name: "Colored by @garden_artist" })).toHaveAttribute("src", "/api/community/artworks/community-work-id/media");
     expect(screen.getByTestId("colored-by-our-readers-view-all")).toHaveAttribute("href", "/en/club?productId=product-id");
     expect(screen.getByText("A bright spring page")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open community artwork 1 by @garden_artist" }));
