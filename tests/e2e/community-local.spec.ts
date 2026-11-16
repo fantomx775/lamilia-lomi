@@ -11,6 +11,9 @@ test("local demo persists a private upload and safely edits and deletes its actu
   test.skip(process.env.RUN_COMMUNITY_LOCAL_E2E !== "1" || !["chromium", "webkit-mobile"].includes(testInfo.project.name),
     "Requires an explicitly isolated local-demo server with both community flags ON.");
   test.setTimeout(90_000);
+  if (testInfo.config.workers !== 1) {
+    throw new Error("Run with --workers=1 because both browsers share the local-demo store.");
+  }
   if (testInfo.project.use.baseURL !== "http://127.0.0.1:3100" || process.env.LAMILIA_BACKEND !== "local") {
     throw new Error("Unexpected local-demo test target.");
   }
