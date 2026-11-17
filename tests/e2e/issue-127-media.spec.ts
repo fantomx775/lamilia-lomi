@@ -100,7 +100,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       const display = dialog.locator("[data-gallery-display]").first();
       await expect(display).toBeVisible();
       const needsLargerSource = (await dialog.getByTestId("product-gallery-preview-frame").boundingBox())!.width * await page.evaluate(() => devicePixelRatio) > thumbnailWidth;
-      if (needsLargerSource) await expect(dialog.getByRole("status")).toHaveTextContent("Loading larger preview");
+      if (needsLargerSource) await expect(dialog.getByRole("status")).toContainText("Loading larger preview");
       await page.screenshot({ path: path.resolve(`docs/verification/issue-127/media-${testInfo.project.name}-pending-gallery.png`), animations: "disabled" });
       releaseDetail();
       await expect(dialog.getByRole("status")).toHaveCount(0);
