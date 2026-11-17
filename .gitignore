@@ -11,6 +11,7 @@
 !.yarn/versions
 
 # testing
+/.task/
 /coverage
 /data/*.local.json
 /data/.collection-media/
