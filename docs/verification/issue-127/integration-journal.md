@@ -60,3 +60,9 @@ Each finding has one lead implementation owner in the matrix. Navigation contrib
 All area workers handed off source after R1-R7 independent-review remediations. This is not final acceptance. Source completeness32/32 is distinct from executed32/32 verification. Final broad commands, real browser/backend campaigns, comparable baseline/candidate samples, screenshots and exact-SHA rereview remain required. The source lead mapping in matrix is authoritative. Runtime setup has recovered; no permanent external blocker is claimed.
 
 Primary checkout status was rechecked and retains exactly the earlier dirty AGENTS/card/PDP/test outputs and untracked RODO/probe artifacts. Remote main remains79df809db41ca824913719e91eaea4c5a3132fb4. No Production, main push, merge or issue closure occurred.
+
+## First real production-flow result and repair
+
+On e15f01b7a182893e11e5fed8dd57f5fb1e7d5994/buildGy6cHtcy5AJLe81kbkiC3, F31 failed before Storage transfer: target preparation200 generated https://localhost without3443, and real TUSPOSTs hit default443/ERR_CONNECTION_REFUSED. Separate45-second and short sanitized diagnostics confirmed the exact origin, without recording tokens/headers/query. Acceptance timeout and guards were not relaxed. Controlled actor/product cleanup counts were all0. The media-storage endpoint helper now uses URL origin to preserve custom ports while retaining hosted Supabase storage hostname mapping and discarding userinfo/query/fragment;34 focused tests passed. Actual F31 acceptance remains pending the new build/rerun.
+
+F28 completion audit removed manual brand suffixes from Account/MyCreations/Guidelines and added unique truthful Privacy/Terms/reset metadata. Legal bodies and authentication actions are unchanged;21 existing focused tests passed, with actual rendered-head assertions prepared for QA.

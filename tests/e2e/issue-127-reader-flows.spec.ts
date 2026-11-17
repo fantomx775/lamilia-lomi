@@ -5,7 +5,7 @@ import { readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
-import { isLocalDemoAppTarget } from "./local-target";
+import { isLocalDemoAppTarget, isLoopbackPlaywrightTarget } from "./local-target";
 import { loadIsolatedCommunityTarget } from "../../scripts/testing/isolated-community-target.mjs";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
@@ -60,6 +60,35 @@ async function holdReaderTable() {
     },
   };
 }
+
+test("F28 rendered public page titles are unique, descriptive and include the brand once", async ({ page }, info) => {
+  test.skip(!isLoopbackPlaywrightTarget(info.project.use.baseURL), "Metadata acceptance is scoped to the local application.");
+  test.setTimeout(120_000);
+  const titles = new Set<string>();
+  const pages = [
+    ["/en/products", "Books & Coloring Books", false],
+    ["/en/contact", "Contact", false],
+    ["/en/about", "About", false],
+    ["/en/community-guidelines", "Community guidelines", false],
+    ["/en/privacy", "Privacy Policy", false],
+    ["/en/terms", "Terms", false],
+    ["/en/reset-password", "Reset password", true],
+    ["/en/login", "Log in", true],
+    ["/en/register", "Create account", true],
+    ["/en/library", "My Library", true],
+    ["/en/account", "Account", true],
+  ] as const;
+  for (const [url, title, privatePage] of pages) {
+    const response = await page.goto(url);
+    expect(response?.status()).toBe(200);
+    await expect(page).toHaveTitle(`${title} | LamiliaLomi`);
+    const actual = await page.title();
+    expect(actual.match(/LamiliaLomi/g)).toHaveLength(1);
+    expect(titles.has(actual)).toBe(false); titles.add(actual);
+    await expect(page.locator('head meta[name="description"]')).toHaveAttribute("content", /\S.{15,}/);
+    if (privatePage) await expect(page.locator('head meta[name="robots"]')).toHaveAttribute("content", /noindex/);
+  }
+});
 
 test("F18 core book is usable while real reader query waits, fails, and recovers", async ({ page }, info) => {
   test.skip(process.env.RUN_ISSUE_127_READER_E2E !== "1", "Requires exclusive guarded isolated Supabase app and database.");
@@ -226,6 +255,16 @@ test("F24 F25 real role fixtures open private files directly and explain sharing
       await expect(memberPage.getByTestId("community-gallery-share")).toHaveText(label);
     }
     await fixture.login(page, owner, "/en/library");
+    const privateTitles = new Set<string>();
+    for (const [url, title] of [["/en/account", "Account"], ["/en/library/creations", "My Creations"], ["/en/library", "My Library"], ["/en/club", "Coloring Club"]] as const) {
+      await page.goto(url);
+      await expect(page).toHaveTitle(`${title} | LamiliaLomi`);
+      const actual = await page.title();
+      expect(actual.match(/LamiliaLomi/g)).toHaveLength(1);
+      expect(privateTitles.has(actual)).toBe(false); privateTitles.add(actual);
+      await expect(page.locator('head meta[name="description"]')).toHaveAttribute("content", /\S.{15,}/);
+      if (url !== "/en/club") await expect(page.locator('head meta[name="robots"]')).toHaveAttribute("content", /noindex/);
+    }
     const card = page.getByTestId("library-book-card").filter({ hasText: book.title });
     await expect(card).toContainText("1 bonus file"); await card.getByRole("link", { name: "Open my files" }).click();
     await expect(page).toHaveURL(`${COMMUNITY_TEST_ORIGIN}${files}`);

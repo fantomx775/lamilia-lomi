@@ -2,6 +2,11 @@ import type { Locale } from "@/i18n/routing";
 import { RichTextContent } from "@/components/rich-text-content";
 import { getStaticPageForRequest } from "@/lib/static-pages";
 
+export const metadata = {
+  title: "Privacy Policy",
+  description: "Read the LamiliaLomi Privacy Policy.",
+};
+
 type Props = {
   params: Promise<{ locale: Locale }>;
 };

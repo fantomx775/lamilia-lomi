@@ -15,7 +15,8 @@ import { getProductByIdForRequest } from "@/lib/products-request";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const metadata: Metadata = {
-  title: "My Creations | LamiliaLomi",
+  title: "My Creations",
+  description: "View your Coloring Club submissions, descriptions and review status.",
   robots: { index: false, follow: false },
 };
 
