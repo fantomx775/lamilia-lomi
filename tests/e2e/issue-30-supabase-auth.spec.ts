@@ -186,15 +186,13 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       sensitiveValues.add(userFour.email);
       sensitiveValues.add(userFour.password);
 
-      // The home CTA and public QR URL must both resolve to published product pages.
+      // Generic home entry lets the reader explicitly select the owned book.
       await page.goto("/en");
-      const homeQrLink = page.getByRole("link", { name: "Try QR unlock", exact: true });
-      const homeQrHref = await homeQrLink.getAttribute("href");
-      expect(homeQrHref).toMatch(/^\/en\/unlock\/[a-z0-9]+(?:-[a-z0-9]+)*$/);
-      if (!homeQrHref) {
-        throw new Error("The homepage QR link did not have a product destination.");
-      }
-      await page.goto(homeQrHref);
+      const homeQrLink = page.getByRole("link", { name: "Unlock my book bonus", exact: true });
+      await expect(homeQrLink).toHaveAttribute("href", "/en/unlock");
+      await homeQrLink.click();
+      const selectedBook = page.locator("li").filter({ has: page.locator(`a[href="/en/products/${productSlug}#premium"]`) });
+      await selectedBook.getByRole("link", { name: "Choose this book", exact: true }).click();
       await expect(page.getByTestId("product-unlock-section")).toBeVisible();
       completed.homepageQrCtaResolvesToPublishedProduct = true;
 

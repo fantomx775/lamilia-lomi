@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
@@ -57,7 +57,7 @@ describe("public Coloring Club gallery", () => {
     expect(screen.getByTestId("community-gallery-audience-filter")).toHaveValue("kids");
     expect(screen.getByTestId("community-gallery-product-filter")).toHaveValue(product.id);
     expect(screen.getByTestId("community-artwork-grid")).toHaveClass("grid-cols-2", "lg:grid-cols-4");
-    expect(screen.getByRole("img", { name: "Coloring by @garden_artist: A spring garden" })).toHaveAttribute("src", `/api/community/artworks/${artwork.id}/media`);
+    expect(screen.getByRole("img", { name: "Coloring by @garden_artist: A spring garden" })).toHaveAttribute("src", `/api/community/artworks/${artwork.id}/media?width=480`);
     expect(screen.getByRole("link", { name: "View artwork by @garden_artist" })).toHaveAttribute("href", `/en/club/artworks/${artwork.id}`);
   });
 
@@ -116,7 +116,7 @@ describe("public Coloring Club gallery", () => {
     expect(screen.getByText("Filtered result")).toBeVisible();
   });
 
-  it("clears stale cards on filter failure and lets the visitor retry", async () => {
+  it("retains current cards on filter failure and lets the visitor retry", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response("{}", { status: 503 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, items: [artwork], nextCursor: null }), { status: 200 }));
@@ -126,7 +126,7 @@ describe("public Coloring Club gallery", () => {
     await user.selectOptions(screen.getByTestId("community-gallery-audience-filter"), "kids");
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be updated");
     expect(screen.queryByRole("heading", { name: "No approved artwork here yet" })).not.toBeInTheDocument();
-    expect(screen.queryByText("A spring garden")).not.toBeInTheDocument();
+    expect(screen.getByText("A spring garden")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("A spring garden")).toBeVisible();
   });
@@ -146,4 +146,38 @@ describe("public Coloring Club gallery", () => {
     expect(await screen.findByText("Next page result")).toBeVisible();
     expect(screen.getByText("A spring garden")).toBeVisible();
   });
+  it("retains geometry while three rapid filters ignore out-of-order responses", async () => {
+    const releases: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => releases.push(resolve)));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<CommunityGallery initialPage={{ items: [artwork], nextCursor: "old-cursor" }} products={[product]} />);
+    fireEvent.change(screen.getByTestId("community-gallery-audience-filter"), { target: { value: "kids" } });
+    fireEvent.change(screen.getByTestId("community-gallery-product-filter"), { target: { value: product.id } });
+    fireEvent.change(screen.getByTestId("community-gallery-sort"), { target: { value: "popular" } });
+    expect(screen.getByTestId("community-artwork-grid")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("A spring garden")).toBeVisible();
+    expect(screen.queryByTestId("community-gallery-load-more")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const response = (description: string) => new Response(JSON.stringify({ items: [{ ...artwork, description }], nextCursor: null }), { status: 200 });
+    await act(async () => { releases[2](response("Correct newest filters")); });
+    await act(async () => { releases[0](response("Stale first filters")); releases[1](response("Stale middle filters")); });
+    expect(screen.getByText("Correct newest filters")).toBeVisible();
+    expect(screen.queryByText("Stale first filters")).toBeNull();
+    expect(screen.queryByText("Stale middle filters")).toBeNull();
+    expect(screen.getByTestId("community-artwork-grid")).toHaveAttribute("aria-busy", "false");
+    expect(window.location.search).toContain("sort=popular");
+    expect(window.location.search).toContain(`productId=${product.id}`);
+  });
+
+  it("replaces filter URL state without destroying the router history payload", async () => {
+    history.replaceState({ __NA: true, preserved: "router" }, "", "/en/club");
+    const replace = vi.spyOn(history, "replaceState");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [], nextCursor: null }), { status: 200 })));
+    render(<CommunityGallery initialPage={{ items: [], nextCursor: null }} products={[product]} />);
+    fireEvent.change(screen.getByTestId("community-gallery-audience-filter"), { target: { value: "adults" } });
+    expect(replace).toHaveBeenCalledWith({ __NA: true, preserved: "router" }, "", "/en/club?audience=adults");
+    await waitFor(() => expect(screen.getByTestId("community-gallery-empty-state")).toBeVisible());
+    replace.mockRestore();
+  });
+
 });

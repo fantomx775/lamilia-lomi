@@ -17,10 +17,10 @@ export function AvatarModerationActions({ id }: { id: string }) {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }),
       });
       if (!response.ok) throw new Error("Review failed.");
-      toast("success", "Zapisano decyzję moderacji zdjęcia.");
+      toast("success", "Zapisano decyzję moderacji zdjęcia.", { scope: `admin-avatar-${id}-${decision}` });
       router.refresh();
     } catch {
-      toast("error", "Nie udało się zapisać decyzji. Odśwież kolejkę i spróbuj ponownie.");
+      toast("error", "Nie udało się zapisać decyzji. Odśwież kolejkę i spróbuj ponownie.", { scope: `admin-avatar-${id}-${decision}` });
     } finally {
       setBusy(false);
     }

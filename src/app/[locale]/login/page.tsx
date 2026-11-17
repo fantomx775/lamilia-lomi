@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { LogIn } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
@@ -11,6 +12,8 @@ import type { Locale } from "@/i18n/routing";
 import { getBackendMode } from "@/lib/config";
 import { productSlugFromReturnTo, sanitizeReturnTo } from "@/lib/return-to";
 import { getUnlockIntent } from "@/lib/unlock-intent";
+
+export const metadata: Metadata = { title: "Log in", description: "Log in to your LamiliaLomi account and return to your books.", robots: { index: false, follow: false } };
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -36,6 +39,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
       : "";
   const error = stringParam(query.error);
   const verificationMessage = getLoginErrorMessage(error, t, isDemo);
+  const messageKind = error === "verification_sent" || error === "verification_required" || error === "email_unverified" ? "status" : "alert";
   const canCreateAccount = Boolean(safeRequestedReturnTo);
   const canResendVerification =
     !isDemo &&
@@ -58,7 +62,7 @@ export default async function LoginPage({ params, searchParams }: Props) {
             {t("loginDescription")}
           </p>
           {verificationMessage ? (
-            <p id="login-error" className="rounded-md bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error)]" role="alert">
+            <p id="login-error" className={`rounded-md p-3 text-sm ${messageKind === "status" ? "bg-[var(--color-sage)] text-[var(--color-ink)]" : "bg-[var(--color-error-bg)] text-[var(--color-error)]"}`} role={messageKind} aria-live={messageKind === "status" ? "polite" : "assertive"}>
               {verificationMessage}
             </p>
           ) : null}

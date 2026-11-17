@@ -11,7 +11,7 @@ type Props = {
 };
 
 export const metadata: Metadata = {
-  title: "About Lamilia Lomi",
+  title: "About",
   description:
     "Meet Lamilia Lomi and explore our favorite coloring books and picture books.",
 };

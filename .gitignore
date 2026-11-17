@@ -49,3 +49,6 @@ next-env.d.ts
 .vercel
 
 /public/admin-video-encoder/
+
+# Controlled local Contact mail sink (never commit message content)
+/.data/contact-test-outbox/

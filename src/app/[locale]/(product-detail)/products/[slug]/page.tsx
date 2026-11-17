@@ -3,13 +3,16 @@ import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { Suspense } from "react";
-import Link from "next/link";
 
 import { AmazonLink } from "@/components/amazon-link";
 import { ImageWithFallback } from "@/components/image-with-fallback";
 import { NavigationLink } from "@/components/navigation-link";
 import { ProductDescription } from "@/components/product-description";
 import { ProductInsideBookSection } from "@/components/product-inside-book-section";
+import { publicImageAlt } from "@/lib/product-display";
+import { safeCatalogReturn } from "@/lib/catalog-navigation";
+import { listReaderArtworks } from "@/lib/reader-artworks";
+import { SectionRecovery } from "@/components/route-recovery";
 import { ReaderArtworkGallery } from "@/components/reader-artwork-gallery";
 import { getRichTextTextContent } from "@/lib/rich-text";
 import { ScrollToFragment } from "@/components/scroll-to-fragment";
@@ -202,7 +205,7 @@ async function ProductUnlockSection({
                       href={href}
                     >
                       <Download className="size-4 shrink-0" aria-hidden />
-                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{asset.title ?? copy("download")}</span>
+                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{publicImageAlt(asset.title, copy("download"))}</span>
                     </a>
                   ))}
                 </div>
@@ -279,19 +282,11 @@ export default async function ProductPage({ params, searchParams }: Props) {
     permanentRedirect(`${current.pathname}${current.search}`);
   }
 
-  const communityFlags = getCommunityFlags();
-  const communitySession = communityFlags.uploadsEnabled ? await getDemoSession() : null;
-  const heartContext = communityFlags.publicEnabled ? await getCommunityHeartContext() : { access: "guest" as const };
-  const communityArtworksPage = communityFlags.publicEnabled
-    ? await listCommunityPublicArtworks({ productId: product.id, limit: 5, viewer: heartContext.access === "member" ? heartContext.actor : undefined }).catch(() => ({ items: [], nextCursor: null }))
-    : { items: [], nextCursor: null };
-  const communityArtworks = communityArtworksPage.items.slice(0, 4);
-
   const productCopy = await getTranslations("Product");
   const galleryImages = product.gallery.map((asset) => ({
     id: asset.id,
     path: asset.path,
-    alt: asset.title ?? product.title,
+    alt: publicImageAlt(asset.title, `${product.title} page`),
     caption: getGalleryCaption(asset.title, asset.filename, product.title),
     unoptimized: isMediaProxyPath(asset.path),
   }));
@@ -326,7 +321,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
       />
       <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8">
         <NavigationLink
-          href={`/${locale}/products`}
+          href={safeCatalogReturn(stringParam(query.catalog), locale)}
           pendingLabel="Opening catalog"
           className={buttonClassName({ variant: "ghost", size: "sm" })}
         >
@@ -339,7 +334,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
           <div className="relative mx-auto aspect-[8.5/11] w-full max-w-[360px] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-blush)] shadow-[0_18px_46px_rgba(62,52,47,0.12)] lg:mx-0 lg:max-w-[min(360px,calc((100svh-7rem)*8.5/11))]">
             <ImageWithFallback
               src={product.cover.path}
-              alt={product.cover.title ?? product.title}
+              alt={publicImageAlt(product.cover.title, `${product.title} cover`)}
               loading="eager"
               className="object-contain"
               sizes="(min-width: 392px) 360px, calc(100vw - 32px)"
@@ -397,20 +392,9 @@ export default async function ProductPage({ params, searchParams }: Props) {
         video={product.video}
         poster={product.cover.path}
       />
-      {communityFlags.uploadsEnabled ? (
-        <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8" data-testid="product-share-art-cta">
-          {!communitySession ? (
-            <Link data-testid="community-share-guest" className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/library/creations?productId=${product.id}`)}`}>Log in to share your art</Link>
-          ) : !communitySession.emailVerified ? (
-            <Link data-testid="community-share-verify" className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)]" href={`/${locale}/account`}>Verify your email to share</Link>
-          ) : !communitySession.unlockedProductIds.includes(product.id) ? (
-            <a data-testid="community-share-locked" className="inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)]" href="#premium">Unlock this book to share your art</a>
-          ) : (
-            <Link data-testid="community-share-eligible" className="inline-flex min-h-10 items-center rounded-md bg-[var(--color-terracotta)] px-4 text-sm font-semibold text-white hover:brightness-95" href={`/${locale}/library/creations?productId=${encodeURIComponent(product.id)}`}>Share your art</Link>
-          )}
-        </div>
-      ) : null}
-      <ReaderArtworkGallery artworks={product.readerArtworks} communityArtworks={communityArtworks} productSlug={product.slug} communityEnabled={communityFlags.publicEnabled} heartAccess={heartContext.access} />
+      <Suspense fallback={<ProductCommunityLoading />}>
+        <ProductCommunitySection product={product} locale={locale} />
+      </Suspense>
 
       {product.publicDownloads.length ? (
         <section aria-labelledby="public-downloads-title" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
@@ -429,7 +413,7 @@ export default async function ProductPage({ params, searchParams }: Props) {
                   <span className="flex min-w-0 items-center gap-3">
                     <FileText className="size-5 shrink-0 text-[var(--color-terracotta)]" aria-hidden />
                     <span className="min-w-0">
-                      <span className="block break-words font-medium">{asset.title || asset.filename}</span>
+                      <span className="block break-words font-medium">{publicImageAlt(asset.title, "Download file")}</span>
                       {asset.sizeBytes ? <span className="mt-1 block text-xs text-[var(--color-muted)]">{formatBytes(asset.sizeBytes)}</span> : null}
                     </span>
                   </span>
@@ -454,6 +438,57 @@ export default async function ProductPage({ params, searchParams }: Props) {
   );
 }
 
+function ProductCommunityLoading() {
+  return <section aria-busy="true" aria-label="Loading reader artwork" className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8" data-testid="product-community-loading">
+    <div className="h-9 w-64 max-w-full animate-pulse rounded bg-[var(--color-blush)] motion-reduce:animate-none" />
+    <div className="mt-7 grid grid-cols-2 gap-4 lg:grid-cols-4">{[0, 1, 2, 3].map((index) => <div key={index} className="aspect-[4/5] animate-pulse rounded-xl bg-[var(--color-blush)] motion-reduce:animate-none" />)}</div>
+  </section>;
+}
+
+async function loadProductCommunity(product: LocalizedProductView) {
+  const communityFlags = getCommunityFlags();
+  try {
+    const [communitySession, heartContext, curatedArtworks] = await Promise.all([
+      communityFlags.uploadsEnabled ? getDemoSession() : Promise.resolve(null),
+      (communityFlags.publicEnabled || communityFlags.uploadsEnabled) ? getCommunityHeartContext() : Promise.resolve({ access: "guest" as const }),
+      listReaderArtworks(product.id),
+    ]);
+    // Viewer-dependent data starts only after the authenticated context resolves.
+    const communityArtworksPage = communityFlags.publicEnabled
+      ? await listCommunityPublicArtworks({ productId: product.id, limit: 5, viewer: heartContext.access === "member" ? heartContext.actor : undefined })
+      : { items: [], nextCursor: null };
+    const communityArtworks = communityArtworksPage.items.slice(0, 4);
+    const artworks = curatedArtworks.map(({ id, displayName, description, sortOrder }) => ({ id, displayName, description, sortOrder, src: `/api/reader-artworks/${encodeURIComponent(id)}` }));
+    return { communityFlags, communitySession, heartContext, communityArtworks, artworks };
+  } catch { return null; }
+}
+
+async function ProductCommunitySection({ product, locale }: { product: LocalizedProductView; locale: Locale }) {
+  const data = await loadProductCommunity(product);
+  if (!data) return <section className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8" data-testid="product-community-error"><SectionRecovery title="Reader artwork could not be loaded" /></section>;
+  const { communityFlags, communitySession, heartContext, communityArtworks, artworks } = data;
+  return <>
+      {communityFlags.uploadsEnabled ? (
+        <div className="mx-auto max-w-7xl px-4 pt-5 sm:px-6 lg:px-8" data-testid="product-share-art-cta">
+          {!communitySession ? (
+            <NavigationLink pendingLabel="Opening sharing requirements" data-testid="community-share-guest" className="inline-flex min-h-11 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" href={`/${locale}/login?returnTo=${encodeURIComponent(`/${locale}/library/creations?productId=${product.id}`)}`}>Log in to share your art</NavigationLink>
+          ) : !communitySession.emailVerified ? (
+            <NavigationLink pendingLabel="Opening sharing requirements" data-testid="community-share-verify" className="inline-flex min-h-11 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)]" href={`/${locale}/account`}>Verify your email to share</NavigationLink>
+          ) : !communitySession.unlockedProductIds.includes(product.id) ? (
+            <a data-testid="community-share-locked" className="inline-flex min-h-11 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)]" href="#premium">Unlock this book to share your art</a>
+          ) : heartContext.access !== "member" ? (
+            <NavigationLink pendingLabel="Opening community settings" className="inline-flex min-h-11 items-center rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-medium" href={`/${locale}/account`}>Review Coloring Club requirements</NavigationLink>
+          ) : (
+            <NavigationLink pendingLabel="Opening sharing requirements" data-testid="community-share-eligible" className="inline-flex min-h-11 items-center rounded-md bg-[var(--color-terracotta)] px-4 text-sm font-semibold text-white hover:brightness-95" href={`/${locale}/library/creations?productId=${encodeURIComponent(product.id)}`}>Share your art</NavigationLink>
+          )}
+          <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Sharing needs a verified email, current Coloring Club participation requirements, and this book unlocked in your account. Artwork is reviewed before appearing publicly.</p>
+        </div>
+      ) : null}
+
+      <ReaderArtworkGallery artworks={artworks} communityArtworks={communityArtworks} productSlug={product.slug} communityEnabled={communityFlags.publicEnabled} heartAccess={heartContext.access} />
+    </>;
+}
+
 function stringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -476,7 +511,8 @@ function getGalleryCaption(
   const normalizedValue = value.toLocaleLowerCase();
   if (
     normalizedValue === filename.trim().toLocaleLowerCase() ||
-    normalizedValue === productTitle.trim().toLocaleLowerCase()
+    normalizedValue === productTitle.trim().toLocaleLowerCase() ||
+    /(?:^|[\\/])[^\\/]+\.[a-z0-9]{2,5}$/i.test(value)
   ) {
     return null;
   }

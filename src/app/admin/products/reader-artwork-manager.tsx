@@ -109,13 +109,13 @@ export function ReaderArtworkManager({ productId }: { productId?: string }) {
         setItems((current) => [...current, artwork]);
       }
       else throw new Error("Nie udało się potwierdzić zapisu. Odpowiedź serwera ma nieprawidłowy format.");
-      publishToast("success", "Prace czytelniczek zostały zapisane.");
+      publishToast("success", "Prace czytelniczek zostały zapisane.", { scope: `reader-artwork-save-${productId}` });
       return true;
     } catch (reason) {
       const knownMessages = ["Nie udało się zapisać zmian. Sprawdź połączenie i spróbuj ponownie.", "Nie udało się potwierdzić zapisu. Odśwież listę przed kolejną próbą.", "Nie udało się potwierdzić zapisu. Odpowiedź serwera ma nieprawidłowy format."];
       const message = reason instanceof Error && knownMessages.includes(reason.message) ? reason.message : "Nie udało się zapisać zmian. Sprawdź połączenie i spróbuj ponownie.";
       setError(message);
-      publishToast("error", message);
+      publishToast("error", message, { scope: `reader-artwork-save-${productId}` });
       return false;
     }
     finally { setBusy(false); }

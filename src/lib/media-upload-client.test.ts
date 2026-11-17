@@ -59,6 +59,36 @@ describe("media upload error handling", () => {
     );
   });
 
+  it("refuses an already cancelled operation before any transfer", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const progress = vi.fn();
+    await expect(uploadMedia(new File(["file"], "cover.jpg"), { driver: "supabase-tus", endpoint: "http://localhost/upload", token: "local", bucket: "test", path: "owned" }, "image/jpeg", progress, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(progress).not.toHaveBeenCalled();
+  });
+
+  it("aborts an in-flight R2 transfer before starting its mirror", async () => {
+    mocks.events = [];
+    let requestCreated = false;
+    class TestXMLHttpRequest {
+      upload = {};
+      onabort?: () => void;
+      constructor() { requestCreated = true; }
+      open() {}
+      setRequestHeader() {}
+      send() { mocks.events.push("r2:start"); }
+      abort() { mocks.events.push("r2:abort"); this.onabort?.(); }
+    }
+    vi.stubGlobal("XMLHttpRequest", TestXMLHttpRequest);
+    const controller = new AbortController();
+    const transfer = uploadMedia(new File(["file"], "cover.jpg"), { driver: "r2-mirrored", r2: { url: "http://localhost/upload", headers: {} },
+      supabase: { driver: "supabase-tus", endpoint: "http://localhost/mirror", token: "local", bucket: "test", path: "owned" } }, "image/jpeg", vi.fn(), controller.signal);
+    expect(requestCreated).toBe(true);
+    controller.abort();
+    await expect(transfer).rejects.toThrow("cancelled");
+    expect(mocks.events).toEqual(["r2:start", "r2:abort"]);
+  });
+
   it("uploads R2 first and then the retained Supabase mirror", async () => {
     mocks.events = [];
     const progress: number[] = [];

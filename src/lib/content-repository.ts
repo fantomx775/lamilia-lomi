@@ -11,7 +11,6 @@ import { normalizeAboutPageSettings } from "./about-settings";
 import { sortFeaturedProductCandidates } from "./featured-product-ranking";
 import { getR2PublicBaseUrl, r2PublicMediaUrl } from "./media-r2-config";
 import { versionedProductImagePath } from "./product-image-cache";
-import { listReaderArtworks } from "./reader-artworks";
 import type {
   AmazonLink,
   AboutPageSettings,
@@ -152,9 +151,7 @@ export const getPublicProductDetailSnapshotForRequest = cache(
     }
 
     if (!data) return null;
-    const snapshot = mapPublicProductDetailRow(data as DbRow);
-    snapshot.products[0].readerArtworks = await listReaderArtworks(stringValue((data as DbRow).id));
-    return snapshot;
+    return mapPublicProductDetailRow(data as DbRow);
   },
 );
 

@@ -35,9 +35,9 @@ export function MarketingPreferenceForm({ initialConsent }: Props) {
         throw new Error("Preference not saved");
       }
 
-      showToast("success", "Your marketing preference has been saved.");
+      showToast("success", "Your marketing preference has been saved.", { scope: "marketing-preference" });
     } catch {
-      showToast("error", "We could not save your preference. Please try again.");
+      showToast("error", "We could not save your preference. Please try again.", { scope: "marketing-preference" });
     } finally {
       setStatus("idle");
     }

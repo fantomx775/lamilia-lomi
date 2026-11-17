@@ -6,7 +6,7 @@ import { CommunityCreationManager } from "@/components/community/community-creat
 import type { Locale } from "@/i18n/routing";
 import { getCommunityFlags } from "@/lib/community-flags";
 import { COMMUNITY_RULES_VERSION } from "@/lib/community/rules";
-import { getMyCommunityProfile, listMyCommunityArtworks } from "@/lib/community/repository";
+import { getMyCommunityProfile, listMyCommunityArtworksPage } from "@/lib/community/repository";
 import { getCommunityActorForRequest } from "@/lib/community/session";
 import { sanitizeReturnTo } from "@/lib/return-to";
 import { getDemoSession } from "@/lib/session.server";
@@ -32,7 +32,7 @@ export default async function MyCreationsPage({ params, searchParams }: {
   const flags = getCommunityFlags();
   const session = await getDemoSession();
   const profile = actor.emailVerified ? await getMyCommunityProfile() : null;
-  const artworks = actor.emailVerified ? await listMyCommunityArtworks(50) : [];
+  const artworkPage = actor.emailVerified ? await listMyCommunityArtworksPage({ limit: 50 }) : { items: [], nextCursor: null };
   const unlockedIds = actor.emailVerified ? (session?.unlockedProductIds ?? actor.unlockedProductIds) : [];
   const products = (await Promise.all(unlockedIds.map(async (id) => {
     const product = await getProductByIdForRequest(id);
@@ -73,16 +73,18 @@ export default async function MyCreationsPage({ params, searchParams }: {
         </div>
       ) : (
         <CommunityCreationManager
-          initialArtworks={artworks}
+          initialArtworks={artworkPage.items}
+          initialNextCursor={artworkPage.nextCursor}
           products={products}
           uploadsEnabled={flags.uploadsEnabled}
-          canSubmit={Boolean(flags.uploadsEnabled && activeMember)}
+          canSubmit={Boolean(flags.uploadsEnabled && activeMember && products.length)}
           canEdit={Boolean(flags.uploadsEnabled && activeMember)}
           canDelete={actor.emailVerified}
           communityMember={Boolean(profile)}
           guidelinesHref={`/${locale}/community-guidelines`}
           accountHref={`/${locale}/account`}
           libraryHref={`/${locale}/library`}
+          unlockHref={`/${locale}/unlock`}
           preselectedProductId={preselectedProductId}
         />
       )}

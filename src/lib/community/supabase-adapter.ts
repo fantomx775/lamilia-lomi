@@ -162,13 +162,16 @@ export async function getPublicCreator(username: string, limit: number, viewerUs
   };
 }
 
-export async function listOwnerArtworks(actor: CommunityActor, limit: number): Promise<CommunityOwnerArtwork[]> {
-  const { data, error } = await createServiceRoleClient().from("community_artworks")
+export async function listOwnerArtworks(actor: CommunityActor, limit: number, cursor?: { timestamp: string; id: string } | null): Promise<CommunityOwnerArtwork[]> {
+  let query = createServiceRoleClient().from("community_artworks")
     .select(OWNER_ARTWORK_SELECT)
     .eq("author_id", actor.userId)
     .is("deleted_at", null)
     .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
     .limit(limit);
+  if (cursor) query = query.or(`created_at.lt.${cursor.timestamp},and(created_at.eq.${cursor.timestamp},id.lt.${cursor.id})`);
+  const { data, error } = await query;
   if (error) throw new Error("Your community artwork could not be loaded.");
   return ((data ?? []) as unknown as Row[]).map(mapOwnerArtwork);
 }

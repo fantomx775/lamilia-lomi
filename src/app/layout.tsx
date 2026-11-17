@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     template: "%s | LamiliaLomi",
   },
   description:
-    "A calm premium platform for LamiliaLomi books, Amazon KDP readers, and protected bonus materials.",
+    "Explore LamiliaLomi coloring books, illustrated stories, and printable bonuses for your books.",
 };
 
 export default function RootLayout({

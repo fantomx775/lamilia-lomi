@@ -145,10 +145,18 @@ describe("Login page registration CTA", () => {
       }),
     );
 
-    expect(view.getByRole("alert")).toHaveTextContent(
+    expect(view.getByText("Demo mode does not send verification emails. Use the demo login above to continue.")).toHaveTextContent(
       "Demo mode does not send verification emails. Use the demo login above to continue.",
     );
     expect(view.container.querySelector("#verification-email")).toBeNull();
     expect(view.getByRole("button", { name: "Continue" })).toBeInTheDocument();
   });
+  it("presents a sent verification email as a polite success status", async () => {
+    const view = render(await LoginPage({ params: Promise.resolve({ locale: "en" }), searchParams: Promise.resolve({ error: "verification_sent", returnTo: "/en/products/moon-garden-coloring-book" }) }));
+    expect(view.getByText("Verification sent")).toHaveAttribute("role", "status");
+    expect(view.getByText("Verification sent")).toHaveAttribute("aria-live", "polite");
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(view.container.querySelector('input[name="returnTo"]')).toHaveValue("/en/products/moon-garden-coloring-book");
+  });
+
 });

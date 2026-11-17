@@ -135,4 +135,11 @@ describe("Register page", () => {
       "LOMI-BOOK-2026",
     );
   });
+  it("explains password requirements and has one clear Terms/Privacy label", async () => {
+    const view = render(await RegisterPage({ params: Promise.resolve({ locale: "en" }), searchParams: Promise.resolve({}) }));
+    expect(view.getByLabelText("Password")).toHaveAttribute("aria-describedby", "registration-password-help");
+    expect(view.getByText("Use at least 8 characters for your password.")).toBeVisible();
+    expect(view.getByRole("checkbox", { name: "I accept the Terms and the Privacy Policy." })).toBeRequired();
+  });
+
 });

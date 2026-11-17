@@ -214,7 +214,9 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     )).toBe(expectedColumnCount);
     await expect(video).toHaveAttribute("controls", "");
     await expect(video).toHaveAttribute("playsinline", "");
-    await expect(video).toHaveAttribute("preload", "none");
+    // F17 selectively prepares metadata as this one player approaches the viewport.
+    await video.scrollIntoViewIfNeeded();
+    await expect(video).toHaveAttribute("preload", "metadata");
     await expect(video).toHaveAttribute("poster", localPosterPath);
     await expect(page.getByText("Flip-through · 8 sec", { exact: true })).toHaveCount(0);
 

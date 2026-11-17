@@ -5,10 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobileNavigation } from "./mobile-navigation";
 
-const mocks = vi.hoisted(() => ({ push: vi.fn() }));
+const mocks = vi.hoisted(() => ({ push: vi.fn(), prefetch: vi.fn(), pathname: "/en/products" }));
+vi.mock("next/link", () => ({
+  default: ({ children, onNavigate, ...props }: import("react").AnchorHTMLAttributes<HTMLAnchorElement> & { onNavigate?: (event: { preventDefault: () => void }) => void }) => (
+    <a {...props} onClick={(event) => { event.preventDefault(); onNavigate?.({ preventDefault() {} }); }}>{children}</a>
+  ),
+  useLinkStatus: () => ({ pending: false }),
+}));
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/en/products",
-  useRouter: () => ({ push: mocks.push }),
+  usePathname: () => mocks.pathname,
+  useRouter: () => mocks,
 }));
 
 afterEach(() => {
@@ -17,9 +23,11 @@ afterEach(() => {
   history.replaceState(null, "");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  mocks.push.mockClear(); mocks.prefetch.mockClear(); mocks.pathname = "/en/products";
 });
 
 function setup() {
+  history.replaceState(null, "", "/en/products");
   Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value(this: HTMLDialogElement) { this.open = false; this.dispatchEvent(new Event("close")); } });
   vi.stubGlobal("matchMedia", () => ({ addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value(this: HTMLDialogElement) { this.open = true; } });
@@ -93,4 +101,59 @@ describe("MobileNavigation", () => {
     expect(screen.getByRole("button", { name: "Log out" })).toBeVisible();
     expect(screen.queryByRole("link", { name: "Log in" })).toBeNull();
   });
+  it("confirms the selected destination before exit and keeps feedback until its route commits", () => {
+    vi.useFakeTimers(); setup();
+    vi.spyOn(history, "back").mockImplementation(() => {});
+    const view = render(<MobileNavigation locale="en" communityEnabled />);
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation menu" }));
+    const about = screen.getByRole("link", { name: "About" });
+    fireEvent.click(about);
+    expect(about).toHaveAttribute("aria-busy", "true");
+    expect(mocks.prefetch).toHaveBeenCalledExactlyOnceWith("/en/about");
+    expect(mocks.push).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("link", { name: "My Library" }));
+    expect(mocks.prefetch).toHaveBeenCalledTimes(1);
+    history.replaceState(null, ""); fireEvent.popState(window);
+    act(() => vi.advanceTimersByTime(280));
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith("/en/about");
+    expect(screen.getByTestId("mobile-navigation-pending")).toHaveTextContent("Opening About");
+    mocks.pathname = "/en/about";
+    view.rerender(<MobileNavigation locale="en" communityEnabled />);
+    expect(screen.queryByTestId("mobile-navigation-pending")).toBeNull();
+    act(() => vi.advanceTimersByTime(0));
+    mocks.pathname = "/en/products";
+    view.rerender(<MobileNavigation locale="en" communityEnabled />);
+    expect(screen.queryByTestId("mobile-navigation-pending")).toBeNull();
+  });
+
+  it("Forward during exit cancels navigation, selection and pending feedback", () => {
+    vi.useFakeTimers(); setup();
+    vi.spyOn(history, "back").mockImplementation(() => {});
+    render(<MobileNavigation locale="en" communityEnabled />);
+    const trigger = screen.getByRole("button", { name: "Open navigation menu" });
+    vi.spyOn(trigger, "getClientRects").mockReturnValue([{}] as unknown as DOMRectList);
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("link", { name: "About" }));
+    history.replaceState(null, ""); fireEvent.popState(window);
+    history.replaceState({ lamiliaMobileNavigation: true }, ""); fireEvent.popState(window);
+    act(() => vi.advanceTimersByTime(300));
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toHaveAttribute("open");
+    expect(screen.getByRole("link", { name: "About" })).not.toHaveAttribute("aria-busy");
+  });
+
+  it("closes the current route without a duplicate navigation or indefinite pending state", () => {
+    vi.useFakeTimers(); setup();
+    vi.spyOn(history, "back").mockImplementation(() => {});
+    render(<MobileNavigation locale="en" communityEnabled={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation menu" }));
+    fireEvent.click(screen.getByRole("link", { name: "Catalog" }));
+    history.replaceState(null, ""); fireEvent.popState(window);
+    act(() => vi.advanceTimersByTime(280));
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(mocks.prefetch).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("mobile-navigation-pending")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open navigation menu" })).toHaveFocus();
+  });
+
 });

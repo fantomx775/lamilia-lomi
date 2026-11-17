@@ -61,6 +61,7 @@ type AssetDraft = {
   uploaded?: boolean;
   upload?: SignedMediaUploadTarget;
   progress?: number;
+  phase?: "preparing" | "uploading" | "finalizing";
 };
 
 function sortGalleryAssets(assets: AssetDraft[]) {
@@ -157,7 +158,7 @@ export function ProductEditor({
     if (!signature) { lastNativeToast.current = ""; return; }
     if (lastNativeToast.current === signature) return;
     lastNativeToast.current = signature;
-    publishToast("error", productSaveErrorMessage(nativeSaveState.errors));
+    publishToast("error", productSaveErrorMessage(nativeSaveState.errors), { scope: "product-save" });
   }, [nativeSaveState.errors, publishToast]);
   const submittedValues = nativeSaveState.values;
   const [content, setContent] = useState<ProductContentDraft>(() => buildProductContent(product, submittedValues));
@@ -169,6 +170,10 @@ export function ProductEditor({
   const [showRouteFeedback, setShowRouteFeedback] = useState(Boolean(feedback));
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
+  const preflightCountRef = useRef(0);
+  const [preflightCount, setPreflightCount] = useState(0);
+  const uploadControllersRef = useRef(new Map<string, AbortController>());
   const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "error">("idle");
   const [saveErrorCodes, setSaveErrorCodes] = useState<AdminErrorCode[]>(() => nativeSaveState.errors);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>(() =>
@@ -188,10 +193,14 @@ export function ProductEditor({
   const assetsRef = useRef(assets);
   const uploadVersionsRef = useRef(new Map<ProductAsset["kind"], number>());
   assetsRef.current = assets;
+  useEffect(() => {
+    const controllers = uploadControllersRef.current;
+    return () => { controllers.forEach((controller) => controller.abort()); };
+  }, []);
   const visibleAssets = assets.filter((asset) => !asset.removed && asset.status === "uploaded");
   const coverAsset = visibleAssets.find((asset) => asset.kind === "cover");
   const videoAsset = visibleAssets.find((asset) => asset.kind === "video");
-  const hasActiveMediaUpload = assets.some((asset) => !asset.removed && (asset.status === "queued" || asset.status === "uploading"));
+  const hasActiveMediaUpload = preflightCount > 0 || assets.some((asset) => !asset.removed && (asset.status === "queued" || asset.status === "uploading"));
   const activeAmazonLinks = amazonLinks.filter((link) => !link.removed);
   const usedAmazonMarkets = new Set(activeAmazonLinks.map((link) => link.market));
   const canAddAmazonMarket = amazonMarketOptions.some(({ value }) => !usedAmazonMarkets.has(value));
@@ -496,6 +505,18 @@ export function ProductEditor({
     MEDIA_UPLOAD_SPECS[kind].multiple || uploadVersionsRef.current.get(kind) === version;
 
   const uploadFiles = async (kind: ProductAsset["kind"], selectedFiles: FileList | File[]) => {
+    if (isSavingRef.current) return;
+    preflightCountRef.current += 1;
+    setPreflightCount(preflightCountRef.current);
+    try {
+      await acceptUploadFiles(kind, selectedFiles);
+    } finally {
+      preflightCountRef.current -= 1;
+      setPreflightCount(preflightCountRef.current);
+    }
+  };
+
+  const acceptUploadFiles = async (kind: ProductAsset["kind"], selectedFiles: FileList | File[]) => {
     const selected = Array.from(selectedFiles);
     const spec = MEDIA_UPLOAD_SPECS[kind];
     const selectionErrors: string[] = [];
@@ -545,7 +566,7 @@ export function ProductEditor({
 
     const files = spec.multiple ? imageFiles : imageFiles.slice(0, 1);
     markDirty();
-    const activeCount = assets.filter((asset) => !asset.removed && asset.kind === kind && asset.status !== "failed").length;
+    const activeCount = assetsRef.current.filter((asset) => !asset.removed && asset.kind === kind && asset.status !== "failed").length;
 
     if (kind === "gallery" && activeCount + files.length > MAX_GALLERY_ASSETS) {
       selectionErrors.push("Galeria może zawierać maksymalnie 20 obrazów. Usuń plik, aby dodać kolejny.");
@@ -612,7 +633,10 @@ export function ProductEditor({
       return;
     }
 
+    const controller = new AbortController();
+    uploadControllersRef.current.set(draft.clientId, controller);
     updateAsset(draft.clientId, "status", "uploading");
+    updateAsset(draft.clientId, "phase", "preparing");
     updateAsset(draft.clientId, "error", undefined);
     let uploadedAsset: Partial<AssetDraft> = currentDraft;
 
@@ -622,8 +646,9 @@ export function ProductEditor({
 
       if (!uploadTarget) {
         try {
-          if (!currentDraft.optimized) file = await optimizeProductMedia(draft.kind, file);
-        } catch {
+          if (!currentDraft.optimized) file = await optimizeProductMedia(draft.kind, file, controller.signal);
+        } catch (error) {
+          if (controller.signal.aborted) throw error;
           updateAsset(draft.clientId, "status", "failed");
           updateAsset(draft.clientId, "error", "Optymalizacja pliku nie powiodła się. Sprawdź plik i spróbuj ponownie.");
           return;
@@ -633,6 +658,7 @@ export function ProductEditor({
           setAssets((current) => current.filter((asset) => asset.clientId !== draft.clientId));
           return;
         }
+        controller.signal.throwIfAborted();
         const validation = validateMediaFile(draft.kind, file);
         if (!validation.ok) {
           updateAsset(draft.clientId, "status", "failed");
@@ -642,6 +668,7 @@ export function ProductEditor({
         contentType = validation.contentType;
         let response = await fetch("/api/admin/assets", {
           method: "POST",
+          signal: controller.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             productId: draftProductId,
@@ -658,7 +685,8 @@ export function ProductEditor({
           formData.append("productId", draftProductId);
           formData.append("kind", draft.kind);
           formData.append("file", file);
-          response = await fetch("/api/admin/assets", { method: "POST", body: formData });
+          updateAsset(draft.clientId, "phase", "uploading");
+          response = await fetch("/api/admin/assets", { method: "POST", body: formData, signal: controller.signal });
           payload = await response.json() as { asset?: Partial<AssetDraft>; upload?: SignedMediaUploadTarget; error?: string; errorCode?: string };
         }
 
@@ -683,10 +711,13 @@ export function ProductEditor({
           : asset));
       }
 
+      controller.signal.throwIfAborted();
       if (uploadTarget) {
+        updateAsset(draft.clientId, "phase", "uploading");
         await uploadMedia(file, uploadTarget, contentType, (progress) => {
           updateAsset(draft.clientId, "progress", progress);
-        });
+        }, controller.signal);
+        updateAsset(draft.clientId, "phase", "finalizing");
       }
 
       const currentState = assetsRef.current.find((asset) => asset.clientId === draft.clientId);
@@ -746,12 +777,20 @@ export function ProductEditor({
         upload: undefined,
         uploaded: false,
         status: "failed",
-        error: getMediaUploadErrorMessage(error),
+        error: controller.signal.aborted ? "Przerwano przygotowanie lub przesyłanie. Możesz ponowić albo usunąć plik." : getMediaUploadErrorMessage(error),
       } : asset));
+    } finally {
+      if (uploadControllersRef.current.get(draft.clientId) === controller) uploadControllersRef.current.delete(draft.clientId);
     }
   };
 
   const removeAsset = async (asset: AssetDraft) => {
+    if (isSavingRef.current) return;
+    const controller = uploadControllersRef.current.get(asset.clientId);
+    if (controller) {
+      controller.abort();
+      return;
+    }
     if (!asset.id || asset.uploaded || asset.upload) {
       try {
         if (asset.storagePath) await deleteUploadedStorage(asset.kind, asset.storagePath, asset.storageProvider);
@@ -848,10 +887,12 @@ export function ProductEditor({
 
   const handleSave = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (isSaving || hasActiveMediaUpload || !saveAction) return;
+    if (isSavingRef.current || preflightCountRef.current > 0 || hasActiveMediaUpload || !saveAction) return;
 
     const form = event.currentTarget;
     const formData = new FormData(form);
+    const submittedSignature = productEditorFormSignature(form);
+    const submittedAssetIds = new Set(assetsRef.current.map((asset) => asset.clientId));
     const validationErrors = [
       ...validateProductCompleteness({
         status: productStatus,
@@ -864,7 +905,7 @@ export function ProductEditor({
     ];
     if (validationErrors.length) {
       const mapped = mapProductSaveErrors(validationErrors, formData);
-      publishToast("error", productSaveErrorMessage(validationErrors));
+      publishToast("error", productSaveErrorMessage(validationErrors), { scope: "product-save" });
       setSaveStatus("error");
       setSaveErrorCodes(validationErrors);
       setFieldErrors(mapped.fieldErrors);
@@ -872,6 +913,7 @@ export function ProductEditor({
       return;
     }
 
+    isSavingRef.current = true;
     setIsSaving(true);
     setSaveStatus("idle");
     setSaveErrorCodes([]);
@@ -881,12 +923,15 @@ export function ProductEditor({
       try {
         const result = await saveAction(formData);
         if (!result.ok) {
-          publishToast("error", productSaveErrorMessage(result.errors));
+          publishToast("error", productSaveErrorMessage(result.errors), { scope: "product-save" });
           const mapped = mapProductSaveErrors(result.errors, formData);
+          const outcomes = new Map((result.mediaOutcomes ?? []).map((outcome) => [outcome.assetId, outcome.state]));
           const cleanupFailures = new Map((result.mediaCleanupFailures ?? []).map((failure) => [failure.assetId, failure]));
           setAssets((current) => current.map((asset) => {
             if (!asset.uploaded) return asset;
-            if (cleanupFailures.has(asset.id)) {
+            if (outcomes.get(asset.id) !== "deleted") {
+              if (outcomes.get(asset.id) === "retained") return { ...asset, error: undefined };
+              if (!cleanupFailures.has(asset.id)) return { ...asset, error: "Wynik zapisu jest niepewny. Plik zachowano; ponów zapis bez ponownego przesyłania." };
               return {
                 ...asset,
                 error: "Nie udało się usunąć niezapisanego pliku. Możesz ponowić zapis albo użyć Usuń, aby ponowić sprzątanie.",
@@ -910,15 +955,15 @@ export function ProductEditor({
           return;
         }
 
-        setAssets((current) => current.map((asset) => ({ ...asset, uploaded: false, file: undefined, upload: undefined })));
+        setAssets((current) => current.map((asset) => submittedAssetIds.has(asset.clientId) ? { ...asset, uploaded: false, file: undefined, upload: undefined } : asset));
         isDirtyRef.current = false;
         setIsDirty(false);
         setSaveStatus("saved");
         setSaveErrorCodes([]);
         setFieldErrors({});
         scheduleAfterRender(() => {
-          const form = formRef.current;
-          if (form) savedFormSignatureRef.current = productEditorFormSignature(form);
+          savedFormSignatureRef.current = submittedSignature;
+          refreshDirtyState();
         });
 
         if (!product) {
@@ -933,13 +978,14 @@ export function ProductEditor({
             setCreatedProductHref(href);
           }
         } else {
-          publishToast("success", "Zmiany produktu zostały zapisane.");
+          publishToast("success", "Zmiany produktu zostały zapisane.", { scope: "product-save" });
         }
       } catch {
-        publishToast("error", "Nie udało się zapisać produktu. Spróbuj ponownie.");
+        publishToast("error", "Nie udało się zapisać produktu. Spróbuj ponownie.", { scope: "product-save" });
         setSaveStatus("error");
         setSaveErrorCodes([ADMIN_ERROR_CODES.INTERNAL]);
       } finally {
+        isSavingRef.current = false;
         setIsSaving(false);
       }
     });
@@ -954,7 +1000,7 @@ export function ProductEditor({
         <input type="hidden" name="videoAssetId" value={videoAsset?.id ?? ""} />
         <input type="hidden" name="mediaUploadState" value={hasActiveMediaUpload ? "active" : "idle"} />
 
-        <fieldset disabled={isSaving} className="m-0 grid min-w-0 gap-6 border-0 p-0">
+        <fieldset disabled={isSaving} inert={isSaving} className="m-0 grid min-w-0 gap-6 border-0 p-0">
         <AdminEditorHeader
           backHref="/admin/products"
           backLabel="Produkty"
@@ -1172,7 +1218,7 @@ function UploadDropzone({
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const inputId = `media-upload-${kind}`;
-  const openPicker = () => inputRef.current?.click();
+  const openPicker = () => { if (!inputRef.current?.matches(":disabled")) inputRef.current?.click(); };
 
   return <div
     role="button"
@@ -1183,7 +1229,7 @@ function UploadDropzone({
     onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openPicker(); } }}
     onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
     onDragLeave={() => setDragging(false)}
-    onDrop={(event) => { event.preventDefault(); setDragging(false); if (event.dataTransfer.files.length) onFiles(event.dataTransfer.files); }}
+    onDrop={(event) => { event.preventDefault(); setDragging(false); if (!inputRef.current?.matches(":disabled") && event.dataTransfer.files.length) onFiles(event.dataTransfer.files); }}
     className={`grid min-h-36 cursor-pointer place-items-center rounded-xl border-2 border-dashed px-5 py-6 text-center transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] ${dragging ? "border-[var(--color-terracotta)] bg-[var(--color-blush)]" : "border-[var(--color-border)] bg-[var(--color-bg)] hover:border-[var(--color-terracotta)] hover:bg-[var(--color-blush)]"}`}
   >
     <input ref={inputRef} id={inputId} type="file" accept={accept} multiple={multiple} className="sr-only" aria-label={`Wybierz pliki do sekcji ${mediaTitle(kind)}`} onClick={(event) => event.stopPropagation()} onChange={(event) => { if (event.target.files?.length) onFiles(event.target.files); event.currentTarget.value = ""; }} />
@@ -1208,14 +1254,14 @@ function MediaAssetRow({ asset, kind, index, total, onRemove, onRetry, onMove }:
       <p className="mt-1 text-xs text-[var(--color-muted)]">{formatBytes(asset.sizeBytes)}</p>
       <p className={`mt-2 inline-flex items-center gap-1 text-xs ${isFailed ? "text-red-800" : "text-[var(--color-muted)]"}`} role={isUploading || isFailed ? "status" : undefined} aria-live="polite">
         {isUploading ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : isFailed ? <X className="size-3.5" aria-hidden /> : asset.status === "queued" ? <LoaderCircle className="size-3.5" aria-hidden /> : <span className="size-1.5 rounded-full bg-emerald-600" aria-hidden />}
-        {asset.status === "uploading" ? "Przesyłanie…" : isFailed ? asset.error || "Upload nie powiódł się." : asset.status === "queued" ? "Oczekuje" : "Przesłano"}
+        {asset.status === "uploading" ? asset.phase === "preparing" ? (kind === "video" ? "Przygotowywanie filmu…" : "Przygotowywanie pliku…") : asset.phase === "finalizing" ? "Finalizowanie…" : "Przesyłanie…" : isFailed ? asset.error || "Upload nie powiódł się." : asset.status === "queued" ? "Oczekuje" : "Przesłano"}
       </p>
-      {isUploading ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg)]" role="progressbar" aria-label="Postęp przesyłania" aria-valuemin={0} aria-valuemax={100} aria-valuenow={asset.progress ?? 0}><div className="h-full rounded-full bg-[var(--color-terracotta)] transition-[width]" style={{ width: `${asset.progress ?? 0}%` }} /></div> : null}
+      {asset.status === "uploading" && asset.phase === "uploading" ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-bg)]" role="progressbar" aria-label="Postęp przesyłania" aria-valuemin={0} aria-valuemax={100} aria-valuenow={asset.progress ?? 0}><div className="h-full rounded-full bg-[var(--color-terracotta)] transition-[width]" style={{ width: `${asset.progress ?? 0}%` }} /></div> : null}
       {asset.status === "uploaded" && asset.error ? <p role="alert" className="mt-2 text-xs text-red-800">{asset.error}</p> : null}
     </div>
     <div className="flex flex-wrap items-center justify-end gap-1 sm:max-w-32">
       {kind === "gallery" ? <><Button type="button" variant="ghost" size="icon" disabled={index === 0} onClick={() => onMove(asset.clientId, -1)} aria-label={`Przenieś ${asset.filename} wyżej`}><MoveUp className="size-4" aria-hidden /></Button><Button type="button" variant="ghost" size="icon" disabled={index === total - 1} onClick={() => onMove(asset.clientId, 1)} aria-label={`Przenieś ${asset.filename} niżej`}><MoveDown className="size-4" aria-hidden /></Button></> : null}
-      <Button type="button" variant="ghost" size="sm" disabled={asset.status === "uploading"} onClick={() => onRemove(asset)} className="text-red-800"><Trash2 className="size-4" aria-hidden />Usuń</Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => onRemove(asset)} className="text-red-800"><Trash2 className="size-4" aria-hidden />{isUploading ? "Przerwij" : "Usuń"}</Button>
     </div>
     {asset.status === "failed" ? <div className="sm:col-span-2"><Button type="button" variant="outline" size="sm" onClick={() => onRetry(asset)}><RotateCcw className="size-4" aria-hidden />Ponów</Button></div> : null}
     {asset.status === "uploaded" ? hiddenAssetFields(asset) : null}
@@ -1436,6 +1482,10 @@ function mapProductSaveErrors(
 
 export function productEditorFormSignature(form: HTMLFormElement) {
   const formData = new FormData(form);
+  // Upload ownership is transport metadata, not an unsaved content change.
+  const uploadedFlags = formData.getAll("assetUploaded");
+  formData.delete("assetUploaded");
+  uploadedFlags.forEach(() => formData.append("assetUploaded", "0"));
   const richTextFields = Array.from(form.querySelectorAll<HTMLInputElement>("[data-rich-text-form-value]"));
   const richTextNames = new Set(richTextFields.map((field) => field.name));
   for (const name of richTextNames) formData.delete(name);

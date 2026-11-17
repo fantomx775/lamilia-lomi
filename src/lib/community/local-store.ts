@@ -713,11 +713,12 @@ export class CommunityLocalStore {
     });
   }
 
-  async listMyArtworks(actor: LocalCommunityActor, products: Product[], limit = 24): Promise<CommunityOwnerArtwork[]> {
+  async listMyArtworks(actor: LocalCommunityActor, products: Product[], limit = 24, cursor?: { timestamp: string; id: string } | null): Promise<CommunityOwnerArtwork[]> {
     assertVerified(actor);
     return this.read((snapshot) => snapshot.artworks
-      .filter((artwork) => artwork.authorId === actor.userId && !artwork.deletedAt)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .filter((artwork) => artwork.authorId === actor.userId && !artwork.deletedAt
+        && (!cursor || artwork.createdAt < cursor.timestamp || (artwork.createdAt === cursor.timestamp && artwork.id < cursor.id)))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
       .slice(0, boundedLimit(limit))
       .flatMap((artwork) => {
         const product = products.find((candidate) => candidate.id === artwork.productId);
@@ -727,8 +728,11 @@ export class CommunityLocalStore {
 
   async getMyArtwork(actor: LocalCommunityActor, artworkId: string, products: Product[]) {
     assertVerified(actor);
-    const items = await this.listMyArtworks(actor, products, 100);
-    return items.find((item) => item.id === artworkId) ?? null;
+    return this.read((snapshot) => {
+      const artwork = snapshot.artworks.find((item) => item.id === artworkId && item.authorId === actor.userId && !item.deletedAt);
+      const product = artwork && products.find((item) => item.id === artwork.productId);
+      return artwork && product ? toOwnerArtwork(artwork, product) : null;
+    });
   }
 
   async getUploadReservation(actor: LocalCommunityActor, idempotencyKey: string) {

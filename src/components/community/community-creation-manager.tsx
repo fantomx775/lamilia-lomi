@@ -22,6 +22,7 @@ type PendingImage = {
 };
 type Props = {
   initialArtworks: CommunityOwnerArtwork[];
+  initialNextCursor?: string | null;
   products: CommunityBook[];
   uploadsEnabled: boolean;
   canSubmit: boolean;
@@ -31,6 +32,7 @@ type Props = {
   guidelinesHref: string;
   accountHref: string;
   libraryHref: string;
+  unlockHref?: string;
   preselectedProductId: string;
 };
 
@@ -79,8 +81,20 @@ async function prepareArtworkFile(file: File): Promise<File> {
   }
 }
 
+async function prepareWithSignal(file: File, signal: AbortSignal) {
+  signal.throwIfAborted();
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try { return await Promise.race([prepareArtworkFile(file), cancelled]); }
+  finally { signal.removeEventListener("abort", abort); }
+}
+
 export function CommunityCreationManager({
   initialArtworks,
+  initialNextCursor = null,
   products,
   uploadsEnabled,
   canSubmit,
@@ -90,6 +104,7 @@ export function CommunityCreationManager({
   guidelinesHref,
   accountHref,
   libraryHref,
+  unlockHref = "/en/unlock",
   preselectedProductId,
 }: Props) {
   const { showToast } = useToast();
@@ -98,6 +113,13 @@ export function CommunityCreationManager({
   const [productId, setProductId] = useState(preselectedProductId);
   const [rulesAccepted, setRulesAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const uploadController = useRef<AbortController | null>(null);
+  const [uploadPhase, setUploadPhase] = useState("");
+  const [nextCursor, setNextCursor] = useState(initialNextCursor);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const [loadMoreError, setLoadMoreError] = useState("");
   const [uploadError, setUploadError] = useState("");
   const [descriptionDrafts, setDescriptionDrafts] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -124,6 +146,7 @@ export function CommunityCreationManager({
     return () => {
       for (const url of urls) URL.revokeObjectURL(url);
       urls.clear();
+      uploadController.current?.abort();
     };
   }, []);
 
@@ -213,19 +236,28 @@ export function CommunityCreationManager({
     setUploadDrawerOpen(false);
   }
 
-  async function uploadOne(item: PendingImage, payload: { productId: string; description: string }) {
+  async function uploadOne(item: PendingImage, payload: { productId: string; description: string }, position = "1 of 1") {
     let file = item.file;
+    const controller = uploadController.current!;
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]);
+    let sent = false;
     try {
-      file = await prepareArtworkFile(file);
+      setUploadPhase(`Preparing image ${position}`);
+      file = await prepareWithSignal(file, signal);
+      signal.throwIfAborted();
       const form = new FormData();
       form.set("file", file);
       form.set("productId", payload.productId);
       form.set("description", payload.description);
       form.set("idempotencyKey", item.idempotencyKey);
       form.set("rulesAccepted", "true");
-      const response = await fetch("/api/community/artworks", { method: "POST", body: form });
+      setUploadPhase(`Uploading image ${position}`);
+      sent = true;
+      const response = await fetch("/api/community/artworks", { method: "POST", body: form, signal });
+      setUploadPhase(`Finishing image ${position}`);
       const result = await response.json().catch(() => null) as { ok?: boolean; artwork?: CommunityOwnerArtwork; message?: string } | null;
       const artwork = result?.artwork;
+      if (response.status >= 500) throw new TypeError("The server result could not be confirmed.");
       if (!response.ok || !result?.ok || !artwork) throw new Error(result?.message ?? "This image could not be submitted. Try again.");
       setArtworks((current) => [artwork, ...current.filter((item) => item.id !== artwork.id)]);
       if (!trackedSubmissions.current.has(item.idempotencyKey)) {
@@ -235,9 +267,9 @@ export function CommunityCreationManager({
       removePending(item.idempotencyKey);
       return true;
     } catch (error) {
-      const message = error instanceof Error && !(error instanceof TypeError)
-        ? error.message
-        : "This image could not be submitted. Check your connection and try again.";
+      const message = signal.aborted || error instanceof TypeError
+        ? sent ? "The result is uncertain. Retry this image to check it safely without creating a duplicate." : "Preparation stopped. Your image and description are kept; retry when ready."
+        : error instanceof Error ? error.message : "This image could not be submitted. Try again.";
       setPendingImages((current) => current.map((candidate) => candidate.idempotencyKey === item.idempotencyKey
         ? { ...candidate, file, requestError: message, retryPayload: candidate.retryPayload ?? payload }
         : candidate));
@@ -247,45 +279,58 @@ export function CommunityCreationManager({
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSubmit || !productId || !rulesAccepted || !pendingImages.some((item) => !item.validationError) || busy) return;
+    if (!canSubmit || !productId || !rulesAccepted || !pendingImages.some((item) => !item.validationError) || busyRef.current) return;
+    busyRef.current = true;
+    uploadController.current = new AbortController();
     setBusy(true);
     setUploadError("");
     let uploadedCount = 0;
     let failedCount = 0;
-    for (const item of pendingImages) {
-      if (item.validationError) continue;
+    const validImages = pendingImages.filter((item) => !item.validationError);
+    for (const [index, item] of validImages.entries()) {
+      if (uploadController.current.signal.aborted) break;
       const payload = item.retryPayload ?? { productId, description: item.description.trim() };
-      if (await uploadOne(item, payload)) uploadedCount += 1;
+      if (await uploadOne(item, payload, `${index + 1} of ${validImages.length}`)) uploadedCount += 1;
       else failedCount += 1;
     }
-    if (failedCount) {
+    if (uploadController.current.signal.aborted) {
+      setUploadError("Sending stopped. Completed images are kept. Retry any uncertain image with its original request key.");
+    } else if (failedCount) {
       showToast("error", uploadedCount
         ? `${uploadedCount} sent for review. Retry the images that could not be sent.`
-        : "Your artwork could not be sent. You can retry each image.");
+        : "Your artwork could not be sent. You can retry each image.", { scope: "community-upload" });
     } else if (uploadedCount) {
-      showToast("success", `${uploadedCount === 1 ? "Artwork was" : `${uploadedCount} artworks were`} sent for review. Private until approved.`);
+      showToast("success", `${uploadedCount === 1 ? "Artwork was" : `${uploadedCount} artworks were`} sent for review. Private until approved.`, { scope: "community-upload" });
     }
     if (uploadedCount === pendingImages.length) {
       setRulesAccepted(false);
       setUploadDrawerOpen(false);
     }
+    busyRef.current = false;
+    uploadController.current = null;
     setBusy(false);
+    setUploadPhase("");
   }
 
   async function retryOne(item: PendingImage) {
-    if (!canSubmit || !item.retryPayload || !rulesAccepted || busy) return;
+    if (!canSubmit || !item.retryPayload || !rulesAccepted || busyRef.current) return;
+    busyRef.current = true;
+    uploadController.current = new AbortController();
     setBusy(true);
     setUploadError("");
     if (await uploadOne(item, item.retryPayload)) {
-      showToast("success", "Artwork was sent for review. It stays private until approved.");
+      showToast("success", "Artwork was sent for review. It stays private until approved.", { scope: "community-upload" });
       if (pendingImages.length === 1) {
         setRulesAccepted(false);
         setUploadDrawerOpen(false);
       }
     } else {
-      showToast("error", "This image could not be sent. Try again.");
+      showToast("error", "This image could not be sent. Try again.", { scope: "community-upload" });
     }
+    busyRef.current = false;
+    uploadController.current = null;
     setBusy(false);
+    setUploadPhase("");
   }
 
   async function saveDescription(artwork: CommunityOwnerArtwork) {
@@ -308,9 +353,9 @@ export function CommunityCreationManager({
       artworkActions.current.get(artwork.id)?.focus();
       showToast("success", updatedArtwork.status === "pending"
         ? "Your description was saved. This artwork is pending review again."
-        : "Your description was saved.");
+        : "Your description was saved.", { scope: `community-description-${artwork.id}` });
     } catch (error) {
-      showToast("error", error instanceof Error && !(error instanceof TypeError) ? error.message : "Your description could not be saved. Try again.");
+      showToast("error", error instanceof Error && !(error instanceof TypeError) ? error.message : "Your description could not be saved. Try again.", { scope: `community-description-${artwork.id}` });
     } finally {
       setSavingId(null);
       setMutationBusy(false);
@@ -333,14 +378,36 @@ export function CommunityCreationManager({
       else focusAfterLastDelete.current = true;
       setArtworks((current) => current.filter((item) => item.id !== artwork.id));
       setDeleteId(null);
-      showToast("success", "Your artwork was deleted.");
+      showToast("success", "Your artwork was deleted.", { scope: `community-delete-${artwork.id}` });
     } catch (error) {
       deleteDialogRef.current?.close();
       artworkActions.current.get(artwork.id)?.focus();
       setDeleteId(null);
-      showToast("error", error instanceof Error && !(error instanceof TypeError) ? error.message : "This artwork could not be deleted. Try again.");
+      showToast("error", error instanceof Error && !(error instanceof TypeError) ? error.message : "This artwork could not be deleted. Try again.", { scope: `community-delete-${artwork.id}` });
     } finally {
       setMutationBusy(false);
+    }
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setLoadMoreError("");
+    try {
+      const response = await fetch(`/api/community/my-artworks?cursor=${encodeURIComponent(nextCursor)}`, { cache: "no-store" });
+      const result = await response.json() as { ok?: boolean; items?: CommunityOwnerArtwork[]; nextCursor?: string | null };
+      if (!response.ok || !result.ok || !Array.isArray(result.items)) throw new Error("Your older artworks could not be loaded. Try again.");
+      setArtworks((current) => {
+        const ids = new Set(current.map((item) => item.id));
+        return [...current, ...result.items!.filter((item) => !ids.has(item.id))];
+      });
+      setNextCursor(result.nextCursor ?? null);
+    } catch {
+      setLoadMoreError("Your older artworks could not be loaded. Your current list is kept; try again.");
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
     }
   }
 
@@ -361,6 +428,12 @@ export function CommunityCreationManager({
           <Plus className="size-4" aria-hidden />
           Share your art
         </button>
+      ) : uploadsEnabled && products.length === 0 ? (
+        <div className="grid gap-2 rounded-xl border border-[var(--color-border)] bg-white p-5" data-testid="community-unlock-book">
+          <h2 className="font-serif text-xl font-semibold">Unlock a book to share your art</h2>
+          <p className="text-sm leading-6">Use the code in your book, then join the Coloring Club in Community settings. Your email must be verified and community requirements accepted before sending photos for review.</p>
+          <Link href={unlockHref} prefetch={false} className={`inline-flex min-h-11 items-center font-medium underline underline-offset-4 ${FOCUS_STYLE}`}>Unlock my book bonus</Link>
+        </div>
       ) : uploadsEnabled ? (
         <div className="grid gap-2 rounded-xl border border-[var(--color-border)] bg-white p-5" data-testid="community-upload-unavailable">
           <h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">Share your art</h2>
@@ -393,6 +466,7 @@ export function CommunityCreationManager({
             >
               {busy ? "Sending artwork…" : "Send for review"}
             </button>
+            {busy ? <div className="mt-2 grid gap-2"><p role="status" aria-live="polite">{uploadPhase}</p><button type="button" onClick={() => uploadController.current?.abort()} className={`min-h-11 rounded-md border border-[var(--color-border)] px-3 text-sm font-medium ${FOCUS_STYLE}`} data-testid="community-upload-cancel">Stop sending</button></div> : null}
           </div>
         )}
       >
@@ -510,7 +584,7 @@ export function CommunityCreationManager({
                       <div className="flex min-w-0 items-start justify-between gap-3">
                         <div className="min-w-0">
                           <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_STYLE[artwork.status]}`}>{statusLabel(artwork.status)}</span>
-                          <h3 className="mt-2 line-clamp-2 font-serif text-xl font-semibold leading-tight break-words text-[var(--color-ink)]">{artwork.product.title}</h3>
+                          <h3 className="mt-2 font-serif text-xl font-semibold leading-tight break-words text-[var(--color-ink)]">{artwork.product.title}</h3>
                           <p className="mt-1 text-xs text-[var(--color-muted)]">Updated <time dateTime={artwork.updatedAt}>{formatDate(artwork.updatedAt)}</time></p>
                         </div>
                         {canEdit || canDelete ? (
@@ -595,6 +669,8 @@ export function CommunityCreationManager({
               );
             })}
           </ul>
+          {loadMoreError ? <p role="alert" className="mt-4 text-sm text-[var(--color-error)]">{loadMoreError}</p> : null}
+          {nextCursor ? <button type="button" disabled={loadingMore} onClick={() => void loadMore()} className={`mt-4 inline-flex min-h-11 items-center justify-center rounded-md border border-[var(--color-border)] px-4 text-sm font-medium disabled:opacity-50 ${FOCUS_STYLE}`} data-testid="community-my-artworks-more">{loadingMore ? "Loading older artworks..." : "Load older artworks"}</button> : null}
         </section>
       ) : (
         <section className="rounded-xl border border-[var(--color-border)] bg-white p-5" data-testid="community-my-artworks-empty">
@@ -602,6 +678,8 @@ export function CommunityCreationManager({
           <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Your submissions and private review status will appear here.</p>
           {!communityMember ? <Link className="mt-3 inline-flex font-medium underline underline-offset-4" href={accountHref}>Join the Coloring Club</Link> : null}
           <Link className="mt-3 inline-flex font-medium underline underline-offset-4" href={libraryHref}>Open My Library</Link>
+          {nextCursor ? <button type="button" disabled={loadingMore} onClick={() => void loadMore()} className={`mt-4 inline-flex min-h-11 items-center justify-center rounded-md border border-[var(--color-border)] px-4 text-sm font-medium disabled:opacity-50 ${FOCUS_STYLE}`} data-testid="community-my-artworks-more">{loadingMore ? "Loading older artworks..." : "Load older artworks"}</button> : null}
+          {loadMoreError ? <p role="alert" className="mt-4 text-sm text-[var(--color-error)]">{loadMoreError}</p> : null}
         </section>
       )}
       <dialog

@@ -12,8 +12,8 @@ export function SiteFooter({ locale }: { locale: Locale }) {
             LamiliaLomi
           </p>
           <p className="mt-2 max-w-sm leading-6">
-            Calm creative books, gentle premium materials, and a tidy bridge
-            from Amazon KDP to a returning reader library.
+            Coloring books and illustrated stories for quiet creative moments.
+            Explore the books, find them on Amazon, and enjoy your book bonuses.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-6 md:col-span-2 md:gap-8">

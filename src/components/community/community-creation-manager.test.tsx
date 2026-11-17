@@ -32,9 +32,10 @@ function renderManager(initialArtworks: Array<{
   rejectionReason: string | null;
   createdAt: string;
   updatedAt: string;
-}> = []) {
+}> = [], nextCursor: string | null = null) {
   return render(<ToastProvider><CommunityCreationManager
     initialArtworks={initialArtworks}
+    initialNextCursor={nextCursor}
     products={[{ id: "11111111-1111-4111-8111-111111111111", slug: "moon-garden", title: "Moon Garden" }]}
     uploadsEnabled
     canSubmit
@@ -68,6 +69,60 @@ function stubObjectUrls(createObjectURL: (file?: File) => string) {
 }
 
 describe("CommunityCreationManager", () => {
+  it("keeps existing artworks after a page failure, retries and deduplicates overlap", async () => {
+    const user = userEvent.setup();
+    const first = (await uploadResponse("first").json()).artwork;
+    const second = { ...first, id: "second", description: "Older artwork" };
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError("Offline"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, items: [first, second], nextCursor: null }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderManager([first], "safe-position-cursor");
+    await user.click(screen.getByTestId("community-my-artworks-more"));
+    expect(await screen.findByText(/Your older artworks could not be loaded/)).toBeInTheDocument();
+    expect(screen.getAllByTestId("community-artwork-card")).toHaveLength(1);
+    await user.click(screen.getByTestId("community-my-artworks-more"));
+    await screen.findByText("Older artwork");
+    expect(screen.getAllByTestId("community-artwork-card")).toHaveLength(2);
+    expect(screen.queryByTestId("community-my-artworks-more")).toBeNull();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/community/my-artworks?cursor=safe-position-cursor", { cache: "no-store" });
+  });
+
+  it("can still load older artworks after the visible page has become empty", async () => {
+    const user = userEvent.setup();
+    const artwork = (await uploadResponse("older-after-delete").json()).artwork;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, items: [artwork], nextCursor: null }), { status: 200 })));
+    renderManager([], "remaining-older-position");
+    await user.click(screen.getByTestId("community-my-artworks-more"));
+    await waitFor(() => expect(screen.getAllByTestId("community-artwork-card")).toHaveLength(1));
+    expect(screen.queryByTestId("community-my-artworks-empty")).toBeNull();
+  });
+
+  it("stops an uncertain transfer and retries using the same key and description", async () => {
+    const user = userEvent.setup({ applyAccept: false });
+    stubObjectUrls(() => "blob:preview");
+    const fetchMock = vi.fn().mockImplementationOnce((_input, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal!.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), { once: true });
+    })).mockResolvedValueOnce(uploadResponse("confirmed-after-retry"));
+    vi.stubGlobal("fetch", fetchMock);
+    renderManager();
+    await user.click(screen.getByTestId("community-upload-open"));
+    await user.selectOptions(screen.getByLabelText("Book"), "11111111-1111-4111-8111-111111111111");
+    await user.upload(screen.getByTestId("community-upload-file-input"), new File(["photo"], "photo.png", { type: "image/png" }));
+    await user.type(screen.getByLabelText(/Description Optional/), "Keep this description");
+    await user.click(screen.getByTestId("community-upload-rules"));
+    await user.click(screen.getByTestId("community-upload-submit"));
+    expect(await screen.findByText("Uploading image 1 of 1")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    const original = fetchMock.mock.calls[0][1].body as FormData;
+    await user.click(screen.getByTestId("community-upload-cancel"));
+    expect(await screen.findByText(/The result is uncertain/)).toBeInTheDocument();
+    await user.click(screen.getByTestId("community-artwork-retry"));
+    await waitFor(() => expect(screen.getAllByTestId("community-artwork-card")).toHaveLength(1));
+    const retry = fetchMock.mock.calls[1][1].body as FormData;
+    expect(retry.get("idempotencyKey")).toBe(original.get("idempotencyKey"));
+    expect(retry.get("description")).toBe("Keep this description");
+  });
+
   it("keeps selected previews and descriptions when the upload drawer closes and reopens", async () => {
     const user = userEvent.setup({ applyAccept: false });
     vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValue("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa") });

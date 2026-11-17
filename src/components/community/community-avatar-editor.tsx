@@ -119,11 +119,11 @@ export function CommunityAvatarEditor({ username, seed, canUpload = true }: {
       clearCrop();
       router.refresh();
       setConfirmRemove(false);
-      showToast("success", method === "POST" ? "Profile photo saved." : "Profile photo removed.");
+      showToast("success", method === "POST" ? "Profile photo saved." : "Profile photo removed.", { scope: `community-avatar-${method}` });
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "Your profile photo could not be updated.";
       setError(message);
-      showToast("error", message);
+      showToast("error", message, { scope: `community-avatar-${method}` });
     } finally {
       setBusy(false);
     }

@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AdminRouteToast, AdminToastProvider, useAdminToast } from "./admin-toast";
+import { AdminRouteToast, AdminToastProvider, adminRouteToastScope, useAdminToast } from "./admin-toast";
 
 function Trigger({ kind = "success" as const }: { kind?: "success" | "error" }) {
   const publish = useAdminToast();
@@ -19,6 +19,7 @@ describe("admin toasts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pokaż" }));
     expect(screen.getByRole("status")).toHaveTextContent("Pomyślnie zapisano.");
     act(() => { vi.advanceTimersByTime(6000); });
+    act(() => { vi.advanceTimersByTime(160); });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -30,7 +31,26 @@ describe("admin toasts", () => {
     act(() => { vi.advanceTimersByTime(20000); });
     expect(screen.getByRole("alert")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Zamknij powiadomienie" }));
+    act(() => { vi.advanceTimersByTime(160); });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("maps server redirect success to its client operation and retains another route error", async () => {
+    function ClientFailure() {
+      const toast = useAdminToast();
+      return <><button onClick={() => toast("error", "Product save failed", { scope: "product-save" })}>Fail product</button>
+        <button onClick={() => toast("error", "About save failed", { scope: adminRouteToastScope("/admin/pages/about") })}>Fail About</button></>;
+    }
+    const view = render(<AdminToastProvider><ClientFailure /></AdminToastProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Fail product" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fail About" }));
+    window.history.replaceState(null, "", "/admin/products/owned?toast=retry&filter=active");
+    view.rerender(<AdminToastProvider><ClientFailure /><AdminRouteToast eventId="retry-product-save" kind="success" message="Product saved" cleanPath="/admin/products/owned" /></AdminToastProvider>);
+    expect(await screen.findByRole("alert")).toHaveTextContent("About save failed");
+    expect(screen.queryByText("Product save failed")).toBeNull();
+    expect(window.location.search).toBe("?filter=active");
+    expect(adminRouteToastScope("/admin/products", "delete")).not.toBe(adminRouteToastScope("/admin/products", "save"));
+    expect(adminRouteToastScope("/admin/pages/about")).not.toBe(adminRouteToastScope("/admin/pages/contact"));
   });
 
   it("consumes each event once, handles a later save, preserves other query state, and cleans the flash URL", async () => {

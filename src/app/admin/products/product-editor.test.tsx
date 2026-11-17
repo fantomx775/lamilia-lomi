@@ -36,6 +36,8 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: editorMocks.routerReplace }),
 }));
 
+import { AdminToastProvider } from "@/components/admin/admin-toast";
+import { useToast } from "@/components/ui/toast";
 import { ProductEditor, productEditorFormSignature, replaceCreatedProductRoute } from "./product-editor";
 import { AdminProductEditorHistoryGuard, shouldUseProductEditorNavigationApi } from "@/app/admin/admin-product-editor-history-guard";
 import { buildProductFromFormData } from "@/lib/admin-content";
@@ -142,6 +144,33 @@ beforeEach(() => {
 });
 
 describe("ProductEditor V2", () => {
+  it.each([false, true])("resolves a failed Save after successful retry without dismiss, unrelated error=%s", async (unrelated) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(readerArtworkGetResponse()));
+    const saveAction = vi.fn().mockResolvedValueOnce({ ok: false, errors: [ADMIN_ERROR_CODES.INTERNAL] })
+      .mockResolvedValueOnce({ ok: true, id: product.id });
+    function OtherFailure() {
+      const { showToast } = useToast();
+      return <button onClick={() => showToast("error", "Unrelated upload failed", { scope: "independent-upload" })}>Other failure</button>;
+    }
+    const user = userEvent.setup();
+    const view = render(<AdminToastProvider><OtherFailure /><ProductEditor title="Edit" product={product}
+      categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} /></AdminToastProvider>);
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    const toastRegion = () => document.querySelector('[data-toast-region]') as HTMLElement;
+    await waitFor(() => expect(within(toastRegion()).getByRole("alert")).toBeInTheDocument());
+    if (unrelated) await user.click(view.getByRole("button", { name: "Other failure" }));
+    await user.type(view.getByLabelText("Tytu\u0142"), " revised");
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+    if (unrelated) {
+      await waitFor(() => expect(within(toastRegion()).getByRole("alert")).toHaveTextContent("Unrelated upload failed"));
+    } else {
+      await waitFor(() => expect(within(toastRegion()).getByRole("status")).toHaveTextContent("Zmiany produktu zosta\u0142y zapisane."));
+      expect(within(toastRegion()).queryByRole("alert")).toBeNull();
+    }
+  });
+
   const snapshot = getSeedContentSnapshot();
   const product = snapshot.products[0];
 
@@ -974,6 +1003,84 @@ describe("ProductEditor V2", () => {
     await user.click(view.getByRole("button", { name: "Usuń" }));
     await waitFor(() => expect(view.queryByText("cover-cleanup-retry.jpg")).not.toBeInTheDocument());
     expect(fetchMock).toHaveBeenLastCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it.each(["retained", "unknown", "deleted"] as const)("uses the explicit %s save outcome for an uploaded asset", async (state) => {
+    const id = "retry-asset";
+    const storagePath = "/uploads/retry/cover/book.jpg";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ asset: {
+      id, kind: "cover", bucket: "public-media", path: storagePath, storagePath,
+      filename: "book.jpg", contentType: "image/jpeg", sizeBytes: 4, sortOrder: 1,
+    } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const saveAction = vi.fn()
+      .mockResolvedValueOnce({ ok: false, errors: [ADMIN_ERROR_CODES.INTERNAL], mediaOutcomes: [{ assetId: id, state }] })
+      .mockResolvedValue({ ok: true, id: "retry-product" });
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
+    await user.type(view.getByLabelText("Tytuł"), "Book");
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-cover")!, new File(["book"], "book.jpg", { type: "image/jpeg" }));
+    await waitFor(() => expect(view.getByText("Przesłano")).toBeInTheDocument());
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    if (state === "deleted") {
+      expect(await view.findByText("Produkt nie został zapisany. Prześlij ten plik ponownie przed kolejną próbą.")).toBeInTheDocument();
+      expect(view.container.querySelector('input[name="assetId"]')).toBeNull();
+    } else {
+      await waitFor(() => expect(view.getByRole("button", { name: /Zapisz/ })).toBeEnabled());
+      expect(view.container.querySelector('input[name="assetId"]')).toHaveValue(id);
+      await user.type(view.getByLabelText("Tytuł"), " revised");
+      await user.click(view.getByRole("button", { name: /Zapisz/ }));
+      await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+      expect(saveAction.mock.calls[1][0].get("assetId")).toBe(id);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("blocks Save during asynchronous dimensions preflight and rejects drops during Save", async () => {
+    let finishDimensions!: (size: { width: number; height: number }) => void;
+    editorMocks.readImageDimensions.mockImplementation(() => new Promise((resolve) => { finishDimensions = resolve; }));
+    let finishSave!: (result: { ok: true; id: string }) => void;
+    const saveAction = vi.fn().mockImplementation(() => new Promise((resolve) => { finishSave = resolve; }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ asset: {
+      id: "preflight-asset", kind: "cover", bucket: "public-media", path: "/uploads/preflight/cover/book.jpg",
+      filename: "book.jpg", contentType: "image/jpeg", sizeBytes: 4, sortOrder: 1,
+    } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
+    await user.type(view.getByLabelText("Tytuł"), "Book");
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-cover")!, new File(["book"], "book.jpg", { type: "image/jpeg" }));
+    expect(view.getByRole("button", { name: /Zapisz/ })).toBeDisabled();
+    fireEvent.submit(view.container.querySelector("form")!);
+    expect(saveAction).not.toHaveBeenCalled();
+    finishDimensions({ width: 850, height: 1100 });
+    await waitFor(() => expect(view.getByText("Przesłano")).toBeInTheDocument());
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    const zone = view.container.querySelector('[role="button"][aria-controls="media-upload-gallery"]')!;
+    fireEvent.drop(zone, { dataTransfer: { files: [new File(["later"], "later.jpg", { type: "image/jpeg" })] } });
+    expect(editorMocks.readImageDimensions).toHaveBeenCalledTimes(1);
+    finishSave({ ok: true, id: "saved" });
+    await waitFor(() => expect(view.getByText("Zapisano. Zmiany są aktualne.")).toBeInTheDocument());
+    expect(saveAction.mock.calls[0][0].getAll("assetId")).toEqual(["preflight-asset"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows preparation without a transfer percentage and lets one operation be cancelled", async () => {
+    editorMocks.optimizeProductMedia.mockImplementation((_kind, _file, signal: AbortSignal) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={vi.fn()} />);
+    await user.type(view.getByLabelText("Tytuł"), "Keep my draft");
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-video")!, new File(["video"], "movie.mp4", { type: "video/mp4" }));
+    expect(await view.findByText("Przygotowywanie filmu…")).toBeInTheDocument();
+    expect(view.queryByRole("progressbar")).toBeNull();
+    await user.click(view.getByRole("button", { name: "Przerwij" }));
+    expect(await view.findByText("Przerwano przygotowanie lub przesyłanie. Możesz ponowić albo usunąć plik.")).toBeInTheDocument();
+    expect(view.getByLabelText("Tytuł")).toHaveValue("Keep my draft");
+    expect(view.getByRole("button", { name: /Zapisz/ })).toBeEnabled();
   });
 
   it("falls back to multipart upload for the local backend", async () => {

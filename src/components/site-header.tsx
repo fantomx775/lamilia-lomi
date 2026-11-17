@@ -35,11 +35,11 @@ export function SiteHeader({ locale }: {
           className="flex items-center gap-3 rounded-sm transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
         >
           <Image
-            src="/assets/home/lamilia-lomi-logo.webp"
+            src="/assets/home/lamilia-lomi-logo-192.webp"
             alt=""
             aria-hidden
-            width={1024}
-            height={1024}
+            width={192}
+            height={192}
             sizes="(max-width: 640px) 56px, 64px"
             unoptimized
             loading="eager"

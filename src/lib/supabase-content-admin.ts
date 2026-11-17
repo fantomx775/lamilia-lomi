@@ -44,7 +44,7 @@ import {
   reconcileR2Publication,
   revokeR2PublicAssetsBeforeMutation,
 } from "./media-storage";
-import { mediaBucketForKind, validateMediaFile } from "./media-upload";
+import { isMediaKind, mediaBucketForKind, validateMediaFile } from "./media-upload";
 import { removeCategoryImageStorage, storeCategoryImage } from "./category-image-storage";
 import { validateImageUploadBytes } from "./image-upload-validation";
 import { createServiceRoleClient } from "./supabase/admin";
@@ -63,6 +63,33 @@ import {
 import type { AboutPageSettings, CategoryImage, CatalogDesktopColumns, Collection, Product } from "./types";
 
 export async function saveProductForRequest(formData: FormData): Promise<AdminMutationResult> {
+  const outcomes = new Map<string, "retained" | "deleted" | "unknown">();
+  formData.getAll("assetId").forEach((value, index) => {
+    if (typeof value === "string" && value && formData.getAll("assetUploaded")[index] === "1") {
+      outcomes.set(value, "unknown");
+    }
+  });
+  const cleanup = async (data: FormData, token?: string | null) => {
+    const failures = await cleanupNewMediaFromFormData(data, token);
+    const failedIds = new Set(failures.map((failure) => failure.assetId));
+    const eligible = new Set(data.getAll("assetId").flatMap((value, index) =>
+      typeof value === "string" && stringField(data, "id") && isMediaKind(String(data.getAll("assetKind")[index]))
+        && String(data.getAll("assetPath")[index] ?? "") ? [value] : []));
+    outcomes.forEach((_, id) => outcomes.set(id,
+      getBackendMode() !== "local" ? "retained" : failedIds.has(id) || !eligible.has(id) ? "unknown" : "deleted"));
+    return failures;
+  };
+  const result = await saveProductWithMediaOutcomes(formData, cleanup);
+  return result.ok || !outcomes.size ? result : {
+    ...result,
+    mediaOutcomes: [...outcomes].map(([assetId, state]) => ({ assetId, state })),
+  };
+}
+
+async function saveProductWithMediaOutcomes(
+  formData: FormData,
+  cleanupNewMediaFromFormData: typeof import("./media-storage").cleanupNewMediaFromFormData,
+): Promise<AdminMutationResult> {
   let storageAuthorizationToken: string | null | undefined;
   let savedProduct: Product | undefined;
   let previousAssets: Product["assets"] = [];
