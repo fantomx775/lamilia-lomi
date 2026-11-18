@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: "**/issue-127-benchmark.spec.mjs",
+  testMatch: "**/issue-127-benchmark.spec.ts",
   outputDir: ".task/ux127/benchmark-test-results",
   workers: 1,
   timeout: 60_000,
