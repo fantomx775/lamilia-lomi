@@ -31,7 +31,7 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
     const projectUse = info.project.use;
     const context = await browser.newContext({ baseURL: origin, viewport: { width, height: projectUse.viewport?.height ?? 900 }, deviceScaleFactor: dpr,
       userAgent: projectUse.userAgent, isMobile: projectUse.isMobile, hasTouch: projectUse.hasTouch,
-      locale: projectUse.locale, colorScheme: projectUse.colorScheme, reducedMotion: projectUse.reducedMotion, ignoreHTTPSErrors: true });
+      locale: projectUse.locale, colorScheme: projectUse.colorScheme, reducedMotion: projectUse.contextOptions?.reducedMotion, ignoreHTTPSErrors: true });
     const page = await context.newPage();
     const imagePayloads = observeImagePayloads(page);
     const observer = new NextCancellationObserver({ testedSha, runId, origin });
