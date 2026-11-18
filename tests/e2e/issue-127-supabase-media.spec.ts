@@ -5,6 +5,7 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { classifyOwnedMetadataResume } from "./helpers/owned-media-metadata-resume";
 import { observeOwnedMediaCdp } from "./helpers/owned-media-diagnostics";
 import { NextCancellationObserver } from "./helpers/next-navigation-cancellations";
 
@@ -45,6 +46,8 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   const mediaRequests: RequestMetadata[] = [];
   const successfulMedia: Array<Record<string, unknown>> = [];
   const cdpMedia: Array<Record<string, unknown>> = [];
+  const metadataResumeProofs = new Map<number, ReturnType<typeof classifyOwnedMetadataResume>>();
+  let ownedVideoBytes = 0;
   const diagnosticWork: Promise<void>[] = [];
   let stopCdp: (() => Promise<void>) | null = null;
   let cdpStatus = "NOT_APPLICABLE";
@@ -123,12 +126,19 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
         request.pauseWitness = { atEpochMs: witness.atEpochMs as number, sourcePath: witness.sourcePath as string, trusted: true, paused: true };
       }
     }
+    await Promise.all(diagnosticWork);
+    for (const request of failed.filter((entry) => entry.resource === "media")) {
+      metadataResumeProofs.set(request.requestId, classifyOwnedMetadataResume({
+        cdpStatus, observerErrors, consoleErrors, pageErrors, failed, mediaRequests, successfulMedia, cdpMedia, nativeTimeline, lifecycleActions,
+        ownedMedia: { apiPath: ownedVideoPath, storagePath: ownedStoragePath },
+      }, request.requestId, ownedVideoBytes));
+    }
   }
   async function networkSnapshot(checkpoint: string) {
     // Paths omit all query/fragment data, including signed Storage tokens. Only
     // two routing-header booleans are retained; never cookies/headers/bodies.
     await Promise.all(diagnosticWork);
-    const body = JSON.stringify({ testedSha, runId, checkpoint, phase, consoleErrors, pageErrors, failed, mediaRequests, successfulMedia, cdpStatus, cdpMedia, nativeTimeline, lifecycleActions, observerErrors,
+    const body = JSON.stringify({ testedSha, runId, checkpoint, phase, consoleErrors, pageErrors, failed, metadataResumeProofs: [...metadataResumeProofs.entries()].map(([requestId, proof]) => ({ requestId, ...proof })), mediaRequests, successfulMedia, cdpStatus, cdpMedia, nativeTimeline, lifecycleActions, observerErrors,
       ownedMedia: { apiPath: ownedVideoPath, storagePath: ownedStoragePath }, nextFinalizationFailed,
       expectedNextCancellations: nextSnapshot?.expectedNextCancellations.filter((outcome) => outcome.kind === "next-prefetch") ?? [],
       closedPrefetches: nextSnapshot?.closedPrefetches ?? [], pending: [...inFlight.values()] }, null, 2);
@@ -200,7 +210,9 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     for (const [index, [width, height]] of [[2000, 2000], [1200, 1800], [1700, 2200]].entries()) {
       await asset("gallery", await sharp({ create: { width, height, channels: 3, background: ["#a5b7c6", "#c6b7a5", "#b7c6a5"][index] } }).png().toBuffer(), `fixture-page-${index}.png`, index + 1);
     }
-    const video = await asset("video", await readFile(path.resolve("tests/e2e/fixtures/issue-127/flower.mp4")), "fixture-film.mp4");
+    const videoBytes = await readFile(path.resolve("tests/e2e/fixtures/issue-127/flower.mp4"));
+    ownedVideoBytes = videoBytes.length;
+    const video = await asset("video", videoBytes, "fixture-film.mp4");
     expect((await fixtures.service.from("product_assets").insert(rows)).error).toBeNull();
     expect((await fixtures.service.from("products").update({ cover_asset_id: cover, video_asset_id: video }).eq("id", book.id)).error).toBeNull();
     expect((await fixtures.service.from("product_assets").select("id").eq("product_id", book.id)).data).toHaveLength(5);
@@ -356,6 +368,12 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     await networkSnapshot("before-assertions");
     expect(pageErrors).toEqual([]); expect(consoleErrors).toEqual([]); expect(observerErrors).toEqual([]); expect(nextFinalizationFailed).toBe(false);
     for (const request of failed) {
+      const metadataResume = metadataResumeProofs.get(request.requestId);
+      if (metadataResume?.disposition === "EXPECTED_METADATA_SUSPEND_VERIFIED_RESUME") {
+        expect(request.method).toBe("GET"); expect(request.resource).toBe("media"); expect(request.error).toBe("net::ERR_ABORTED");
+        expect(metadataResume.canceledInitialResponseCompleted).toBe(false);
+        continue;
+      }
       if (request.validatedNextPrefetchId) {
         expect(request.method).toBe("GET"); expect(request.resource).toBe("fetch"); expect(request.rsc && request.prefetch).toBe(true);
         expect(request.error).toBe("net::ERR_ABORTED");
