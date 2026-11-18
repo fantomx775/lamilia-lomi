@@ -1,7 +1,7 @@
 "use client";
 
 import { Archive, FileText, ImagePlus, LoaderCircle, MoveDown, MoveUp, Plus, RotateCcw, Star, Trash2, Undo2, Video, X } from "lucide-react";
-import { startTransition, useActionState, useCallback, useEffect, useRef, useState } from "react";
+import { startTransition, useActionState, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { registerProductEditorPopStateGuard, shouldUseProductEditorNavigationApi } from "@/app/admin/admin-product-editor-history-guard";
@@ -184,6 +184,7 @@ export function ProductEditor({
   const [amazonLinks, setAmazonLinks] = useState<AmazonDraft[]>(() => buildAmazonLinks(product, submittedValues));
   const formRef = useRef<HTMLFormElement>(null);
   const savedFormSignatureRef = useRef<string | null>(null);
+  const [savedFormSnapshot, setSavedFormSnapshot] = useState<{ signature: string } | null>(null);
   const isDirtyRef = useRef(false);
   const navigationApiAvailableRef = useRef(false);
   const createdProductNeedsDocumentNavigationRef = useRef(false);
@@ -219,7 +220,9 @@ export function ProductEditor({
 
   const refreshDirtyState = useCallback(() => {
     const form = formRef.current;
-    if (!form) return;
+    // A disabled fieldset omits all of its fields from FormData. A queued frame
+    // during Save must not mistake that temporary omission for unsaved media.
+    if (!form || isSavingRef.current || form.querySelector<HTMLFieldSetElement>("fieldset")?.disabled) return;
 
     const signature = productEditorFormSignature(form);
     if (savedFormSignatureRef.current === null) {
@@ -236,6 +239,15 @@ export function ProductEditor({
     setIsDirty(nextIsDirty);
 
   }, []);
+
+  useLayoutEffect(() => {
+    if (isSaving || !savedFormSnapshot) return;
+    // Confirm the submitted baseline after React has actually enabled the DOM,
+    // not in rAF, which may precede a transition commit. A fresh snapshot object
+    // also covers successful synchronous actions whose saving state is batched.
+    savedFormSignatureRef.current = savedFormSnapshot.signature;
+    refreshDirtyState();
+  }, [isSaving, savedFormSnapshot, refreshDirtyState]);
 
   const markDirty = useCallback(() => {
     if (!isDirtyRef.current) {
@@ -968,10 +980,7 @@ export function ProductEditor({
         setSaveStatus(hasUnsubmittedMedia ? "idle" : "saved");
         setSaveErrorCodes([]);
         setFieldErrors({});
-        scheduleAfterRender(() => {
-          savedFormSignatureRef.current = submittedSignature;
-          refreshDirtyState();
-        });
+        setSavedFormSnapshot({ signature: submittedSignature });
 
         if (!product && !hasUnsubmittedMedia) {
           const href = `/admin/products/${result.id}?toast=${crypto.randomUUID()}`;

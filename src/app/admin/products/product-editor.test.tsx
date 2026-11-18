@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor, within, type RenderResult } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within, type RenderResult } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1065,6 +1065,46 @@ describe("ProductEditor V2", () => {
     await waitFor(() => expect(view.getByText("Zapisano. Zmiany są aktualne.")).toBeInTheDocument());
     expect(saveAction.mock.calls[0][0].getAll("assetId")).toEqual(["preflight-asset"]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a completed PDF save clean when an animation frame precedes fieldset release", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_input, init?: RequestInit) => {
+      if (!init?.method) return readerArtworkGetResponse();
+      return { ok: true, json: async () => ({ asset: { id: "timed-pdf", kind: "public_download", bucket: "public-media",
+        path: "/uploads/controlled/public_download/read.pdf", storagePath: "/uploads/controlled/public_download/read.pdf",
+        filename: "read.pdf", contentType: "application/pdf", sizeBytes: 12, sortOrder: 1 } }) };
+    }));
+    let completeSave!: (result: { ok: true; id: string }) => void;
+    const saveAction = vi.fn(() => new Promise<{ ok: true; id: string }>((resolve) => { completeSave = resolve; }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Save timing" product={{ ...product, status: "draft", assets: [] }}
+      categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
+    const form = view.container.querySelector<HTMLFormElement>("#product-editor-form")!;
+    const queuedFrames: FrameRequestCallback[] = [];
+    let frameBeforeRelease = false;
+    const runFrame = (callback: FrameRequestCallback) => {
+      frameBeforeRelease ||= Boolean(form.querySelector<HTMLFieldSetElement>("fieldset")?.disabled);
+      callback(0);
+    };
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      if (form.querySelector<HTMLFieldSetElement>("fieldset")?.disabled) runFrame(callback);
+      else queuedFrames.push(callback);
+      return 1;
+    });
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-public_download")!, new File(["%PDF-fixture"], "read.pdf", { type: "application/pdf" }));
+    await waitFor(() => expect(view.container.querySelector('#media-section-public_download input[name="assetId"]')).toHaveValue("timed-pdf"));
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    expect(form.querySelector("fieldset")).toBeDisabled();
+    expect(saveAction.mock.calls[0][0].getAll("assetId")).toEqual(["timed-pdf"]);
+    // Real dirty refresh callbacks queued during upload can run while Save has
+    // disabled its fieldset, before the server result and React release commit.
+    expect(queuedFrames.length).toBeGreaterThan(0);
+    act(() => { queuedFrames.splice(0).forEach(runFrame); });
+    await act(async () => { completeSave({ ok: true, id: product.id }); });
+    expect(frameBeforeRelease).toBe(true);
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Zapisano. Zmiany s\u0105 aktualne."));
+    expect(form.querySelector("fieldset")).not.toBeDisabled();
+    expect(view.container.querySelector('#media-section-public_download input[name="assetId"]')).toHaveValue("timed-pdf");
   });
 
   async function cancelledMediaSavedElsewhere(newProduct = false) {

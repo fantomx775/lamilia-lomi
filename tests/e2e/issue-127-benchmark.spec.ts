@@ -6,7 +6,20 @@ import { execFileSync } from 'node:child_process';
 type Probe = { token: string; destination: string; start: number | null; feedback: number | null; fallback: number | null; useful: number | null; completed: number | null };
 declare global { interface Window { __uxProbe?: Probe } }
 const samples: Array<Record<string, unknown>> = [];
-async function settleVisibleImages(page: Page) { await expect.poll(() => page.locator('img').evaluateAll(images => images.filter((img): img is HTMLImageElement => img instanceof HTMLImageElement).filter(img => { const b = img.getBoundingClientRect(); return img.loading !== 'lazy' || (b.bottom > 0 && b.top < innerHeight); }).every(img => img.complete && img.naturalWidth > 0)), { timeout: 15000, message: 'Source/destination images settle before resetting a navigation sample' }).toBe(true); }
+async function settleVisibleImages(page: Page) {
+    await page.evaluate(() => document.fonts.ready);
+    await expect.poll(() => page.locator('img').evaluateAll(images => images
+        .filter((img): img is HTMLImageElement => img instanceof HTMLImageElement)
+        .filter(img => { const b = img.getBoundingClientRect(), s = getComputedStyle(img); return b.width > 0 && b.height > 0 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth && s.visibility !== 'hidden' && s.display !== 'none'; })
+        .every(img => img.complete && img.naturalWidth > 0)), {
+        timeout: 15000, message: 'Visible source/destination image bytes decode before sample reset'
+    }).toBe(true);
+    await page.locator('img').evaluateAll(async images => {
+        await Promise.all(images.filter((img): img is HTMLImageElement => img instanceof HTMLImageElement)
+            .filter(img => { const b = img.getBoundingClientRect(), s = getComputedStyle(img); return b.width > 0 && b.height > 0 && b.bottom > 0 && b.top < innerHeight && b.right > 0 && b.left < innerWidth && s.visibility !== 'hidden' && s.display !== 'none'; })
+            .map(img => img.decode()));
+    });
+}
 for (const journey of ['catalog', 'product', 'about'] as const)
     test(`production navigation ${journey}`, async ({ browser }, info) => {
         test.skip(process.env.RUN_UX127_BENCHMARK !== '1', 'Separate controlled production benchmark, not the functional E2E gate');
@@ -39,7 +52,7 @@ for (const journey of ['catalog', 'product', 'about'] as const)
                 observedFailures.push({ method: request.method(), path: url.pathname, imageSource, resource: request.resourceType(), error: request.failure()?.errorText, phase, rsc: headers.rsc === '1', prefetch: headers['next-router-prefetch'] === '1' || Boolean(headers['next-router-segment-prefetch']) });
             });
             const writeDiagnostic = (network?: Awaited<ReturnType<NextCancellationObserver['finish']>>) => fs.writeFileSync(path.resolve(process.env.UX127_BENCHMARK_RESULTS!, `diagnostic-${info.project.name}-${journey}-${round}.json`), JSON.stringify({ testedSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.env.UX127_APP_WORKTREE, encoding: 'utf8' }).trim(), runId: process.env.UX127_BENCHMARK_RUN_ID, phase, observedFailures, unresolved: network?.unresolved.map(item => ({ method: item.method, path: item.path, resource: item.resource, error: item.error })), typedNextCancellations: network?.expectedNextCancellations.length }, null, 2));
-            const drain = async () => { await settleVisibleImages(page); await expect.poll(() => inFlight.size, { timeout: 15_000, message: 'Actual non-prefetch requests must settle before sample reset/teardown' }).toBe(0); };
+            const drain = async () => { await page.waitForLoadState('networkidle', { timeout: 15_000 }); await settleVisibleImages(page); await expect.poll(() => inFlight.size, { timeout: 15_000, message: 'Actual non-prefetch requests must settle before sample reset/teardown' }).toBe(0); };
             const failures: Array<{ type: string; message?: string; path?: string; status?: number }> = [];
             page.on('pageerror', () => failures.push({ type: 'pageerror', message: 'Browser page exception; inspect private runner output' }));
             page.on('console', m => { if (m.type() === 'error')
@@ -54,7 +67,7 @@ for (const journey of ['catalog', 'product', 'about'] as const)
                 phase = 'source';
                 await page.goto(journey === 'product' ? '/en/products' : '/en');
                 await expect(page.locator('h1').first()).toBeVisible();
-                await drain();
+                await drain(); // Outside the pointer measurement, before source preparation.
                 let target: Locator;
                 let destination: string;
                 if (journey === 'catalog') {

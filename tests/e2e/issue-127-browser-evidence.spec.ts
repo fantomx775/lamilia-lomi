@@ -1,10 +1,11 @@
-import { expect, test, type ConsoleMessage, type Locator, type Page, type Request, type Response, type TestInfo } from "@playwright/test";
-import { execFileSync } from "node:child_process";
+import { expect, test, type APIRequestContext, type ConsoleMessage, type Locator, type Page, type Request, type Response, type TestInfo } from "@playwright/test";
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { communityFixtures, communityHtmlCheck, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { loadIsolatedCommunityTarget } from "../../scripts/testing/isolated-community-target.mjs";
 import { NextCancellationObserver } from "./helpers/next-navigation-cancellations";
 
 // Clean acceptance campaigns only. Injected503, transport abort and denial probes
@@ -41,12 +42,14 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
   const consoleErrors: Array<{ message: string; url: string }> = [];
   const pageErrors: Array<{ message: string }> = [];
   const activeRequests = new Set<Request>();
+  const pendingRequests = new Set<Request>();
   const onRequest = (request: Request) => {
+    pendingRequests.add(request);
     const headers = request.headers();
     const prefetchedRsc = new URL(request.url()).origin === COMMUNITY_TEST_ORIGIN && request.resourceType() === "fetch" && headers.rsc === "1" && (headers["next-router-prefetch"] === "1" || Boolean(headers["next-router-segment-prefetch"]));
     if (!prefetchedRsc) activeRequests.add(request);
   };
-  const onTerminal = (request: Request) => { activeRequests.delete(request); };
+  const onTerminal = (request: Request) => { activeRequests.delete(request); pendingRequests.delete(request); };
   const httpErrors: Array<{ url: string; path: string; method: string; statusCode: number }> = [];
   const onConsole = (message: ConsoleMessage) => { if (message.type() === "error") consoleErrors.push({ message: sanitize(message.text()), url: safeUrl(message.location().url) }); };
   const onPageError = (error: Error) => pageErrors.push({ message: sanitize(error.message) });
@@ -66,7 +69,9 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
     await expect.poll(() => activeRequests.size, { message: "Actual started non-prefetch requests must finish before viewport/route changes", timeout: 15_000 }).toBe(0);
   }
 
-  async function capture(phase: string, mask: Locator[] = []) {
+  // A pending screenshot cannot drain the very real request whose loading UI it records.
+  // This exception never permits viewport/route changes: callers must release and drain first.
+  async function capture(phase: string, mask: Locator[] = [], pendingNavigation = false) {
     if (!/^[a-z0-9-]+$/i.test(phase)) throw new Error("Unsafe evidence phase.");
     await page.evaluate(() => document.fonts.ready);
     const images = await page.locator("img").evaluateAll(async (nodes) => {
@@ -85,7 +90,9 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       return visible.map((element) => { const source = new URL(element.currentSrc || element.src, location.href); return { path: ["http:", "https:"].includes(source.protocol) ? source.pathname : "[inline image]", width: element.naturalWidth, height: element.naturalHeight }; });
     });
-    await drain();
+    if (pendingNavigation) {
+      expect([...pendingRequests].some((request) => request.isNavigationRequest() || request.headers().rsc === "1"), "A pending capture must observe an actual in-flight document/RSC request").toBe(true);
+    } else await drain();
     const relative = `docs/verification/issue-127/ux127-primary-${campaign}-${project}-${phase}.png`;
     await mkdir(path.dirname(path.resolve(relative)), { recursive: true });
     await page.screenshot({ path: relative, fullPage: false, animations: "disabled", caret: "hide", mask });
@@ -95,6 +102,20 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
   async function destination(expectedUrl: string, name: string) {
     await expect(page).toHaveURL(expectedUrl);
     await observer.assertDestination(page, { expectedUrl, assertions: [{ name, status: "PASS", details: "The actual trusted anchor reached its exact same-origin destination and its visible content assertions passed." }] });
+  }
+
+  let publicOn: { status: "PASS"; testedSha: string; runId: string; command: string; publicEnabled: true; checks: Awaited<ReturnType<typeof communityHtmlCheck>>[] } | undefined;
+  async function verifyPublicOn(request: APIRequestContext, artworkId: string, username: string, description: string) {
+    const command = process.env.UX127_PRIMARY_ACTUAL_COMMAND;
+    if (!command || !command.includes("issue-127-browser-evidence.spec.ts")) throw new Error("QA must supply the exact sanitized invocation as UX127_PRIMARY_ACTUAL_COMMAND.");
+    const checks = await Promise.all([
+      communityHtmlCheck(request, "/en/club", 200, "Coloring, shared with care"),
+      communityHtmlCheck(request, `/en/club/artworks/${artworkId}`, 200, description),
+      communityHtmlCheck(request, `/en/club/creators/${username}`, 200, `@${username}`),
+    ]);
+    // No caller-supplied run IDs or pre-existing proof can enter this object.
+    publicOn = { status: "PASS", testedSha, runId, command, publicEnabled: true, checks };
+    check("actual public ON HTML", "All three public route kinds returned actual same-origin HTML200 with controlled expected content, without redirects.");
   }
 
   async function finish(flowPassed: boolean, persistence: { status: "PASS" | "NOT APPLICABLE"; details: string }, responsiveLayouts: string[]) {
@@ -109,6 +130,7 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
     const browser = {
       status: automatedStatus, tool: "Playwright", testedSha, runId, origin: COMMUNITY_TEST_ORIGIN,
       flows: [campaign], screenshots, responsiveLayouts, persistence,
+      ...(publicOn ? { featureFlags: { publicEnabled: true } } : {}),
       // A real visual inspection by QA must replace this before v1 publication.
       screenshotReview: { status: "NOT RUN", details: "Screenshots were captured after actual decode; QA must inspect these exact current-head artifacts visually before publishing the harness record." },
       retestedAfterFixes: false,
@@ -120,7 +142,7 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
     };
     const manifest = { schemaVersion: 1, campaign, testedSha, runId, automatedStatus, harnessReady: false,
       remainingManualSteps: ["Inspect the exact screenshots visually", "Confirm this run is the required final retest after fixes", "Commit stable screenshot artifacts and publish the full current-SHA v1 verification record"],
-      browser, checks, decodedImages, httpErrors, observationFailure, headUnchanged,
+      browser, publicOn: flowPassed && clean ? publicOn : undefined, checks, decodedImages, httpErrors, observationFailure, headUnchanged,
       physicalDevices: { status: "NOT RUN", details: "Playwright Chromium/WebKit with resized viewports is emulation, not a physical iPhone/Android." } };
     const directory = path.resolve(".task/ux127/runtime-manifests"); await mkdir(directory, { recursive: true });
     await writeFile(path.join(directory, `ux127-primary-${campaign}-${project}.json`), JSON.stringify(manifest, null, 2));
@@ -129,7 +151,7 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
       expect(consoleErrors).toEqual([]); expect(pageErrors).toEqual([]); expect(httpErrors).toEqual([]);
     }
   }
-  return { observer, secrets, check, capture, destination, drain, finish };
+  return { observer, secrets, check, capture, destination, drain, finish, verifyPublicOn, hasPendingNavigation: () => [...pendingRequests].some((request) => request.isNavigationRequest() || request.headers().rsc === "1") };
 }
 
 async function expectDocumentFits(page: Page) {
@@ -292,6 +314,183 @@ test("clean primary real success toast wraps at320, survives modal keyboard focu
     passed = true;
   } finally {
     try { await evidence.finish(passed, { status: persistencePassed ? "PASS" : "NOT APPLICABLE", details: persistencePassed ? "Actual isolated community membership and marketing preference were confirmed with direct DB readback plus authenticated page reload; the manifest retains no account identity, credentials or response bodies." : "The flow did not reach completed persistence assertions; automated browser status is FAIL, not verified acceptance." }, ["320px viewport, reduced motion, real native-modal focus and long-toast wrapping checked"]); }
+    finally { await fixture.cleanup(); }
+  }
+});
+// The lock is a short successful read delay, not the cancellation/fault campaign.
+// No pg_cancel_backend, termination, schema/security changes, or fabricated response.
+async function holdCleanCommunityRead(relation: "community_artworks" | "community_profiles") {
+  const target = loadIsolatedCommunityTarget();
+  const args = ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-Atq"];
+  const options = { env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" }, windowsHide: true };
+  const child = spawn(target.dockerExecutable, args, options);
+  child.stderr.resume(); child.stdin.on("error", () => undefined);
+  let output = "";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ready = new Promise<number>((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("Clean fixture lock acquisition timed out.")), 5000);
+    child.on("error", () => reject(new Error("Owned local read-delay process failed to start.")));
+    child.on("exit", () => { if (!output.includes("UX127_CLEAN_LOCK:")) reject(new Error("Owned read-delay transaction exited before acquisition.")); });
+    child.stdout.on("data", (chunk) => { output += chunk.toString(); const match = output.match(/UX127_CLEAN_LOCK:(\d+)/); if (match) resolve(Number(match[1])); });
+  });
+  child.stdin.write(`BEGIN; SET LOCAL statement_timeout='10s'; SET LOCAL idle_in_transaction_session_timeout='15s'; LOCK TABLE public.${relation} IN ACCESS EXCLUSIVE MODE; SELECT 'UX127_CLEAN_LOCK:' || pg_backend_pid();\n`);
+  let pid: number;
+  try { pid = await ready; }
+  catch (cause) { child.stdin.end("ROLLBACK;\n"); throw cause; }
+  finally { if (timer) clearTimeout(timer); }
+  if (!Number.isSafeInteger(pid) || pid < 1) { child.stdin.end("ROLLBACK;\n"); throw new Error("Invalid owned delay PID."); }
+  return {
+    async assertOwnBlockedRead() {
+      await expect.poll(() => Number(execFileSync(target.dockerExecutable, args, { ...options, encoding: "utf8", input: `SELECT count(*) FROM pg_stat_activity WHERE ${pid}=ANY(pg_blocking_pids(pid)) AND query ILIKE '%${relation}%';` }).trim()), { timeout: 4000 }).toBeGreaterThan(0);
+    },
+    async release() {
+      if (child.exitCode !== null) return;
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+      child.stdin.end("ROLLBACK;\n"); await exited;
+    },
+  };
+}
+
+// Hold real RSC requests before continuing them unchanged. Never route.fulfill/abort.
+async function holdCleanRsc(page: Page, pathname: string) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const matcher = (url: URL) => url.pathname === pathname;
+  const handler = async (route: import("@playwright/test").Route) => {
+    if (route.request().headers().rsc === "1") await gate;
+    await route.continue();
+  };
+  await page.route(matcher, handler);
+  return { release, async dispose() { release(); await page.unroute(matcher, handler); } };
+}
+
+async function clubGeometry(root: Locator) {
+  const geometry = await root.evaluate((element) => {
+    const rootBox = element.getBoundingClientRect();
+    const slots = [...element.querySelectorAll("[class*='aspect-']")].slice(0, 4).map((slot) => {
+      const box = slot.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    });
+    return { viewport: innerWidth, root: { x: rootBox.x, y: rootBox.y, width: rootBox.width, height: rootBox.height }, slots };
+  });
+  expect(geometry.root.width).toBeGreaterThan(0);
+  expect(geometry.root.x).toBeGreaterThanOrEqual(0);
+  expect(geometry.root.x + geometry.root.width).toBeLessThanOrEqual(geometry.viewport + 1);
+  expect(geometry.slots.length).toBeGreaterThan(0);
+  for (const slot of geometry.slots) { expect(slot.width).toBeGreaterThan(0); expect(slot.height).toBeGreaterThan(0); }
+  return geometry;
+}
+
+test("clean primary real public Club list, artwork and creator cold/warm feedback and ON HTML proof", async ({ page }, info) => {
+  test.skip(process.env.RUN_ISSUE_127_BROWSER_EVIDENCE !== "1", "Requires frozen candidate, guarded isolated HTTPS Supabase and public Club ON.");
+  test.setTimeout(180_000);
+  const evidence = await observePrimary(page, info, "club-public");
+  const fixture = await communityFixtures(info, evidence.observer);
+  let passed = false;
+  const geometry: Array<{ kind: string; temperature: string; phase: string; bounds: Awaited<ReturnType<typeof clubGeometry>> }> = [];
+  const cacheObservations: Array<{ kind: string; feedbackObserved: boolean }> = [];
+  try {
+    // Stable public display name; fixture actor email/password never enters artifacts.
+    const username = `ux127_public_${info.project.name.replace(/[^a-z0-9]/gi, "").slice(0, 9)}`;
+    const owner = await fixture.actor("primary-public-owner", { username });
+    const moderator = await fixture.actor("primary-public-moderator", { admin: true });
+    evidence.secrets.add(owner.email); evidence.secrets.add(owner.password);
+    evidence.secrets.add(moderator.email); evidence.secrets.add(moderator.password);
+    const book = await fixture.product("UX127 public Club proof book");
+    const artworkId = randomUUID();
+    const storagePath = `community/${owner.id}/${randomUUID()}`;
+    const description = "UX127 controlled garden coloring";
+    const bytes = await sharp({ create: { width: 1536, height: 2048, channels: 3, background: "#a4b49c" } }).webp({ quality: 90 }).toBuffer();
+    expect((await fixture.service.storage.from("collection-media").upload(storagePath, bytes, { contentType: "image/webp", upsert: false })).error).toBeNull();
+    expect((await fixture.service.from("community_artworks").insert({ id: artworkId, author_id: owner.id, product_id: book.id, storage_path: storagePath, storage_provider: "supabase", content_type: "image/webp", size_bytes: bytes.length, description, status: "pending" })).error).toBeNull();
+    expect((await fixture.service.rpc("community_moderate_artwork", { p_actor_user_id: moderator.id, p_artwork_id: artworkId, p_expected_revision: 1, p_action: "approve", p_reason: null })).error).toBeNull();
+    await fixture.normalizeDisplayTimestamps({ artworkIds: [artworkId] });
+    // Browser remains a guest: this proves public visibility, not service-role UI access.
+    const detailPath = `/en/club/artworks/${artworkId}`;
+    const creatorPath = `/en/club/creators/${username}`;
+    for (const temperature of ["cold", "warm"] as const) {
+      await evidence.drain();
+      await page.setViewportSize({ width: temperature === "cold" ? 390 : 1440, height: 1000 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      if (temperature === "cold") await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/about`);
+      else {
+        // Keep this browser document/router alive: a hard goto would counterfeit a warm revisit.
+        const about = page.getByRole("navigation", { name: "Primary navigation", exact: true }).getByRole("link", { name: "About", exact: true });
+        await about.click(); await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+        await evidence.destination(`${COMMUNITY_TEST_ORIGIN}/en/about`, "warm same-context return to entry");
+      }
+      await evidence.capture(`${temperature}-entry-before`);
+      for (const kind of ["gallery", "artwork", "creator"] as const) {
+        const targetPath = kind === "gallery" ? "/en/club" : kind === "artwork" ? detailPath : creatorPath;
+        // Install before opening menu/scrolling anchors, including viewport prefetch.
+        const gate = await holdCleanRsc(page, targetPath);
+        let lock: Awaited<ReturnType<typeof holdCleanCommunityRead>> | undefined;
+        try {
+          await evidence.drain();
+          if (temperature === "cold") lock = await holdCleanCommunityRead(kind === "creator" ? "community_profiles" : "community_artworks");
+          let link: Locator;
+          if (kind === "gallery") {
+            if (temperature === "cold") {
+              await page.getByRole("button", { name: "Open navigation menu", exact: true }).click();
+              link = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true }).getByRole("link", { name: "Coloring Club", exact: true });
+            } else link = page.getByRole("navigation", { name: "Primary navigation", exact: true }).getByRole("link", { name: "Coloring Club", exact: true });
+          } else if (kind === "artwork") link = page.getByRole("link", { name: `View artwork by @${username}`, exact: true });
+          else link = page.getByTestId("community-artwork-creator");
+          await link.scrollIntoViewIfNeeded();
+          const linkBefore = await link.boundingBox();
+          await link.click({ noWaitAfter: true });
+          const feedback = kind === "gallery" && temperature === "cold" ? page.getByTestId("mobile-navigation-pending") : link.locator("[data-pending='true']");
+          if (temperature === "cold") {
+            await expect(feedback.first()).toBeVisible({ timeout: 2000 });
+            if (kind !== "gallery") {
+              const linkPending = await link.boundingBox();
+              expect(linkPending!.width).toBeCloseTo(linkBefore!.width, 0); expect(linkPending!.height).toBeCloseTo(linkBefore!.height, 0);
+            }
+            await evidence.capture(`${temperature}-${kind}-link-feedback`, [], true);
+          } else {
+            // A real warm same-context revisit may use Router Cache or a fresh dynamic read; an immediate hit need not create pending DOM.
+            const observed = await feedback.first().isVisible();
+            cacheObservations.push({ kind, feedbackObserved: observed });
+            if (observed && evidence.hasPendingNavigation()) await evidence.capture(`${temperature}-${kind}-link-feedback`, [], true);
+          }
+          gate.release();
+          if (lock) {
+            const loading = page.getByTestId(`community-${kind}-loading`);
+            await expect(loading).toBeVisible({ timeout: 4000 });
+            await lock.assertOwnBlockedRead();
+            await expect(loading).toHaveAttribute("aria-busy", "true");
+            await expectDocumentFits(page);
+            geometry.push({ kind, temperature, phase: "real-loading", bounds: await clubGeometry(loading) });
+            await evidence.capture(`${temperature}-${kind}-real-loading`, [], true);
+            await lock.release(); lock = undefined;
+          }
+          const content = page.getByTestId(kind === "gallery" ? "community-gallery-page" : kind === "artwork" ? "community-artwork-detail" : "community-creator-page");
+          await expect(content).toBeVisible();
+          if (kind === "gallery") await expect(content.getByRole("link", { name: `View artwork by @${username}`, exact: true })).toBeVisible();
+          if (kind === "artwork") await expect(content.getByRole("heading", { name: description, exact: true })).toBeVisible();
+          if (kind === "creator") { await expect(content.getByRole("heading", { name: `@${username}`, exact: true })).toBeVisible(); await expect(content.getByRole("heading", { name: "Approved creations", exact: true })).toBeVisible(); }
+          await evidence.destination(`${COMMUNITY_TEST_ORIGIN}${targetPath}`, `${temperature} actual ${kind}`);
+          await expectDocumentFits(page);
+          geometry.push({ kind, temperature, phase: "actual-content", bounds: await clubGeometry(content) });
+          // Decode every actual proof image, even when below the screenshot fold.
+          const image = content.locator(`img[src*='/api/community/artworks/${artworkId}/media']`).first();
+          await image.scrollIntoViewIfNeeded();
+          await expect.poll(() => image.evaluate(async (node) => { if (!(node instanceof HTMLImageElement)) return false; await node.decode(); return node.naturalWidth > 0 && node.naturalHeight > 0; })).toBe(true);
+          await evidence.capture(`${temperature}-${kind}-decoded`);
+        } finally { gate.release(); await lock?.release(); await gate.dispose(); }
+        await evidence.drain();
+      }
+    }
+    // Real API media200 plus actual MIME and decoded dimensions; no storage URL leak.
+    const media = await page.request.get(`${COMMUNITY_TEST_ORIGIN}/api/community/artworks/${artworkId}/media?width=480`);
+    expect(media.status()).toBe(200); expect(media.headers()["content-type"]).toMatch(/^image\//);
+    const decoded = await sharp(await media.body()).metadata(); expect(decoded.width).toBeGreaterThan(0); expect(decoded.height).toBeGreaterThan(0);
+    await evidence.verifyPublicOn(page.request, artworkId, username, description);
+    evidence.check("F05 cold/warm actual geometry", JSON.stringify({ geometry, cacheObservations, policy: "Cold real blocked readers resolved successfully after rollback; warm immediate cache hits are recorded honestly. Bounding boxes and screenshots require visual review; no unexecuted pixel-match claim." }));
+    evidence.check("actual public media", "Approved owned Storage bytes returned public media200/image MIME and actually decoded; all three route kinds rendered the controlled artist/artwork publicly.");
+    passed = true;
+  } finally {
+    try { await evidence.finish(passed, { status: passed ? "PASS" : "NOT APPLICABLE", details: passed ? "The same approved isolated artwork persisted across actual list/detail/creator and cold/warm anchor navigation; real HTML plus public media readback confirmed publication. Own fixture is removed only after observer finalization." : "The flow did not complete publication/readback assertions; this is failed or incomplete evidence." }, ["390px cold mobile", "1440px warm desktop", "real pending + real streamed fallback + decoded content; actual geometry recorded for QA visual comparison"]); }
     finally { await fixture.cleanup(); }
   }
 });
