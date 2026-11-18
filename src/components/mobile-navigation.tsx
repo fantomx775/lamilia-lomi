@@ -6,10 +6,10 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { mobileActionClass } from "@/components/mobile-header-styles";
+import { mobileNavigationHistoryKey as mobileHistoryKey, useCommunityRouteNavigation } from "@/components/community/community-route-transition";
 import { NavigationLink } from "@/components/navigation-link";
 import type { Locale } from "@/i18n/routing";
 
-const mobileHistoryKey = "lamiliaMobileNavigation";
 const menuLinkClass = "flex min-h-11 items-center gap-3 rounded-md px-3 py-2 font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] active:bg-[var(--color-blush)] active:brightness-90 aria-busy:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-[var(--color-terracotta)]";
 
 export function MobileNavigation({ locale, communityEnabled, accountHref, showCreations, logout }: {
@@ -21,14 +21,22 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const community = useCommunityRouteNavigation();
+  const navigateCommunity = community?.navigate;
+  const cancelCommunity = community?.cancel;
+  const menuOpened = community?.menuOpened;
+  const requestVersion = useRef(0);
+  const navigateDestination = useCallback((destination: string) => {
+    if (!navigateCommunity?.(destination)) router.push(destination);
+  }, [navigateCommunity, router]);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const openedPath = useRef<string | null>(null);
-  const pendingClose = useRef<{ destination?: string } | null>(null);
+  const pendingClose = useRef<{ destination?: string; version: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const [selection, setSelection] = useState<{ href: string; label: string; from: string } | null>(null);
-  const navigating = selection && selection.from === pathname && selection.href !== pathname ? selection : null;
+  const navigating = selection && selection.href !== pathname ? selection : null;
   const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exitAction = useRef<(() => void) | null>(null);
   const pendingLogout = useRef<(() => void) | null>(null);
@@ -70,6 +78,7 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
         exitAction.current = null;
         pendingLogout.current = null;
         pendingClose.current = null;
+        requestVersion.current += 1;
         setSelection(null);
         if (dialog?.open) dialog.style.setProperty("--navigation-enter-start", getComputedStyle(dialog).transform);
         else dialog?.style.removeProperty("--navigation-enter-start");
@@ -82,10 +91,12 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
         return;
       }
       if (!pendingClose.current) setSelection(null);
-      const destination = pendingClose.current?.destination;
+      const request = pendingClose.current;
+      const destination = request?.destination;
+      if (!request && exitAction.current) requestVersion.current += 1;
       pendingClose.current = null;
       if (dialog?.open) beginExit(() => {
-        if (destination && window.location.pathname === openedPath.current && destination !== window.location.pathname) router.push(destination);
+        if (destination && request?.version === requestVersion.current && destination !== window.location.pathname) navigateDestination(destination);
         else if (openedPath.current === window.location.pathname) trigger?.focus();
         openedPath.current = null;
       });
@@ -103,11 +114,11 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
       window.removeEventListener("popstate", syncHistory);
       desktop.removeEventListener("change", onDesktop);
     };
-  }, [router, beginExit]);
+  }, [navigateDestination, beginExit]);
 
   useEffect(() => {
     if (dialogRef.current?.open && openedPath.current !== pathname) dialogRef.current.close();
-    if (!selection || selection.from === pathname) return;
+    if (!selection || selection.from === pathname || pendingClose.current || exitAction.current) return;
     const clear = window.setTimeout(() => setSelection(null), 0);
     return () => window.clearTimeout(clear);
   }, [pathname, selection]);
@@ -115,6 +126,7 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
   function closeForLogout(event: FormEvent<HTMLDivElement>) {
     if (submittingLogout.current || !(event.target instanceof HTMLFormElement)) return;
     event.preventDefault();
+    cancelCommunity?.();
     const form = event.target;
     const submitter = (event.nativeEvent as SubmitEvent).submitter;
     pendingLogout.current = () => {
@@ -128,7 +140,9 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
   function openMenu() {
     if (dialogRef.current?.open) return;
     setSelection(null);
+    requestVersion.current += 1;
     history.pushState({ ...history.state, [mobileHistoryKey]: true }, "");
+    menuOpened?.();
     dialogRef.current?.style.removeProperty("--navigation-enter-start");
     dialogRef.current?.showModal();
     openedPath.current = pathname;
@@ -139,15 +153,18 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
     if (!dialogRef.current?.open) return;
     if (history.state?.[mobileHistoryKey]) {
       if (pendingClose.current) return;
-      pendingClose.current = { destination };
+      if (destination) cancelCommunity?.();
+      pendingClose.current = { destination, version: ++requestVersion.current };
       history.back();
     } else {
+      if (destination) cancelCommunity?.();
+      const version = ++requestVersion.current;
       beginExit(() => {
-        if (destination && destination !== window.location.pathname) router.push(destination);
+        if (destination && version === requestVersion.current && destination !== window.location.pathname) navigateDestination(destination);
         else triggerRef.current?.focus();
       });
     }
-  }, [router, beginExit]);
+  }, [navigateDestination, cancelCommunity, beginExit]);
 
   const links = [
     { label: "Catalog", href: `/${locale}/products`, icon: BookOpen },

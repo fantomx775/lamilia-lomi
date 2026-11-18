@@ -1,5 +1,6 @@
 "use client";
 
+import { useCommunityLinkPending } from "@/components/community/community-route-transition";
 import { useLinkStatus } from "next/link";
 import { useEffect, useState } from "react";
 
@@ -15,7 +16,8 @@ export function LinkPendingIndicator({
   pendingOverride?: boolean;
 }) {
   const { pending: linkPending } = useLinkStatus();
-  const pending = pendingOverride ?? linkPending;
+  const managedPending = useCommunityLinkPending();
+  const pending = pendingOverride ?? managedPending ?? linkPending;
   const [announcePending, setAnnouncePending] = useState(false);
 
   useEffect(() => {

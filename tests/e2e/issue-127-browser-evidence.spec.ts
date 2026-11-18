@@ -6,6 +6,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { communityFixtures, communityHtmlCheck, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 import { loadIsolatedCommunityTarget } from "../../scripts/testing/isolated-community-target.mjs";
+import { boundedOwnedRscTeardown } from "./helpers/owned-rsc-teardown";
 import { NextCancellationObserver } from "./helpers/next-navigation-cancellations";
 
 // Clean acceptance campaigns only. Injected503, transport abort and denial probes
@@ -381,7 +382,7 @@ async function holdCleanCommunityRead(relation: "community_artworks" | "communit
     async release() {
       if (child.exitCode !== null) return;
       const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-      child.stdin.end("ROLLBACK;\n"); await exited;
+      child.stdin.end("ROLLBACK;\n"); await boundedOwnedRscTeardown(exited);
     },
   };
 }
@@ -405,7 +406,7 @@ async function createCleanRscController(page: Page) {
   };
   await page.route((url) => gates.has(url.pathname), handler);
   const assertCompleted = async (pending: Iterable<Promise<void>>) => {
-    const results = await Promise.allSettled(pending);
+    const results = await boundedOwnedRscTeardown(Promise.allSettled(pending));
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Owned RSC continuation failed.");
   };
@@ -424,7 +425,7 @@ async function createCleanRscController(page: Page) {
         for (const gate of gates.values()) gate.release();
         try {
           // Public wait semantics; this case installs no other page routes.
-          await page.unrouteAll({ behavior: "wait" });
+          await boundedOwnedRscTeardown(page.unrouteAll({ behavior: "wait" }));
         } finally { await assertCompleted(tasks); }
       })();
     },
@@ -528,13 +529,14 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
           await link.scrollIntoViewIfNeeded();
           const linkBefore = await link.boundingBox();
           await link.click({ noWaitAfter: true });
-          const feedback = kind === "gallery" && temperature === "cold" ? page.getByTestId("mobile-navigation-pending") : link.locator("[data-pending='true']");
+          // Public client transition replaces main with the target-neutral shell;
+          // the source tree is retained but client-hidden, while header/menu feedback remains visible.
+          const feedback = page.getByTestId(`community-${kind}-loading`);
           if (temperature === "cold") {
-            await expect(feedback.first()).toBeVisible({ timeout: 2000 });
-            if (kind !== "gallery") {
-              const linkPending = await link.boundingBox();
-              expect(linkPending!.width).toBeCloseTo(linkBefore!.width, 0); expect(linkPending!.height).toBeCloseTo(linkBefore!.height, 0);
-            }
+            await expect(feedback).toBeVisible({ timeout: 2000 });
+            if (kind === "gallery") await expect(page.getByTestId("mobile-navigation-pending")).toBeVisible();
+            expect(linkBefore!.width).toBeGreaterThan(0); expect(linkBefore!.height).toBeGreaterThan(0);
+            // This is a real intercepted RSC request, not a synthetic pending flag.
             await evidence.capture(`${temperature}-${kind}-link-feedback`, [], true);
           } else {
             // A real warm same-context revisit may use Router Cache or a fresh dynamic read; an immediate hit need not create pending DOM.
@@ -591,7 +593,7 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
     try { await disposeCleanRsc(page); }
     catch (cause) { passed = false; throw cause; }
     finally {
-    try { await evidence.finish(passed, { status: passed ? "PASS" : "NOT APPLICABLE", details: passed ? "The same approved isolated artwork persisted across actual list/detail/creator and cold/warm anchor navigation; real HTML plus public media readback confirmed publication. Own fixture is removed only after observer finalization." : "The flow did not complete publication/readback assertions; this is failed or incomplete evidence." }, ["390px cold mobile", "1440px warm desktop", "real pending + real streamed fallback + decoded content; actual geometry recorded for QA visual comparison"]); }
+    try { await evidence.finish(passed, { status: passed ? "PASS" : "NOT APPLICABLE", details: passed ? "The same approved isolated artwork persisted across actual list/detail/creator and cold/warm anchor navigation; real HTML plus public media readback confirmed publication. Own fixture is removed only after observer finalization." : "The flow did not complete publication/readback assertions; this is failed or incomplete evidence." }, ["390px cold mobile", "1440px warm desktop", "real client transition shell + actual blocked reader + decoded content; actual geometry recorded for QA visual comparison"]); }
     finally { await fixture.cleanup(); }
     }
   }

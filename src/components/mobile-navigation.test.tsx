@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobileNavigation } from "./mobile-navigation";
+import { CommunityRouteNavigationProvider, CommunityRoutePendingRegion } from "@/components/community/community-route-transition";
 
 const mocks = vi.hoisted(() => ({ push: vi.fn(), prefetch: vi.fn(), pathname: "/en/products" }));
 vi.mock("next/link", () => ({
@@ -23,7 +24,7 @@ afterEach(() => {
   history.replaceState(null, "");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  mocks.push.mockClear(); mocks.prefetch.mockClear(); mocks.pathname = "/en/products";
+  mocks.push.mockReset(); mocks.prefetch.mockClear(); mocks.pathname = "/en/products";
 });
 
 function setup() {
@@ -34,6 +35,65 @@ function setup() {
 }
 
 describe("MobileNavigation", () => {
+  for (const withHistoryEntry of [true, false]) for (const reversed of [false, true]) it(`dispatches Club once after ${withHistoryEntry ? "menu history Back" : "direct exit"}, listeners ${reversed ? "reversed" : "registered"}`, async () => {
+    vi.useFakeTimers(); setup();
+    vi.spyOn(history, "back").mockImplementation(() => {});
+    const listeners: Array<EventListenerOrEventListenerObject> = [];
+    const add = window.addEventListener.bind(window);
+    vi.spyOn(window, "addEventListener").mockImplementation((type, listener, options) => {
+      if (type === "popstate") listeners.push(listener);
+      else add(type, listener, options);
+    });
+    const pop = () => act(() => {
+      for (const listener of reversed ? [...listeners].reverse() : listeners) {
+        const event = new PopStateEvent("popstate");
+        if (typeof listener === "function") listener.call(window, event); else listener.handleEvent(event);
+      }
+    });
+    let resolve!: () => void;
+    mocks.push.mockReturnValue(new Promise<void>((done) => { resolve = done; }));
+    render(<CommunityRouteNavigationProvider><MobileNavigation locale="en" communityEnabled /><CommunityRoutePendingRegion><h1>Original page</h1></CommunityRoutePendingRegion></CommunityRouteNavigationProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation menu" }));
+    if (!withHistoryEntry) history.replaceState(null, "");
+    fireEvent.click(screen.getByRole("link", { name: "Coloring Club" }));
+    expect(mocks.push).not.toHaveBeenCalled();
+    if (withHistoryEntry) { history.replaceState(null, ""); pop(); }
+    act(() => vi.advanceTimersByTime(280));
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith("/en/club");
+    expect(screen.getByTestId("community-gallery-loading")).toBeVisible();
+    expect(screen.getByTestId("mobile-navigation-pending")).toHaveTextContent("Opening Coloring Club");
+    await act(async () => resolve());
+    expect(screen.getByRole("heading", { name: "Original page" })).toBeVisible();
+  });
+
+  it("does not dispatch a deferred menu destination after a second external Back", () => {
+    vi.useFakeTimers(); setup();
+    vi.spyOn(history, "back").mockImplementation(() => {});
+    render(<CommunityRouteNavigationProvider><MobileNavigation locale="en" communityEnabled /></CommunityRouteNavigationProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation menu" }));
+    fireEvent.click(screen.getByRole("link", { name: "Coloring Club" }));
+    history.replaceState(null, ""); fireEvent.popState(window);
+    history.replaceState(null, "", "/en/about"); fireEvent.popState(window);
+    act(() => vi.advanceTimersByTime(280));
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("mobile-navigation-pending")).toBeNull();
+  });
+
+  it("keeps the accepted newer menu destination and feedback if an older route commits during exit", () => {
+    vi.useFakeTimers(); setup();
+    vi.spyOn(history, "back").mockImplementation(() => {});
+    const app = () => <CommunityRouteNavigationProvider><MobileNavigation locale="en" communityEnabled /></CommunityRouteNavigationProvider>;
+    const view = render(app());
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation menu" }));
+    fireEvent.click(screen.getByRole("link", { name: "Coloring Club" }));
+    history.replaceState(null, ""); fireEvent.popState(window);
+    mocks.pathname = "/en/about"; history.replaceState(null, "", "/en/about");
+    view.rerender(app());
+    act(() => vi.advanceTimersByTime(280));
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith("/en/club");
+    expect(screen.getByTestId("mobile-navigation-pending")).toHaveTextContent("Opening Coloring Club");
+  });
+
   it("finishes closing if the browser does not deliver animationend", () => {
     vi.useFakeTimers();
     setup();

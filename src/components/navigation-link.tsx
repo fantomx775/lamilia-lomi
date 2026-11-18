@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ComponentProps } from "react";
 
+import { CommunityLinkPendingScope, communityRouteTarget, useCommunityRouteNavigation } from "@/components/community/community-route-transition";
 import { LinkPendingIndicator } from "@/components/link-pending-indicator";
 
 type NavigationLinkProps = ComponentProps<typeof Link> & {
@@ -18,12 +19,28 @@ export function NavigationLink({
   pendingLabel,
   showPendingBar = true,
   pending,
+  href,
+  onNavigate,
+  replace,
+  scroll,
   ...props
 }: NavigationLinkProps) {
+  const community = useCommunityRouteNavigation();
+  const target = community && typeof href === "string" ? communityRouteTarget(href, typeof window === "undefined" ? undefined : window.location.origin) : null;
+  const managedPending = target ? community?.active?.href === target.href : undefined;
+  const effectivePending = pending ?? managedPending;
   return (
-    <Link {...props} className={[className, "relative"].filter(Boolean).join(" ")}>
+    <CommunityLinkPendingScope pending={effectivePending}><Link {...props} href={href} replace={replace} scroll={scroll}
+      onNavigate={(event) => {
+        let prevented = false;
+        onNavigate?.({ preventDefault() { prevented = true; event.preventDefault(); } });
+        if (!prevented && community) {
+          if (typeof href === "string" && community.navigate(href, { replace, scroll })) event.preventDefault();
+          else community.cancel();
+        }
+      }} className={[className, "relative"].filter(Boolean).join(" ")}>
       {children}
-      <LinkPendingIndicator label={pendingLabel} variant="inline" showInlineBar={showPendingBar} pendingOverride={pending} />
-    </Link>
+      <LinkPendingIndicator label={pendingLabel} variant="inline" showInlineBar={showPendingBar} pendingOverride={effectivePending} />
+    </Link></CommunityLinkPendingScope>
   );
 }
