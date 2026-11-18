@@ -1075,7 +1075,7 @@ describe("ProductEditor V2", () => {
         filename: "read.pdf", contentType: "application/pdf", sizeBytes: 12, sortOrder: 1 } }) };
     }));
     let completeSave!: (result: { ok: true; id: string }) => void;
-    const saveAction = vi.fn(() => new Promise<{ ok: true; id: string }>((resolve) => { completeSave = resolve; }));
+    const saveAction = vi.fn<(formData: FormData) => Promise<{ ok: true; id: string }>>(() => new Promise((resolve) => { completeSave = resolve; }));
     const user = userEvent.setup();
     const view = render(<ProductEditor title="Save timing" product={{ ...product, status: "draft", assets: [] }}
       categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
