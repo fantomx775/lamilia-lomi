@@ -1,6 +1,7 @@
-import { expect, test, type Request } from "@playwright/test";
+import { expect, test, type Request, type Page, type Locator } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
@@ -13,16 +14,37 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   test.skip(process.env.RUN_ISSUE_127_PRODUCT_MEDIA_E2E !== "1", "Requires guarded exclusive local Supabase and its owned HTTPS gateway.");
   test.setTimeout(180_000);
   const fixtures = await communityFixtures(testInfo); // Pins the existing strict local Docker/API/DB identity before writes.
+  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const runId = process.env.UX127_MEDIA_RUN_ID ?? `supabase-media-${randomUUID()}`;
+  const screenshots: Array<Record<string, unknown>> = [];
+  let completed = false;
+  async function capture(target: Page, phase: string) {
+    await settleVisibleMedia(target);
+    const artifact = `docs/verification/issue-127/supabase-media-${testInfo.project.name}-${phase}.png`;
+    await mkdir(path.dirname(path.resolve(artifact)), { recursive: true });
+    await target.screenshot({ path: path.resolve(artifact), animations: "disabled" });
+    screenshots.push({ path: artifact, testedSha, runId, phase, viewport: target.viewportSize(), dpr: await target.evaluate(() => devicePixelRatio) });
+  }
   const objects: Array<{ bucket: string; path: string }> = [];
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
-  const failed: Array<{ method: string; path: string; error: string | null; expectedPause: boolean }> = [];
+  const failed: Array<{ method: string; path: string; error: string | null; expectedPause: boolean; expectedFault: boolean }> = [];
   const delayedRequests = new WeakSet<Request>();
+  const faultRequests = new WeakSet<Request>();
+  const expectedFaultConsole: string[] = [];
+  let faultActive = false;
+  let ownedVideoPath = "";
   let pauseConfirmed = false;
-  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  let waitEvents = { waiting: 0, stalled: 0 };
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    const consolePath = new URL(message.location().url || COMMUNITY_TEST_ORIGIN).pathname;
+    if (faultActive && consolePath === ownedVideoPath && /^Failed to load resource:/.test(message.text())) expectedFaultConsole.push(message.text());
+    else consoleErrors.push(message.text());
+  });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("requestfailed", (request) => failed.push({ method: request.method(), path: new URL(request.url()).pathname,
-    error: request.failure()?.errorText ?? null, expectedPause: pauseConfirmed && delayedRequests.has(request) }));
+    error: request.failure()?.errorText ?? null, expectedPause: pauseConfirmed && delayedRequests.has(request), expectedFault: faultRequests.has(request) }));
   try {
     const book = await fixtures.product("Controlled product media preview");
     const rows: Array<Record<string, unknown>> = [];
@@ -50,6 +72,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     expect((await fixtures.service.from("product_assets").select("id").eq("product_id", book.id)).data).toHaveLength(5);
     await page.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
     const videoPath = `/api/media/${video}`;
+    ownedVideoPath = videoPath;
     const range = await page.request.get(`${COMMUNITY_TEST_ORIGIN}${videoPath}`, { headers: { Range: "bytes=0-127" } });
     expect(range.status()).toBe(206); expect(range.headers()["content-type"]).toContain("video/mp4");
     expect(range.headers()["content-range"]).toMatch(/^bytes 0-127\//); expect((await range.body()).length).toBe(128);
@@ -77,13 +100,10 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       const timing = await page.evaluate(() => (window as unknown as { mediaTiming: { click: number; frame: number } }).mediaTiming);
       expect(timing.click).toBeGreaterThan(0); expect(timing.frame).toBeGreaterThanOrEqual(timing.click);
       timings.push({ cache, clickToFrameMs: timing.frame - timing.click });
-      await player.evaluate(async (element) => {
-        const video = element as HTMLVideoElement; video.pause();
-        await new Promise<void>((resolve) => { video.addEventListener("seeked", () => resolve(), { once: true }); video.currentTime = Math.min(1, video.duration / 2); });
-      });
+      const postSeekFrame = await seekAndPaint(player);
+      await testInfo.attach(`${cache}-post-seek-frame`, { body: JSON.stringify({ testedSha, runId, ...postSeekFrame }), contentType: "application/json" });
       expect(await player.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true);
-      await mkdir(path.resolve("docs/verification/issue-127"), { recursive: true });
-      await page.screenshot({ path: path.resolve(`docs/verification/issue-127/supabase-media-${testInfo.project.name}-${cache}.png`), animations: "disabled" });
+      await capture(page, cache);
     }
     // Delay the actual application media request, then deliberately pause native
     // pending playback. No synthetic response replaces the stored MP4 bytes.
@@ -98,11 +118,19 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     try {
       await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`);
       await page.locator("video").scrollIntoViewIfNeeded();
+      await page.locator("video").evaluate((element) => {
+        const events = { waiting: 0, stalled: 0 };
+        (window as unknown as { mediaWaitEvents: typeof events }).mediaWaitEvents = events;
+        element.addEventListener("waiting", () => { events.waiting += 1; });
+        element.addEventListener("stalled", () => { events.stalled += 1; });
+      });
       await page.getByTestId("product-video-play").click();
       await expect(page.getByRole("status").filter({ hasText: "Preparing video" })).toBeVisible();
+      await expect.poll(() => page.evaluate(() => (window as unknown as { mediaWaitEvents: { waiting: number } }).mediaWaitEvents.waiting)).toBeGreaterThan(0);
       pauseConfirmed = true;
       await page.getByTestId("product-video-pause").click();
       await expect(page.getByTestId("product-video-play")).toBeVisible();
+      waitEvents = await page.evaluate(() => (window as unknown as { mediaWaitEvents: typeof waitEvents }).mediaWaitEvents);
       expect(await page.locator("video").evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true);
       release();
       await expect(page.getByRole("alert").filter({ hasText: "video could not" })).toHaveCount(0);
@@ -110,25 +138,126 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 20_000 }).toBeGreaterThan(0.2);
       await page.locator("video").evaluate((element) => (element as HTMLVideoElement).pause());
     } finally { release(); await page.unroute(videoPattern); }
+    // Controlled transport failure, then real stored-byte recovery. The fault
+    // aborts only this owned media request; it never fulfills a replacement MP4.
+    faultActive = true;
+    await page.route(videoPattern, async (route) => { faultRequests.add(route.request()); await route.abort("failed"); });
+    try {
+      await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`);
+      await page.locator("video").scrollIntoViewIfNeeded();
+      const play = page.getByTestId("product-video-play");
+      if (await play.isVisible()) await play.click();
+      await expect(page.getByRole("alert").filter({ hasText: "video could not be played" })).toBeVisible();
+      await capture(page, "controlled-video-error");
+    } finally { await page.unroute(videoPattern); }
+    await page.getByRole("button", { name: "Retry video", exact: true }).click();
+    await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 20_000 }).toBeGreaterThan(0.2);
+    await expect(page.getByRole("alert").filter({ hasText: "video could not be played" })).toHaveCount(0);
+    faultActive = false;
+    await seekAndPaint(page.locator("video"));
+    await capture(page, "video-recovered-real-storage");
+    expect(failed.some((request) => request.expectedFault)).toBe(true);
+    // Observe a genuine tab switch rather than dispatching a fake visibility
+    // event. Headless engines that keep it visible are recorded as such.
+    const other = await page.context().newPage();
+    let backgroundVisibility = "not-observed";
+    let pausedOnReturn = false;
+    let backgroundStartTime = 0;
+    try {
+      await page.locator("video").evaluate((element) => (element as HTMLVideoElement).play());
+      backgroundStartTime = await page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime);
+      await other.goto("about:blank"); await other.bringToFront();
+      backgroundVisibility = await page.evaluate(() => document.visibilityState);
+      await page.bringToFront();
+      expect(await page.locator("video").evaluate((element) => (element as HTMLVideoElement).error)).toBeNull();
+      pausedOnReturn = await page.locator("video").evaluate((element) => (element as HTMLVideoElement).paused);
+      if (pausedOnReturn) {
+        const bounds = await page.locator("video").boundingBox();
+        // A trusted gesture on the native play control; no forced autoplay after backgrounding.
+        await page.locator("video").click({ position: { x: 20, y: bounds!.height - 18 } });
+      }
+      await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(backgroundStartTime + 0.2);
+      await seekAndPaint(page.locator("video"));
+      await capture(page, "video-after-tab-return");
+    } finally { await other.close(); }
     const opener = page.getByRole("button", { name: "Open image 1", exact: true });
     await opener.scrollIntoViewIfNeeded(); await opener.click();
     const dialog = page.getByRole("dialog", { name: "Image preview" });
     await expect(dialog.getByRole("status")).toHaveCount(0);
     const image = dialog.locator("[data-gallery-display]").first();
     await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(2000);
+    await capture(page, "decoded-gallery");
     await page.keyboard.press("Escape"); await expect(opener).toBeFocused();
     expect(pageErrors).toEqual([]); expect(consoleErrors).toEqual([]);
     for (const request of failed) {
-      expect(request.expectedPause).toBe(true); expect(request.method).toBe("GET"); expect(request.path).toBe(videoPath);
-      expect(["net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"]).toContain(request.error);
+      expect(request.expectedPause || request.expectedFault).toBe(true); expect(request.method).toBe("GET"); expect(request.path).toBe(videoPath);
+      expect(request.expectedFault ? ["net::ERR_FAILED", "Load failed", "Unknown error", "Failed"] : ["net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"]).toContain(request.error);
     }
-    await testInfo.attach("real-storage-media-evidence", { body: JSON.stringify({ project: testInfo.project.name, timings, consoleErrors, pageErrors, failed,
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(testedSha);
+    completed = true;
+    await testInfo.attach("real-storage-media-evidence", { body: JSON.stringify({ testedSha, runId, project: testInfo.project.name, timings, consoleErrors, expectedFaultConsole, pageErrors, failed, backgroundVisibility, pausedOnReturn, backgroundStartTime, waitEvents,
       optimizerSelection: "NOT APPLICABLE to unoptimized authenticated Supabase fallback; tested separately in local-demo optimized image campaign" }), contentType: "application/json" });
   } finally {
+    let cleanupVerified = false;
+    try {
+      try {
     for (const bucket of new Set(objects.map((object) => object.bucket))) {
       const owned = objects.filter((object) => object.bucket === bucket).map((object) => object.path);
       if (owned.length) expect((await fixtures.service.storage.from(bucket).remove(owned)).error).toBeNull();
     }
-    await fixtures.cleanup();
+      } finally { await fixtures.cleanup(); }
+      cleanupVerified = true;
+    } finally {
+    const sourceMatchesHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim() === testedSha && !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "scripts", "public", "messages", "package.json", "package-lock.json", "next.config.*"], { encoding: "utf8" }).trim();
+    const provenance = { testedSha, runId, cleanupVerified, status: completed && cleanupVerified ? sourceMatchesHead ? "PASS" : "WORKING_TREE" : "FAIL", sourceMatchesHead, project: testInfo.project.name, tool: "Playwright", screenshots };
+    const body = JSON.stringify(provenance, null, 2);
+    await writeFile(testInfo.outputPath("supabase-media-provenance.json"), body);
+    await testInfo.attach("supabase-media-provenance", { body, contentType: "application/json" });
+    }
   }
 });
+
+
+async function settleVisibleMedia(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    const visible = Array.from(document.images).filter((image) => {
+      const box = image.getBoundingClientRect();
+      const style = getComputedStyle(image);
+      return box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth && style.visibility !== "hidden" && style.display !== "none";
+    });
+    await Promise.all(visible.map((image) => image.decode()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+}
+
+async function seekAndPaint(locator: Locator) {
+  return locator.evaluate(async (element) => {
+    const video = element as HTMLVideoElement;
+    video.pause();
+    const target = Math.min(1, video.duration / 2);
+    let frameId: number | undefined;
+    let timeoutId = 0;
+    let onSeeked!: () => void;
+    const seeked = new Promise<void>((resolve) => { onSeeked = resolve; video.addEventListener("seeked", onSeeked, { once: true }); });
+    const requestFrame = video.requestVideoFrameCallback;
+    const hasFrameCallback = typeof requestFrame === "function";
+    const painted = hasFrameCallback ? new Promise<void>((resolve) => {
+      const frame = (_time: number, metadata: VideoFrameCallbackMetadata) => {
+        if (Math.abs(metadata.mediaTime - target) < 0.12) resolve();
+        else frameId = requestFrame.call(video, frame);
+      };
+      frameId = requestFrame.call(video, frame);
+    }) : seeked.then(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const timeout = new Promise<never>((_, reject) => { timeoutId = window.setTimeout(() => reject(new Error("A decoded post-seek frame did not arrive.")), 20000); });
+    try {
+      video.currentTime = target;
+      await Promise.race([Promise.all([seeked, painted]), timeout]);
+      if (video.readyState < 2) throw new Error("The post-seek video frame is not decoded.");
+      return { method: hasFrameCallback ? "requestVideoFrameCallback" : "seeked-readyState-two-animation-frames", targetTime: target, observedTime: video.currentTime, readyState: video.readyState };
+    } finally {
+      window.clearTimeout(timeoutId); video.removeEventListener("seeked", onSeeked);
+      if (frameId !== undefined) video.cancelVideoFrameCallback?.(frameId);
+    }
+  });
+}

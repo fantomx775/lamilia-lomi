@@ -1,4 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page, type Locator, type Request } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
@@ -11,6 +13,17 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
   test.skip(!(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)), "Only a verified disposable loopback local-content app may be mutated.");
   test.setTimeout(120_000);
   const release = await acquireLocalContentStoreLock();
+  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const runId = process.env.UX127_MEDIA_RUN_ID ?? `local-media-${randomUUID()}`;
+  const screenshots: Array<Record<string, unknown>> = [];
+  let completed = false;
+  async function capture(target: Page, phase: string) {
+    await settleVisibleMedia(target);
+    const artifact = `docs/verification/issue-127/media-${testInfo.project.name}-${phase}.png`;
+    fs.mkdirSync(path.dirname(path.resolve(artifact)), { recursive: true });
+    await target.screenshot({ path: path.resolve(artifact), animations: "disabled" });
+    screenshots.push({ path: artifact, testedSha, runId, phase, viewport: target.viewportSize(), dpr: await target.evaluate(() => devicePixelRatio) });
+  }
   const store = path.resolve("data/lamilialomi-content.local.json");
   const original = fs.existsSync(store) ? fs.readFileSync(store) : null;
   const mediaDirectory = path.resolve("public/uploads/issue-127-video");
@@ -18,10 +31,19 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
   if (existed) { release(); throw new Error("The exclusive video fixture directory already exists; inspect its ownership before proceeding."); }
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
-  const failedRequests: Array<{ method: string; url: string; error: string | null }> = [];
+  const expectedImageFaultConsole: string[] = [];
+  const imageFaultRequests = new WeakSet<Request>();
+  let imageFaultActive = false;
+  let imageFaultSource = "";
+  const failedRequests: Array<{ method: string; url: string; error: string | null; expectedImageFault: boolean }> = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-  page.on("requestfailed", (request) => failedRequests.push({ method: request.method(), url: new URL(request.url()).origin + new URL(request.url()).pathname, error: request.failure()?.errorText ?? null }));
+  page.on("console", (message) => {
+    if (message.type() !== "error") return;
+    const source = new URL(message.location().url || String(testInfo.project.use.baseURL));
+    if (imageFaultActive && source.pathname === "/_next/image" && source.searchParams.get("url") === imageFaultSource && /^Failed to load resource:/.test(message.text())) expectedImageFaultConsole.push(message.text());
+    else consoleErrors.push(message.text());
+  });
+  page.on("requestfailed", (request) => failedRequests.push({ method: request.method(), url: new URL(request.url()).origin + new URL(request.url()).pathname, error: request.failure()?.errorText ?? null, expectedImageFault: imageFaultRequests.has(request) }));
   try {
     fs.mkdirSync(mediaDirectory, { recursive: true });
     fs.copyFileSync(path.resolve("tests/e2e/fixtures/issue-127/flower.mp4"), path.join(mediaDirectory, "flower.mp4"));
@@ -73,42 +95,57 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       const timing = await page.evaluate(() => (window as unknown as { ux127VideoTiming: { started: number; frame: number } }).ux127VideoTiming);
       expect(timing.started).toBeGreaterThan(0); expect(timing.frame).toBeGreaterThanOrEqual(timing.started);
       samples.push({ cache, clickToFrameMs: timing.frame - timing.started });
-      await video.evaluate(async (element) => {
-        const player = element as HTMLVideoElement; player.pause();
-        await new Promise<void>((resolve) => { player.addEventListener("seeked", () => resolve(), { once: true }); player.currentTime = Math.min(1, player.duration / 2); });
-      });
+      const postSeekFrame = await seekAndPaint(video);
+      await testInfo.attach(`${cache}-post-seek-frame`, { body: JSON.stringify({ testedSha, runId, ...postSeekFrame }), contentType: "application/json" });
       expect(await video.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true);
-      fs.mkdirSync(path.resolve("docs/verification/issue-127"), { recursive: true });
-      await page.screenshot({ path: path.resolve(`docs/verification/issue-127/media-${testInfo.project.name}-${cache}-video.png`), animations: "disabled" });
+      await capture(page, `${cache}-video`);
     }
     const opener = page.getByRole("button", { name: /Open image 1/ });
     await opener.scrollIntoViewIfNeeded();
     const thumbnail = opener.locator("img");
-    const thumbnailWidth = await thumbnail.evaluate((element) => (element as HTMLImageElement).naturalWidth);
+    const thumbnailPixels = await selectedPixels(thumbnail, page);
+    const thumbnailWidth = thumbnailPixels.width;
+    imageFaultSource = new URL(thumbnailPixels.currentSrc).searchParams.get("url") ?? "";
     expect(thumbnailWidth).toBeGreaterThan(0);
     let releaseDetail!: () => void;
     const detailGate = new Promise<void>((resolve) => { releaseDetail = resolve; });
+    let imageFaultInjected = false;
     await page.route("**/_next/image**", async (route) => {
-      const width = Number(new URL(route.request().url()).searchParams.get("w"));
+      const source = new URL(route.request().url());
+      const width = Number(source.searchParams.get("w"));
       if (width > thumbnailWidth) await detailGate;
+      if (!imageFaultInjected && width > thumbnailWidth && source.searchParams.get("url") === imageFaultSource) {
+        imageFaultInjected = true; imageFaultActive = true;
+        imageFaultRequests.add(route.request()); await route.abort("failed"); return;
+      }
       await route.continue();
     });
     try {
-      await page.screenshot({ path: path.resolve(`docs/verification/issue-127/media-${testInfo.project.name}-before-gallery.png`), animations: "disabled" });
+      await capture(page, "before-gallery");
       await opener.click();
       const dialog = page.getByRole("dialog", { name: "Image preview" });
       const display = dialog.locator("[data-gallery-display]").first();
       await expect(display).toBeVisible();
       const needsLargerSource = (await dialog.getByTestId("product-gallery-preview-frame").boundingBox())!.width * await page.evaluate(() => devicePixelRatio) > thumbnailWidth;
       if (needsLargerSource) await expect(dialog.getByRole("status")).toContainText("Loading larger preview");
-      await page.screenshot({ path: path.resolve(`docs/verification/issue-127/media-${testInfo.project.name}-pending-gallery.png`), animations: "disabled" });
+      await capture(page, "pending-gallery");
       releaseDetail();
+      if (needsLargerSource) {
+        await expect(dialog.getByRole("alert")).toContainText("larger preview could not be loaded");
+        expect(imageFaultInjected).toBe(true);
+        await capture(page, "controlled-gallery-error");
+        imageFaultActive = false;
+        await dialog.getByRole("button", { name: "Retry image", exact: true }).click();
+      }
       await expect(dialog.getByRole("status")).toHaveCount(0);
-      const detailWidth = await display.evaluate((element) => (element as HTMLImageElement).naturalWidth);
+      await expect(dialog.getByRole("alert")).toHaveCount(0);
+      const detailPixels = await selectedPixels(display, page);
+      const detailWidth = detailPixels.width;
+      await testInfo.attach("selected-gallery-bytes", { body: JSON.stringify({ testedSha, runId, thumbnail: thumbnailPixels, detail: detailPixels }), contentType: "application/json" });
       const frame = await dialog.getByTestId("product-gallery-preview-frame").boundingBox();
       const dpr = await page.evaluate(() => devicePixelRatio);
       expect(detailWidth).toBeGreaterThanOrEqual(Math.min(2000, Math.floor(frame!.width * dpr)));
-      await page.screenshot({ path: path.resolve(`docs/verification/issue-127/media-${testInfo.project.name}-after-gallery.png`), animations: "disabled" });
+      await capture(page, "after-gallery");
       await dialog.getByRole("button", { name: "Next image" }).click();
       await expect(dialog.getByText("2 of 3")).toBeVisible();
       await page.keyboard.press("Escape");
@@ -122,7 +159,8 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     // actual preview width is768CSSpx, so1920px is below min(2000,768*3).
     // This separate local-demo campaign uses actual Next optimization; the real
     // Supabase fallback campaign intentionally keeps its auth path unoptimized.
-    const tallContext = await browser.newContext({ baseURL: String(testInfo.project.use.baseURL), viewport: { width: 1024, height: 1366 }, deviceScaleFactor: 3, ignoreHTTPSErrors: true });
+    for (const dpr of [2, 3]) {
+    const tallContext = await browser.newContext({ baseURL: String(testInfo.project.use.baseURL), viewport: { width: 1024, height: 1366 }, deviceScaleFactor: dpr, ignoreHTTPSErrors: true });
     try {
       await tallContext.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
       const tall = await tallContext.newPage();
@@ -146,18 +184,96 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
         const frame = await preview.getByTestId("product-gallery-preview-frame").boundingBox();
         expect(frame!.width).toBeGreaterThan(640);
         const selected = preview.locator("[data-gallery-display]").first();
-        await expect.poll(() => selected.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThanOrEqual(Math.min(2000, Math.floor(frame!.width * 3)));
-        await tall.screenshot({ path: path.resolve(`docs/verification/issue-127/media-${testInfo.project.name}-tall-dpr3-gallery.png`), animations: "disabled" });
-        await testInfo.attach("optimized-tall-DPR3-selection", { body: JSON.stringify({ viewport: { width: 1024, height: 1366 }, dpr: 3, frameWidth: frame!.width,
-          originalWidth: 2000, selectedWidth: await selected.evaluate((element) => (element as HTMLImageElement).naturalWidth), frameHeightBeforeDecode: before!.height, frameHeightAfterDecode: after!.height, errors: tallErrors }), contentType: "application/json" });
+        const selectedSource = await selectedPixels(selected, tall);
+        expect(selectedSource.width).toBeGreaterThanOrEqual(Math.min(2000, Math.floor(frame!.width * dpr)));
+        await capture(tall, `tall-dpr${dpr}-gallery`);
+        await testInfo.attach(`optimized-tall-DPR${dpr}-selection`, { body: JSON.stringify({ testedSha, runId, viewport: { width: 1024, height: 1366 }, dpr, frameWidth: frame!.width,
+          originalWidth: 2000, selectedSource, frameHeightBeforeDecode: before!.height, frameHeightAfterDecode: after!.height, errors: tallErrors }), contentType: "application/json" });
         expect(tallErrors).toEqual([]);
       } finally { releaseThumbnails(); }
     } finally { await tallContext.close(); }
-    await testInfo.attach("local-video-first-frame-samples", { body: JSON.stringify({ project: testInfo.project.name, samples, pageErrors, consoleErrors, failedRequests }), contentType: "application/json" });
-    expect(pageErrors).toEqual([]); expect(consoleErrors).toEqual([]); expect(failedRequests).toEqual([]);
+    }
+    await testInfo.attach("local-video-first-frame-samples", { body: JSON.stringify({ testedSha, runId, project: testInfo.project.name, samples, pageErrors, consoleErrors, expectedImageFaultConsole, failedRequests }), contentType: "application/json" });
+    expect(pageErrors).toEqual([]); expect(consoleErrors).toEqual([]);
+    for (const request of failedRequests) {
+      expect(request.expectedImageFault).toBe(true); expect(request.method).toBe("GET"); expect(new URL(request.url).pathname).toBe("/_next/image");
+      expect(["net::ERR_FAILED", "Load failed", "Unknown error", "Failed"]).toContain(request.error);
+    }
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(testedSha);
+    completed = true;
   } finally {
+    let cleanupVerified = false;
+    try {
     if (original) fs.writeFileSync(store, original); else if (fs.existsSync(store)) fs.unlinkSync(store);
     // The exact exclusive path was checked absent above and created by this test.
-    fs.rmSync(mediaDirectory, { recursive: true, force: true }); release();
+    fs.rmSync(mediaDirectory, { recursive: true, force: true });
+      cleanupVerified = true;
+    } finally {
+      release();
+    const sourceMatchesHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim() === testedSha && !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "scripts", "public", "messages", "package.json", "package-lock.json", "next.config.*"], { encoding: "utf8" }).trim();
+    const provenance = { testedSha, runId, cleanupVerified, status: completed && cleanupVerified ? sourceMatchesHead ? "PASS" : "WORKING_TREE" : "FAIL", sourceMatchesHead, project: testInfo.project.name, tool: "Playwright", screenshots };
+    const body = JSON.stringify(provenance, null, 2);
+    fs.writeFileSync(testInfo.outputPath("media-provenance.json"), body);
+    await testInfo.attach("media-provenance", { body, contentType: "application/json" });
+    }
   }
 });
+
+
+async function settleVisibleMedia(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    const visible = Array.from(document.images).filter((image) => {
+      const box = image.getBoundingClientRect();
+      const style = getComputedStyle(image);
+      return box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth && style.visibility !== "hidden" && style.display !== "none";
+    });
+    await Promise.all(visible.map((image) => image.decode()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+}
+
+async function seekAndPaint(locator: Locator) {
+  return locator.evaluate(async (element) => {
+    const video = element as HTMLVideoElement;
+    video.pause();
+    const target = Math.min(1, video.duration / 2);
+    let frameId: number | undefined;
+    let timeoutId = 0;
+    let onSeeked!: () => void;
+    const seeked = new Promise<void>((resolve) => { onSeeked = resolve; video.addEventListener("seeked", onSeeked, { once: true }); });
+    const requestFrame = video.requestVideoFrameCallback;
+    const hasFrameCallback = typeof requestFrame === "function";
+    const painted = hasFrameCallback ? new Promise<void>((resolve) => {
+      const frame = (_time: number, metadata: VideoFrameCallbackMetadata) => {
+        if (Math.abs(metadata.mediaTime - target) < 0.12) resolve();
+        else frameId = requestFrame.call(video, frame);
+      };
+      frameId = requestFrame.call(video, frame);
+    }) : seeked.then(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const timeout = new Promise<never>((_, reject) => { timeoutId = window.setTimeout(() => reject(new Error("A decoded post-seek frame did not arrive.")), 20000); });
+    try {
+      video.currentTime = target;
+      await Promise.race([Promise.all([seeked, painted]), timeout]);
+      if (video.readyState < 2) throw new Error("The post-seek video frame is not decoded.");
+      return { method: hasFrameCallback ? "requestVideoFrameCallback" : "seeked-readyState-two-animation-frames", targetTime: target, observedTime: video.currentTime, readyState: video.readyState };
+    } finally {
+      window.clearTimeout(timeoutId); video.removeEventListener("seeked", onSeeked);
+      if (frameId !== undefined) video.cancelVideoFrameCallback?.(frameId);
+    }
+  });
+}
+
+async function selectedPixels(locator: Locator, page: Page) {
+  const source = await locator.evaluate((element) => {
+    const image = element as HTMLImageElement;
+    return { currentSrc: image.currentSrc, reportedNaturalWidth: image.naturalWidth };
+  });
+  expect(new URL(source.currentSrc).origin).toBe(new URL(page.url()).origin);
+  const response = await page.request.get(source.currentSrc);
+  expect(response.ok()).toBe(true);
+  const bytes = await response.body();
+  const decoded = await sharp(bytes).metadata();
+  expect(decoded.width).toBeGreaterThan(0);
+  return { ...source, width: decoded.width!, height: decoded.height!, bytes: bytes.length, format: decoded.format };
+}
