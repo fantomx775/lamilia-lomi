@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type BrowserContext } from "@playwright/test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { NextCancellationObserver } from "./helpers/next-navigation-cancellations";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -30,11 +32,37 @@ test("admin reads authorize every page before querying protected tables", async 
   const token = randomUUID();
   const productId = randomUUID();
   const collectionId = randomUUID();
-  const errors: string[] = [];
-  const networkFailures: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
-  page.on("requestfailed", (request) => networkFailures.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText}`));
+  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  if (process.env.ADMIN_READ_TESTED_SHA) expect(process.env.ADMIN_READ_TESTED_SHA).toBe(testedSha);
+  const runId = process.env.ADMIN_READ_RUN_ID ?? `admin-read-${randomUUID()}`;
+  const observer = new NextCancellationObserver({ testedSha, runId, origin: appUrl.origin });
+  await observer.observe(page);
+  let network: Awaited<ReturnType<typeof observer.finish>> | undefined;
+  const errors: Array<{ category: string; locationSha256: string }> = [];
+  const httpErrors: Array<{ category: string; status: number; resource: string; locationSha256: string }> = [];
+  const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+  // Error text, stack, account HTML, request query and console arguments can
+  // contain private data. Closed categories still fail every unexpected error.
+  page.on("pageerror", () => errors.push({ category: "unexpected-page-error", locationSha256: digest(page.url()) }));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push({ category: "unexpected-console-error", locationSha256: digest(message.location().url) });
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 400) httpErrors.push({ category: "unexpected-http-error", status: response.status(),
+      resource: response.request().resourceType(), locationSha256: digest(response.url()) });
+  });
+  function genuinePrefetch(proof: Record<string, unknown>) {
+    try {
+      const url = new URL(String(proof.requestUrl));
+      return proof.testedSha === testedSha && proof.runId === runId && proof.origin === appUrl.origin &&
+        url.origin === appUrl.origin && !url.username && !url.password && !url.hash &&
+        url.pathname === proof.requestPath && !url.pathname.startsWith("/api/") && url.pathname !== "/api" &&
+        !url.pathname.startsWith("/_next/") && !/\.(?:png|jpe?g|webp|gif|svg|woff2?|css|js|mp4|webm)$/i.test(url.pathname) &&
+        proof.requestMethod === "GET" && proof.resource === "fetch" && proof.rsc === "1" &&
+        (proof.prefetchHeader === "1" || (typeof proof.segmentPrefetch === "string" && proof.segmentPrefetch.length > 0 && proof.segmentPrefetch.length <= 512)) &&
+        (proof.responseStatus === null || (typeof proof.responseStatus === "number" && proof.responseStatus >= 200 && proof.responseStatus < 300));
+    } catch { return false; }
+  }
   const evidence = path.resolve("docs/verification/issue-94");
 
   async function account(role: "admin" | "user") {
@@ -146,17 +174,46 @@ test("admin reads authorize every page before querying protected tables", async 
     const publicResponse = await anonymous.from("products").select("id").eq("id", productId);
     expect(publicResponse.error).toBeNull();
     expect(publicResponse.data).toEqual([]);
+    // goto/reload has no anchor intent. Only the observer's actual explicit
+    // Next RSC prefetch header proof may classify an aborted request here.
+    network = await observer.finish();
+    const proofs = network.expectedNextCancellations;
+    const failures = network.failedNetworkRequests;
+    const matchingPrefetches = proofs.every((proof) => genuinePrefetch(proof) && proof.kind === "next-prefetch" &&
+      proof.observedFailure === "net::ERR_ABORTED" && proof.assertionStatus === "PASS" &&
+      failures.filter((failure) => failure.requestId === proof.requestId && failure.pageId === proof.pageId &&
+        failure.url === proof.requestUrl && failure.path === proof.requestPath && failure.method === "GET" &&
+        failure.resource === "fetch" && failure.error === "net::ERR_ABORTED" && failure.disposition === "next-canceled" &&
+        failure.cancellationKind === "next-prefetch" && failure.outcomeId === proof.id).length === 1) &&
+      failures.every((failure) => proofs.filter((proof) => proof.requestId === failure.requestId && proof.id === failure.outcomeId).length === 1) &&
+      new Set(proofs.map((proof) => proof.requestId)).size === proofs.length &&
+      new Set(proofs.map((proof) => proof.id)).size === proofs.length;
+    const closedPrefetchesValid = network.closedPrefetches.every((proof) => genuinePrefetch(proof) &&
+      proof.phase === "teardown" && proof.pageClosed === true && proof.closedByObserver === true &&
+      proof.completionObserved === false && proof.terminalObservation === "page-closed-without-request-terminal-event" &&
+      !failures.some((failure) => failure.requestId === proof.requestId) && !proofs.some((failed) => failed.requestId === proof.requestId)) &&
+      new Set(network.closedPrefetches.map((proof) => proof.requestId)).size === network.closedPrefetches.length;
+    // Boolean assertions avoid dumping unknown request URLs or private bodies.
+    expect(network.unresolved.length).toBe(0);
+    expect(network.expectedNavigationCancellations.length).toBe(0);
+    expect(network.expectedLoginRedirects.length).toBe(0);
+    expect(matchingPrefetches).toBe(true);
+    expect(closedPrefetchesValid).toBe(true);
     expect(errors).toEqual([]);
-    expect(networkFailures).toEqual([]);
+    expect(httpErrors).toEqual([]);
     if (process.env.ADMIN_READ_BROWSER_EVIDENCE_PATH) {
       await writeFile(`${process.env.ADMIN_READ_BROWSER_EVIDENCE_PATH}-${testInfo.project.name}.json`, JSON.stringify({
-        testedSha: process.env.ADMIN_READ_TESTED_SHA, runId: process.env.ADMIN_READ_RUN_ID,
+        testedSha, runId,
         project: testInfo.project.name, paths, roles: ["anonymous", "regular", "invalid-session", "admin"],
-        consoleErrors: errors, failedNetworkRequests: networkFailures, persistence: "editor remains available after reload",
+        consoleErrors: errors, httpErrors, ...network, persistence: "editor remains available after reload",
         screenshots: [`docs/verification/issue-94/denied-${testInfo.project.name}.png`, `docs/verification/issue-94/editor-${testInfo.project.name}.png`],
       }, null, 2));
     }
   } finally {
+    // Drain/close only this test's observed page before fixture teardown. Do
+    // not invent link-navigation proof for any programmatic goto/reload.
+    try { network ??= await observer.finish(); }
+    catch { errors.push({ category: "observer-finalization-failed", locationSha256: digest(appUrl.origin) }); }
     for (const target of contexts) await target.close();
     expect((await service.from("products").delete().eq("id", productId)).error).toBeNull();
     expect((await service.from("collections").delete().eq("id", collectionId)).error).toBeNull();
