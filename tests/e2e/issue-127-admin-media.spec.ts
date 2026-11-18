@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,6 +7,39 @@ import { randomUUID } from "node:crypto";
 import { communityFixtures } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
+
+async function captureRetainedGallery(page: Page, filename: string, fixtureProductId: string) {
+  const gallery = page.locator("#media-section-gallery");
+  await gallery.scrollIntoViewIfNeeded();
+  const preview = gallery.getByRole("img").first();
+  await expect(preview).toBeVisible();
+  // The editor renders a CSS background, not an <img>. Decode that exact source
+  // before claiming the reloaded preview is visually ready; never retain its URL.
+  await expect.poll(() => preview.evaluate((element) => getComputedStyle(element).backgroundImage)).not.toBe("none");
+  const dimensions = await preview.evaluate(async (element) => {
+    const source = getComputedStyle(element).backgroundImage.match(/^url\(["']?(.*?)["']?\)$/)?.[1];
+    if (!source) throw new Error("The retained asset preview has no image source.");
+    const image = new Image();
+    image.src = source;
+    await image.decode();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  });
+  expect(dimensions.width).toBeGreaterThan(0);
+  expect(dimensions.height).toBeGreaterThan(0);
+  await expect(gallery.getByText("Przesłano", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("product-save-bar")).toBeVisible();
+  await page.screenshot({
+    path: filename,
+    fullPage: false,
+    animations: "disabled",
+    caret: "hide",
+    // Only random controlled fixture identifiers are masked, should they enter
+    // this viewport. Asset filename/preview/state, errors and Save remain visible.
+    mask: [page.getByText(`ID: ${fixtureProductId}`, { exact: true }), page.getByLabel("Adres produktu")],
+  });
+  return dimensions;
+}
 
 test("F31 real cloud Save failure retains uploaded bytes for retry and reload", async ({ page }, testInfo) => {
   test.skip(process.env.RUN_ISSUE_127_ADMIN_E2E !== "1", "Requires guarded exclusive local Supabase Auth/DB/Storage.");
@@ -61,7 +94,7 @@ test("F31 real cloud Save failure retains uploaded bytes for retry and reload", 
     expect((await fixtures.service.storage.from(storageBucket).info(storagePath)).error).toBeNull();
     expect((await fixtures.service.from("product_assets").select("id").eq("id", asset.id)).data).toEqual([]);
     await mkdir(directory, { recursive: true });
-    await page.screenshot({ path: path.join(directory, `${screenshotBase}-retained.png`), fullPage: true });
+    const retainedPreview = await captureRetainedGallery(page, path.join(directory, `${screenshotBase}-retained.png`), book.id);
 
     await page.getByLabel("Adres produktu").fill(book.slug);
     await page.getByRole("button", { name: /Zapisz/ }).click();
@@ -76,11 +109,13 @@ test("F31 real cloud Save failure retains uploaded bytes for retry and reload", 
     expect((await fixtures.service.storage.from(storageBucket).info(storagePath)).error).toBeNull();
     expect(storageTransfers.length).toBe(beforeFailureTransfers);
     expect(pageErrors).toEqual([]);
-    await page.screenshot({ path: path.join(directory, `${screenshotBase}-reloaded.png`), fullPage: true });
+    const reloadedPreview = await captureRetainedGallery(page, path.join(directory, `${screenshotBase}-reloaded.png`), book.id);
     await mkdir(manifestDirectory, { recursive: true });
     await writeFile(path.join(manifestDirectory, `${runId}.json`), JSON.stringify({ testedSha, runId, status: "PASS",
       checks: ["real Auth admin", "real TUS Storage upload", "real duplicate slug Save failure", "retained object and editor id",
-        "retry Save without retransmission", "database readback", "reload persistence"], storageTransfers: beforeFailureTransfers,
+        "retry Save without retransmission", "database readback", "reload persistence", "actual retained and reloaded preview decode"], storageTransfers: beforeFailureTransfers,
+      decodedPreviews: { retained: retainedPreview, reloaded: reloadedPreview },
+      screenshotPolicy: "Gallery viewport with real fixed controls; only controlled fixture product ID and slug input masked; no error, asset state or Save control masked.",
       browser: testInfo.project.name, viewport: testInfo.project.use.viewport,
       screenshots: ["retained", "reloaded"].map((phase) => ({ path: `docs/verification/issue-127/${screenshotBase}-${phase}.png`, testedSha, runId })) }, null, 2));
   } finally {

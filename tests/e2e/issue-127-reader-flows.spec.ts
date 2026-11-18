@@ -265,6 +265,9 @@ test("F24 F25 real role fixtures open private files directly and explain sharing
       await expect(page.locator('head meta[name="description"]')).toHaveAttribute("content", /\S.{15,}/);
       if (url !== "/en/club") await expect(page.locator('head meta[name="robots"]')).toHaveAttribute("content", /noindex/);
     }
+    await page.goto("/en/library");
+    await expect(page).toHaveURL(`${COMMUNITY_TEST_ORIGIN}/en/library`);
+    await expect(page.getByTestId("library-page")).toBeVisible();
     const card = page.getByTestId("library-book-card").filter({ hasText: book.title });
     await expect(card).toContainText("1 bonus file"); await card.getByRole("link", { name: "Open my files" }).click();
     await expect(page).toHaveURL(`${COMMUNITY_TEST_ORIGIN}${files}`);

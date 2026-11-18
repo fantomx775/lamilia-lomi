@@ -6,6 +6,7 @@ import https from "node:https";
 import path from "node:path";
 import { X509Certificate } from "node:crypto";
 import { loadIsolatedCommunityTarget, readCommunityCronSecret } from "./isolated-community-target.mjs";
+import { rewriteIsolatedTusLocation } from "./issue-127-tus-location.mjs";
 
 const worktree = path.resolve(process.env.UX127_APP_WORKTREE ?? process.cwd());
 const target = loadIsolatedCommunityTarget();
@@ -33,7 +34,14 @@ const proxy = https.createServer(tls, (request, response) => {
   const isLocalSupabase = /^\/(auth|rest|storage)\/v1(?:\/|$)/.test(pathname);
   const upstream = http.request({ host: "127.0.0.1", port: isLocalSupabase ? 55421 : 3128, path: request.url, method: request.method,
     headers: { ...request.headers, host: "localhost:3443", "x-forwarded-host": "localhost:3443", "x-forwarded-proto": "https" } }, (result) => {
-    response.writeHead(result.statusCode ?? 502, result.headers); result.pipe(response);
+    const headers = { ...result.headers };
+    if (isLocalSupabase && /^\/storage\/v1\/upload\/resumable(?:\/|$)/.test(pathname) && headers.location) {
+      try { headers.location = rewriteIsolatedTusLocation(request.url ?? "/", headers.location); }
+      catch {
+        result.resume(); response.writeHead(502); response.end("Unexpected isolated Storage upload location."); return;
+      }
+    }
+    response.writeHead(result.statusCode ?? 502, headers); result.pipe(response);
   });
   upstream.on("error", () => { if (!response.headersSent) response.writeHead(502); response.end("Local production server is starting."); });
   request.pipe(upstream);

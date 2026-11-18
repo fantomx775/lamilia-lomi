@@ -38,3 +38,9 @@ Part of #127 and #139. Exactly 32 findings. Baseline `79df809db41ca824913719e91e
 | F32 | #138 / admin | Synchronous preflight/Save guard and submitted snapshot ownership (worker targeted checks passed; final validation pending) | Preflight/drop/save snapshot race cannot falsely mark unsent assets saved | Controlled dimensions/upload/Save delays + backend list after reload; exact SHA/run/artifact pending | NOT RUN |
 
 Cross-cutting acceptance: full final command gate, real isolated backend role/persistence tests, screenshots visually reviewed, independent complete diff review, current-SHA harness records, verify-pr, one non-draft PR and Project Review/issues OPEN. Physical-device testing is separately NOT RUN until executed; it does not substitute for or invalidate required local browser evidence.
+
+## F31 runtime checkpoint (historical, final candidate rerun required)
+
+Cloud retained-file branch PASS on `52e10a591935f9b21e38b5bb41b851016730b5c8`, production build `yHcoDENhvvwPMQ7PCGODX`, Chromium1280x720, run `ux127-admin-chromium-e554ccde`. Original8s assertions unchanged: actual TUSPOST201, one transfer, actual duplicate-slug Save rejection, Storage/id/path retained, corrected Save without retransmission, DB readback and reload. Screenshot manifest `.task/ux127/runtime-manifests/ux127-admin-chromium-e554ccde.json`; controlled fixture counters0 after cleanup.
+
+This small2.2KB transfer completed during TUScreation; it does not prove chunkedPATCH/HEAD, largevideo preparation or the separate local deleted-asset branch. The improved decode/viewport screenshot test has not run yet, and source/capture changes require a new final-head build and rerun. The row's overall final acceptance remains NOT RUN until all required branches and final-head evidence pass.
