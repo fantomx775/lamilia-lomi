@@ -148,7 +148,7 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
       expect(consoleErrors).toEqual([]); expect(pageErrors).toEqual([]); expect(httpErrors).toEqual([]);
     }
   }
-  return { observer, secrets, check, capture, destination, drain, finish, verifyPublicOn, hasPendingNavigation: () => [...pendingRequests].some((request) => request.isNavigationRequest() || request.headers().rsc === "1") };
+  return { identity: { testedSha, runId }, observer, secrets, check, capture, destination, drain, finish, verifyPublicOn, hasPendingNavigation: () => [...pendingRequests].some((request) => request.isNavigationRequest() || request.headers().rsc === "1") };
 }
 
 async function expectDocumentFits(page: Page) {
@@ -226,8 +226,38 @@ test("clean primary responsive long-title navigation, keyboard and reduced-motio
     }
     await evidence.drain();
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await card.getByRole("link").focus(); await page.keyboard.press("Tab"); await page.keyboard.press("Shift+Tab");
-    await expectFocusableOutline(card.getByRole("link"));
+    const focusAnchor = card.getByRole("link");
+    const focusHandle = await focusAnchor.elementHandle();
+    if (!focusHandle) throw new Error("Expected controlled card anchor is missing.");
+    const focusChain: Array<Record<string, unknown>> = [];
+    const recordFocus = async (step: string) => focusChain.push({ step, ...await focusHandle.evaluate((target) => {
+      const active = document.activeElement;
+      const box = active?.getBoundingClientRect(); const style = active ? getComputedStyle(active) : null;
+      const safeId = (value: string | null) => value && /^[a-z0-9:_-]{1,160}$/i.test(value) ? value : null;
+      return { documentFocused: document.hasFocus(), targetConnected: target.isConnected, expectedTargetActive: active === target,
+        activeTag: active?.tagName.toLowerCase() ?? null, activeIsBody: active === document.body,
+        activeId: safeId(active?.id ?? null), activeTestId: safeId(active?.getAttribute("data-testid") ?? null),
+        focusVisible: active?.matches(":focus-visible") ?? false, targetFocusVisible: target.matches(":focus-visible"),
+        tabIndex: active instanceof HTMLElement ? active.tabIndex : null,
+        role: active?.getAttribute("role") ?? null,
+        scope: active?.closest("dialog") ? "dialog" : active?.closest("header") ? "header" : active?.closest("main") ? "main" : active?.closest("footer") ? "footer" : "document",
+        rect: box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null,
+        outlineWidth: style?.outlineWidth ?? null, outlineStyle: style?.outlineStyle ?? null, outlineOffset: style?.outlineOffset ?? null,
+        expectedOutlineWidth: getComputedStyle(target).outlineWidth, expectedOutlineStyle: getComputedStyle(target).outlineStyle };
+    }) });
+    try {
+      await recordFocus("before-focus");
+      await focusAnchor.focus(); await recordFocus("after-focus");
+      await page.keyboard.press("Tab"); await recordFocus("after-tab");
+      await page.keyboard.press("Shift+Tab"); await recordFocus("after-shift-tab");
+    } finally {
+      const diagnostic = { status: "DIAGNOSTIC_ONLY", ...evidence.identity, project: info.project.name, viewport: page.viewportSize(), focusChain };
+      const directory = path.resolve(".task/ux127/runtime-manifests"); await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, `ux127-primary-focus-chain-${info.project.name.replace(/[^a-z0-9-]/gi, "-")}.json`), JSON.stringify(diagnostic, null, 2));
+      await info.attach("controlled-card-focus-chain", { body: Buffer.from(JSON.stringify(diagnostic, null, 2)), contentType: "application/json" });
+      await focusHandle.dispose();
+    }
+    await expectFocusableOutline(focusAnchor);
     const productHref = await card.getByRole("link").getAttribute("href");
     await evidence.drain();
     await card.getByRole("link").click();
@@ -356,17 +386,63 @@ async function holdCleanCommunityRead(relation: "community_artworks" | "communit
   };
 }
 
-// Hold real RSC requests before continuing them unchanged. Never route.fulfill/abort.
-async function holdCleanRsc(page: Page, pathname: string) {
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const matcher = (url: URL) => url.pathname === pathname;
-  const handler = async (route: import("@playwright/test").Route) => {
-    if (route.request().headers().rsc === "1") await gate;
-    await route.continue();
+// This case owns one page route handler, with independent destination gates.
+// Never remove interception while its callbacks are still awaiting gate release.
+async function createCleanRscController(page: Page) {
+  type Gate = { wait: Promise<void>; release: () => void; tasks: Set<Promise<void>> };
+  const gates = new Map<string, Gate>();
+  const tasks = new Set<Promise<void>>();
+  let disposal: Promise<void> | undefined;
+  const handler = (route: import("@playwright/test").Route) => {
+    const request = route.request();
+    const gate = gates.get(new URL(request.url()).pathname);
+    const task = (async () => {
+      if (gate && request.headers().rsc === "1") await gate.wait;
+      await route.continue(); // Exactly one continuation per handler invocation.
+    })();
+    tasks.add(task); gate?.tasks.add(task);
+    return task; // Real continuation errors still propagate, never ignored.
   };
-  await page.route(matcher, handler);
-  return { release, async dispose() { release(); await page.unroute(matcher, handler); } };
+  await page.route((url) => gates.has(url.pathname), handler);
+  const assertCompleted = async (pending: Iterable<Promise<void>>) => {
+    const results = await Promise.allSettled(pending);
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Owned RSC continuation failed.");
+  };
+  return {
+    hold(pathname: string) {
+      if (disposal) throw new Error("Cannot arm a disposed RSC controller.");
+      let release!: () => void;
+      const wait = new Promise<void>((resolve) => { release = resolve; });
+      const gate = { wait, release, tasks: new Set<Promise<void>>() };
+      gates.set(pathname, gate);
+      let joined: Promise<void> | undefined;
+      return { release, dispose() { release(); return joined ??= assertCompleted(gate.tasks); } };
+    },
+    dispose() {
+      return disposal ??= (async () => {
+        for (const gate of gates.values()) gate.release();
+        try {
+          // Public wait semantics; this case installs no other page routes.
+          await page.unrouteAll({ behavior: "wait" });
+        } finally { await assertCompleted(tasks); }
+      })();
+    },
+  };
+}
+const cleanRscControllers = new WeakMap<Page, Promise<Awaited<ReturnType<typeof createCleanRscController>>>>();
+async function holdCleanRsc(page: Page, pathname: string) {
+  let controller = cleanRscControllers.get(page);
+  if (!controller) {
+    controller = createCleanRscController(page);
+    cleanRscControllers.set(page, controller);
+  }
+  return (await controller).hold(pathname);
+}
+async function disposeCleanRsc(page: Page) {
+  const controller = cleanRscControllers.get(page);
+  try { if (controller) await (await controller).dispose(); }
+  finally { cleanRscControllers.delete(page); }
 }
 
 async function clubGeometry(root: Locator) {
@@ -490,7 +566,14 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
           await image.scrollIntoViewIfNeeded();
           await expect.poll(() => image.evaluate(async (node) => { if (!(node instanceof HTMLImageElement)) return false; await node.decode(); return node.naturalWidth > 0 && node.naturalHeight > 0; })).toBe(true);
           await evidence.capture(`${temperature}-${kind}-decoded`);
-        } finally { gate.release(); await lock?.release(); await gate.dispose(); if (temperature === "cold") delete coldGates[kind]; }
+        } finally {
+          gate.release();
+          try { await lock?.release(); }
+          finally {
+            try { await gate.dispose(); }
+            finally { if (temperature === "cold") delete coldGates[kind]; }
+          }
+        }
         await evidence.drain();
       }
     }
@@ -503,8 +586,10 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
     evidence.check("actual public media", "Approved owned Storage bytes returned public media200/image MIME and actually decoded; all three route kinds rendered the controlled artist/artwork publicly.");
     passed = true;
   } finally {
-    // Release/dispose still-armed destinations even if setup or an earlier route failed.
-    try { await Promise.all(Object.values(coldGates).map((gate) => gate.dispose())); }
+    // Join all real callbacks before observer.finish may close the page. Neither
+    // a gate failure nor an observation failure can bypass own fixture cleanup.
+    try { await disposeCleanRsc(page); }
+    catch (cause) { passed = false; throw cause; }
     finally {
     try { await evidence.finish(passed, { status: passed ? "PASS" : "NOT APPLICABLE", details: passed ? "The same approved isolated artwork persisted across actual list/detail/creator and cold/warm anchor navigation; real HTML plus public media readback confirmed publication. Own fixture is removed only after observer finalization." : "The flow did not complete publication/readback assertions; this is failed or incomplete evidence." }, ["390px cold mobile", "1440px warm desktop", "real pending + real streamed fallback + decoded content; actual geometry recorded for QA visual comparison"]); }
     finally { await fixture.cleanup(); }

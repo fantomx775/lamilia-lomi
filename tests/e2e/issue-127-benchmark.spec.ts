@@ -6,6 +6,10 @@ import { execFileSync } from 'node:child_process';
 type Probe = { token: string; destination: string; start: number | null; feedback: number | null; fallback: number | null; useful: number | null; completed: number | null };
 declare global { interface Window { __uxProbe?: Probe } }
 const samples: Array<Record<string, unknown>> = [];
+function diagnosticPath(raw: string) {
+    try { const url = new URL(raw); return ['http:', 'https:'].includes(url.protocol) ? url.pathname : '[non-HTTP source]'; }
+    catch { return '[unknown source]'; }
+}
 async function settleVisibleImages(page: Page) {
     await page.evaluate(() => document.fonts.ready);
     await expect.poll(() => page.locator('img').evaluateAll(images => images
@@ -39,25 +43,65 @@ for (const journey of ['catalog', 'product', 'about'] as const)
             await observer.observe(page);
             let phase = 'source';
             const inFlight = new Set<Request>();
+            const pendingRequests = new Map<Request, { startedAt: number; responseStatus: number | null }>();
+            const roundStartedAt = Date.now();
+            let lastNetworkActivity = roundStartedAt;
+            let eventCount = 0;
+            const recentNetworkEvents: Array<Record<string, unknown>> = [];
+            const requestProjection = (request: Request) => {
+                const headers = request.headers();
+                return { method: request.method(), path: diagnosticPath(request.url()), resource: request.resourceType(),
+                    rsc: headers.rsc === '1', prefetch: headers['next-router-prefetch'] === '1' || Boolean(headers['next-router-segment-prefetch']) };
+            };
+            const networkEvent = (event: string, request: Request) => {
+                lastNetworkActivity = Date.now(); eventCount += 1;
+                recentNetworkEvents.push({ event, atMs: lastNetworkActivity - roundStartedAt, ...requestProjection(request) });
+                if (recentNetworkEvents.length > 64) recentNetworkEvents.shift();
+            };
             const observedFailures: Array<Record<string, unknown>> = [];
             page.on('request', request => {
+                pendingRequests.set(request, { startedAt: Date.now(), responseStatus: null }); networkEvent('request', request);
                 const headers = request.headers();
                 const prefetch = headers.rsc === '1' && (headers['next-router-prefetch'] === '1' || Boolean(headers['next-router-segment-prefetch']));
                 if (!prefetch) inFlight.add(request);
             });
-            page.on('requestfinished', request => inFlight.delete(request));
+            page.on('requestfinished', request => { networkEvent('requestfinished', request); inFlight.delete(request); pendingRequests.delete(request); });
             page.on('requestfailed', request => {
+                networkEvent('requestfailed', request); pendingRequests.delete(request);
                 inFlight.delete(request); const url = new URL(request.url()); const headers = request.headers();
                 const imageSource = url.pathname === '/_next/image' ? new URL(url.searchParams.get('url') ?? '/', origin).pathname : undefined;
-                observedFailures.push({ method: request.method(), path: url.pathname, imageSource, resource: request.resourceType(), error: request.failure()?.errorText, phase, rsc: headers.rsc === '1', prefetch: headers['next-router-prefetch'] === '1' || Boolean(headers['next-router-segment-prefetch']) });
+                observedFailures.push({ method: request.method(), path: url.pathname, imageSource, resource: request.resourceType(), error: 'requestfailed event', phase, rsc: headers.rsc === '1', prefetch: headers['next-router-prefetch'] === '1' || Boolean(headers['next-router-segment-prefetch']) });
             });
-            const writeDiagnostic = (network?: Awaited<ReturnType<NextCancellationObserver['finish']>>) => fs.writeFileSync(path.resolve(process.env.UX127_BENCHMARK_RESULTS!, `diagnostic-${info.project.name}-${journey}-${round}.json`), JSON.stringify({ testedSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.env.UX127_APP_WORKTREE, encoding: 'utf8' }).trim(), runId: process.env.UX127_BENCHMARK_RUN_ID, phase, observedFailures, unresolved: network?.unresolved.map(item => ({ method: item.method, path: item.path, resource: item.resource, error: item.error })), typedNextCancellations: network?.expectedNextCancellations.length }, null, 2));
-            const drain = async () => { await page.waitForLoadState('networkidle', { timeout: 15_000 }); await settleVisibleImages(page); await expect.poll(() => inFlight.size, { timeout: 15_000, message: 'Actual non-prefetch requests must settle before sample reset/teardown' }).toBe(0); };
+            const writeDiagnostic = (network?: Awaited<ReturnType<NextCancellationObserver['finish']>>, drainFailure?: { status: 'FAIL'; stage: string }) => {
+                const now = Date.now();
+                fs.writeFileSync(path.resolve(process.env.UX127_BENCHMARK_RESULTS!, `diagnostic-${info.project.name}-${journey}-${round}.json`), JSON.stringify({
+                    status: 'DIAGNOSTIC_ONLY', testedSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.env.UX127_APP_WORKTREE, encoding: 'utf8' }).trim(),
+                    runId: process.env.UX127_BENCHMARK_RUN_ID, project: info.project.name, journey, round, phase, pagePath: diagnosticPath(page.url()), drainFailure,
+                    failures, observedFailures, nonprefetchInFlight: inFlight.size, allPendingCount: pendingRequests.size,
+                    pendingRequests: [...pendingRequests].slice(0, 100).map(([request, state]) => ({ ...requestProjection(request), ageMs: now - state.startedAt, responseStatus: state.responseStatus })),
+                    truncatedPendingCount: Math.max(0, pendingRequests.size - 100), lastNetworkActivityMsAgo: now - lastNetworkActivity, networkEventCount: eventCount, recentNetworkEvents,
+                    unresolved: network?.unresolved.map(item => ({ method: item.method, path: item.path, resource: item.resource, error: 'unresolved network failure' })),
+                    typedNextCancellations: network?.expectedNextCancellations.length,
+                }, null, 2));
+            };
+            const drain = async () => {
+                let stage = 'networkidle';
+                try {
+                    await page.waitForLoadState('networkidle', { timeout: 15_000 });
+                    stage = 'visible-image-decode'; await settleVisibleImages(page);
+                    stage = 'nonprefetch-inflight';
+                    await expect.poll(() => inFlight.size, { timeout: 15_000, message: 'Actual non-prefetch requests must settle before sample reset/teardown' }).toBe(0);
+                } catch (cause) {
+                    // Preserve the actual pending set BEFORE any context/page teardown.
+                    try { writeDiagnostic(undefined, { status: 'FAIL', stage }); persist(); }
+                    finally { throw cause; } // Same failure/deadline; no readiness waiver.
+                }
+            };
             const failures: Array<{ type: string; message?: string; path?: string; status?: number }> = [];
-            page.on('pageerror', () => failures.push({ type: 'pageerror', message: 'Browser page exception; inspect private runner output' }));
+            page.on('pageerror', () => failures.push({ type: 'pageerror', message: 'Browser page exception', path: diagnosticPath(page.url()) }));
             page.on('console', m => { if (m.type() === 'error')
-                failures.push({ type: 'console', message: 'Browser console error; inspect private runner output' }); });
-            page.on('response', r => { if (r.status() >= 400)
+                failures.push({ type: 'console', message: 'Browser console error', path: diagnosticPath(m.location().url) }); });
+            page.on('response', r => { const state = pendingRequests.get(r.request()); if (state) state.responseStatus = r.status(); networkEvent('response', r.request()); if (r.status() >= 400)
                 failures.push({ type: 'http', path: new URL(r.url()).pathname, status: r.status() }); });
             // CDP throttling preserves browser cache, unlike page.route(), which disables it.
             const cdp = await context.newCDPSession(page);
