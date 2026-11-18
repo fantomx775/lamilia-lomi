@@ -304,12 +304,25 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     // Controlled transport failure, then real stored-byte recovery. The fault
     // aborts only this owned media request; it never fulfills a replacement MP4.
     faultActive = true;
-    await page.route(videoPattern, async (route) => { faultRequests.add(route.request()); await route.abort("failed"); });
+    const injectedFaultIds = new Set<number>();
+    await page.route(videoPattern, async (route) => {
+      faultRequests.add(route.request()); injectedFaultIds.add(requestMetadata(route.request()).requestId);
+      await route.abort("failed");
+    });
     try {
       await resetDocument(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`, "controlled-fault:navigation");
       await page.locator("video").scrollIntoViewIfNeeded();
-      const play = page.getByTestId("product-video-play");
-      if (await play.isVisible()) await play.click();
+      // Viewport preparation performs the actual metadata fetch. Wait for its
+      // exact injected failure; native onError can remove Play before a click.
+      await expect(page.locator("video")).toHaveAttribute("preload", "metadata");
+      await expect.poll(() => failed.some((request) => injectedFaultIds.has(request.requestId) && request.expectedFault && request.path === videoPath)).toBe(true);
+      await Promise.all(diagnosticWork);
+      await expect.poll(() => nativeTimeline.some((event) => {
+        if (event.event !== "error" || event.trusted !== true || event.mediaErrorPresent !== true || event.sourcePath !== videoPath) return false;
+        return mediaRequests.some((request) => injectedFaultIds.has(request.requestId) &&
+          event.documentId === request.identitySample?.documentId && event.elementId === request.identitySample?.elementId &&
+          event.generation === request.identitySample?.generation && typeof event.atEpochMs === "number" && event.atEpochMs >= request.startedAtEpochMs);
+      })).toBe(true);
       await expect(page.getByRole("alert").filter({ hasText: "video could not be played" })).toBeVisible();
       await capture(page, "controlled-video-error");
     } finally { await page.unroute(videoPattern); }

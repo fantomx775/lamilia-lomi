@@ -12,7 +12,7 @@ test.use({ trace: "off", screenshot: "off", video: "off" });
 
 type SafeError = { category: "unexpected-console-error" | "unexpected-page-error"; path: string };
 type ImageRecord = {
-  role: string; status: "MEASURED" | "ABSENT" | "FALLBACK";
+  role: string; status: "MEASURED" | "MEASURED_VECTOR" | "ABSENT" | "FALLBACK";
   visualSharpness: "PENDING_VISUAL_REVIEW";
   [key: string]: unknown;
 };
@@ -78,7 +78,7 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
       const state = await image.evaluate((element) => {
         const image = element as HTMLImageElement;
         const slot = image.getBoundingClientRect();
-        return { currentSrc: image.currentSrc, naturalWidth: image.naturalWidth, slot: { width: slot.width, height: slot.height }, loading: image.loading, sizes: image.sizes };
+        return { currentSrc: image.currentSrc, naturalWidth: image.naturalWidth, complete: image.complete, actualDpr: devicePixelRatio, slot: { width: slot.width, height: slot.height }, loading: image.loading, sizes: image.sizes };
       });
       const selected = new URL(state.currentSrc, origin);
       expect(["https:", "http:"]).toContain(selected.protocol);
@@ -93,10 +93,33 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
       const underlying = new URL(referencePath ?? selected.searchParams.get("url") ?? selected.href, origin);
       const originalResponse = await getImage(page, underlying.href, accept);
       const original = await sharp(await originalResponse.body()).metadata();
-      const isFallback = decoded.format === "svg" || /placeholder/i.test(underlying.pathname);
+      const isFallback = /placeholder/i.test(underlying.pathname);
       if (isFallback) {
         images.push({ role, status: "FALLBACK", source: sourceProjection(selected, origin), decodedFormat: decoded.format,
           slot: state.slot, visualSharpness: "PENDING_VISUAL_REVIEW" });
+        return;
+      }
+      if (decoded.format === "svg") {
+        // SVG intrinsic width is a viewport, never evidence of a physical raster pixel ceiling.
+        expect(role.startsWith("audience-")).toBe(true);
+        expect(original.format).toBe("svg");
+        expect(payload.mime).toBe("image/svg+xml");
+        expect(safeImageMime(originalResponse.headers()["content-type"])).toBe("image/svg+xml");
+        expect(bytes.length).toBeGreaterThan(0); expect(state.complete).toBe(true);
+        expect(state.naturalWidth).toBeGreaterThan(0);
+        expect(state.slot.width).toBeGreaterThan(0); expect(state.slot.height).toBeGreaterThan(0);
+        expect(state.actualDpr).toBe(dpr);
+        images.push({ role, status: "MEASURED_VECTOR", source: sourceProjection(selected, origin), originalSource: sourceProjection(underlying, origin),
+          representation: "svg-vector", mime: payload.mime, bytes: bytes.length,
+          intrinsicSvgViewport: { width: decoded.width ?? null, height: decoded.height ?? null, physicalRasterPixels: "NOT_APPLICABLE" },
+          browserDecode: { decodePromise: "resolved", complete: state.complete, reportedNaturalWidth: state.naturalWidth },
+          slot: state.slot, dpr: state.actualDpr,
+          renderedSlotPhysicalPixels: { width: Math.ceil(state.slot.width * state.actualDpr), height: Math.ceil(state.slot.height * state.actualDpr) },
+          resolutionModel: "vector scales to the measured CSS slot; intrinsic SVG viewport is not raster resolution",
+          browserResponse: browserResponses.get(hash(state.currentSrc)) ?? null,
+          browserPayload: { source: "observed-browser-response-body", status: payload.status, sha256: hash(bytes) },
+          originalReferenceVerificationGet: { usesObservedImageAccept: true, status: originalResponse.status(), cache: cacheTokens(originalResponse.headers()["cache-control"]) },
+          visualSharpness: "PENDING_VISUAL_REVIEW" });
         return;
       }
       expect(decoded.width).toBeGreaterThan(0); expect(original.width).toBeGreaterThan(0);
@@ -166,7 +189,7 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
       const sourceMatchesHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim() === testedSha &&
         !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "scripts", "public", "messages", "package.json", "package-lock.json", "next.config.*"], { encoding: "utf8" }).trim();
       const required = ["header-logo", "banner", "menu-logo", "audience-kids", "audience-adults"];
-      const coverageGaps = required.filter((role) => !images.some((image) => image.role === role && image.status === "MEASURED"))
+      const coverageGaps = required.filter((role) => !images.some((image) => image.role === role && (image.status === "MEASURED" || (role.startsWith("audience-") && image.status === "MEASURED_VECTOR"))))
         .map((role) => ({ role, status: images.find((image) => image.role === role)?.status ?? "NOT_MEASURED" }));
       const completeImages = coverageGaps.length === 0;
       // Only typed RSC proof retains its controlled query contract. Unknown requests are projected.
@@ -223,15 +246,20 @@ function safeInteger(value: string | undefined) { return value && /^\d+$/.test(v
 function cacheTokens(value: string | undefined) { return value?.toLowerCase().match(/\b(?:public|private|no-store|no-cache|must-revalidate|immutable|max-age=\d+|s-maxage=\d+)\b/g) ?? []; }
 
 
-type ObservedImagePayload = { body: Promise<Buffer | null>; accept: Promise<string | null>; status: number };
+type ObservedImagePayload = { body: Promise<Buffer | null>; accept: Promise<string | null>; status: number; mime: string };
 function observeImagePayloads(page: Page) {
   // Register before goto. Neither full URLs nor raw Accept values leave this in-memory map.
   const payloads = new Map<string, ObservedImagePayload>();
   page.on("response", (response) => {
     const request = response.request();
     if (request.resourceType() !== "image" || !response.ok()) return;
-    const payload = { body: response.body().catch(() => null), accept: request.headerValue("accept").catch(() => null), status: response.status() };
+    const payload = { body: response.body().catch(() => null), accept: request.headerValue("accept").catch(() => null), status: response.status(), mime: safeImageMime(response.headers()["content-type"]) };
     for (let alias: Request | null = request; alias; alias = alias.redirectedFrom()) payloads.set(alias.url(), payload);
   });
   return payloads;
+}
+
+function safeImageMime(value: string | undefined) {
+  const mime = value?.split(";", 1)[0].trim().toLowerCase();
+  return mime && ["image/svg+xml", "image/webp", "image/png", "image/jpeg", "image/avif", "image/gif"].includes(mime) ? mime : "unknown-image-mime";
 }
