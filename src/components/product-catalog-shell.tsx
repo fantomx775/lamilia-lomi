@@ -2,9 +2,8 @@ import { ChevronDown, Filter, Search } from "lucide-react";
 import type { ReactNode } from "react";
 import { CategoryTileImage } from "@/components/category-tile-image";
 import { NavigationLink } from "@/components/navigation-link";
-import { CatalogForm, CatalogSubmitButton } from "@/components/catalog-form";
+import { CatalogForm, CatalogNavigationProvider, CatalogSearchInput, CatalogSubmitButton } from "@/components/catalog-form";
 import { ProductCatalogHeading } from "@/components/product-catalog-loading";
-import { Input } from "@/components/ui/input";
 import type { Locale } from "@/i18n/routing";
 import type { ContentSnapshot } from "@/lib/types";
 import { productTypeLabel } from "@/lib/product-display";
@@ -53,7 +52,7 @@ export function ProductCatalogShell({ snapshot, locale, rawSearchParams, childre
   const clearFiltersHref = getCatalogHref(locale, rawSearchParams, { clearFilters: true });
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
+    <CatalogNavigationProvider><div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
       <ProductCatalogHeading />
 
       {categories.length ? (
@@ -96,7 +95,7 @@ export function ProductCatalogShell({ snapshot, locale, rawSearchParams, childre
         {hiddenFilterValues.map(({ name, value }) => value ? <input key={name} type="hidden" name={name} value={value} /> : null)}
         <label className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted)]" />
-          <Input aria-label="Search catalog" name="q" key={filters.q ?? ""} defaultValue={filters.q ?? ""} className="pl-9" />
+          <CatalogSearchInput aria-label="Search catalog" name="q" value={filters.q ?? ""} className="pl-9" />
         </label>
         <CatalogSubmitButton size="sm" className="h-11 px-3">
           <Search className="size-4" aria-hidden />
@@ -138,7 +137,7 @@ export function ProductCatalogShell({ snapshot, locale, rawSearchParams, childre
         {preservedQueryInputs}
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted)]" />
-          <Input aria-label="Search catalog" name="q" key={filters.q ?? ""} defaultValue={filters.q ?? ""} className="pl-9" />
+          <CatalogSearchInput aria-label="Search catalog" name="q" value={filters.q ?? ""} className="pl-9" />
         </label>
         {renderCatalogFilterFields({ filters, categories, tags, productTypes })}
         <div className="flex items-center gap-3">
@@ -151,7 +150,7 @@ export function ProductCatalogShell({ snapshot, locale, rawSearchParams, childre
       </CatalogForm>
 
       {children}
-    </div>
+    </div></CatalogNavigationProvider>
   );
 }
 

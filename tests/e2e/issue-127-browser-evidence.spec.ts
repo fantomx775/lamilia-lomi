@@ -23,7 +23,7 @@ function frozenHead() {
   return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 }
 function safeUrl(raw: string) {
-  try { const url = new URL(raw); return `${url.protocol}//${url.host}${url.pathname}`; } catch { return "[non-URL source]"; }
+  try { const url = new URL(raw); return ["http:", "https:"].includes(url.protocol) ? url.pathname : "[non-HTTP source]"; } catch { return "[non-URL source]"; }
 }
 
 async function observePrimary(page: Page, info: TestInfo, campaign: string) {
@@ -34,13 +34,10 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
   const project = info.project.name.replace(/[^a-z0-9-]/gi, "-");
   const observer = new NextCancellationObserver({ testedSha, runId, origin: COMMUNITY_TEST_ORIGIN });
   const secrets = new Set<string>();
-  const sanitize = (message: string) => {
-    let text = message;
-    for (const value of secrets) if (value) text = text.split(value).join("[redacted]");
-    return text.replace(/https?:\/\/[^\s]+/g, (url) => safeUrl(url)).replace(/(token|code|authorization|cookie)=([^\s&]+)/gi, "$1=[redacted]").slice(0, 1500);
-  };
+  // Never serialize arbitrary console/exception text. Partial redaction cannot
+  // reliably remove identities or signed values embedded in free-form messages.
   const consoleErrors: Array<{ message: string; url: string }> = [];
-  const pageErrors: Array<{ message: string }> = [];
+  const pageErrors: Array<{ message: string; url: string }> = [];
   const activeRequests = new Set<Request>();
   const pendingRequests = new Set<Request>();
   const onRequest = (request: Request) => {
@@ -51,8 +48,8 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
   };
   const onTerminal = (request: Request) => { activeRequests.delete(request); pendingRequests.delete(request); };
   const httpErrors: Array<{ url: string; path: string; method: string; statusCode: number }> = [];
-  const onConsole = (message: ConsoleMessage) => { if (message.type() === "error") consoleErrors.push({ message: sanitize(message.text()), url: safeUrl(message.location().url) }); };
-  const onPageError = (error: Error) => pageErrors.push({ message: sanitize(error.message) });
+  const onConsole = (message: ConsoleMessage) => { if (message.type() === "error") consoleErrors.push({ message: "console.error event", url: safeUrl(message.location().url) }); };
+  const onPageError = () => pageErrors.push({ message: "uncaught page exception", url: safeUrl(page.url()) });
   const onResponse = (response: Response) => {
     if (response.status() >= 400) httpErrors.push({ url: safeUrl(response.url()), path: new URL(response.url()).pathname, method: response.request().method(), statusCode: response.status() });
   };
@@ -122,7 +119,7 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
     let navigation: NavigationEvidence | undefined;
     let observationFailure: string | undefined;
     try { navigation = await observer.finish(); }
-    catch (cause) { observationFailure = sanitize(cause instanceof Error ? cause.message : "Browser observation could not be finalized."); }
+    catch { observationFailure = "browser observation could not be finalized"; }
     finally { page.off("console", onConsole); page.off("pageerror", onPageError); page.off("response", onResponse); page.off("request", onRequest); page.off("requestfinished", onTerminal); page.off("requestfailed", onTerminal); }
     const headUnchanged = frozenHead() === testedSha;
     const clean = headUnchanged && !observationFailure && navigation?.unresolved.length === 0 && consoleErrors.length === 0 && pageErrors.length === 0 && httpErrors.length === 0;

@@ -135,11 +135,20 @@ test("F07 F10 F23 catalog Enter, all filter context, Back and native GET", async
     const filterSummary = page.getByTestId("catalog-mobile-filter-disclosure").locator("summary");
     await expect(filterSummary).toContainText("4 active filters");
     await filterSummary.click();
+    const apply = page.getByTestId("catalog-mobile-filters").getByRole("button", { name: "Apply filters", exact: true });
+    await apply.focus();
+    await apply.press("Enter");
+    await expect(page).toHaveURL((url) => url.pathname === "/en/products" && url.searchParams.get("tag") === "" && [...initialQuery].every(([key, value]) => url.searchParams.get(key) === value));
+    await expect(apply).toBeFocused();
+    await expect(page.getByTestId("catalog-mobile-filter-disclosure")).toHaveAttribute("open");
     await page.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).fill(book.title);
+    const searchScroll = await page.evaluate(() => scrollY);
     await page.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).press("Enter");
     await expect(page.getByTestId("catalog-mobile-filter-disclosure")).toHaveAttribute("open");
     const card = page.locator(`#catalog-product-${book.id}`);
     await expect(card.getByRole("heading", { name: book.title })).toBeVisible();
+    await expect(page.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" })).toBeFocused();
+    expect(await page.evaluate(() => scrollY)).toBe(searchScroll);
     await card.getByRole("link").click();
     await expect(page).toHaveURL(/\?catalog=/);
     await page.getByRole("link", { name: "Back to catalog" }).click();
@@ -154,11 +163,44 @@ test("F07 F10 F23 catalog Enter, all filter context, Back and native GET", async
     const context = await browser.newContext({ baseURL: COMMUNITY_TEST_ORIGIN, javaScriptEnabled: false, ignoreHTTPSErrors: true, viewport: { width: 390, height: 844 } });
     try {
       const native = await context.newPage();
-      await native.goto(`/en/products?${initialQuery}`);
+      const nativeResponse = await native.goto(`/en/products?${initialQuery}`);
+      const nativeDiagnostics = await native.evaluate(() => {
+        const searchRoots = [...document.querySelectorAll('[data-testid="catalog-mobile-search"]')];
+        const hiddenAncestors = searchRoots.map((root) => {
+          const hidden = [];
+          for (let node: Element | null = root; node; node = node.parentElement) {
+            const style = getComputedStyle(node);
+            if (node.hasAttribute("hidden") || style.display === "none" || style.visibility === "hidden" || style.contentVisibility === "hidden") {
+              hidden.push({ tag: node.tagName.toLowerCase(), hidden: node.hasAttribute("hidden"), display: style.display, visibility: style.visibility, contentVisibility: style.contentVisibility, streamedSegment: node.id.startsWith("S:") });
+            }
+          }
+          return hidden;
+        });
+        return {
+          pathname: location.pathname, title: document.title.slice(0, 160),
+          headings: [...document.querySelectorAll("h1")].slice(0, 3).map((node) => node.textContent?.trim().slice(0, 160)),
+          viewport: { width: innerWidth, height: innerHeight }, forms: document.forms.length,
+          mobileSearchRoots: searchRoots.length, mobileSearchInputs: searchRoots.reduce((count, root) => count + root.querySelectorAll('input:not([type]), input[type="search"], input[type="text"]').length, 0),
+          loadingMarkers: [...document.querySelectorAll('[data-testid*="loading"]')].map((node) => node.getAttribute("data-testid")).filter((value) => value && /^[a-z-]+$/.test(value)).slice(0, 10),
+          hiddenNodes: document.querySelectorAll("[hidden]").length,
+          streamedSegments: document.querySelectorAll('[id^="S:"]').length,
+          suspenseTemplates: document.querySelectorAll('template[id^="B:"]').length,
+          hiddenAncestors,
+        };
+      });
+      const nativeSearch = native.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" });
+      const nativeSearchIncludingHidden = native.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog", includeHidden: true });
+      await info.attach("f07-native-before-search-diagnostics", { body: Buffer.from(JSON.stringify({ responseStatus: nativeResponse?.status() ?? null, ...nativeDiagnostics, searchRoleCount: await nativeSearch.count(), searchRoleIncludingHiddenCount: await nativeSearchIncludingHidden.count() }, null, 2)), contentType: "application/json" });
+      const nativeScreenshot = info.outputPath("f07-native-before-search.png");
+      await native.screenshot({ path: nativeScreenshot, fullPage: false, animations: "disabled", caret: "hide" });
+      await info.attach("f07-native-before-search", { path: nativeScreenshot, contentType: "image/png" });
+      expect(nativeResponse?.status()).toBe(200);
+      await expect(native.getByTestId("catalog-mobile-search")).toBeVisible();
       await native.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).fill(book.title);
       await native.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).press("Enter");
       await expect(native.locator(`#catalog-product-${book.id}`)).toBeVisible();
-      expect(new URL(native.url()).searchParams.get("q")).toBe(book.title);
+      const nativeQuery = new URL(native.url()).searchParams;
+      for (const [key, value] of query) expect(nativeQuery.get(key)).toBe(value);
     } finally { await context.close(); }
   } finally {
     await fixture.cleanup();

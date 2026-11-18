@@ -48,34 +48,34 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         await page.setViewportSize({ width, height: 1000 });
         await page.goto(`/en/products?ux127case=${categoryCount}-${desktopColumns}-${width}`, { waitUntil: "commit" });
         await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
-        await expect(page.getByTestId("product-catalog-loading")).toBeVisible();
+        await expect(page.getByTestId("product-catalog-grid")).toBeVisible();
         await expect(page.getByTestId("catalog-category-list")).toHaveCount(categoryCount ? 1 : 0);
         if (categoryCount) await expect(page.locator('[data-testid^="catalog-category-ux127-category-"]')).toHaveCount(categoryCount);
         await page.evaluate(() => document.fonts.ready);
-        const pending = await geometry(page);
+        const before = await geometry(page);
         const phase = `r5-c${categoryCount}-cols${desktopColumns}-w${width}`;
+        await page.screenshot({ path: info.outputPath(`${phase}-before.png`), animations: "disabled" });
+        // Native documents resolve critical content before sending it. Enhanced
+        // GET transitions keep this actual shell and show the results skeleton.
+        const form = page.getByTestId(width < 768 ? "catalog-mobile-search" : "catalog-desktop-filters");
+        await form.getByRole("textbox", { name: "Search catalog" }).fill(snapshot.products[0].translations.find((item) => item.locale === "en")!.title);
+        const submitted = await geometry(page);
+        await form.getByRole("textbox", { name: "Search catalog" }).press("Enter");
+        await expect(form.locator('[data-catalog-form-pending="true"]')).toBeVisible();
+        await expect(page.getByTestId("product-catalog-loading")).toBeVisible();
+        const pending = await geometry(page);
+        sameGeometry(submitted, pending);
         await page.screenshot({ path: info.outputPath(`${phase}-pending.png`), animations: "disabled" });
         await expect(page.getByTestId("product-catalog-grid")).toBeVisible();
         await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
+        await expect(form.getByRole("textbox", { name: "Search catalog" })).toBeFocused();
         const final = await geometry(page);
         sameGeometry(pending, final);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await page.screenshot({ path: info.outputPath(`${phase}-after.png`), animations: "disabled" });
-        await info.attach(`${phase}-bounds.json`, { body: JSON.stringify({ pending, final }), contentType: "application/json" });
-        // The same actual shell stays visible through a query transition; it
-        // must not regress to guessed categories or a whole-page skeleton.
-        if (desktopColumns === 4) {
-          const form = page.getByTestId(width < 768 ? "catalog-mobile-search" : "catalog-desktop-filters");
-          await form.getByRole("textbox", { name: "Search catalog" }).fill(snapshot.products[0].translations.find((item) => item.locale === "en")!.title);
-          const before = await geometry(page);
-          await form.getByRole("textbox", { name: "Search catalog" }).press("Enter");
-          await expect(form.locator('[data-catalog-form-pending="true"]')).toBeVisible();
-          const updating = await geometry(page);
-          sameGeometry(before, updating);
-          await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
-          await expect(form.locator('[data-catalog-form-pending="true"]')).toHaveCount(0);
-          sameGeometry(before, await geometry(page));
-        }
+        await info.attach(`${phase}-bounds.json`, { body: JSON.stringify({ before, submitted, pending, final }), contentType: "application/json" });
+        await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
+        await expect(form.locator('[data-catalog-form-pending="true"]')).toHaveCount(0);
       }
     }
   } finally {

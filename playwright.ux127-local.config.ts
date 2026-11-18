@@ -13,8 +13,6 @@ export default defineConfig(base, {
       LAMILIA_BACKEND: "local",
       NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000",
       NEXT_TELEMETRY_DISABLED: "1",
-      LAMILIA_CONTACT_TEST_SINK: "1",
-      LAMILIA_TEST_CATALOG_LOADING_DELAY_MS: "2000",
     },
     url: "http://127.0.0.1:3000/en",
     reuseExistingServer: false,

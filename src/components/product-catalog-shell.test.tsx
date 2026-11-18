@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 vi.mock("next/link", () => ({ default: ({ children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a>, useLinkStatus: () => ({ pending: false }) }));
 vi.mock("next/form", () => ({ default: ({ children, scroll, ...props }: { children: ReactNode; scroll?: boolean }) => { void scroll; return <form {...props}>{children}</form>; } }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/components/category-tile-image", () => ({ CategoryTileImage: () => <span /> }));
 import { getSeedContentSnapshot } from "@/lib/local-content";
 import { ProductCatalogShell } from "./product-catalog-shell";

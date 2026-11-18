@@ -28,8 +28,8 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     screenshots.push({ path: artifact, testedSha, runId, phase: screenshotPhase, viewport: target.viewportSize(), dpr: await target.evaluate(() => devicePixelRatio) });
   }
   const objects: Array<{ bucket: string; path: string }> = [];
-  const consoleErrors: string[] = [];
-  const pageErrors: string[] = [];
+  const consoleErrors: Array<{ category: "unexpected-console-error"; path: string }> = [];
+  const pageErrors: Array<{ category: "unexpected-page-error"; path: string }> = [];
   type RequestMetadata = { requestId: number; method: string; path: string; resource: string; phaseAtStart: string; navigation: boolean; rsc: boolean; prefetch: boolean };
   const failed: Array<RequestMetadata & { error: string | null; phaseAtFailure: string; expectedPause: boolean; expectedFault: boolean }> = [];
   const inFlight = new Map<Request, RequestMetadata>();
@@ -37,7 +37,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   let requestSequence = 0;
   function requestMetadata(request: Request): RequestMetadata {
     const headers = request.headers();
-    return { requestId: ++requestSequence, method: request.method(), path: new URL(request.url()).pathname,
+    return { requestId: ++requestSequence, method: request.method(), path: locationPath(request.url(), COMMUNITY_TEST_ORIGIN),
       resource: request.resourceType(), phaseAtStart: phase, navigation: request.isNavigationRequest(),
       rsc: headers.rsc === "1", prefetch: headers["next-router-prefetch"] === "1" || Boolean(headers["next-router-segment-prefetch"]) };
   }
@@ -53,23 +53,23 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   }
   const delayedRequests = new WeakSet<Request>();
   const faultRequests = new WeakSet<Request>();
-  const expectedFaultConsole: string[] = [];
+  const expectedFaultConsole: Array<{ category: "controlled-media-resource-error"; path: string }> = [];
   let faultActive = false;
   let ownedVideoPath = "";
   let pauseConfirmed = false;
   let waitEvents = { waiting: 0, stalled: 0 };
   page.on("console", (message) => {
     if (message.type() !== "error") return;
-    const consolePath = new URL(message.location().url || COMMUNITY_TEST_ORIGIN).pathname;
-    if (faultActive && consolePath === ownedVideoPath && /^Failed to load resource:/.test(message.text())) expectedFaultConsole.push(withoutUrlQueries(message.text()));
-    else consoleErrors.push(withoutUrlQueries(message.text()));
+    const consolePath = locationPath(message.location().url, COMMUNITY_TEST_ORIGIN);
+    if (faultActive && consolePath === ownedVideoPath && /^Failed to load resource:/.test(message.text())) expectedFaultConsole.push({ category: "controlled-media-resource-error", path: consolePath });
+    else consoleErrors.push({ category: "unexpected-console-error", path: consolePath });
   });
-  page.on("pageerror", (error) => pageErrors.push(withoutUrlQueries(error.message)));
+  page.on("pageerror", () => pageErrors.push({ category: "unexpected-page-error", path: locationPath(page.url(), COMMUNITY_TEST_ORIGIN) }));
   page.on("request", (request) => inFlight.set(request, requestMetadata(request)));
   page.on("requestfinished", (request) => inFlight.delete(request));
   page.on("requestfailed", (request) => {
     failed.push({ ...(inFlight.get(request) ?? requestMetadata(request)),
-      error: request.failure()?.errorText ? withoutUrlQueries(request.failure()!.errorText) : null, phaseAtFailure: phase,
+      error: networkErrorCategory(request), phaseAtFailure: phase,
       expectedPause: pauseConfirmed && delayedRequests.has(request), expectedFault: faultRequests.has(request) });
     inFlight.delete(request);
   });
@@ -146,7 +146,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     await page.route(videoPattern, async (route) => {
       delayedRequests.add(route.request()); await gate;
       try { await route.continue(); }
-      catch (error) { if (!pauseConfirmed || !route.request().failure()) throw error; }
+      catch { if (!pauseConfirmed || !route.request().failure()) throw new Error("Unexpected owned media-route continuation failure."); }
     });
     try {
       phase = "pending-playback:navigation";
@@ -212,7 +212,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       backgroundVisibility = await page.evaluate(() => document.visibilityState);
       phase = "tab-switch:return";
       await page.bringToFront();
-      expect(await page.locator("video").evaluate((element) => (element as HTMLVideoElement).error)).toBeNull();
+      expect(await page.locator("video").evaluate((element) => Boolean((element as HTMLVideoElement).error))).toBe(false);
       pausedOnReturn = await page.locator("video").evaluate((element) => (element as HTMLVideoElement).paused);
       if (pausedOnReturn) {
         const bounds = await page.locator("video").boundingBox();
@@ -270,11 +270,17 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   }
 });
 
-function withoutUrlQueries(value: string) {
-  return value.replace(/https?:\/\/[^\s"']+/g, (raw) => {
-    try { const url = new URL(raw); return `${url.origin}${url.pathname}`; }
-    catch { return "[url]"; }
-  });
+function locationPath(value: string, base: string) {
+  try {
+    const location = new URL(value || base, base);
+    return location.protocol === "http:" || location.protocol === "https:" ? location.pathname : "[non-http-location]";
+  } catch { return "[invalid-location]"; }
+}
+
+function networkErrorCategory(request: Request) {
+  const value = request.failure()?.errorText;
+  const known = ["net::ERR_FAILED", "Load failed", "Unknown error", "Failed", "net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"];
+  return value && known.includes(value) ? value : "unknown-network-error";
 }
 
 async function settleVisibleMedia(page: Page) {

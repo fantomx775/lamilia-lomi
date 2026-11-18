@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 import { NavigationLink } from "@/components/navigation-link";
-import { ProductCatalogLoading } from "@/components/product-catalog-loading";
+import { CatalogResults } from "@/components/catalog-form";
 import { ProductCatalogShell, getCatalogHref } from "@/components/product-catalog-shell";
 import { ProductCard } from "@/components/product-card";
 import type { Locale } from "@/i18n/routing";
@@ -19,22 +18,21 @@ export const metadata: Metadata = {
   description: "Find your next LamiliaLomi coloring or activity book. Explore pages, choose a book on Amazon, and discover extras for your copy.",
   alternates: { canonical: "/en/products" },
 };
-export default function ProductsPage(props: Props) {
-  return <Suspense fallback={<ProductCatalogLoading />}><ProductsPageContent {...props} /></Suspense>;
-}
-async function ProductsPageContent({ params, searchParams }: Props) {
+export default async function ProductsPage({ params, searchParams }: Props) {
   const [{ locale }, rawSearchParams] = await Promise.all([params, searchParams]);
   const snapshot = await getPublicCatalogSnapshotForRequest(locale);
+  // This document is a native GET entry point too. Streamed Suspense segments
+  // need inline scripts to replace their fallback, so resolve its content first.
+  await delayCatalogForE2E();
   return <ProductCatalogShell snapshot={snapshot} locale={locale} rawSearchParams={rawSearchParams}>
-    <Suspense fallback={<ProductCatalogLoading resultsOnly desktopColumns={snapshot.catalogSettings.desktopColumns} />}>
-      <CatalogResults snapshot={snapshot} locale={locale} rawSearchParams={rawSearchParams} />
-    </Suspense>
+    <CatalogResults desktopColumns={snapshot.catalogSettings.desktopColumns}>
+      <CatalogProductGrid snapshot={snapshot} locale={locale} rawSearchParams={rawSearchParams} />
+    </CatalogResults>
   </ProductCatalogShell>;
 }
-async function CatalogResults({ snapshot, locale, rawSearchParams }: {
+function CatalogProductGrid({ snapshot, locale, rawSearchParams }: {
   snapshot: ContentSnapshot; locale: Locale; rawSearchParams: Record<string, string | string[] | undefined>;
 }) {
-  await delayCatalogForE2E();
   const products = getCatalogProductsFromSnapshot(snapshot, locale, parseCatalogFilters(rawSearchParams));
   const imageSizes = `(min-width: 1280px) ${Math.round(100 / snapshot.catalogSettings.desktopColumns)}vw, (min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw`;
   return products.length ? (

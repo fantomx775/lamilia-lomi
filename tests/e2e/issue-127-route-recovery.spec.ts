@@ -46,7 +46,7 @@ async function holdOwnRelation(relation: Relation) {
   };
 }
 
-function safePath(url: string) { try { return new URL(url).pathname; } catch { return "[unknown source]"; } }
+function safePath(url: string) { try { const source = new URL(url); return ["http:", "https:"].includes(source.protocol) ? source.pathname : "[non-HTTP source]"; } catch { return "[unknown source]"; } }
 async function capture(page: Page, info: TestInfo, campaign: string, phase: string, testedSha: string, runId: string) {
   await page.evaluate(() => document.fonts.ready);
   await page.locator("img").evaluateAll(async (nodes) => {
@@ -70,14 +70,14 @@ for (const campaign of ["catalog", "product", "club"] as const) {
     const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
     const runId = `ux127-route-fault-${campaign}-${info.project.name}-${Date.now()}`;
     const consoleErrors: Array<{ kind: string; path: string }> = [];
-    const pageErrors: Array<{ kind: string }> = [];
+    const pageErrors: Array<{ kind: string; path: string }> = [];
     const httpErrors: Array<{ path: string; status: number; method: string }> = [];
     const failedRequests: Array<{ path: string; method: string; error: string }> = [];
     // Record occurrence/source/status only; raw exception text can contain server details.
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push({ kind: "console.error during controlled backend failure", path: safePath(message.location().url) }); });
-    page.on("pageerror", () => pageErrors.push({ kind: "page exception during controlled backend failure" }));
+    page.on("pageerror", () => pageErrors.push({ kind: "page exception during controlled backend failure", path: safePath(page.url()) }));
     page.on("response", (response) => { if (response.status() >= 400) httpErrors.push({ path: safePath(response.url()), status: response.status(), method: response.request().method() }); });
-    page.on("requestfailed", (request) => failedRequests.push({ path: safePath(request.url()), method: request.method(), error: request.failure()?.errorText ?? "request failed" }));
+    page.on("requestfailed", (request) => failedRequests.push({ path: safePath(request.url()), method: request.method(), error: "requestfailed event during controlled backend failure" }));
     await page.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
     let lock: Awaited<ReturnType<typeof holdOwnRelation>> | undefined;
     const screenshots: Awaited<ReturnType<typeof capture>>[] = [];
@@ -87,8 +87,12 @@ for (const campaign of ["catalog", "product", "club"] as const) {
       const relation = campaign === "club" ? "community_artworks" : "products";
       lock = await holdOwnRelation(relation);
       const route = campaign === "catalog" ? "/en/products?q=UX127RouteRecovery" : campaign === "club" ? "/en/club" : `/en/products/${book.slug}`;
-      await page.goto(`${COMMUNITY_TEST_ORIGIN}${route}`, { waitUntil: "commit" });
-      await lock.cancelOwnBlockedReaders();
+      // A progressively enhanced catalog GET intentionally waits for its data
+      // before committing HTML. Start it before canceling the owned blocked read.
+      await Promise.all([
+        page.goto(`${COMMUNITY_TEST_ORIGIN}${route}`, { waitUntil: "commit" }),
+        lock.cancelOwnBlockedReaders(),
+      ]);
       const title = campaign === "catalog" ? "The catalog could not be loaded" : campaign === "club" ? "Coloring Club could not be loaded" : "This book could not be loaded";
       const failure = page.getByRole("alert").filter({ has: page.getByRole("heading", { name: title, exact: true }) });
       await expect(failure).toBeVisible();

@@ -1,6 +1,6 @@
-import { expect, test, type Page, type Locator, type Request } from "@playwright/test";
+import { expect, test, type Page, type Locator, type Request, type APIResponse } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
@@ -8,6 +8,8 @@ import { getSeedContentSnapshot } from "../../src/lib/local-content";
 import type { ProductAsset } from "../../src/lib/types";
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
+
+test.use({ trace: "off", screenshot: "off", video: "off" });
 
 test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inline playback", async ({ page, browser }, testInfo) => {
   test.skip(!(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)), "Only a verified disposable loopback local-content app may be mutated.");
@@ -29,21 +31,25 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
   const mediaDirectory = path.resolve("public/uploads/issue-127-video");
   const existed = fs.existsSync(mediaDirectory);
   if (existed) { release(); throw new Error("The exclusive video fixture directory already exists; inspect its ownership before proceeding."); }
-  const pageErrors: string[] = [];
-  const consoleErrors: string[] = [];
-  const expectedImageFaultConsole: string[] = [];
+  const pageErrors: Array<{ category: "unexpected-page-error"; path: string }> = [];
+  const consoleErrors: Array<{ category: "unexpected-console-error"; path: string }> = [];
+  const expectedImageFaultConsole: Array<{ category: "controlled-image-resource-error"; path: string }> = [];
   const imageFaultRequests = new WeakSet<Request>();
   let imageFaultActive = false;
   let imageFaultSource = "";
-  const failedRequests: Array<{ method: string; url: string; error: string | null; expectedImageFault: boolean }> = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const failedRequests: Array<{ method: string; path: string; error: string | null; expectedImageFault: boolean }> = [];
+  page.on("pageerror", () => pageErrors.push({ category: "unexpected-page-error", path: locationPath(page.url(), String(testInfo.project.use.baseURL)) }));
   page.on("console", (message) => {
     if (message.type() !== "error") return;
-    const source = new URL(message.location().url || String(testInfo.project.use.baseURL));
-    if (imageFaultActive && source.pathname === "/_next/image" && source.searchParams.get("url") === imageFaultSource && /^Failed to load resource:/.test(message.text())) expectedImageFaultConsole.push(message.text());
-    else consoleErrors.push(message.text());
+    const base = String(testInfo.project.use.baseURL);
+    const safePath = locationPath(message.location().url, base);
+    let matchesOwnedImage = false;
+    try { matchesOwnedImage = new URL(message.location().url || base, base).searchParams.get("url") === imageFaultSource; }
+    catch { /* Malformed locations remain unexpected; no raw input is retained. */ }
+    if (imageFaultActive && safePath === "/_next/image" && matchesOwnedImage && /^Failed to load resource:/.test(message.text())) expectedImageFaultConsole.push({ category: "controlled-image-resource-error", path: safePath });
+    else consoleErrors.push({ category: "unexpected-console-error", path: safePath });
   });
-  page.on("requestfailed", (request) => failedRequests.push({ method: request.method(), url: new URL(request.url()).origin + new URL(request.url()).pathname, error: request.failure()?.errorText ?? null, expectedImageFault: imageFaultRequests.has(request) }));
+  page.on("requestfailed", (request) => failedRequests.push({ method: request.method(), path: locationPath(request.url(), String(testInfo.project.use.baseURL)), error: networkErrorCategory(request), expectedImageFault: imageFaultRequests.has(request) }));
   try {
     fs.mkdirSync(mediaDirectory, { recursive: true });
     fs.copyFileSync(path.resolve("tests/e2e/fixtures/issue-127/flower.mp4"), path.join(mediaDirectory, "flower.mp4"));
@@ -105,7 +111,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     const thumbnail = opener.locator("img");
     const thumbnailPixels = await selectedPixels(thumbnail, page);
     const thumbnailWidth = thumbnailPixels.width;
-    imageFaultSource = new URL(thumbnailPixels.currentSrc).searchParams.get("url") ?? "";
+    imageFaultSource = thumbnailPixels.sourcePath;
     expect(thumbnailWidth).toBeGreaterThan(0);
     let releaseDetail!: () => void;
     const detailGate = new Promise<void>((resolve) => { releaseDetail = resolve; });
@@ -164,8 +170,8 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     try {
       await tallContext.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
       const tall = await tallContext.newPage();
-      const tallErrors: string[] = [];
-      tall.on("pageerror", (error) => tallErrors.push(error.message));
+      const tallErrors: Array<{ category: "unexpected-page-error"; path: string }> = [];
+      tall.on("pageerror", () => tallErrors.push({ category: "unexpected-page-error", path: locationPath(tall.url(), String(testInfo.project.use.baseURL)) }));
       let releaseThumbnails!: () => void;
       const thumbnailGate = new Promise<void>((resolve) => { releaseThumbnails = resolve; });
       await tall.route("**/_next/image**", async (route) => { await thumbnailGate; await route.continue(); });
@@ -196,7 +202,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     await testInfo.attach("local-video-first-frame-samples", { body: JSON.stringify({ testedSha, runId, project: testInfo.project.name, samples, pageErrors, consoleErrors, expectedImageFaultConsole, failedRequests }), contentType: "application/json" });
     expect(pageErrors).toEqual([]); expect(consoleErrors).toEqual([]);
     for (const request of failedRequests) {
-      expect(request.expectedImageFault).toBe(true); expect(request.method).toBe("GET"); expect(new URL(request.url).pathname).toBe("/_next/image");
+      expect(request.expectedImageFault).toBe(true); expect(request.method).toBe("GET"); expect(request.path).toBe("/_next/image");
       expect(["net::ERR_FAILED", "Load failed", "Unknown error", "Failed"]).toContain(request.error);
     }
     expect(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(testedSha);
@@ -269,11 +275,44 @@ async function selectedPixels(locator: Locator, page: Page) {
     const image = element as HTMLImageElement;
     return { currentSrc: image.currentSrc, reportedNaturalWidth: image.naturalWidth };
   });
-  expect(new URL(source.currentSrc).origin).toBe(new URL(page.url()).origin);
-  const response = await page.request.get(source.currentSrc);
+  const selectedUrl = new URL(source.currentSrc);
+  expect(selectedUrl.origin).toBe(new URL(page.url()).origin);
+  let response: APIResponse;
+  try { response = await page.request.get(source.currentSrc); }
+  catch { throw new Error("The selected image response could not be fetched."); }
   expect(response.ok()).toBe(true);
   const bytes = await response.body();
   const decoded = await sharp(bytes).metadata();
   expect(decoded.width).toBeGreaterThan(0);
-  return { ...source, width: decoded.width!, height: decoded.height!, bytes: bytes.length, format: decoded.format };
+  const numericParameter = (name: string, allowed: readonly number[]) => {
+    const value = selectedUrl.searchParams.get(name);
+    return value !== null && /^\d+$/.test(value) && allowed.includes(Number(value)) ? Number(value) : null;
+  };
+  const candidatePath = locationPath(selectedUrl.searchParams.get("url") ?? source.currentSrc, page.url());
+  const sourcePath = /^\/uploads\/issue-127-video\/page-[0-2]\.png$/.test(candidatePath) ? candidatePath : "[unexpected-source-path]";
+  expect(sourcePath).not.toBe("[unexpected-source-path]");
+  // The real URL stays in memory for fetching. Evidence contains structured
+  // paths and only the installed optimizer's discrete public numeric options.
+  return {
+    pathname: selectedUrl.pathname === "/_next/image" ? "/_next/image" : sourcePath,
+    sourcePath,
+    optimizerWidth: numericParameter("w", [32, 48, 64, 96, 128, 256, 384, 640, 750, 828, 1080, 1200, 1920, 2048, 3840]),
+    optimizerQuality: numericParameter("q", [75]),
+    currentSrcSha256: createHash("sha256").update(source.currentSrc).digest("hex"),
+    reportedNaturalWidth: source.reportedNaturalWidth,
+    width: decoded.width!, height: decoded.height!, bytes: bytes.length, format: decoded.format,
+  };
+}
+
+function locationPath(value: string, base: string) {
+  try {
+    const location = new URL(value || base, base);
+    return location.protocol === "http:" || location.protocol === "https:" ? location.pathname : "[non-http-location]";
+  } catch { return "[invalid-location]"; }
+}
+
+function networkErrorCategory(request: Request) {
+  const value = request.failure()?.errorText;
+  const known = ["net::ERR_FAILED", "Load failed", "Unknown error", "Failed", "net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"];
+  return value && known.includes(value) ? value : "unknown-network-error";
 }
