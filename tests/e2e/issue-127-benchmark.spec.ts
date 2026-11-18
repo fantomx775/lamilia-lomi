@@ -62,7 +62,7 @@ for (const journey of ['catalog', 'product', 'about'] as const)
             page.on('request', request => {
                 pendingRequests.set(request, { startedAt: Date.now(), responseStatus: null }); networkEvent('request', request);
                 const headers = request.headers();
-                const prefetch = headers.rsc === '1' && (headers['next-router-prefetch'] === '1' || Boolean(headers['next-router-segment-prefetch']));
+                const prefetch = new URL(request.url()).origin === origin && request.resourceType() === 'fetch' && headers.rsc === '1' && (headers['next-router-prefetch'] === '1' || Boolean(headers['next-router-segment-prefetch']));
                 if (!prefetch) inFlight.add(request);
             });
             page.on('requestfinished', request => { networkEvent('requestfinished', request); inFlight.delete(request); pendingRequests.delete(request); });
@@ -72,11 +72,14 @@ for (const journey of ['catalog', 'product', 'about'] as const)
                 const imageSource = url.pathname === '/_next/image' ? new URL(url.searchParams.get('url') ?? '/', origin).pathname : undefined;
                 observedFailures.push({ method: request.method(), path: url.pathname, imageSource, resource: request.resourceType(), error: 'requestfailed event', phase, rsc: headers.rsc === '1', prefetch: headers['next-router-prefetch'] === '1' || Boolean(headers['next-router-segment-prefetch']) });
             });
+            const readinessSnapshots: Array<Record<string, unknown>> = [];
+            let lastDrainFailure: { status: 'FAIL'; stage: string } | undefined;
             const writeDiagnostic = (network?: Awaited<ReturnType<NextCancellationObserver['finish']>>, drainFailure?: { status: 'FAIL'; stage: string }) => {
                 const now = Date.now();
+                if (drainFailure) lastDrainFailure = drainFailure;
                 fs.writeFileSync(path.resolve(process.env.UX127_BENCHMARK_RESULTS!, `diagnostic-${info.project.name}-${journey}-${round}.json`), JSON.stringify({
                     status: 'DIAGNOSTIC_ONLY', testedSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.env.UX127_APP_WORKTREE, encoding: 'utf8' }).trim(),
-                    runId: process.env.UX127_BENCHMARK_RUN_ID, project: info.project.name, journey, round, phase, pagePath: diagnosticPath(page.url()), drainFailure,
+                    runId: process.env.UX127_BENCHMARK_RUN_ID, project: info.project.name, journey, round, phase, pagePath: diagnosticPath(page.url()), drainFailure: lastDrainFailure, readinessSnapshots,
                     failures, observedFailures, nonprefetchInFlight: inFlight.size, allPendingCount: pendingRequests.size,
                     pendingRequests: [...pendingRequests].slice(0, 100).map(([request, state]) => ({ ...requestProjection(request), ageMs: now - state.startedAt, responseStatus: state.responseStatus })),
                     truncatedPendingCount: Math.max(0, pendingRequests.size - 100), lastNetworkActivityMsAgo: now - lastNetworkActivity, networkEventCount: eventCount, recentNetworkEvents,
@@ -85,10 +88,12 @@ for (const journey of ['catalog', 'product', 'about'] as const)
                 }, null, 2));
             };
             const drain = async () => {
-                let stage = 'networkidle';
+                let stage = 'visible-image-decode';
                 try {
-                    await page.waitForLoadState('networkidle', { timeout: 15_000 });
-                    stage = 'visible-image-decode'; await settleVisibleImages(page);
+                    // Public readiness: networkidle is discouraged by Playwright and
+                    // includes genuine background Next partial prefetch. Those requests
+                    // remain observed/typed below; no failure is waived by readiness.
+                    await settleVisibleImages(page);
                     stage = 'nonprefetch-inflight';
                     await expect.poll(() => inFlight.size, { timeout: 15_000, message: 'Actual non-prefetch requests must settle before sample reset/teardown' }).toBe(0);
                 } catch (cause) {
@@ -103,6 +108,7 @@ for (const journey of ['catalog', 'product', 'about'] as const)
                 failures.push({ type: 'console', message: 'Browser console error', path: diagnosticPath(m.location().url) }); });
             page.on('response', r => { const state = pendingRequests.get(r.request()); if (state) state.responseStatus = r.status(); networkEvent('response', r.request()); if (r.status() >= 400)
                 failures.push({ type: 'http', path: new URL(r.url()).pathname, status: r.status() }); });
+            try {
             // CDP throttling preserves browser cache, unlike page.route(), which disables it.
             const cdp = await context.newCDPSession(page);
             await cdp.send('Network.enable');
@@ -142,6 +148,12 @@ for (const journey of ['catalog', 'product', 'about'] as const)
                 if (!box) throw new Error('Benchmark trigger has no visible geometry.');
                 await page.mouse.move(box.x + Math.min(box.width / 2, 40), box.y + Math.min(box.height / 2, 30));
                 await page.waitForTimeout(180);
+                phase = 'pre-pointer-readiness'; await drain();
+                const now = Date.now();
+                readinessSnapshots.push({ cache, path: diagnosticPath(page.url()), nonprefetchInFlight: inFlight.size,
+                    pending: [...pendingRequests].slice(0, 100).map(([request, state]) => ({ ...requestProjection(request), ageMs: now - state.startedAt, responseStatus: state.responseStatus })),
+                    truncatedPendingCount: Math.max(0, pendingRequests.size - 100) });
+                writeDiagnostic(); persist(); // Actual pending context persisted BEFORE pointer activation.
                 await page.evaluate(({ token, destination }) => {
                     const state: Probe = { token, destination, start: null, feedback: null, fallback: null, useful: null, completed: null };
                     window.__uxProbe = state;
@@ -192,19 +204,22 @@ for (const journey of ['catalog', 'product', 'about'] as const)
                 samples.push({ testedSha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: process.env.UX127_APP_WORKTREE, encoding: 'utf8' }).trim(), runId: process.env.UX127_BENCHMARK_RUN_ID, inputModel: 'controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch', browserVersion: browser.version(), backend: 'isolated Supabase', runtime: 'next start production + owned HTTPS proxy', network: { latencyMs: 120, downloadBytesPerSecond: 1250000, uploadBytesPerSecond: 125000 }, cacheDefinition: cache === 'cold' ? 'fresh browser context; normal prefetch allowed' : 'same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed', completionDefinition: 'destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion', journey, round, requestedRounds, cache, project: info.project.name, viewport: await page.viewportSize(), metrics, failures: [...failures] });
                 persist(); writeDiagnostic();
                 await info.attach(token + '.json', { body: JSON.stringify(samples.at(-1), null, 2), contentType: 'application/json' });
-                expect(failures, 'Unexpected page/console/HTTP failures; inspect baseline before comparison').toEqual([]);
+                expect.soft(failures, 'Unexpected page/console/HTTP failures; collect remaining otherwise-ready samples, overall benchmark remains FAIL').toEqual([]);
                 phase = 'sample-drain'; await drain();
                 if (round === 0)
                     await page.screenshot({ path: info.outputPath(`${journey}-${cache}.png`), animations: 'disabled' });
             }
+            } finally {
             phase = 'observer-finalization';
+            try {
             const network = await observer.finish();
             writeDiagnostic(network); persist();
             expect.soft(network.unresolved.length, 'Unclassified failed network requests; inspect sanitized path diagnostics (overall benchmark remains FAIL)').toBe(0);
             for (const sample of samples.filter(s => s.journey === journey && s.round === round && s.project === info.project.name))
                 sample.networkDiagnostics = { unresolvedCount: network.unresolved.length, typedNextCancellations: network.expectedNextCancellations.length, closedPrefetches: network.closedPrefetches.length, failures: network.failedNetworkRequests.map(r => ({ path: r.path ?? r.requestPath, method: r.method, disposition: r.disposition })) };
             persist();
-            await context.close();
+            } finally { await context.close(); }
+            }
         }
         fs.mkdirSync(process.env.UX127_BENCHMARK_RESULTS, { recursive: true });
         fs.writeFileSync(path.resolve(process.env.UX127_BENCHMARK_RESULTS, `samples-${info.project.name}-${journey}.json`), JSON.stringify(samples.filter(s => s.journey === journey && s.project === info.project.name), null, 2));
