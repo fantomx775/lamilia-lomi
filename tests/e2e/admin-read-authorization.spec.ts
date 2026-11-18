@@ -48,8 +48,11 @@ test("admin reads authorize every page before querying protected tables", async 
     return { email, id };
   }
 
+  // The browser app uses the localhost HTTPS gateway, while fixture API calls
+  // use the internal 127.0.0.1 endpoint. Match the app's default auth namespace.
+  const authCookieName = `sb-${appUrl.hostname.split(".")[0]}-auth-token`;
   async function signIn(target: BrowserContext, email: string) {
-    const client = createServerClient(apiUrl.origin, key!, { cookies: {
+    const client = createServerClient(apiUrl.origin, key!, { cookieOptions: { name: authCookieName }, cookies: {
       getAll: () => [],
       setAll: async (cookies) => {
         await target.addCookies(cookies.map(({ name, value, options }) => ({ name, value,
@@ -58,6 +61,13 @@ test("admin reads authorize every page before querying protected tables", async 
       },
     } });
     expect((await client.auth.signInWithPassword({ email, password })).error).toBeNull();
+    const cookieNames = (await target.cookies(appUrl.origin)).map(({ name }) => name);
+    expect(cookieNames.some((name) => name === authCookieName || name.startsWith(`${authCookieName}.`))).toBe(true);
+    // Assert the app, rather than only the standalone RLS client, sees this
+    // identity. Never include private account HTML or cookie values in output.
+    const accountResponse = await target.request.get(`${appUrl.origin}/en/account`);
+    expect(accountResponse.status()).toBe(200);
+    expect((await accountResponse.text()).includes(email)).toBe(true);
     return client;
   }
 
@@ -106,7 +116,7 @@ test("admin reads authorize every page before querying protected tables", async 
     await denied(regular);
     const expired = await browser.newContext({ ignoreHTTPSErrors: true });
     contexts.push(expired);
-    await expired.addCookies([{ name: "sb-127-auth-token", value: "base64-expired-invalid-session", domain: appUrl.hostname,
+    await expired.addCookies([{ name: authCookieName, value: "base64-expired-invalid-session", domain: appUrl.hostname,
       path: "/", secure: true, sameSite: "Lax" }]);
     await denied(expired);
 
