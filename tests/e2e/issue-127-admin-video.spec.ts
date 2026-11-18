@@ -1,6 +1,6 @@
 // Real isolated admin encoder recovery and multi-chunk transport regression.
 // Fixture generation, test collection and executed browser outcomes are separate evidence.
-import { expect, test, type Page, type Request as BrowserRequest } from "@playwright/test";
+import { expect, test, type Page, type Request as BrowserRequest, type Response as BrowserResponse } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
@@ -11,6 +11,10 @@ import { communityFixtures } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 const TUS_PATH = "/storage/v1/upload/resumable";
+// Match the application's explicit loader and encoding abort contracts, then the
+// existing 20s target-request allowance. This is a failure deadline, not a speed goal.
+const VIDEO_PREPARATION_TARGET_DEADLINE_MS = 60_000 + 420_000 + 20_000;
+
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 type Asset = { id: string; kind: string; bucket: string; storagePath: string; sizeBytes: number; contentType: string; filename: string };
 type Fixtures = Awaited<ReturnType<typeof communityFixtures>>;
@@ -113,6 +117,27 @@ function observeTus(page: Page, gatedMethod: "POST" | "PATCH") {
       resource = ""; auth = {};
     },
   };
+}
+
+/** Resolve an Error value rather than reject before the test reaches its await. */
+function observePreparedVideoTarget(page: Page) {
+  const origin = new URL(page.url()).origin;
+  const result = Promise.withResolvers<BrowserResponse | Error>();
+  let settled = false;
+  const finish = (outcome: BrowserResponse | Error) => {
+    if (settled) return;
+    settled = true; clearTimeout(timer);
+    page.off("response", onResponse); page.off("close", onClose);
+    result.resolve(outcome);
+  };
+  const onResponse = (response: BrowserResponse) => {
+    const url = new URL(response.url());
+    if (url.origin === origin && url.pathname === "/api/admin/assets" && response.request().method() === "POST") finish(response);
+  };
+  const onClose = () => finish(new Error("Video preparation observation ended because its owned page closed."));
+  const timer = setTimeout(() => finish(new Error("Video preparation exceeded the application's loader/encoding contract plus target-request deadline.")), VIDEO_PREPARATION_TARGET_DEADLINE_MS);
+  page.on("response", onResponse); page.on("close", onClose);
+  return { result: result.promise, dispose: () => finish(new Error("Video preparation observation disposed by test cleanup.")) };
 }
 
 async function targetResponse(page: Page, operation: () => Promise<unknown>) {
@@ -292,6 +317,7 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
   const assets: Asset[] = [];
   let productId = "";
   let transport: ReturnType<typeof observeTus> | undefined;
+  let retryTargetObservation: ReturnType<typeof observePreparedVideoTarget> | undefined;
   try {
     const configured = process.env.UX127_ADMIN_VIDEO_FIXTURE_PATH;
     if (!configured || !path.isAbsolute(configured)) throw new Error("Set an absolute private generated video fixture path.");
@@ -337,10 +363,20 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     const savedText = await fixture.service.from("product_translations").select("short_description").eq("product_id", productId).eq("locale", "en").single();
     expect(savedText.error === null).toBe(true); expect(savedText.data?.short_description).toBe(notes);
     transport = observeTus(page, "POST"); await transport.routing;
-    const retriedTarget = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/admin/assets" && response.request().method() === "POST");
+    retryTargetObservation = observePreparedVideoTarget(page);
+    const retryPreparationStartedAt = performance.now();
     await video.getByRole("button", { name: "Pon\u00f3w", exact: true }).click();
     await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 90_000 }).toBe(2);
-    const prepared = await retriedTarget;
+    const targetOutcome = await retryTargetObservation.result;
+    const retryPreparationElapsedMs = performance.now() - retryPreparationStartedAt;
+    await manifest(`ux127-video-preparation-phase-${info.project.name}`, page, {
+      status: "PHASE_TIMING_ONLY", browser: info.project.name,
+      retryPreparationElapsedMs, deadlineMs: VIDEO_PREPARATION_TARGET_DEADLINE_MS,
+      targetObserved: !(targetOutcome instanceof Error),
+      limitation: "Retry click to upload-target response includes actual preparation and signing; this is not an encoder benchmark or a full-case PASS.",
+    });
+    if (targetOutcome instanceof Error) throw targetOutcome;
+    const prepared = targetOutcome;
     expect(prepared.status()).toBe(200);
     const encoded = (await prepared.json()).asset as Asset; assets.push(encoded);
     expect(encoded.contentType).toBe("video/mp4"); expect(encoded.filename.endsWith(".mp4")).toBe(true);
@@ -379,9 +415,11 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     expect(outputMetadata.paused).toBe(true);
     const reloadedScreenshot = await capturePhase(page, "#media-section-video", `ux127-large-video-${info.project.name}-reloaded`, productId);
     await manifest(`ux127-large-video-${info.project.name}`, page, { browser: info.project.name, outputMetadata, screenshotPaths: [preparingScreenshot, cancelledScreenshot, reloadedScreenshot], status: "PASS", input, inputSha256: sha256(bytes),
+      retryPreparationElapsedMs, preparationTargetDeadlineMs: VIDEO_PREPARATION_TARGET_DEADLINE_MS,
       preparedBytes: output.byteLength, preparedSha256: sha256(output), transport: evidence,
       checks: ["real 45s input metadata", "actual pinned WASM worker EXEC before cancel", "no fake transfer percentage during encoding", "draft text and gallery preserved", "remaining draft saved without canceled video", "actual same-file retry conversion", "actual TUS and Storage hash", "DB and reload persistence"] });
   } finally {
+    retryTargetObservation?.dispose();
     if (transport) await transport.stop(); else await page.close();
     if (productId) await cleanupOwned(fixture, productId, assets); else await fixture.cleanup();
   }
