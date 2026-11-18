@@ -152,7 +152,13 @@ describe("ProductImageGallery", () => {
     render(<ProductImageGallery images={pages} labels={makeLabels(3)} />);
     await user.click(screen.getByRole("button", { name: "Open image 1" }));
     const dialog = screen.getByRole("dialog");
-    expect(dialog.querySelector("[data-gallery-display]")).toBeNull();
+    expect(dialog.querySelector("[data-gallery-display][src]")).toBeNull();
+    expect(dialog.querySelectorAll("[data-gallery-display]")).toHaveLength(3);
+    for (const display of dialog.querySelectorAll("[data-gallery-display]")) {
+      expect(display).not.toHaveAttribute("src");
+      expect(display).toHaveAttribute("aria-hidden", "true");
+      expect(display).toHaveClass("invisible");
+    }
     expect(dialog.querySelector('img[src*="480"]')).toBeNull();
     expect(within(dialog).getByRole("status")).toHaveTextContent("Loading larger preview");
     const preloads = Array.from(dialog.querySelectorAll('img[alt=""]'));
@@ -170,7 +176,7 @@ describe("ProductImageGallery", () => {
     fireEvent.load(thumbnail);
     await user.click(screen.getByRole("button", { name: "Open image 1" }));
     const dialog = screen.getByRole("dialog");
-    expect(dialog.querySelectorAll("[data-gallery-display]")).toHaveLength(1);
+    expect(dialog.querySelectorAll("[data-gallery-display][src]")).toHaveLength(1);
     expect(within(dialog).getByRole("img", { name: "Page 1" })).toHaveAttribute("src", "/actually-loaded-thumbnail.webp");
     const neighbor = dialog.querySelector('img[src="/detail-1.webp?width=2048"]') as HTMLImageElement;
     let resolveDecode!: () => void;
@@ -179,16 +185,48 @@ describe("ProductImageGallery", () => {
     Object.defineProperty(neighbor, "currentSrc", { value: "/decoded-neighbor.webp" });
     fireEvent.load(neighbor);
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
-    expect(dialog.querySelector("[data-gallery-display]")).toBeNull();
+    expect(dialog.querySelector("[data-gallery-display][src]")).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: "Previous image" }));
     await act(async () => resolveDecode());
     expect(dialog.querySelector('img[src="/detail-1.webp?width=2048"]')).toBe(neighbor);
-    expect(dialog.querySelectorAll("[data-gallery-display]")).toHaveLength(1);
+    const inactiveDecoded = dialog.querySelector('[data-gallery-display][src="/decoded-neighbor.webp"]');
+    expect(inactiveDecoded).toHaveAttribute("aria-hidden", "true");
+    expect(inactiveDecoded?.parentElement).toHaveClass("invisible");
+    expect(within(dialog).getByRole("img", { name: "Page 1" })).toHaveAttribute("src", "/actually-loaded-thumbnail.webp");
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
     expect(within(dialog).getByRole("img", { name: "Page 2" })).toHaveAttribute("src", "/decoded-neighbor.webp");
     expect(within(dialog).queryByRole("status")).toBeNull();
     expect(decode).toHaveBeenCalledTimes(1);
     expect(dialog.querySelector('img[src*="480"]')).toBeNull();
+  });
+
+  it("fills the same hidden neighboring display only after its real detail decodes", async () => {
+    const user = userEvent.setup();
+    const pages = makeImages(3).map((image, index) => ({ ...image, path: `/thumb-${index}.webp?width=480`, detailPath: `/detail-${index}.webp?width=2048`, unoptimized: true }));
+    render(<ProductImageGallery images={pages} labels={makeLabels(3)} />);
+    await user.click(screen.getByRole("button", { name: "Open image 1" }));
+    const dialog = screen.getByRole("dialog");
+    const detail = dialog.querySelector('img[alt=""][src="/detail-1.webp?width=2048"]') as HTMLImageElement;
+    const display = detail.parentElement?.querySelector("[data-gallery-display]");
+    expect(display).toBeInstanceOf(HTMLImageElement);
+    expect(display).not.toHaveAttribute("src");
+    expect(display).toHaveAttribute("aria-hidden", "true");
+    expect(display?.parentElement).toHaveClass("invisible");
+    let resolveDecode!: () => void;
+    const decodedSource = "/actual-selected-detail.webp?width=2048";
+    Object.defineProperty(detail, "currentSrc", { value: decodedSource });
+    Object.defineProperty(detail, "decode", { value: () => new Promise<void>(resolve => { resolveDecode = resolve; }) });
+    fireEvent.load(detail);
+    expect(display).not.toHaveAttribute("src");
+    await act(async () => resolveDecode());
+    expect(detail.parentElement?.querySelector("[data-gallery-display]")).toBe(display);
+    expect(display).toHaveAttribute("src", decodedSource);
+    expect(display).toHaveAttribute("aria-hidden", "true");
+    expect(display?.parentElement).toHaveClass("invisible");
+    expect(dialog.querySelector('img[src*="480"]')).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Next image" }));
+    expect(within(dialog).getByRole("img", { name: "Page 2" })).toBe(display);
+    expect(display).toHaveAttribute("src", decodedSource);
   });
 
   it("keeps the thumbnail until detail decode completes, and retries a failed detail", async () => {
@@ -251,6 +289,43 @@ describe("ProductImageGallery", () => {
     expect(within(dialog).getByRole("img", { name: "Stars and little houses" })).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Close image preview" }));
     await waitFor(() => expect(dialog).not.toHaveAttribute("open"));
+  });
+
+  it("keeps the real display target connected from pointerup through native touchend bubbling", async () => {
+    const user = userEvent.setup();
+    render(<ProductImageGallery images={makeImages(3)} labels={makeLabels(3)} />);
+    loadVisibleThumbnails();
+    await user.click(screen.getByRole("button", { name: "Open image 1" }));
+    const dialog = screen.getByRole("dialog");
+    const frame = within(dialog).getByTestId("product-gallery-preview-frame");
+    const target = within(dialog).getByRole("img", { name: "Page 1" });
+    expect(target).toHaveAttribute("data-gallery-display");
+    const documentTouchEnd = vi.fn();
+    const directTouchEnd = vi.fn();
+    const capture = (event: Event) => { if (event.target === target) documentTouchEnd(); };
+    document.addEventListener("touchend", capture, true);
+    target.addEventListener("touchend", directTouchEnd);
+    try {
+      fireEvent.pointerDown(target, { pointerType: "touch", pointerId: 5, clientX: 280 });
+      fireEvent.pointerUp(target, { pointerType: "touch", pointerId: 5, clientX: 80 });
+      expect(within(dialog).getByText("2 of 3")).toBeVisible();
+      // Dispatch on the original native target, even if React detached it. A frame retarget would mask the bug.
+      fireEvent.touchEnd(target, { touches: [], changedTouches: [{ identifier: 0, target }] });
+      expect({
+        directTouchEndCount: directTouchEnd.mock.calls.length,
+        documentTouchEndCount: documentTouchEnd.mock.calls.length,
+        originalTargetConnected: target.isConnected,
+        retainedDisplayIdentity: Array.from(frame.querySelectorAll("[data-gallery-display]")).includes(target),
+      }).toEqual({ directTouchEndCount: 1, documentTouchEndCount: 1, originalTargetConnected: true, retainedDisplayIdentity: true });
+      expect(target).not.toHaveAttribute("src");
+      expect(target).toHaveAttribute("aria-hidden", "true");
+      await user.click(within(dialog).getByRole("button", { name: "Previous image" }));
+      expect(within(dialog).getByRole("img", { name: "Page 1" })).toBe(target);
+      expect(target).toHaveAttribute("src", "/page-1.svg");
+    } finally {
+      document.removeEventListener("touchend", capture, true);
+      target.removeEventListener("touchend", directTouchEnd);
+    }
   });
 
   it("renders no gallery for an empty image list", () => {
@@ -357,7 +432,7 @@ describe("ProductImageGallery", () => {
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     const frame = within(dialog).getByTestId("product-gallery-preview-frame");
     expect(within(dialog).getByRole("img", { name: "Page 4" })).toBeVisible();
-    expect(Array.from(frame.querySelectorAll("img[data-gallery-display]"), (image) => image.getAttribute("src")))
+    expect(Array.from(frame.querySelectorAll("img[data-gallery-display][src]"), (image) => image.getAttribute("src")))
       .toEqual(["/page-4.svg"]);
     expect(Array.from(frame.querySelectorAll('img[alt=""]'), (image) => image.getAttribute("src")))
       .toEqual(["/page-4.svg", "/page-5.svg", "/page-3.svg"]);

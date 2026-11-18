@@ -356,15 +356,16 @@ function GalleryPreviewImage({ image, thumbnail, active }: { image: ProductGalle
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const alive = useRef(true);
-  const displaySource = active ? decoded ?? thumbnail : undefined;
+  const displaySource = decoded ?? (active ? thumbnail : undefined);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   return <div className={active ? "absolute inset-0" : "invisible absolute inset-0"} aria-hidden={!active}>
     {/* Only the active slide can reuse a thumbnail observed by its real onLoad.
-        Unknown thumbnails stay neutral; neighbors request only their real detail. */}
-    {displaySource ? (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img data-gallery-display src={displaySource} alt={image.alt} loading="eager" className="absolute inset-0 size-full object-contain" />
-    ) : null}
+        Unknown thumbnails stay neutral; neighbors reuse only their decoded real detail. */}
+    {/* Keep the native gesture target mounted when this slide becomes a neighbor.
+        An absent src requests nothing; hide the empty image while status stays visible. */}
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img data-gallery-display src={displaySource} alt={image.alt} aria-hidden={!active || !displaySource}
+      loading="eager" className={`absolute inset-0 size-full object-contain${displaySource ? "" : " invisible"}`} />
     <Image key={attempt} src={image.detailPath ?? image.path} alt="" aria-hidden fill loading="eager"
       fetchPriority={active ? "high" : "low"} unoptimized={image.unoptimized}
       sizes="(min-width: 768px) min(75vw, calc((100dvh - 8rem) * 0.773)), min(90vw, calc((100dvh - 11rem) * 0.773))"
