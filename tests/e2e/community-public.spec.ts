@@ -221,9 +221,48 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await page.getByTestId("community-gallery-audience-filter").selectOption("adults");
     await expect(page.getByTestId("community-gallery-empty-state")).toBeVisible();
     await settled(page);
-    await page.getByTestId("community-gallery-audience-filter").selectOption("");
+    // Clearing a filter starts a fresh 24-item first page, not the previously
+    // expanded 25-item list. Prove its actual cursor and append path again.
+    const [resetResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return response.request().method() === "GET" && url.origin === origin && url.pathname === "/api/community/artworks" &&
+          url.searchParams.get("productId") === paged.id && url.searchParams.get("limit") === "24" &&
+          !url.searchParams.has("audience") && !url.searchParams.has("cursor");
+      }),
+      page.getByTestId("community-gallery-audience-filter").selectOption(""),
+    ]);
+    expect(resetResponse.status()).toBe(200);
+    expect(await resetResponse.finished()).toBeNull();
+    const resetPage = await resetResponse.json() as { ok: boolean; items: { id: string }[]; nextCursor: string | null };
+    expect(resetPage.ok).toBe(true);
+    expect(resetPage.items.length).toBe(24);
+    expect(typeof resetPage.nextCursor === "string" && resetPage.nextCursor.length > 0).toBe(true);
+    await expect(page.getByTestId("community-artwork-card")).toHaveCount(24);
+    await loadedImages(page, '[data-testid="community-artwork-grid"] img');
+    await settled(page);
+    await expect(page.getByTestId("community-gallery-load-more")).toBeEnabled();
+    const [resetMoreResponse] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return response.request().method() === "GET" && url.origin === origin && url.pathname === "/api/community/artworks" &&
+          url.searchParams.get("productId") === paged.id && url.searchParams.get("limit") === "24" &&
+          !url.searchParams.has("audience") && url.searchParams.get("cursor") === resetPage.nextCursor;
+      }),
+      page.getByTestId("community-gallery-load-more").click(),
+    ]);
+    expect(resetMoreResponse.status()).toBe(200);
+    expect(await resetMoreResponse.finished()).toBeNull();
+    const resetMorePage = await resetMoreResponse.json() as { ok: boolean; items: { id: string }[]; nextCursor: string | null };
+    expect(resetMorePage.ok).toBe(true);
+    expect(resetMorePage.items.length).toBe(1);
+    expect(resetMorePage.nextCursor).toBeNull();
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(25);
     await loadedImages(page, '[data-testid="community-artwork-grid"] img');
+    await expect(page.getByTestId("community-gallery-load-more")).toHaveCount(0);
+    const resetLinks = await page.locator('[data-testid="community-artwork-card"] a[href^="/en/club/artworks/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+    expect(new Set(resetLinks).size).toBe(25);
+    expect([...resetLinks].sort()).toEqual([...uniqueLinks].sort());
     await settled(page);
     await page.getByTestId("community-gallery-product-filter").selectOption(empty.id);
     await expect(page.getByTestId("community-gallery-empty-state")).toBeVisible();
