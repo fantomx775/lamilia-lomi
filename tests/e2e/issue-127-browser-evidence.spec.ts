@@ -389,6 +389,7 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
   let passed = false;
   const geometry: Array<{ kind: string; temperature: string; phase: string; bounds: Awaited<ReturnType<typeof clubGeometry>> }> = [];
   const cacheObservations: Array<{ kind: string; feedbackObserved: boolean }> = [];
+  const coldGates: Partial<Record<"gallery" | "artwork" | "creator", Awaited<ReturnType<typeof holdCleanRsc>>>> = {};
   try {
     // Stable public display name; fixture actor email/password never enters artifacts.
     const username = `ux127_public_${info.project.name.replace(/[^a-z0-9]/gi, "").slice(0, 9)}`;
@@ -408,6 +409,11 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
     // Browser remains a guest: this proves public visibility, not service-role UI access.
     const detailPath = `/en/club/artworks/${artworkId}`;
     const creatorPath = `/en/club/creators/${username}`;
+    // Arm every cold destination before any source page/link can become visible.
+    // Gallery cards expose artwork AND creator links; scrolling/decoding may prefetch both.
+    coldGates.gallery = await holdCleanRsc(page, "/en/club");
+    coldGates.artwork = await holdCleanRsc(page, detailPath);
+    coldGates.creator = await holdCleanRsc(page, creatorPath);
     for (const temperature of ["cold", "warm"] as const) {
       await evidence.drain();
       await page.setViewportSize({ width: temperature === "cold" ? 390 : 1440, height: 1000 });
@@ -422,8 +428,9 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
       await evidence.capture(`${temperature}-entry-before`);
       for (const kind of ["gallery", "artwork", "creator"] as const) {
         const targetPath = kind === "gallery" ? "/en/club" : kind === "artwork" ? detailPath : creatorPath;
-        // Install before opening menu/scrolling anchors, including viewport prefetch.
-        const gate = await holdCleanRsc(page, targetPath);
+        // Cold gates already intercept viewport prefetch; warm remains a genuine revisit.
+        const gate = temperature === "cold" ? coldGates[kind] : await holdCleanRsc(page, targetPath);
+        if (!gate) throw new Error("Missing destination-owned cold RSC gate.");
         let lock: Awaited<ReturnType<typeof holdCleanCommunityRead>> | undefined;
         try {
           await evidence.drain();
@@ -477,7 +484,7 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
           await image.scrollIntoViewIfNeeded();
           await expect.poll(() => image.evaluate(async (node) => { if (!(node instanceof HTMLImageElement)) return false; await node.decode(); return node.naturalWidth > 0 && node.naturalHeight > 0; })).toBe(true);
           await evidence.capture(`${temperature}-${kind}-decoded`);
-        } finally { gate.release(); await lock?.release(); await gate.dispose(); }
+        } finally { gate.release(); await lock?.release(); await gate.dispose(); if (temperature === "cold") delete coldGates[kind]; }
         await evidence.drain();
       }
     }
@@ -490,7 +497,11 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
     evidence.check("actual public media", "Approved owned Storage bytes returned public media200/image MIME and actually decoded; all three route kinds rendered the controlled artist/artwork publicly.");
     passed = true;
   } finally {
+    // Release/dispose still-armed destinations even if setup or an earlier route failed.
+    try { await Promise.all(Object.values(coldGates).map((gate) => gate.dispose())); }
+    finally {
     try { await evidence.finish(passed, { status: passed ? "PASS" : "NOT APPLICABLE", details: passed ? "The same approved isolated artwork persisted across actual list/detail/creator and cold/warm anchor navigation; real HTML plus public media readback confirmed publication. Own fixture is removed only after observer finalization." : "The flow did not complete publication/readback assertions; this is failed or incomplete evidence." }, ["390px cold mobile", "1440px warm desktop", "real pending + real streamed fallback + decoded content; actual geometry recorded for QA visual comparison"]); }
     finally { await fixture.cleanup(); }
+    }
   }
 });

@@ -3,19 +3,8 @@
 import { getImageProps } from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { isMediaProxyPath } from "@/lib/media-upload";
-import type { ProductAsset } from "@/lib/types";
 import { publicImageAlt } from "@/lib/product-display";
-
-type VideoPreviewAsset = Pick<ProductAsset, "contentType" | "path" | "title">;
-
-export function isPlayableVideoAsset(
-  asset: VideoPreviewAsset | null | undefined,
-): asset is VideoPreviewAsset {
-  return Boolean(
-    asset?.path.trim() &&
-      asset.contentType.trim().toLowerCase().startsWith("video/"),
-  );
-}
+import { isPlayableVideoAsset, type VideoPreviewAsset } from "@/lib/product-video";
 
 type ProductVideoPreviewProps = {
   video?: VideoPreviewAsset | null;
