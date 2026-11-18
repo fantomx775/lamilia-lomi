@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Locator, type Request, type APIResponse } from "@playwright/test";
+import { expect, test, type Page, type Locator, type Request } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -12,6 +12,7 @@ import { isLocalDemoAppTarget } from "./local-target";
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
 test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inline playback", async ({ page, browser }, testInfo) => {
+  const imagePayloads = observeImagePayloads(page);
   test.skip(!(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)), "Only a verified disposable loopback local-content app may be mutated.");
   test.setTimeout(120_000);
   const release = await acquireLocalContentStoreLock();
@@ -109,7 +110,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     const opener = page.getByRole("button", { name: /Open image 1/ });
     await opener.scrollIntoViewIfNeeded();
     const thumbnail = opener.locator("img");
-    const thumbnailPixels = await selectedPixels(thumbnail, page);
+    const thumbnailPixels = await selectedPixels(thumbnail, page, imagePayloads);
     const thumbnailWidth = thumbnailPixels.width;
     imageFaultSource = thumbnailPixels.sourcePath;
     expect(thumbnailWidth).toBeGreaterThan(0);
@@ -145,7 +146,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       }
       await expect(dialog.getByRole("status")).toHaveCount(0);
       await expect(dialog.getByRole("alert")).toHaveCount(0);
-      const detailPixels = await selectedPixels(display, page);
+      const detailPixels = await selectedPixels(display, page, imagePayloads);
       const detailWidth = detailPixels.width;
       await testInfo.attach("selected-gallery-bytes", { body: JSON.stringify({ testedSha, runId, thumbnail: thumbnailPixels, detail: detailPixels }), contentType: "application/json" });
       const frame = await dialog.getByTestId("product-gallery-preview-frame").boundingBox();
@@ -170,6 +171,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     try {
       await tallContext.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
       const tall = await tallContext.newPage();
+      const tallImagePayloads = observeImagePayloads(tall);
       const tallErrors: Array<{ category: "unexpected-page-error"; path: string }> = [];
       tall.on("pageerror", () => tallErrors.push({ category: "unexpected-page-error", path: locationPath(tall.url(), String(testInfo.project.use.baseURL)) }));
       let releaseThumbnails!: () => void;
@@ -190,7 +192,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
         const frame = await preview.getByTestId("product-gallery-preview-frame").boundingBox();
         expect(frame!.width).toBeGreaterThan(640);
         const selected = preview.locator("[data-gallery-display]").first();
-        const selectedSource = await selectedPixels(selected, tall);
+        const selectedSource = await selectedPixels(selected, tall, tallImagePayloads);
         expect(selectedSource.width).toBeGreaterThanOrEqual(Math.min(2000, Math.floor(frame!.width * dpr)));
         await capture(tall, `tall-dpr${dpr}-gallery`);
         await testInfo.attach(`optimized-tall-DPR${dpr}-selection`, { body: JSON.stringify({ testedSha, runId, viewport: { width: 1024, height: 1366 }, dpr, frameWidth: frame!.width,
@@ -270,19 +272,32 @@ async function seekAndPaint(locator: Locator) {
   });
 }
 
-async function selectedPixels(locator: Locator, page: Page) {
+type ObservedImagePayload = { body: Promise<Buffer | null>; status: number };
+
+function observeImagePayloads(page: Page) {
+  // Full URLs, redirect aliases and byte buffers exist only inside this test's memory.
+  const payloads = new Map<string, ObservedImagePayload>();
+  page.on("response", (response) => {
+    const request = response.request();
+    if (request.resourceType() !== "image" || !response.ok()) return;
+    const payload = { body: response.body().catch(() => null), status: response.status() };
+    for (let alias: Request | null = request; alias; alias = alias.redirectedFrom()) payloads.set(alias.url(), payload);
+  });
+  return payloads;
+}
+
+async function selectedPixels(locator: Locator, page: Page, payloads: Map<string, ObservedImagePayload>) {
   const source = await locator.evaluate((element) => {
     const image = element as HTMLImageElement;
     return { currentSrc: image.currentSrc, reportedNaturalWidth: image.naturalWidth };
   });
   const selectedUrl = new URL(source.currentSrc);
   expect(selectedUrl.origin).toBe(new URL(page.url()).origin);
-  let response: APIResponse;
-  try { response = await page.request.get(source.currentSrc); }
-  catch { throw new Error("The selected image response could not be fetched."); }
-  expect(response.ok()).toBe(true);
-  const bytes = await response.body();
-  const decoded = await sharp(bytes).metadata();
+  const payload = payloads.get(source.currentSrc);
+  if (!payload) throw new Error("The selected browser image response was not observed.");
+  const bytes = await payload.body;
+  if (!bytes) throw new Error("The observed browser image response body is unavailable.");
+  const decoded = await sharp(bytes).metadata().catch(() => { throw new Error("The observed browser image bytes could not be decoded."); });
   expect(decoded.width).toBeGreaterThan(0);
   const numericParameter = (name: string, allowed: readonly number[]) => {
     const value = selectedUrl.searchParams.get(name);
@@ -291,14 +306,16 @@ async function selectedPixels(locator: Locator, page: Page) {
   const candidatePath = locationPath(selectedUrl.searchParams.get("url") ?? source.currentSrc, page.url());
   const sourcePath = /^\/uploads\/issue-127-video\/page-[0-2]\.png$/.test(candidatePath) ? candidatePath : "[unexpected-source-path]";
   expect(sourcePath).not.toBe("[unexpected-source-path]");
-  // The real URL stays in memory for fetching. Evidence contains structured
-  // paths and only the installed optimizer's discrete public numeric options.
+  // Decode the actual negotiated browser response, never a default-Accept replay.
+  // Evidence contains only structured paths and discrete public numeric options.
   return {
     pathname: selectedUrl.pathname === "/_next/image" ? "/_next/image" : sourcePath,
     sourcePath,
     optimizerWidth: numericParameter("w", [32, 48, 64, 96, 128, 256, 384, 640, 750, 828, 1080, 1200, 1920, 2048, 3840]),
     optimizerQuality: numericParameter("q", [75]),
     currentSrcSha256: createHash("sha256").update(source.currentSrc).digest("hex"),
+    payloadSource: "observed-browser-response-body", payloadStatus: payload.status,
+    payloadSha256: createHash("sha256").update(bytes).digest("hex"),
     reportedNaturalWidth: source.reportedNaturalWidth,
     width: decoded.width!, height: decoded.height!, bytes: bytes.length, format: decoded.format,
   };

@@ -8,12 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProductCatalogLoading } from "@/components/product-catalog-loading";
 
-const CatalogNavigation = createContext<{ pending: boolean; navigate: (url: string) => void } | null>(null);
+type CatalogSubmission = { id: number; href: string };
+const CatalogNavigation = createContext<{ pending: boolean; submission: CatalogSubmission | null; navigate: (url: string) => void } | null>(null);
 
 export function CatalogNavigationProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  return <CatalogNavigation.Provider value={{ pending, navigate: (url) => startTransition(() => router.push(url, { scroll: false })) }}>{children}</CatalogNavigation.Provider>;
+  const [submission, setSubmission] = useState<CatalogSubmission | null>(null);
+  return <CatalogNavigation.Provider value={{ pending, submission, navigate: (url) => {
+    const destination = new URL(url, window.location.href);
+    const href = `${destination.pathname}${destination.search}`;
+    setSubmission((previous) => ({ id: (previous?.id ?? 0) + 1, href }));
+    startTransition(() => router.push(url, { scroll: false }));
+  } }}>{children}</CatalogNavigation.Provider>;
 }
 
 export function CatalogResults({ children, desktopColumns }: { children: ReactNode; desktopColumns: 3 | 4 | 5 }) {
@@ -22,10 +29,23 @@ export function CatalogResults({ children, desktopColumns }: { children: ReactNo
 }
 
 /** Keep the same focused DOM input when an enhanced GET commits its new query. */
-export function CatalogSearchInput({ value, ...props }: Omit<ComponentProps<typeof Input>, "value" | "defaultValue" | "onChange"> & { value: string }) {
-  const [draft, setDraft] = useState({ source: value, text: value });
-  if (draft.source !== value) setDraft({ source: value, text: value });
-  return <Input {...props} value={draft.text} onChange={(event) => setDraft({ source: value, text: event.target.value })} />;
+export function CatalogSearchInput({ value, sourceKey = value, ...props }: Omit<ComponentProps<typeof Input>, "value" | "defaultValue" | "onChange"> & { value: string; sourceKey?: string }) {
+  const submission = useContext(CatalogNavigation)?.submission;
+  const submissionId = submission?.id ?? 0;
+  const [draft, setDraft] = useState({ source: sourceKey, text: value, submissionId, submittedText: value, handledSubmission: 0 });
+  let next = draft;
+  // Snapshot each input separately: the hidden desktop/mobile sibling may have
+  // a different draft from the form which actually submitted this request.
+  if (next.submissionId !== submissionId) next = { ...next, submissionId, submittedText: next.text };
+  if (next.source !== sourceKey) {
+    const newerDraft = submission && next.handledSubmission !== submissionId && sourceKey === submission.href && next.text !== next.submittedText;
+    next = { ...next, source: sourceKey, text: newerDraft ? next.text : value, handledSubmission: submissionId };
+  }
+  if (next !== draft) setDraft(next);
+  return <Input {...props} value={next.text} onChange={(event) => {
+    const text = event.target.value;
+    setDraft((current) => ({ ...current, text }));
+  }} />;
 }
 
 /** GET remains usable without JS. App navigation preserves scroll and disclosure state. */

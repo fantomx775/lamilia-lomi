@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -8,12 +8,36 @@ import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fi
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
+async function captureOwnerCard(page: Page, card: Locator, filename: string) {
+  await card.scrollIntoViewIfNeeded();
+  await expect(card).toBeVisible();
+  const preview = card.getByTestId("community-artwork-preview");
+  await expect(preview).toBeVisible();
+  const decoded = await preview.evaluate(async (element) => {
+    const image = element as HTMLImageElement;
+    await document.fonts.ready;
+    await image.decode();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    return { width: image.naturalWidth, height: image.naturalHeight };
+  });
+  expect(decoded.width).toBeGreaterThan(0);
+  expect(decoded.height).toBeGreaterThan(0);
+  await expect(card.getByTestId("community-artwork-actions")).toBeVisible();
+  await page.mouse.move(0, 0);
+  // Bounded visible-card capture avoids unrelated lazy rows and identities.
+  // Its real decoded image, timestamp, status, description and actions are unmasked.
+  await card.screenshot({ path: filename, animations: "disabled", caret: "hide" });
+  return decoded;
+}
+
 test("F29 owner reaches tied-timestamp artwork 52 and persists edit/delete with access isolation", async ({ page, browser }, testInfo) => {
   test.skip(process.env.RUN_ISSUE_127_OWNER_E2E !== "1", "Requires guarded exclusive local Supabase/Auth/Storage and upload flags ON.");
   test.setTimeout(240_000);
   const fixture = await communityFixtures(testInfo);
   const runId = `ux127-owner-${testInfo.project.name}-${randomUUID().slice(0, 8)}`;
-  const screenshotBase = `ux127-owner-${testInfo.project.name}`;
+  const screenshotBase = `owner-${testInfo.project.name}`;
+  const directory = path.resolve("docs/verification/issue-127");
+  const screenshots: Array<{ path: string; testedSha: string; runId: string; phase: string; decodedPreview: { width: number; height: number } }> = [];
   const manifestDirectory = path.resolve(".task/ux127/runtime-manifests");
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   try {
@@ -77,6 +101,17 @@ test("F29 owner reaches tied-timestamp artwork 52 and persists edit/delete with 
     await page.reload();
     await page.getByTestId("community-my-artworks-more").click();
     await expect(oldest).toContainText("Oldest artwork edited on real backend");
+    // Tie pagination and the real edit/reload were asserted above before changing
+    // only this owned fixture's display dates through the guarded helper.
+    await fixture.normalizeDisplayTimestamps({ artworkIds: [ids[51]] });
+    await page.reload();
+    await page.getByTestId("community-my-artworks-more").click();
+    await expect(page.getByTestId("community-artwork-card")).toHaveCount(52);
+    await expect(oldest).toContainText("Oldest artwork edited on real backend");
+    await mkdir(directory, { recursive: true });
+    const editedPath = `docs/verification/issue-127/${screenshotBase}-edited-reloaded.png`;
+    const editedPreview = await captureOwnerCard(page, oldest, path.resolve(editedPath));
+    screenshots.push({ path: editedPath, testedSha, runId, phase: "oldest-52-edited-reloaded", decodedPreview: editedPreview });
     await oldest.getByTestId("community-artwork-actions").click();
     await oldest.getByTestId("community-artwork-delete").click();
     await page.getByTestId("community-artwork-confirm-delete").click();
@@ -96,12 +131,24 @@ test("F29 owner reaches tied-timestamp artwork 52 and persists edit/delete with 
     }
     const anonymous = await fixture.newPage(browser);
     expect((await anonymous.request.get(`${COMMUNITY_TEST_ORIGIN}/api/community/my-artworks?cursor=${encodeURIComponent(cursor)}`)).status()).toBe(401);
-    const directory = path.resolve("docs/verification/issue-127");
-    await mkdir(directory, { recursive: true });
-    await page.screenshot({ path: path.join(directory, `${screenshotBase}.png`), fullPage: true });
-    await mkdir(manifestDirectory, { recursive: true });
-    await writeFile(path.join(manifestDirectory, `${runId}.json`), JSON.stringify({ testedSha, runId, status: "PASS", browser: testInfo.project.name,
-      checks: ["52 tied timestamps without duplicate or omission", "failed page keeps 50 rows", "real edit and revision readback", "reload", "real delete and reload", "owner/stranger/admin/anonymous isolation"],
-      screenshots: [{ path: `docs/verification/issue-127/${screenshotBase}.png`, testedSha, runId }] }, null, 2));
+    // The original oldest artwork is already proven deleted after DB + reload,
+    // and every denial check has passed. Capture the next oldest remaining card.
+    await fixture.normalizeDisplayTimestamps({ artworkIds: [ids[50]] });
+    await page.reload();
+    await page.getByTestId("community-my-artworks-more").click();
+    await expect(page.getByTestId("community-artwork-card")).toHaveCount(51);
+    await expect(oldest).toHaveCount(0);
+    const remainingOldest = page.locator(`#creation-${ids[50]}`);
+    await expect(remainingOldest).toContainText("Owner page 51");
+    const deletedPath = `docs/verification/issue-127/${screenshotBase}-deleted-reloaded.png`;
+    const remainingPreview = await captureOwnerCard(page, remainingOldest, path.resolve(deletedPath));
+    screenshots.push({ path: deletedPath, testedSha, runId, phase: "next-oldest-after-52-deleted-reloaded", decodedPreview: remainingPreview });
   } finally { await fixture.cleanup(); }
+  // A failed assertion or failed cleanup bypasses this success record entirely.
+  await mkdir(manifestDirectory, { recursive: true });
+  await writeFile(path.join(manifestDirectory, `${runId}.json`), JSON.stringify({ testedSha, runId, status: "PASS", browser: testInfo.project.name,
+    viewport: page.viewportSize(),
+    checks: ["52 tied timestamps without duplicate or omission", "failed page keeps 50 rows", "real PATCH200 payload and revision readback", "reload", "real delete and reload", "owner/stranger/admin/anonymous isolation", "fixture cleanup completed"],
+    screenshotPolicy: "Stable per-project bounded visible-card captures, actual image decode before capture; no status/action/description/timestamp mask. Only each captured owned fixture display timestamp is normalized after its functional persistence assertions through the existing owner/plausibility guard. No username is rendered inside the owner card projection.",
+    screenshots }, null, 2));
 });

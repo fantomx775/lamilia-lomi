@@ -1,7 +1,7 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route, type TestInfo } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
-import { readFile, unlink } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
@@ -16,8 +16,34 @@ test.beforeEach(async ({ page }) => {
 function requireExclusive(info: import("@playwright/test").TestInfo) {
   if (info.config.workers !== 1) throw new Error("UX127 controlled fixtures require --workers=1.");
 }
-async function capture(page: Page, info: import("@playwright/test").TestInfo, phase: string) {
-  await page.screenshot({ path: info.outputPath(`${phase}.png`), animations: "disabled", fullPage: false });
+type ReaderScreenshot = { path: string; phase: string; testedSha: string; runId: string; sourceClean: boolean };
+const readerCaptures = new WeakMap<TestInfo, { testedSha: string; runId: string; screenshots: ReaderScreenshot[] }>();
+async function capture(page: Page, info: TestInfo, phase: string) {
+  if (!/^[a-z0-9-]+$/i.test(phase)) throw new Error("Unsafe reader screenshot phase.");
+  const project = info.project.name.replace(/[^a-z0-9-]/gi, "-");
+  const testKey = createHash("sha256").update(info.titlePath.join("\n")).digest("hex").slice(0, 12);
+  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  if (!/^[a-f0-9]{40}$/i.test(testedSha)) throw new Error("Reader capture requires the actual full Git HEAD.");
+  let record = readerCaptures.get(info);
+  if (!record) {
+    record = { testedSha, runId: `ux127-reader-${project}-${testKey}-${randomUUID()}`, screenshots: [] };
+    readerCaptures.set(info, record);
+  }
+  if (record.testedSha !== testedSha) throw new Error("Git HEAD changed during this reader test capture run.");
+  const sourceClean = !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "next.config.ts", "next.config.mjs", "playwright.config.ts", "package.json", "package-lock.json"], { encoding: "utf8" }).trim();
+  const screenshotPath = `docs/verification/issue-127/reader-${project}-${phase}.png`;
+  await mkdir(path.dirname(path.resolve(screenshotPath)), { recursive: true });
+  await page.screenshot({ path: screenshotPath, animations: "disabled", fullPage: false, caret: "hide" });
+  const screenshot = { path: screenshotPath, phase, testedSha, runId: record.runId, sourceClean };
+  record.screenshots.push(screenshot);
+  const manifestDirectory = path.resolve(".task/runtime-manifests");
+  await mkdir(manifestDirectory, { recursive: true });
+  await writeFile(path.join(manifestDirectory, `reader-${project}-${testKey}.json`), JSON.stringify({
+    schemaVersion: 1, status: "CAPTURE_ONLY", project, testKey, testedSha, runId: record.runId,
+    screenshots: record.screenshots, screenshotReview: { status: "NOT RUN", details: "Capture provenance only; this is not a test verdict, visual review or clean browser harness record." },
+  }, null, 2));
+  await info.attach(`reader-${phase}-provenance`, { body: Buffer.from(JSON.stringify({ status: "CAPTURE_ONLY", ...screenshot }, null, 2)), contentType: "application/json" });
+  await info.attach(`reader-${phase}`, { path: screenshotPath, contentType: "image/png" });
 }
 
 /** No test hook or schema/security change: a local transaction owns this lock.
@@ -113,6 +139,7 @@ test("F18 core book is usable while real reader query waits, fails, and recovers
     await page.getByTestId("product-community-error").getByRole("button", { name: "Try again" }).click();
     await expect(page.getByRole("heading", { name: "Colored by Our Readers" })).toBeVisible();
     await expect(page.getByTestId("product-community-error")).toHaveCount(0);
+    await page.getByRole("heading", { name: "Colored by Our Readers" }).scrollIntoViewIfNeeded();
     await capture(page, info, "f18-recovered");
   } finally { await lock?.release(); await fixture.cleanup(); }
 });
@@ -141,14 +168,46 @@ test("F07 F10 F23 catalog Enter, all filter context, Back and native GET", async
     await expect(page).toHaveURL((url) => url.pathname === "/en/products" && url.searchParams.get("tag") === "" && [...initialQuery].every(([key, value]) => url.searchParams.get(key) === value));
     await expect(apply).toBeFocused();
     await expect(page.getByTestId("catalog-mobile-filter-disclosure")).toHaveAttribute("open");
-    await page.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).fill(book.title);
-    const searchScroll = await page.evaluate(() => scrollY);
-    await page.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).press("Enter");
-    await expect(page.getByTestId("catalog-mobile-filter-disclosure")).toHaveAttribute("open");
+    const searchForm = page.getByTestId("catalog-mobile-search");
+    const search = searchForm.getByRole("textbox", { name: "Search catalog" });
     const card = page.locator(`#catalog-product-${book.id}`);
-    await expect(card.getByRole("heading", { name: book.title })).toBeVisible();
-    await expect(page.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" })).toBeFocused();
-    expect(await page.evaluate(() => scrollY)).toBe(searchScroll);
+    // Hold only the actual A query's navigation RSC, then continue it unchanged.
+    // This tests the response/draft order in Next itself, not synthetic pending.
+    const matchingSearch = (url: URL) => url.origin === COMMUNITY_TEST_ORIGIN && url.pathname === "/en/products"
+      && [...query].every(([key, value]) => url.searchParams.get(key) === value)
+      && [...url.searchParams.keys()].every((key) => query.has(key) || key === "_rsc");
+    let releaseSearch!: () => void;
+    const searchGate = new Promise<void>((resolve) => { releaseSearch = resolve; });
+    let heldNavigations = 0;
+    const holdSearch = async (route: Route) => {
+      const request = route.request(); const headers = request.headers();
+      if (request.method() === "GET" && headers.rsc === "1" && !headers["next-router-prefetch"] && !headers["next-router-segment-prefetch"]) {
+        heldNavigations += 1; await searchGate;
+      }
+      await route.continue();
+    };
+    await page.route(matchingSearch, holdSearch);
+    try {
+      await search.fill(book.title);
+      const searchScroll = await page.evaluate(() => scrollY);
+      await search.press("Enter");
+      await expect.poll(() => heldNavigations).toBeGreaterThan(0);
+      await expect(searchForm.locator('[data-catalog-form-pending="true"]')).toBeVisible();
+      await expect(page.getByTestId("product-catalog-loading")).toBeVisible();
+      await search.press("End"); await search.pressSequentially(" sky");
+      const newerDraft = `${book.title} sky`;
+      await expect(search).toHaveValue(newerDraft); await expect(search).toBeFocused();
+      releaseSearch();
+      await expect(page).toHaveURL((url) => url.pathname === "/en/products" && [...query].every(([key, value]) => url.searchParams.get(key) === value));
+      await expect(card.getByRole("heading", { name: book.title })).toBeVisible();
+      await expect(searchForm.locator('[data-catalog-form-pending="true"]')).toHaveCount(0);
+      await expect(page.getByTestId("catalog-mobile-filter-disclosure")).toHaveAttribute("open");
+      await expect(search).toHaveValue(newerDraft); await expect(search).toBeFocused();
+      expect(await page.evaluate(() => scrollY)).toBe(searchScroll);
+      const committedUrl = page.url();
+      await search.fill(book.title); // Intentionally discard B, without submitting it.
+      await expect(search).toHaveValue(book.title); await expect(page).toHaveURL(committedUrl);
+    } finally { releaseSearch(); await page.unroute(matchingSearch, holdSearch); }
     await card.getByRole("link").click();
     await expect(page).toHaveURL(/\?catalog=/);
     await page.getByRole("link", { name: "Back to catalog" }).click();
@@ -191,9 +250,7 @@ test("F07 F10 F23 catalog Enter, all filter context, Back and native GET", async
       const nativeSearch = native.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" });
       const nativeSearchIncludingHidden = native.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog", includeHidden: true });
       await info.attach("f07-native-before-search-diagnostics", { body: Buffer.from(JSON.stringify({ responseStatus: nativeResponse?.status() ?? null, ...nativeDiagnostics, searchRoleCount: await nativeSearch.count(), searchRoleIncludingHiddenCount: await nativeSearchIncludingHidden.count() }, null, 2)), contentType: "application/json" });
-      const nativeScreenshot = info.outputPath("f07-native-before-search.png");
-      await native.screenshot({ path: nativeScreenshot, fullPage: false, animations: "disabled", caret: "hide" });
-      await info.attach("f07-native-before-search", { path: nativeScreenshot, contentType: "image/png" });
+      await capture(native, info, "f07-native-before-search");
       expect(nativeResponse?.status()).toBe(200);
       await expect(native.getByTestId("catalog-mobile-search")).toBeVisible();
       await native.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).fill(book.title);
@@ -275,8 +332,9 @@ test("F24 F25 real role fixtures open private files directly and explain sharing
   let assetPath: string | undefined;
   try {
     const book = await fixture.product("UX127 direct library files");
-    const owner = await fixture.actor("library-owner", { username: `lib_${randomUUID().slice(0, 8)}` });
-    const noBooks = await fixture.actor("library-empty", { username: `empty_${randomUUID().slice(0, 8)}` });
+    const publicNameSuffix = info.project.name.replace(/[^a-z0-9]/gi, "").slice(0, 10);
+    const owner = await fixture.actor("library-owner", { username: `ux127_library_${publicNameSuffix}` });
+    const noBooks = await fixture.actor("library-empty", { username: `ux127_empty_${publicNameSuffix}` });
     const join = await fixture.actor("library-join");
     const unverified = await fixture.actor("library-unverified");
     await fixture.unlock(owner.id, book.id); await fixture.unlock(join.id, book.id); await fixture.unlock(unverified.id, book.id);

@@ -95,7 +95,7 @@ export function ProductCatalogShell({ snapshot, locale, rawSearchParams, childre
         {hiddenFilterValues.map(({ name, value }) => value ? <input key={name} type="hidden" name={name} value={value} /> : null)}
         <label className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted)]" />
-          <CatalogSearchInput aria-label="Search catalog" name="q" value={filters.q ?? ""} className="pl-9" />
+          <CatalogSearchInput aria-label="Search catalog" name="q" value={filters.q ?? ""} sourceKey={getCatalogHref(locale, rawSearchParams)} className="pl-9" />
         </label>
         <CatalogSubmitButton size="sm" className="h-11 px-3">
           <Search className="size-4" aria-hidden />
@@ -137,7 +137,7 @@ export function ProductCatalogShell({ snapshot, locale, rawSearchParams, childre
         {preservedQueryInputs}
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted)]" />
-          <CatalogSearchInput aria-label="Search catalog" name="q" value={filters.q ?? ""} className="pl-9" />
+          <CatalogSearchInput aria-label="Search catalog" name="q" value={filters.q ?? ""} sourceKey={getCatalogHref(locale, rawSearchParams)} className="pl-9" />
         </label>
         {renderCatalogFilterFields({ filters, categories, tags, productTypes })}
         <div className="flex items-center gap-3">

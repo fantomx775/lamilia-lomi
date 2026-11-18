@@ -12,6 +12,31 @@ import { CatalogForm, CatalogNavigationProvider, CatalogResults, CatalogSearchIn
 afterEach(() => { cleanup(); push.mockClear(); });
 
 describe("progressively enhanced catalog GET", () => {
+  it("keeps edits newer than submit A when A commits, then synchronizes Back and Forward", () => {
+    const controls = (query: string, sourceKey = query ? `/en/products?q=${encodeURIComponent(query)}` : "/en/products") => <CatalogNavigationProvider>
+      <CatalogForm action="/en/products" data-testid="mobile"><CatalogSearchInput aria-label="Mobile search" name="q" value={query} sourceKey={sourceKey} /><CatalogSubmitButton>Search</CatalogSubmitButton></CatalogForm>
+      <CatalogForm action="/en/products" data-testid="desktop"><CatalogSearchInput aria-label="Desktop search" name="q" value={query} sourceKey={sourceKey} /></CatalogForm>
+    </CatalogNavigationProvider>;
+    const view = render(controls(""));
+    const mobile = screen.getByRole("textbox", { name: "Mobile search" });
+    const desktop = screen.getByRole("textbox", { name: "Desktop search" });
+    mobile.focus(); fireEvent.change(mobile, { target: { value: "Garden" } });
+    fireEvent.submit(screen.getByTestId("mobile"));
+    expect(push).toHaveBeenCalledWith("/en/products?q=Garden", { scroll: false });
+    // New unsent input arrives after the actual form submission, before its RSC props.
+    fireEvent.change(mobile, { target: { value: "Garden sky" } });
+    view.rerender(controls("Garden"));
+    expect(mobile).toHaveValue("Garden sky"); expect(mobile).toHaveFocus();
+    expect(desktop).toHaveValue("Garden");
+    // Consuming the submit acknowledgement once keeps future history authoritative.
+    view.rerender(controls("Garden", "/en/products?q=Garden&category=earlier"));
+    expect(mobile).toHaveValue("Garden"); expect(mobile).toHaveFocus();
+    view.rerender(controls("Earlier search"));
+    expect(mobile).toHaveValue("Earlier search"); expect(mobile).toHaveFocus();
+    view.rerender(controls("Garden"));
+    expect(mobile).toHaveValue("Garden"); expect(mobile).toHaveFocus();
+    expect(desktop).toHaveValue("Garden");
+  });
   it("retains textbox focus when server query changes and restores later history values", () => {
     const view = render(<CatalogSearchInput aria-label="Search catalog" name="q" value="" />);
     const input = screen.getByRole("textbox", { name: "Search catalog" });

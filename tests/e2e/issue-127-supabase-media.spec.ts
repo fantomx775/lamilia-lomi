@@ -1,10 +1,11 @@
 import { expect, test, type Request, type Page, type Locator } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { NextCancellationObserver } from "./helpers/next-navigation-cancellations";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -16,6 +17,10 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   const fixtures = await communityFixtures(testInfo); // Pins the existing strict local Docker/API/DB identity before writes.
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const runId = process.env.UX127_MEDIA_RUN_ID ?? `supabase-media-${randomUUID()}`;
+  const nextObserver = new NextCancellationObserver({ testedSha, runId, origin: COMMUNITY_TEST_ORIGIN });
+  await nextObserver.observe(page);
+  let nextSnapshot: Awaited<ReturnType<NextCancellationObserver["finish"]>> | null = null;
+  let nextFinalizationFailed = false;
   const screenshots: Array<Record<string, unknown>> = [];
   let completed = false;
   let phase = "fixture-setup";
@@ -30,22 +35,83 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   const objects: Array<{ bucket: string; path: string }> = [];
   const consoleErrors: Array<{ category: "unexpected-console-error"; path: string }> = [];
   const pageErrors: Array<{ category: "unexpected-page-error"; path: string }> = [];
-  type RequestMetadata = { requestId: number; method: string; path: string; resource: string; phaseAtStart: string; navigation: boolean; rsc: boolean; prefetch: boolean };
-  const failed: Array<RequestMetadata & { error: string | null; phaseAtFailure: string; expectedPause: boolean; expectedFault: boolean }> = [];
+  type RequestMetadata = { requestId: number; method: string; path: string; resource: string; phaseAtStart: string; navigation: boolean; rsc: boolean; prefetch: boolean;
+    urlSha256: string; startedAtEpochMs: number; range: string | null; responseStatus: number | null; contentRange: string | null };
+  type FailedRequest = RequestMetadata & { error: string | null; phaseAtFailure: string; failedAtEpochMs: number; expectedPause: boolean; expectedFault: boolean;
+    redirectChain: RequestMetadata[]; pauseGateRequest: boolean; pauseRequestedAtFailure: boolean; validatedNextPrefetchId?: string;
+    pauseWitness?: { atEpochMs: number; sourcePath: string; trusted: true; paused: true } };
+  const failed: FailedRequest[] = [];
   const inFlight = new Map<Request, RequestMetadata>();
+  const requestIdentity = new WeakMap<Request, RequestMetadata>();
+  const nativeTimeline: Array<Record<string, unknown>> = [];
+  const observerErrors: Array<{ category: "invalid-native-observation" }> = [];
+  const lifecycleActions: Array<{ action: string; phase: string; atEpochMs: number }> = [];
   const networkDiagnostics: string[] = [];
   let requestSequence = 0;
   function requestMetadata(request: Request): RequestMetadata {
+    const existing = requestIdentity.get(request);
+    if (existing) return existing;
     const headers = request.headers();
-    return { requestId: ++requestSequence, method: request.method(), path: locationPath(request.url(), COMMUNITY_TEST_ORIGIN),
+    const metadata = { requestId: ++requestSequence, method: request.method(), path: locationPath(request.url(), COMMUNITY_TEST_ORIGIN),
       resource: request.resourceType(), phaseAtStart: phase, navigation: request.isNavigationRequest(),
-      rsc: headers.rsc === "1", prefetch: headers["next-router-prefetch"] === "1" || Boolean(headers["next-router-segment-prefetch"]) };
+      rsc: headers.rsc === "1", prefetch: headers["next-router-prefetch"] === "1" || Boolean(headers["next-router-segment-prefetch"]),
+      urlSha256: createHash("sha256").update(request.url()).digest("hex"), startedAtEpochMs: Date.now(),
+      range: headers.range ? /^bytes=\d{1,16}-\d{0,16}$/.test(headers.range) ? headers.range : "unknown-range" : null,
+      responseStatus: null as number | null, contentRange: null as string | null };
+    requestIdentity.set(request, metadata);
+    return metadata;
+  }
+  async function drainBeforeReset(reason: string) {
+    phase = `drain:${reason}`;
+    lifecycleActions.push({ action: "drain-start", phase, atEpochMs: Date.now() });
+    // Wait for genuine document/prefetch/script/image work; do not abort it or
+    // count this wait as part of click-to-frame latency. Media is observed separately.
+    await expect.poll(() => [...inFlight.values()].filter((request) => request.resource !== "media").length,
+      { timeout: 20_000, message: "Started non-media document requests must settle before a test-driven reset." }).toBe(0);
+    lifecycleActions.push({ action: "drain-complete", phase, atEpochMs: Date.now() });
+  }
+  async function resetDocument(url: string, label: string) {
+    await drainBeforeReset(label);
+    phase = label;
+    lifecycleActions.push({ action: "goto-requested", phase, atEpochMs: Date.now() });
+    await page.goto(url);
+    lifecycleActions.push({ action: "goto-committed", phase, atEpochMs: Date.now() });
+  }
+  async function finalizeNextRequests() {
+    if (nextSnapshot || nextFinalizationFailed) return;
+    phase = "network:typed-finalization";
+    try { nextSnapshot = await nextObserver.finish(); }
+    catch { nextFinalizationFailed = true; return; }
+    const byHash = new Map<string, string[]>();
+    for (const outcome of nextSnapshot.expectedNextCancellations) {
+      if (outcome.kind !== "next-prefetch" || typeof outcome.requestUrl !== "string" || typeof outcome.id !== "string") continue;
+      const hash = createHash("sha256").update(outcome.requestUrl).digest("hex");
+      byHash.set(hash, [...(byHash.get(hash) ?? []), outcome.id]);
+    }
+    for (const request of failed) {
+      if (request.error === "net::ERR_ABORTED" && request.method === "GET" && request.resource === "fetch" && request.rsc && request.prefetch) {
+        request.validatedNextPrefetchId = byHash.get(request.urlSha256)?.shift();
+      }
+    }
+    if ([...byHash.values()].some((outcomes) => outcomes.length)) nextFinalizationFailed = true;
+    for (const request of failed) {
+      if (!request.pauseGateRequest || !request.pauseRequestedAtFailure || request.method !== "GET" || request.path !== ownedVideoPath || request.resource !== "media") continue;
+      const witness = nativeTimeline.find((event) => event.event === "pause" && event.trusted === true && event.paused === true && event.connected === true &&
+        (event.sourcePath === ownedVideoPath || event.sourcePath === ownedStoragePath) && typeof event.atEpochMs === "number" &&
+        event.atEpochMs >= request.startedAtEpochMs && event.atEpochMs < request.failedAtEpochMs);
+      if (witness) {
+        request.expectedPause = true;
+        request.pauseWitness = { atEpochMs: witness.atEpochMs as number, sourcePath: witness.sourcePath as string, trusted: true, paused: true };
+      }
+    }
   }
   async function networkSnapshot(checkpoint: string) {
     // Paths omit all query/fragment data, including signed Storage tokens. Only
     // two routing-header booleans are retained; never cookies/headers/bodies.
-    const body = JSON.stringify({ testedSha, runId, checkpoint, phase, consoleErrors, pageErrors, failed,
-      pending: [...inFlight.values()] }, null, 2);
+    const body = JSON.stringify({ testedSha, runId, checkpoint, phase, consoleErrors, pageErrors, failed, nativeTimeline, lifecycleActions, observerErrors,
+      ownedMedia: { apiPath: ownedVideoPath, storagePath: ownedStoragePath }, nextFinalizationFailed,
+      expectedNextCancellations: nextSnapshot?.expectedNextCancellations.filter((outcome) => outcome.kind === "next-prefetch") ?? [],
+      closedPrefetches: nextSnapshot?.closedPrefetches ?? [], pending: [...inFlight.values()] }, null, 2);
     const filename = `supabase-media-network-${checkpoint}.json`;
     await writeFile(testInfo.outputPath(filename), body);
     networkDiagnostics.push(filename);
@@ -56,6 +122,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   const expectedFaultConsole: Array<{ category: "controlled-media-resource-error"; path: string }> = [];
   let faultActive = false;
   let ownedVideoPath = "";
+  let ownedStoragePath = "";
   let pauseConfirmed = false;
   let waitEvents = { waiting: 0, stalled: 0 };
   page.on("console", (message) => {
@@ -66,11 +133,19 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   });
   page.on("pageerror", () => pageErrors.push({ category: "unexpected-page-error", path: locationPath(page.url(), COMMUNITY_TEST_ORIGIN) }));
   page.on("request", (request) => inFlight.set(request, requestMetadata(request)));
+  page.on("response", (response) => {
+    const metadata = requestMetadata(response.request());
+    metadata.responseStatus = response.status();
+    const contentRange = response.headers()["content-range"];
+    metadata.contentRange = contentRange ? /^bytes \d{1,16}-\d{1,16}\/(?:\d{1,16}|\*)$/.test(contentRange) ? contentRange : "unknown-content-range" : null;
+  });
   page.on("requestfinished", (request) => inFlight.delete(request));
   page.on("requestfailed", (request) => {
+    const redirectChain: RequestMetadata[] = [];
+    for (let previous = request.redirectedFrom(); previous; previous = previous.redirectedFrom()) redirectChain.unshift({ ...requestMetadata(previous) });
     failed.push({ ...(inFlight.get(request) ?? requestMetadata(request)),
-      error: networkErrorCategory(request), phaseAtFailure: phase,
-      expectedPause: pauseConfirmed && delayedRequests.has(request), expectedFault: faultRequests.has(request) });
+      error: networkErrorCategory(request), phaseAtFailure: phase, failedAtEpochMs: Date.now(), redirectChain,
+      expectedPause: false, pauseGateRequest: delayedRequests.has(request), pauseRequestedAtFailure: pauseConfirmed, expectedFault: faultRequests.has(request) });
     inFlight.delete(request);
   });
   try {
@@ -101,14 +176,18 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     await page.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
     const videoPath = `/api/media/${video}`;
     ownedVideoPath = videoPath;
+    ownedStoragePath = `/storage/v1/object/sign/public-videos/${objects.find((object) => object.bucket === "public-videos")!.path}`;
+    await observeNativeMedia(page, [ownedVideoPath, ownedStoragePath], (observation) => {
+      if (!observation) observerErrors.push({ category: "invalid-native-observation" });
+      else nativeTimeline.push({ ...observation, phaseAtReceipt: phase, receivedAtEpochMs: Date.now() });
+    });
     phase = "range-probe";
     const range = await page.request.get(`${COMMUNITY_TEST_ORIGIN}${videoPath}`, { headers: { Range: "bytes=0-127" } });
     expect(range.status()).toBe(206); expect(range.headers()["content-type"]).toContain("video/mp4");
     expect(range.headers()["content-range"]).toMatch(/^bytes 0-127\//); expect((await range.body()).length).toBe(128);
     const timings: Array<{ cache: string; clickToFrameMs: number }> = [];
     for (const cache of ["cold-media", "warm-media"]) {
-      phase = `${cache}:navigation`;
-      await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`);
+      await resetDocument(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`, `${cache}:navigation`);
       phase = `${cache}:video-intent`;
       const player = page.locator("video[data-flipthrough]");
       await player.scrollIntoViewIfNeeded();
@@ -149,8 +228,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       catch { if (!pauseConfirmed || !route.request().failure()) throw new Error("Unexpected owned media-route continuation failure."); }
     });
     try {
-      phase = "pending-playback:navigation";
-      await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`);
+      await resetDocument(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`, "pending-playback:navigation");
       await page.locator("video").scrollIntoViewIfNeeded();
       await page.locator("video").evaluate((element) => {
         const events = { waiting: 0, stalled: 0 };
@@ -181,8 +259,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     faultActive = true;
     await page.route(videoPattern, async (route) => { faultRequests.add(route.request()); await route.abort("failed"); });
     try {
-      phase = "controlled-fault:navigation";
-      await page.goto(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`);
+      await resetDocument(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`, "controlled-fault:navigation");
       await page.locator("video").scrollIntoViewIfNeeded();
       const play = page.getByTestId("product-video-play");
       if (await play.isVisible()) await play.click();
@@ -233,15 +310,27 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     const image = dialog.locator("[data-gallery-display]").first();
     await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(2000);
     await capture(page, "decoded-gallery");
+    await drainBeforeReset("gallery-close");
     phase = "gallery:close";
     await page.keyboard.press("Escape"); await expect(opener).toBeFocused();
+    await drainBeforeReset("final-document-teardown");
+    await finalizeNextRequests();
     await testInfo.attach("real-storage-media-evidence", { body: JSON.stringify({ testedSha, runId, project: testInfo.project.name, timings, consoleErrors, expectedFaultConsole, pageErrors, failed, backgroundVisibility, pausedOnReturn, backgroundStartTime, waitEvents,
       optimizerSelection: "NOT APPLICABLE to unoptimized authenticated Supabase fallback; tested separately in local-demo optimized image campaign" }), contentType: "application/json" });
     phase = "network:assertions";
     await networkSnapshot("before-assertions");
-    expect(pageErrors).toEqual([]); expect(consoleErrors).toEqual([]);
+    expect(pageErrors).toEqual([]); expect(consoleErrors).toEqual([]); expect(observerErrors).toEqual([]); expect(nextFinalizationFailed).toBe(false);
     for (const request of failed) {
+      if (request.validatedNextPrefetchId) {
+        expect(request.method).toBe("GET"); expect(request.resource).toBe("fetch"); expect(request.rsc && request.prefetch).toBe(true);
+        expect(request.error).toBe("net::ERR_ABORTED");
+        continue;
+      }
       expect(request.expectedPause || request.expectedFault).toBe(true); expect(request.method).toBe("GET"); expect(request.path).toBe(videoPath);
+      if (request.expectedPause) {
+        expect(request.pauseWitness?.trusted && request.pauseWitness.paused).toBe(true);
+        expect(request.pauseWitness!.atEpochMs).toBeLessThan(request.failedAtEpochMs);
+      }
       expect(request.expectedFault ? ["net::ERR_FAILED", "Load failed", "Unknown error", "Failed"] : ["net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"]).toContain(request.error);
     }
     expect(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(testedSha);
@@ -249,7 +338,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   } finally {
     let cleanupVerified = false;
     try {
-      try { await networkSnapshot("finally-before-cleanup"); }
+      try { await finalizeNextRequests(); await networkSnapshot("finally-before-cleanup"); }
       finally {
       phase = "fixture-cleanup";
       try {
@@ -269,6 +358,57 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     }
   }
 });
+
+async function observeNativeMedia(page: Page, ownedPaths: string[], receive: (value: Record<string, unknown> | null) => void) {
+  const binding = `__ux127Media_${randomUUID().replaceAll("-", "")}`;
+  const events = ["play", "playing", "pause", "waiting", "stalled", "abort", "emptied", "loadstart", "loadedmetadata", "loadeddata", "suspend", "canplay", "seeking", "seeked", "error", "ended", "pagehide", "beforeunload", "visibilitychange", "video-detached"];
+  await page.exposeBinding(binding, (_source, input: unknown) => {
+    if (!input || typeof input !== "object") { receive(null); return; }
+    const value = input as Record<string, unknown>;
+    const numbers = ["atEpochMs", "performanceMs", "timeOrigin", "currentTime", "readyState", "networkState", "errorCode"];
+    if (typeof value.event !== "string" || !events.includes(value.event) ||
+      !numbers.every((key) => typeof value[key] === "number" && Number.isFinite(value[key])) ||
+      ![0, 1, -1].includes(value.sourceIndex as number) ||
+      !["none", "metadata", "auto", "empty", "unknown"].includes(value.preload as string) ||
+      !["paused", "connected", "trusted", "documentHidden", "mediaErrorPresent"].every((key) => typeof value[key] === "boolean")) { receive(null); return; }
+    // Reconstruct a bounded record; never spread arbitrary browser payloads.
+    receive({ event: value.event, atEpochMs: value.atEpochMs, performanceMs: value.performanceMs, timeOrigin: value.timeOrigin,
+      currentTime: value.currentTime, readyState: value.readyState, networkState: value.networkState, errorCode: value.errorCode, preload: value.preload, mediaErrorPresent: value.mediaErrorPresent,
+      paused: value.paused, connected: value.connected, trusted: value.trusted, documentHidden: value.documentHidden,
+      sourcePath: value.sourceIndex === 0 || value.sourceIndex === 1 ? ownedPaths[value.sourceIndex] : "[no-owned-media-source]" });
+  });
+  await page.addInitScript(({ binding, ownedPaths }) => {
+    let lastVideo: HTMLVideoElement | null = null;
+    const emit = (video: HTMLVideoElement, event: string, trusted: boolean) => {
+      let sourceIndex = -1;
+      try { sourceIndex = ownedPaths.indexOf(new URL(video.currentSrc || video.src, location.href).pathname); } catch { /* No raw URL is sent. */ }
+      const payload = { event, atEpochMs: Date.now(), performanceMs: performance.now(), timeOrigin: performance.timeOrigin,
+        currentTime: video.currentTime, readyState: video.readyState, networkState: video.networkState, errorCode: video.error?.code ?? 0,
+        preload: ["none", "metadata", "auto"].includes(video.preload) ? video.preload : video.preload === "" ? "empty" : "unknown",
+        mediaErrorPresent: video.error !== null, paused: video.paused, connected: video.isConnected, trusted, documentHidden: document.hidden, sourceIndex };
+      const report = (window as unknown as Record<string, (value: unknown) => Promise<void>>)[binding];
+      void report(payload).catch(() => { /* A document may be disposed before its binding promise returns. */ });
+    };
+    for (const name of ["play", "playing", "pause", "waiting", "stalled", "abort", "emptied", "loadstart", "loadedmetadata", "loadeddata", "suspend", "canplay", "seeking", "seeked", "error", "ended"]) {
+      document.addEventListener(name, (event) => {
+        if (event.target instanceof HTMLVideoElement && event.target.matches("[data-flipthrough]")) {
+          lastVideo = event.target; emit(lastVideo, name, event.isTrusted);
+        }
+      }, true);
+    }
+    for (const name of ["pagehide", "beforeunload", "visibilitychange"]) {
+      (name === "visibilitychange" ? document : window).addEventListener(name, (event: Event) => {
+        const video = document.querySelector<HTMLVideoElement>("video[data-flipthrough]") ?? lastVideo;
+        if (video) emit(video, name, event.isTrusted);
+      });
+    }
+    new MutationObserver(() => {
+      const video = document.querySelector<HTMLVideoElement>("video[data-flipthrough]");
+      if (lastVideo && !lastVideo.isConnected) emit(lastVideo, "video-detached", false);
+      lastVideo = video;
+    }).observe(document, { childList: true, subtree: true });
+  }, { binding, ownedPaths });
+}
 
 function locationPath(value: string, base: string) {
   try {
