@@ -1067,6 +1067,85 @@ describe("ProductEditor V2", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  async function cancelledMediaSavedElsewhere(newProduct = false) {
+    const original = new File(["original-video"], "cancelled-video.webm", { type: "video/webm" });
+    let videoAttempts = 0;
+    editorMocks.optimizeProductMedia.mockImplementation(async (kind, file: File, signal: AbortSignal) => {
+      if (kind !== "video") return file;
+      videoAttempts += 1;
+      if (videoAttempts === 1) return new Promise<File>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+      });
+      return new File(["prepared-video"], "cancelled-video.mp4", { type: "video/mp4" });
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_input, init?: RequestInit) => {
+      if (!init?.method) return readerArtworkGetResponse();
+      const body = JSON.parse(String(init.body));
+      const storagePath = `/uploads/${body.productId}/${body.kind}/${body.filename}`;
+      return { ok: true, json: async () => ({ asset: { id: `recovery-${body.kind}`, kind: body.kind,
+        bucket: body.kind === "video" ? "public-videos" : "public-media", path: storagePath, storagePath,
+        filename: body.filename, contentType: body.contentType, sizeBytes: body.sizeBytes, sortOrder: 1 } }) };
+    }));
+    const saveAction = vi.fn(async (data: FormData) => ({ ok: true as const, id: String(data.get("id")) }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Recovery" product={newProduct ? undefined : { ...product, status: "draft", assets: [] }}
+      categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
+    const title = view.getByLabelText("Tytu\u0142");
+    await user.clear(title);
+    await user.type(title, "Keep this draft after video cancellation");
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-gallery")!, new File(["gallery"], "kept-gallery.png", { type: "image/png" }));
+    const gallery = view.container.querySelector("#media-section-gallery") as HTMLElement;
+    await waitFor(() => expect(within(gallery).getByText("Przes\u0142ano", { exact: true })).toBeInTheDocument());
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-video")!, original);
+    const video = view.container.querySelector("#media-section-video") as HTMLElement;
+    await within(video).findByText("Przygotowywanie filmu\u2026");
+    await user.click(within(video).getByRole("button", { name: "Przerwij" }));
+    await within(video).findByText("Przerwano przygotowanie lub przesy\u0142anie. Mo\u017cesz ponowi\u0107 albo usun\u0105\u0107 plik.");
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.getByRole("button", { name: /^Zapisz/ })).toBeEnabled());
+    expect(saveAction.mock.calls[0][0].getAll("assetId")).toEqual(["recovery-gallery"]);
+    expect(title).toHaveValue("Keep this draft after video cancellation");
+    expect(view.container.querySelector('#media-section-gallery input[name="assetId"]')).toHaveValue("recovery-gallery");
+    return { user, view, original, video, saveAction };
+  }
+
+  it("cancelled media Save recovery does not label an unsubmitted draft as all saved", async () => {
+    const { view } = await cancelledMediaSavedElsewhere();
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Niezapisane zmiany"));
+    expect(view.queryByText("Zapisano. Zmiany s\u0105 aktualne.")).toBeNull();
+  });
+
+  it("cancelled media Save recovery retries the exact original File without reselection", async () => {
+    const { user, original, video, view, saveAction } = await cancelledMediaSavedElsewhere();
+    await user.click(within(video).getByRole("button", { name: "Pon\u00f3w" }));
+    await waitFor(() => expect(editorMocks.optimizeProductMedia.mock.calls.filter(([kind]) => kind === "video")).toHaveLength(2));
+    const attempts = editorMocks.optimizeProductMedia.mock.calls.filter(([kind]) => kind === "video");
+    expect(attempts[0][1]).toBe(original);
+    expect(attempts[1][1]).toBe(original);
+    await within(video).findByText("Przes\u0142ano", { exact: true });
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+    expect(saveAction.mock.calls[1][0].getAll("assetId")).toEqual(["recovery-gallery", "recovery-video"]);
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Zapisano. Zmiany s\u0105 aktualne."));
+  });
+
+  it.each([false, true])("cancelled media Save recovery becomes clean only after its unsubmitted file is deliberately removed, new=%s", async (newProduct) => {
+    const { user, video, view, saveAction } = await cancelledMediaSavedElsewhere(newProduct);
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Niezapisane zmiany"));
+    await user.click(within(video).getByRole("button", { name: "Usu\u0144" }));
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Wszystkie zmiany s\u0105 zapisane"));
+    expect(within(video).queryByText("cancelled-video.webm")).toBeNull();
+    expect(saveAction).toHaveBeenCalledTimes(1);
+    expect(view.container.querySelector('#media-section-gallery input[name="assetId"]')).toHaveValue("recovery-gallery");
+  });
+
+  it("cancelled media Save recovery keeps a new editor in place until its retained file is resolved", async () => {
+    const { view } = await cancelledMediaSavedElsewhere(true);
+    expect(editorMocks.routerReplace).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Niezapisane zmiany"));
+  });
+
   it("shows preparation without a transfer percentage and lets one operation be cancelled", async () => {
     editorMocks.optimizeProductMedia.mockImplementation((_kind, _file, signal: AbortSignal) => new Promise((_resolve, reject) => {
       signal.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });

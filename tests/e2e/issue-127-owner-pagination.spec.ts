@@ -55,9 +55,24 @@ test("F29 owner reaches tied-timestamp artwork 52 and persists edit/delete with 
     await oldest.getByTestId("community-artwork-actions").click();
     await oldest.getByTestId("community-artwork-edit-description").click();
     await oldest.getByTestId("community-artwork-description").fill("Oldest artwork edited on real backend");
+    const savedDescription = page.waitForResponse((response) => {
+      const target = new URL(response.url());
+      return response.request().method() === "PATCH" && target.origin === COMMUNITY_TEST_ORIGIN
+        && target.pathname === `/api/community/artworks/${ids[51]}`;
+    });
     await oldest.getByTestId("community-artwork-save-description").click();
+    const savedResponse = await savedDescription;
+    expect(savedResponse.status()).toBe(200);
+    const savedPayload = await savedResponse.json();
+    expect(savedPayload.ok).toBe(true);
+    expect(savedPayload.artwork).toMatchObject({ id: ids[51], description: "Oldest artwork edited on real backend", revision: 2 });
+    // A textarea already contains its draft before PATCH finishes. The editor
+    // must close on the confirmed response before rendered text or DB proves save.
+    await expect(oldest.getByTestId("community-artwork-description")).toHaveCount(0);
+    await expect(oldest.getByTestId("community-artwork-save-description")).toHaveCount(0);
     await expect(oldest).toContainText("Oldest artwork edited on real backend");
     const readback = await fixture.service.from("community_artworks").select("description,revision").eq("id", ids[51]).single();
+    expect(readback.error).toBeNull();
     expect(readback.data).toMatchObject({ description: "Oldest artwork edited on real backend", revision: 2 });
     await page.reload();
     await page.getByTestId("community-my-artworks-more").click();

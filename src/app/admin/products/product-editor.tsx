@@ -167,6 +167,7 @@ export function ProductEditor({
   const [productSlug, setProductSlug] = useState(() => submittedValue(submittedValues, "slug", product?.slug ?? ""));
   const [productStatus, setProductStatus] = useState<Product["status"]>(() => parseProductStatus(submittedValue(submittedValues, "status", product?.status ?? "draft")));
   const [createdProductHref, setCreatedProductHref] = useState<string | null>(null);
+  const [hasSavedProduct, setHasSavedProduct] = useState(Boolean(product));
   const [showRouteFeedback, setShowRouteFeedback] = useState(Boolean(feedback));
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -228,7 +229,9 @@ export function ProductEditor({
       return;
     }
 
-    const nextIsDirty = signature !== savedFormSignatureRef.current;
+    const serialized = serializedAssetClientIds(new FormData(form));
+    const hasUnsubmittedMedia = assetsRef.current.some((asset) => !asset.removed && !serialized.has(asset.clientId));
+    const nextIsDirty = signature !== savedFormSignatureRef.current || hasUnsubmittedMedia;
     isDirtyRef.current = nextIsDirty;
     setIsDirty(nextIsDirty);
 
@@ -892,7 +895,7 @@ export function ProductEditor({
     const form = event.currentTarget;
     const formData = new FormData(form);
     const submittedSignature = productEditorFormSignature(form);
-    const submittedAssetIds = new Set(assetsRef.current.map((asset) => asset.clientId));
+    const submittedAssetIds = serializedAssetClientIds(formData);
     const validationErrors = [
       ...validateProductCompleteness({
         status: productStatus,
@@ -955,10 +958,14 @@ export function ProductEditor({
           return;
         }
 
+        setHasSavedProduct(true);
+        // Only fields actually serialized into this request were persisted. A
+        // failed/cancelled file remains a local draft with its original retry File.
+        const hasUnsubmittedMedia = assetsRef.current.some((asset) => !asset.removed && !submittedAssetIds.has(asset.clientId));
         setAssets((current) => current.map((asset) => submittedAssetIds.has(asset.clientId) ? { ...asset, uploaded: false, file: undefined, upload: undefined } : asset));
-        isDirtyRef.current = false;
-        setIsDirty(false);
-        setSaveStatus("saved");
+        isDirtyRef.current = hasUnsubmittedMedia;
+        setIsDirty(hasUnsubmittedMedia);
+        setSaveStatus(hasUnsubmittedMedia ? "idle" : "saved");
         setSaveErrorCodes([]);
         setFieldErrors({});
         scheduleAfterRender(() => {
@@ -966,7 +973,7 @@ export function ProductEditor({
           refreshDirtyState();
         });
 
-        if (!product) {
+        if (!product && !hasUnsubmittedMedia) {
           const href = `/admin/products/${result.id}?toast=${crypto.randomUUID()}`;
           const owner = currentEditorUrlRef.current;
           const guard = readProductEditorHistoryGuard(window.history.state);
@@ -978,7 +985,9 @@ export function ProductEditor({
             setCreatedProductHref(href);
           }
         } else {
-          publishToast("success", "Zmiany produktu zostały zapisane.", { scope: "product-save" });
+          publishToast("success", hasUnsubmittedMedia
+            ? "Pola produktu zapisano. Pozostały nieprzesłane pliki do ponowienia lub usunięcia."
+            : "Zmiany produktu zostały zapisane.", { scope: "product-save" });
         }
       } catch {
         publishToast("error", "Nie udało się zapisać produktu. Spróbuj ponownie.", { scope: "product-save" });
@@ -1124,7 +1133,7 @@ export function ProductEditor({
         </div>
       ) : null}
 
-      <AdminSaveBar formId="product-editor-form" dirty={isDirty} pending={isSaving} status={saveStatus} disabled={hasActiveMediaUpload || !saveAction} testId="product-save-bar" nativeSubmitLabel="Zapisz produkt" idleMessage={product || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"} savedMessage="Zapisano. Zmiany są aktualne." errorMessage="Zapis nie powiódł się. Sprawdź wskazane błędy." allowCleanSubmit />
+      <AdminSaveBar formId="product-editor-form" dirty={isDirty} pending={isSaving} status={saveStatus} disabled={hasActiveMediaUpload || !saveAction} testId="product-save-bar" nativeSubmitLabel="Zapisz produkt" idleMessage={hasSavedProduct || createdProductHref ? "Wszystkie zmiany są zapisane" : "Nowy produkt nie został jeszcze zapisany"} savedMessage="Zapisano. Zmiany są aktualne." errorMessage="Zapis nie powiódł się. Sprawdź wskazane błędy." allowCleanSubmit />
     </div>
   );
 }
@@ -1478,6 +1487,11 @@ function mapProductSaveErrors(
   }
 
   return { fieldErrors, focusTarget };
+}
+
+/** Use the actual serialization contract, including explicit removed rows. */
+function serializedAssetClientIds(formData: FormData) {
+  return new Set(formData.getAll("assetClientId").flatMap((value) => typeof value === "string" && value ? [value] : []));
 }
 
 export function productEditorFormSignature(form: HTMLFormElement) {
