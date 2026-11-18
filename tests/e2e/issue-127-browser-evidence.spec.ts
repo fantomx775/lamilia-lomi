@@ -187,6 +187,10 @@ test("clean primary responsive long-title navigation, keyboard and reduced-motio
       await page.emulateMedia({ reducedMotion: "reduce" });
       await title.scrollIntoViewIfNeeded();
       await expectDocumentFits(page);
+      const brand = page.locator("header").getByRole("link", { name: "LamiliaLomi home", exact: true });
+      await expect(brand.getByText("LamiliaLomi", { exact: true })).toBeVisible();
+      const brandBounds = await brand.boundingBox();
+      expect(brandBounds!.x).toBeGreaterThanOrEqual(0); expect(brandBounds!.x + brandBounds!.width).toBeLessThanOrEqual(width + 1);
       const titleGeometry = await title.evaluate((element) => {
         const box = element.getBoundingClientRect();
         return { left: box.left, right: box.right, viewport: innerWidth, clipped: element.scrollHeight > element.clientHeight + 1, clamp: getComputedStyle(element).webkitLineClamp };
@@ -199,6 +203,10 @@ test("clean primary responsive long-title navigation, keyboard and reduced-motio
         const opener = page.getByRole("button", { name: "Open navigation menu", exact: true });
         await opener.scrollIntoViewIfNeeded();
         const target = await opener.boundingBox(); expect(target!.width).toBeGreaterThanOrEqual(44); expect(target!.height).toBeGreaterThanOrEqual(44);
+        expect(target!.x + target!.width).toBeLessThanOrEqual(width + 1);
+        const account = await page.locator("header").getByRole("link", { name: "Log in", exact: true }).boundingBox();
+        expect(account!.width).toBeGreaterThanOrEqual(44); expect(account!.height).toBeGreaterThanOrEqual(44);
+        expect(account!.x).toBeGreaterThanOrEqual(0); expect(account!.x + account!.width).toBeLessThanOrEqual(width + 1);
         await opener.focus(); await page.keyboard.press("Enter");
         const menu = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
         await expect(menu).toBeVisible();
@@ -395,6 +403,7 @@ test("clean primary real public Club list, artwork and creator cold/warm feedbac
     evidence.secrets.add(owner.email); evidence.secrets.add(owner.password);
     evidence.secrets.add(moderator.email); evidence.secrets.add(moderator.password);
     const book = await fixture.product("UX127 public Club proof book");
+    await fixture.unlock(owner.id, book.id);
     const artworkId = randomUUID();
     const storagePath = `community/${owner.id}/${randomUUID()}`;
     const description = "UX127 controlled garden coloring";

@@ -27,12 +27,12 @@ export function SiteHeader({ locale }: {
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
-      <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center justify-between gap-3 px-2 min-[360px]:px-4 sm:px-6 lg:px-8">
         <NavigationLink
           href={`/${locale}`}
           pendingLabel="Opening home"
           aria-label="LamiliaLomi home"
-          className="flex items-center gap-3 rounded-sm transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
+          className="flex items-center gap-1 min-[360px]:gap-3 rounded-sm transition-transform active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
         >
           <Image
             src="/assets/home/lamilia-lomi-logo-192.webp"
@@ -46,7 +46,7 @@ export function SiteHeader({ locale }: {
             className="size-14 shrink-0 object-contain sm:size-16"
           />
           <span className="min-w-0">
-            <span className="block font-serif text-lg font-semibold text-[var(--color-ink)] sm:text-xl">
+            <span className="block font-serif text-base font-semibold text-[var(--color-ink)] min-[360px]:text-lg sm:text-xl">
               LamiliaLomi
             </span>
             <span className="hidden text-xs text-[var(--color-muted)] sm:block">
