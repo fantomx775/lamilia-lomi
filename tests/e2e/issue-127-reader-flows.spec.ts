@@ -132,7 +132,9 @@ test("F07 F10 F23 catalog Enter, all filter context, Back and native GET", async
     await page.setViewportSize({ width: 390, height: 844 });
     const initialQuery = new URLSearchParams(query); initialQuery.delete("q");
     await page.goto(`/en/products?${initialQuery}`);
-    await page.getByTestId("catalog-mobile-filter-disclosure").getByText("Filters", { exact: true }).click();
+    const filterSummary = page.getByTestId("catalog-mobile-filter-disclosure").locator("summary");
+    await expect(filterSummary).toContainText("4 active filters");
+    await filterSummary.click();
     await page.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).fill(book.title);
     await page.getByTestId("catalog-mobile-search").getByRole("textbox", { name: "Search catalog" }).press("Enter");
     await expect(page.getByTestId("catalog-mobile-filter-disclosure")).toHaveAttribute("open");
@@ -209,8 +211,16 @@ test("F06 Club retains real artwork through rapid filters, an injected failure a
     await expect(page.getByTestId("community-gallery-empty-state")).toBeVisible();
     await select.selectOption(book.id);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(1);
-    await page.getByTestId("community-artwork-card").getByRole("link").first().click();
+    await expect(page.getByTestId("community-artwork-grid")).toHaveAttribute("aria-busy", "false");
+    const clubUrl = `${COMMUNITY_TEST_ORIGIN}/en/club?productId=${book.id}`;
+    await expect(page).toHaveURL(clubUrl);
+    const detailLink = page.getByTestId("community-artwork-card").getByRole("link").first();
+    await expect(detailLink).toHaveAttribute("href", `/en/club/artworks/${artwork.id}`);
+    await detailLink.click();
+    await expect(page).toHaveURL(`${COMMUNITY_TEST_ORIGIN}/en/club/artworks/${artwork.id}`);
+    await expect(page.getByTestId("community-artwork-detail").getByRole("heading", { name: "UX127 real filtered artwork", exact: true })).toBeVisible();
     await page.goBack();
+    await expect(page).toHaveURL(clubUrl);
     await expect(select).toHaveValue(book.id);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(1);
   } finally { release.forEach((resolve) => resolve()); await page.unrouteAll({ behavior: "ignoreErrors" }); await fixture.cleanup(); }
@@ -228,7 +238,7 @@ test("F24 F25 real role fixtures open private files directly and explain sharing
     const join = await fixture.actor("library-join");
     const unverified = await fixture.actor("library-unverified");
     await fixture.unlock(owner.id, book.id); await fixture.unlock(join.id, book.id); await fixture.unlock(unverified.id, book.id);
-    const assetId = randomUUID(); assetPath = `products/${book.id}/premium/${assetId}.pdf`;
+    const assetId = randomUUID(); assetPath = `products/${book.id}/premium_download/${assetId}.pdf`;
     const bytes = Buffer.from("%PDF-1.4\nControlled UX127 test bonus\n%%EOF");
     expect((await fixture.service.storage.from("premium-files").upload(assetPath, bytes, { contentType: "application/pdf" })).error).toBeNull();
     expect((await fixture.service.from("product_assets").insert({ id: assetId, product_id: book.id, kind: "premium_download", bucket: "premium-files", path: assetPath, filename: "test-bonus.pdf", content_type: "application/pdf", size_bytes: bytes.length, title: "Controlled bonus PDF", is_public: false, is_active: true, storage_provider: "supabase" })).error).toBeNull();
