@@ -46,6 +46,8 @@ async function loadedImages(page: Page, selector: string) {
   for (const image of await images.all()) {
     await image.scrollIntoViewIfNeeded();
     await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await expect(image).toHaveJSProperty("complete", true);
+    await image.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
   }
 }
 
@@ -157,7 +159,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     const reads = new Set<object>();
     activeReads.set(target, reads);
     target.on("request", (request) => {
-      if (request.method() === "GET" && request.resourceType() === "fetch") reads.add(request);
+      if (request.method() === "GET" && ["fetch", "image", "media"].includes(request.resourceType())) reads.add(request);
     });
     target.on("requestfinished", (request) => reads.delete(request));
     target.on("requestfailed", (request) => reads.delete(request));
@@ -202,7 +204,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await expect(page.getByTestId("community-gallery-product-filter")).toHaveValue(book.id);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(3);
     await loadedImages(page, '[data-testid="community-artwork-grid"] img');
-    screenshots.push(...await communityScreenshots(page, "cc05", "gallery-filtered", runId));
+    screenshots.push(...await communityScreenshots(page, "cc05", "gallery-filtered", runId, () => settled(page)));
 
     await settled(page);
     await page.getByTestId("community-gallery-product-filter").selectOption(paged.id);
@@ -220,10 +222,12 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await expect(page.getByTestId("community-gallery-empty-state")).toBeVisible();
     await settled(page);
     await page.getByTestId("community-gallery-audience-filter").selectOption("");
+    await expect(page.getByTestId("community-artwork-card")).toHaveCount(25);
+    await loadedImages(page, '[data-testid="community-artwork-grid"] img');
     await settled(page);
     await page.getByTestId("community-gallery-product-filter").selectOption(empty.id);
     await expect(page.getByTestId("community-gallery-empty-state")).toBeVisible();
-    screenshots.push(...await communityScreenshots(page, "cc05", "gallery-empty", runId));
+    screenshots.push(...await communityScreenshots(page, "cc05", "gallery-empty", runId, () => settled(page)));
     await settled(page);
     await page.getByTestId("community-gallery-product-filter").selectOption(book.id);
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(3);
@@ -236,7 +240,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await expect(page.getByTestId("community-artwork-book")).toContainText(book.title);
     await nextEvidence.assertDestination(page, { expectedUrl: `${origin}/en/club/artworks/${gallery[0].id}`,
       assertions: [{ name: "desktop artwork destination and media", status: "PASS", details: "The selected artwork detail rendered, its canonical URL and book title match, and its actual image has nonzero naturalWidth." }] });
-    screenshots.push(...await communityScreenshots(page, "cc05", "artwork-detail", runId));
+    screenshots.push(...await communityScreenshots(page, "cc05", "artwork-detail", runId, () => settled(page)));
     await settled(page);
     await page.getByTestId("community-artwork-creator").click();
     await expect(page.getByRole("heading", { name: "@cc_gallery_artist", exact: true })).toBeVisible();
@@ -245,14 +249,14 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     expect(await page.getByTestId("community-creator-page").innerText()).not.toContain(owner.email);
     await nextEvidence.assertDestination(page, { expectedUrl: `${origin}/en/club/creators/cc_gallery_artist`,
       assertions: [{ name: "desktop creator destination and media", status: "PASS", details: "The linked creator has the exact expected heading, three artworks and loaded real photos, and does not expose the author's email." }] });
-    screenshots.push(...await communityScreenshots(page, "cc05", "creator-photos", runId));
+    screenshots.push(...await communityScreenshots(page, "cc05", "creator-photos", runId, () => settled(page)));
 
     await settled(page);
     await page.goto(`${origin}/en/products/${empty.slug}`);
     await expect(page.getByRole("heading", { name: "Colored by Our Readers", exact: true })).toHaveCount(1);
     await expect(page.getByTestId("colored-by-our-readers-empty")).toBeVisible();
     await expect(page.getByTestId("reader-artwork-grid")).toHaveCount(0);
-    screenshots.push(...await communityScreenshots(page, "cc05", "product-empty-gallery", runId));
+    screenshots.push(...await communityScreenshots(page, "cc05", "product-empty-gallery", runId, () => settled(page)));
 
     await settled(page);
     await page.goto(`${origin}/en/products/${book.slug}`);
@@ -274,14 +278,20 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     const dialog = page.getByRole("dialog", { name: "Reader artwork preview", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("Reader Garden");
+    await loadedImages(page, 'dialog[open] img');
+    await settled(page);
     await page.keyboard.press("ArrowRight");
     await expect(dialog).toContainText("Reader Rose");
+    await loadedImages(page, 'dialog[open] img');
+    await settled(page);
     await page.keyboard.press("ArrowRight");
     await expect(dialog).toContainText("cc_gallery_artist");
+    await loadedImages(page, 'dialog[open] img');
+    await settled(page);
     await page.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
     await expect(originalButton).toBeFocused();
-    screenshots.push(...await communityScreenshots(page, "cc05", "product-mixed-gallery", runId));
+    screenshots.push(...await communityScreenshots(page, "cc05", "product-mixed-gallery", runId, () => settled(page)));
     await settled(page);
     await page.getByTestId("community-share-guest").click();
     await expect(page).toHaveURL(/\/en\/login\?returnTo=/);
@@ -301,6 +311,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     observe(ownerPage);
     await fixtures.login(ownerPage, owner, `/en/products/${book.slug}`, `/en/products/${book.slug}#premium`);
     await expect(ownerPage.getByRole("link", { name: "Share your art", exact: true })).toBeVisible();
+    await loadedImages(ownerPage, '[data-testid="reader-artwork-grid"] img');
     await settled(ownerPage);
     await ownerPage.getByRole("link", { name: "Share your art", exact: true }).click();
     await expect(ownerPage).toHaveURL(/\/en\/library\/creations/);
@@ -313,6 +324,7 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await phone.goto(`${origin}/en/club?productId=${book.id}`);
     await essentials(phone);
     await expect(phone.getByTestId("community-artwork-card")).toHaveCount(3);
+    await loadedImages(phone, '[data-testid="community-artwork-grid"] img');
     await settled(phone);
     const phoneArtworkLink = phone.locator('[data-testid="community-artwork-card"] a[href^="/en/club/artworks/"]').first();
     const phoneArtworkHref = await phoneArtworkLink.getAttribute("href");
@@ -336,11 +348,15 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     const phonePreview = phone.getByRole("dialog", { name: "Reader artwork preview", exact: true });
     await expect(phonePreview).toBeVisible();
     await expect(phonePreview).toContainText("Reader Garden");
+    await loadedImages(phone, 'dialog[open] img');
+    await settled(phone);
     await phonePreview.getByRole("button", { name: "Close preview", exact: true }).tap();
     await expect(phonePreview).not.toBeVisible();
     await settled(phone);
     await phone.getByTestId("reader-artwork-grid").locator("button").first().tap();
     await expect(phonePreview).toBeVisible();
+    await loadedImages(phone, 'dialog[open] img');
+    await settled(phone);
     const touch = await phone.context().newCDPSession(phone);
     await phone.evaluate(() => {
       const records: object[] = [];
@@ -360,6 +376,8 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     await touch.send("Input.synthesizeScrollGesture", { x: frame.x + frame.width * 0.8, y,
       xDistance: -frame.width * 0.6, yDistance: 0, speed: 600, preventFling: true, gestureSourceType: "touch" });
     await expect(phonePreview).toContainText("Reader Rose");
+    await loadedImages(phone, 'dialog[open] img');
+    await settled(phone);
     await phonePreview.getByRole("button", { name: "Close preview", exact: true }).tap();
     const touchEvents = await phone.evaluate(() => Reflect.get(window, "__communityTouchEvents"));
     await expect(phonePreview, JSON.stringify(touchEvents)).not.toBeVisible();
@@ -368,6 +386,9 @@ test("anonymous gallery navigation and mixed PDP preserve real photos and the or
     expect(touchEvidence.filter((event) => event.type === "touchend")).toHaveLength(2);
     expect(touchEvidence.some((event) => event.type === "click")).toBe(true);
     await touch.detach();
+    // Keep finish() strict: drain actual image/fetch/media requests on each
+    // observed page before its teardown; failures remain in Next diagnostics.
+    for (const target of activeReads.keys()) await settled(target);
     expect(runtimeErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
     nextDiagnostics = await nextEvidence.finish();

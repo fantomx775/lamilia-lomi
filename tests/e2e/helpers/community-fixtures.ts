@@ -310,7 +310,7 @@ export async function essentials(page: Page) {
   if (await accept.isVisible()) await accept.click();
 }
 
-export async function communityScreenshots(page: Page, folderName: string, view: string, runId: string) {
+export async function communityScreenshots(page: Page, folderName: string, view: string, runId: string, settleRequests?: () => Promise<void>) {
   if (!/^[a-z0-9_-]+$/i.test(folderName) || !/^[a-z0-9_-]+$/i.test(view)) throw new Error("Unsafe screenshot path.");
   const set = process.env.COMMUNITY_SCREENSHOT_SET;
   if (set && !/^[a-z0-9_-]+$/i.test(set)) throw new Error("Unsafe screenshot set.");
@@ -318,6 +318,9 @@ export async function communityScreenshots(page: Page, folderName: string, view:
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const screenshots = [];
   for (const width of [390, 768, 1440]) {
+    // A caller that observes real image requests must drain the previous
+    // candidate before this helper deliberately changes its responsive source.
+    await settleRequests?.();
     await page.setViewportSize({ width, height: 1000 });
     await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
     const dialog = page.getByRole("dialog").filter({ visible: true });
@@ -332,6 +335,8 @@ export async function communityScreenshots(page: Page, folderName: string, view:
       if (!await photo.isVisible()) continue;
       await photo.scrollIntoViewIfNeeded();
       await expect.poll(() => photo.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+      await expect(photo).toHaveJSProperty("complete", true);
+      await photo.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
     }
     await page.mouse.move(0, 0);
     await page.evaluate(() => document.fonts.ready);
@@ -350,6 +355,9 @@ export async function communityScreenshots(page: Page, folderName: string, view:
     const filename = `${view}-${width}.png`;
     const screenshotPath = await communityArtifactPath(folderName, filename);
     await page.screenshot({ path: screenshotPath, fullPage: !dialogOpen, caret: "hide", animations: "disabled" });
+    // Full-page capture can start below-the-fold lazy images. Do not resize
+    // or return to a caller that navigates while those real requests run.
+    await settleRequests?.();
     screenshots.push({ path: process.env.COMMUNITY_ARTIFACT_DIR ? screenshotPath : `docs/verification/issue-77/${folderName}/${filename}`, testedSha, runId });
   }
   return screenshots;
