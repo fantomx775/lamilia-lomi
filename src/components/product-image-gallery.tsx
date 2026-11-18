@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent } from "react";
-import Image, { getImageProps } from "next/image";
+import Image from "next/image";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
 import type { ReactNode } from "react";
@@ -356,12 +356,15 @@ function GalleryPreviewImage({ image, thumbnail, active }: { image: ProductGalle
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const alive = useRef(true);
-  const fallbackSource = getImageProps({ src: image.path, alt: "", width: 640, height: 828, unoptimized: image.unoptimized }).props.src;
+  const displaySource = active ? decoded ?? thumbnail : undefined;
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   return <div className={active ? "absolute inset-0" : "invisible absolute inset-0"} aria-hidden={!active}>
-    {/* Show the already painted thumbnail while the bounded detail variant decodes. */}
-    {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img data-gallery-display src={decoded ?? thumbnail ?? fallbackSource} alt={active ? image.alt : ""} loading="eager" className={`absolute inset-0 size-full object-contain ${active ? "" : "invisible"}`} />
+    {/* Only the active slide can reuse a thumbnail observed by its real onLoad.
+        Unknown thumbnails stay neutral; neighbors request only their real detail. */}
+    {displaySource ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img data-gallery-display src={displaySource} alt={image.alt} loading="eager" className="absolute inset-0 size-full object-contain" />
+    ) : null}
     <Image key={attempt} src={image.detailPath ?? image.path} alt="" aria-hidden fill loading="eager"
       fetchPriority={active ? "high" : "low"} unoptimized={image.unoptimized}
       sizes="(min-width: 768px) min(75vw, calc((100dvh - 8rem) * 0.773)), min(90vw, calc((100dvh - 11rem) * 0.773))"

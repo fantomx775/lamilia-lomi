@@ -1,0 +1,313 @@
+{
+  "runId": "ux127-baseline-79df809-23f3e4ee",
+  "status": "FAIL",
+  "scope": "baseline79 production benchmark; not candidate acceptance",
+  "actualPlaywright": {
+    "passed": 3,
+    "failed": 3,
+    "skipped": 0
+  },
+  "observations": 36,
+  "completed": 36,
+  "feedbackObserved": 12,
+  "fallbackObserved": 23,
+  "nullMetrics": "signal not observed, never interpreted as zero",
+  "cases": [
+    {
+      "file": "samples-chromium-about.json",
+      "observations": 6,
+      "completed": 6,
+      "unresolved": 1
+    },
+    {
+      "file": "samples-chromium-catalog.json",
+      "observations": 6,
+      "completed": 6,
+      "unresolved": 2
+    },
+    {
+      "file": "samples-chromium-product.json",
+      "observations": 6,
+      "completed": 6,
+      "unresolved": 0
+    },
+    {
+      "file": "samples-mobile-about.json",
+      "observations": 6,
+      "completed": 6,
+      "unresolved": 0
+    },
+    {
+      "file": "samples-mobile-catalog.json",
+      "observations": 6,
+      "completed": 6,
+      "unresolved": 2
+    },
+    {
+      "file": "samples-mobile-product.json",
+      "observations": 6,
+      "completed": 6,
+      "unresolved": 0
+    }
+  ],
+  "unresolvedDiagnosticCount": 16,
+  "failures": [
+    {
+      "project": "chromium",
+      "journey": "about",
+      "round": 0,
+      "method": "GET",
+      "path": "/_next/image",
+      "resource": "image",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "imageSource": "/assets/covers/mindful-mandalas.svg",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "about",
+      "round": 1,
+      "method": "GET",
+      "path": "/_next/image",
+      "resource": "image",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "imageSource": "/assets/covers/mindful-mandalas.svg",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "about",
+      "round": 2,
+      "method": "GET",
+      "path": "/_next/image",
+      "resource": "image",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "imageSource": "/assets/covers/mindful-mandalas.svg",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "catalog",
+      "round": 0,
+      "method": "GET",
+      "path": "/_next/image",
+      "resource": "image",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "imageSource": "/assets/covers/mindful-mandalas.svg",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "catalog",
+      "round": 0,
+      "method": "GET",
+      "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "catalog",
+      "round": 1,
+      "method": "GET",
+      "path": "/_next/static/chunks/2y2osldhng-ec.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "catalog",
+      "round": 1,
+      "method": "GET",
+      "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "catalog",
+      "round": 2,
+      "method": "GET",
+      "path": "/_next/image",
+      "resource": "image",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "imageSource": "/assets/covers/mindful-mandalas.svg",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "catalog",
+      "round": 2,
+      "method": "GET",
+      "path": "/_next/static/chunks/2y2osldhng-ec.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "chromium",
+      "journey": "catalog",
+      "round": 2,
+      "method": "GET",
+      "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "mobile",
+      "journey": "catalog",
+      "round": 0,
+      "method": "GET",
+      "path": "/_next/static/chunks/2y2osldhng-ec.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "mobile",
+      "journey": "catalog",
+      "round": 0,
+      "method": "GET",
+      "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "mobile",
+      "journey": "catalog",
+      "round": 1,
+      "method": "GET",
+      "path": "/_next/static/chunks/2y2osldhng-ec.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "mobile",
+      "journey": "catalog",
+      "round": 1,
+      "method": "GET",
+      "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "mobile",
+      "journey": "catalog",
+      "round": 2,
+      "method": "GET",
+      "path": "/_next/static/chunks/2y2osldhng-ec.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    },
+    {
+      "project": "mobile",
+      "journey": "catalog",
+      "round": 2,
+      "method": "GET",
+      "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+      "resource": "script",
+      "error": "unresolved network failure",
+      "matchingObservedFacts": [
+        {
+          "phase": "source",
+          "error": "requestfailed event"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "checkedAt": "2026-11-18T06:10:05.602Z",
+    "ports3000_3100_3128_3443Listening": 0,
+    "ownedBenchmarkProductionNextNodes": 0,
+    "sourceClean": true,
+    "inventoryBeforeAndAfterEqual": true,
+    "fingerprint": "636c2e593842cc5c5f02b430fa2b3e6c19dd13cc62ba13d26d38da3f1608e4df",
+    "temporaryProducts": 0,
+    "temporaryActors": 0,
+    "communityArtworks": 0
+  },
+  "caution": "Each diagnostic is cumulative within its cold/warm round; matching phase facts may include repeated path events and do not prove the individual request identity or root cause."
+}

@@ -1,0 +1,496 @@
+[
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "fresh browser context; normal prefetch allowed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "catalog",
+    "round": 0,
+    "requestedRounds": 3,
+    "cache": "cold",
+    "project": "mobile",
+    "viewport": {
+      "width": 412,
+      "height": 839
+    },
+    "metrics": {
+      "token": "catalog-0-cold",
+      "destination": "https://localhost:3443/en/products",
+      "start": 2250.300000011921,
+      "feedback": null,
+      "fallback": 123.90000000596046,
+      "useful": 422.40000000596046,
+      "completed": 422.40000000596046
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 2,
+      "typedNextCancellations": 7,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/_next/static/chunks/2y2osldhng-ec.js",
+          "method": "GET"
+        },
+        {
+          "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "catalog",
+    "round": 0,
+    "requestedRounds": 3,
+    "cache": "warm",
+    "project": "mobile",
+    "viewport": {
+      "width": 412,
+      "height": 839
+    },
+    "metrics": {
+      "token": "catalog-0-warm",
+      "destination": "https://localhost:3443/en/products",
+      "start": 818.5999999940395,
+      "feedback": null,
+      "fallback": 119.90000000596046,
+      "useful": 433.2000000178814,
+      "completed": 433.2000000178814
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 2,
+      "typedNextCancellations": 7,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/_next/static/chunks/2y2osldhng-ec.js",
+          "method": "GET"
+        },
+        {
+          "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "fresh browser context; normal prefetch allowed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "catalog",
+    "round": 1,
+    "requestedRounds": 3,
+    "cache": "cold",
+    "project": "mobile",
+    "viewport": {
+      "width": 412,
+      "height": 839
+    },
+    "metrics": {
+      "token": "catalog-1-cold",
+      "destination": "https://localhost:3443/en/products",
+      "start": 2247.7000000178814,
+      "feedback": null,
+      "fallback": 123.40000000596046,
+      "useful": 421.7999999821186,
+      "completed": 421.7999999821186
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 2,
+      "typedNextCancellations": 6,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/_next/static/chunks/2y2osldhng-ec.js",
+          "method": "GET"
+        },
+        {
+          "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "catalog",
+    "round": 1,
+    "requestedRounds": 3,
+    "cache": "warm",
+    "project": "mobile",
+    "viewport": {
+      "width": 412,
+      "height": 839
+    },
+    "metrics": {
+      "token": "catalog-1-warm",
+      "destination": "https://localhost:3443/en/products",
+      "start": 845.4000000059605,
+      "feedback": null,
+      "fallback": 102,
+      "useful": 401,
+      "completed": 401
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 2,
+      "typedNextCancellations": 6,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/_next/static/chunks/2y2osldhng-ec.js",
+          "method": "GET"
+        },
+        {
+          "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "fresh browser context; normal prefetch allowed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "catalog",
+    "round": 2,
+    "requestedRounds": 3,
+    "cache": "cold",
+    "project": "mobile",
+    "viewport": {
+      "width": 412,
+      "height": 839
+    },
+    "metrics": {
+      "token": "catalog-2-cold",
+      "destination": "https://localhost:3443/en/products",
+      "start": 2259.7999999821186,
+      "feedback": null,
+      "fallback": 106.2000000178814,
+      "useful": 421.40000000596046,
+      "completed": 421.40000000596046
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 2,
+      "typedNextCancellations": 7,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/_next/static/chunks/2y2osldhng-ec.js",
+          "method": "GET"
+        },
+        {
+          "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "catalog",
+    "round": 2,
+    "requestedRounds": 3,
+    "cache": "warm",
+    "project": "mobile",
+    "viewport": {
+      "width": 412,
+      "height": 839
+    },
+    "metrics": {
+      "token": "catalog-2-warm",
+      "destination": "https://localhost:3443/en/products",
+      "start": 628.5,
+      "feedback": null,
+      "fallback": 102.69999998807907,
+      "useful": 401.90000000596046,
+      "completed": 401.90000000596046
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 2,
+      "typedNextCancellations": 7,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/_next/static/chunks/2y2osldhng-ec.js",
+          "method": "GET"
+        },
+        {
+          "path": "/_next/static/chunks/1w0m5in6w4iyy.js",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  }
+]

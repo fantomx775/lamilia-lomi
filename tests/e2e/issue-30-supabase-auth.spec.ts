@@ -443,10 +443,17 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       const premiumFileDownloadPromise = crossDevicePage.waitForEvent("download");
       await privateDownloadLink.click();
       const premiumFileDownload = await premiumFileDownloadPromise;
-      const downloadedFilePath = await premiumFileDownload.path();
-      const downloadedFileBytes = downloadedFilePath
-        ? await readFile(downloadedFilePath)
-        : Buffer.alloc(0);
+      // Download.path() is unavailable over browserType.connect(). Consume
+      // the real public download stream on both local and remote browsers.
+      const downloadStream = await premiumFileDownload.createReadStream();
+      const downloadChunks: Buffer[] = [];
+      try {
+        for await (const chunk of downloadStream) downloadChunks.push(Buffer.from(chunk));
+      } finally {
+        downloadStream.destroy();
+      }
+      const downloadedFileBytes = Buffer.concat(downloadChunks);
+      expect(downloadedFileBytes.equals(pdf)).toBe(true);
       const privateFileOpenedFromLibraryProduct =
         premiumFileDownload.suggestedFilename().toLowerCase().endsWith(".pdf") &&
         downloadedFileBytes.subarray(0, 4).toString("ascii") === "%PDF";

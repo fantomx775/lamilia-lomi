@@ -1,7 +1,7 @@
 [
   {
     "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
-    "runId": "ux127-baseline-prod-20261118",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
     "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
     "browserVersion": "148.0.7778.96",
     "backend": "isolated Supabase",
@@ -15,6 +15,7 @@
     "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
     "journey": "product",
     "round": 0,
+    "requestedRounds": 3,
     "cache": "cold",
     "project": "chromium",
     "viewport": {
@@ -24,30 +25,25 @@
     "metrics": {
       "token": "product-0-cold",
       "destination": "https://localhost:3443/en/products/moon-garden-coloring-book",
-      "start": 2195.7999999821186,
-      "feedback": 43.80000001192093,
-      "fallback": null,
-      "useful": 400.09999999403954,
-      "completed": 400.09999999403954
+      "start": 2266.0999999940395,
+      "feedback": 36.900000005960464,
+      "fallback": 186.90000000596046,
+      "useful": 507.30000001192093,
+      "completed": 507.30000001192093
     },
     "failures": [],
     "networkDiagnostics": {
       "unresolvedCount": 0,
-      "typedNextCancellations": 9,
+      "typedNextCancellations": 13,
       "closedPrefetches": 0,
       "failures": [
-        {
-          "path": "/en/products/moon-garden-coloring-book",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
         {
           "path": "/en/author",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/login",
+          "path": "/en/products/moon-garden-coloring-book",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -57,12 +53,12 @@
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/privacy",
+          "path": "/en/about",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/club",
+          "path": "/en/contact",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -77,7 +73,32 @@
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/club",
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
           "method": "GET",
           "disposition": "next-canceled"
         }
@@ -86,7 +107,7 @@
   },
   {
     "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
-    "runId": "ux127-baseline-prod-20261118",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
     "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
     "browserVersion": "148.0.7778.96",
     "backend": "isolated Supabase",
@@ -96,10 +117,11 @@
       "downloadBytesPerSecond": 1250000,
       "uploadBytesPerSecond": 125000
     },
-    "cacheDefinition": "same context repeat; browser/router caches retained",
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
     "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
     "journey": "product",
     "round": 0,
+    "requestedRounds": 3,
     "cache": "warm",
     "project": "chromium",
     "viewport": {
@@ -109,30 +131,25 @@
     "metrics": {
       "token": "product-0-warm",
       "destination": "https://localhost:3443/en/products/moon-garden-coloring-book",
-      "start": 607.9000000059605,
-      "feedback": 50.19999998807907,
-      "fallback": 100,
-      "useful": 416.40000000596046,
-      "completed": 416.40000000596046
+      "start": 627.0999999940395,
+      "feedback": 39.900000005960464,
+      "fallback": 124.2999999821186,
+      "useful": 439.19999998807907,
+      "completed": 439.19999998807907
     },
     "failures": [],
     "networkDiagnostics": {
       "unresolvedCount": 0,
-      "typedNextCancellations": 9,
+      "typedNextCancellations": 13,
       "closedPrefetches": 0,
       "failures": [
-        {
-          "path": "/en/products/moon-garden-coloring-book",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
         {
           "path": "/en/author",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/login",
+          "path": "/en/products/moon-garden-coloring-book",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -142,12 +159,12 @@
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/privacy",
+          "path": "/en/about",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/club",
+          "path": "/en/contact",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -162,7 +179,32 @@
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/club",
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
           "method": "GET",
           "disposition": "next-canceled"
         }
@@ -171,7 +213,7 @@
   },
   {
     "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
-    "runId": "ux127-baseline-prod-20261118",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
     "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
     "browserVersion": "148.0.7778.96",
     "backend": "isolated Supabase",
@@ -185,6 +227,7 @@
     "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
     "journey": "product",
     "round": 1,
+    "requestedRounds": 3,
     "cache": "cold",
     "project": "chromium",
     "viewport": {
@@ -194,25 +237,35 @@
     "metrics": {
       "token": "product-1-cold",
       "destination": "https://localhost:3443/en/products/moon-garden-coloring-book",
-      "start": 2105.600000023842,
-      "feedback": 43.39999997615814,
-      "fallback": null,
-      "useful": 393.2999999821186,
-      "completed": 393.2999999821186
+      "start": 2153.0999999940395,
+      "feedback": 38.599999994039536,
+      "fallback": 236.19999998807907,
+      "useful": 538.7999999821186,
+      "completed": 538.7999999821186
     },
     "failures": [],
     "networkDiagnostics": {
       "unresolvedCount": 0,
-      "typedNextCancellations": 13,
+      "typedNextCancellations": 8,
       "closedPrefetches": 0,
       "failures": [
         {
-          "path": "/en/about",
+          "path": "/en/contact",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/contact",
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/mindful-mandalas-for-adults",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/bedtime-forest-picture-book",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -222,47 +275,12 @@
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/library",
+          "path": "/en/products/bedtime-forest-picture-book",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
           "path": "/en",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/club",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/about",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/products/moon-garden-coloring-book",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/library",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/contact",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/products/moon-garden-coloring-book",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/login",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -276,7 +294,7 @@
   },
   {
     "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
-    "runId": "ux127-baseline-prod-20261118",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
     "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
     "browserVersion": "148.0.7778.96",
     "backend": "isolated Supabase",
@@ -286,10 +304,11 @@
       "downloadBytesPerSecond": 1250000,
       "uploadBytesPerSecond": 125000
     },
-    "cacheDefinition": "same context repeat; browser/router caches retained",
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
     "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
     "journey": "product",
     "round": 1,
+    "requestedRounds": 3,
     "cache": "warm",
     "project": "chromium",
     "viewport": {
@@ -299,25 +318,35 @@
     "metrics": {
       "token": "product-1-warm",
       "destination": "https://localhost:3443/en/products/moon-garden-coloring-book",
-      "start": 583.5,
-      "feedback": 40.79999998211861,
-      "fallback": 110.5,
-      "useful": 424,
-      "completed": 424
+      "start": 706,
+      "feedback": 35.5,
+      "fallback": 120,
+      "useful": 419.7000000178814,
+      "completed": 419.7000000178814
     },
     "failures": [],
     "networkDiagnostics": {
       "unresolvedCount": 0,
-      "typedNextCancellations": 13,
+      "typedNextCancellations": 8,
       "closedPrefetches": 0,
       "failures": [
         {
-          "path": "/en/about",
+          "path": "/en/contact",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/contact",
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/mindful-mandalas-for-adults",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/bedtime-forest-picture-book",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -327,47 +356,12 @@
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/library",
+          "path": "/en/products/bedtime-forest-picture-book",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
           "path": "/en",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/club",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/about",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/products/moon-garden-coloring-book",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/library",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/contact",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/products/moon-garden-coloring-book",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/login",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -381,7 +375,7 @@
   },
   {
     "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
-    "runId": "ux127-baseline-prod-20261118",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
     "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
     "browserVersion": "148.0.7778.96",
     "backend": "isolated Supabase",
@@ -395,6 +389,7 @@
     "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
     "journey": "product",
     "round": 2,
+    "requestedRounds": 3,
     "cache": "cold",
     "project": "chromium",
     "viewport": {
@@ -404,35 +399,20 @@
     "metrics": {
       "token": "product-2-cold",
       "destination": "https://localhost:3443/en/products/moon-garden-coloring-book",
-      "start": 2084.7999999821186,
-      "feedback": 36.60000002384186,
+      "start": 2146.4000000059605,
+      "feedback": 41.89999997615814,
       "fallback": null,
-      "useful": 409.2000000178814,
-      "completed": 409.2000000178814
+      "useful": 376.7999999821186,
+      "completed": 376.7999999821186
     },
     "failures": [],
     "networkDiagnostics": {
       "unresolvedCount": 0,
-      "typedNextCancellations": 8,
+      "typedNextCancellations": 15,
       "closedPrefetches": 0,
       "failures": [
         {
-          "path": "/en/contact",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/products/moon-garden-coloring-book",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/library",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/privacy",
+          "path": "/en",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -442,12 +422,62 @@
           "disposition": "next-canceled"
         },
         {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/about",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
           "path": "/en/library",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/login",
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/about",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/mindful-mandalas-for-adults",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -461,7 +491,7 @@
   },
   {
     "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
-    "runId": "ux127-baseline-prod-20261118",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
     "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
     "browserVersion": "148.0.7778.96",
     "backend": "isolated Supabase",
@@ -471,10 +501,11 @@
       "downloadBytesPerSecond": 1250000,
       "uploadBytesPerSecond": 125000
     },
-    "cacheDefinition": "same context repeat; browser/router caches retained",
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
     "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
     "journey": "product",
     "round": 2,
+    "requestedRounds": 3,
     "cache": "warm",
     "project": "chromium",
     "viewport": {
@@ -484,35 +515,20 @@
     "metrics": {
       "token": "product-2-warm",
       "destination": "https://localhost:3443/en/products/moon-garden-coloring-book",
-      "start": 580.7999999821186,
-      "feedback": 39.599999994039536,
-      "fallback": 94.90000000596046,
-      "useful": 405,
-      "completed": 405
+      "start": 616,
+      "feedback": 33.400000005960464,
+      "fallback": 101.5,
+      "useful": 416.80000001192093,
+      "completed": 416.80000001192093
     },
     "failures": [],
     "networkDiagnostics": {
       "unresolvedCount": 0,
-      "typedNextCancellations": 8,
+      "typedNextCancellations": 15,
       "closedPrefetches": 0,
       "failures": [
         {
-          "path": "/en/contact",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/products/moon-garden-coloring-book",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/library",
-          "method": "GET",
-          "disposition": "next-canceled"
-        },
-        {
-          "path": "/en/privacy",
+          "path": "/en",
           "method": "GET",
           "disposition": "next-canceled"
         },
@@ -522,12 +538,62 @@
           "disposition": "next-canceled"
         },
         {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/about",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
           "path": "/en/library",
           "method": "GET",
           "disposition": "next-canceled"
         },
         {
-          "path": "/en/login",
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/about",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/moon-garden-coloring-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products/mindful-mandalas-for-adults",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en",
           "method": "GET",
           "disposition": "next-canceled"
         },

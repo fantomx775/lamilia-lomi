@@ -133,9 +133,9 @@ export function ProductCatalogShell({ snapshot, locale, rawSearchParams, childre
         </CatalogForm>
       </details>
 
-      <CatalogForm action={`/${locale}/products`} data-testid="catalog-desktop-filters" className="mt-8 hidden gap-3 rounded-lg border border-[var(--color-border)] bg-white/65 p-4 md:grid md:grid-cols-[1.2fr_repeat(5,minmax(0,1fr))_auto]">
+      <CatalogForm action={`/${locale}/products`} data-testid="catalog-desktop-filters" className="mt-8 hidden gap-3 rounded-lg border border-[var(--color-border)] bg-white/65 p-4 md:grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(12rem,1.2fr)_repeat(5,minmax(0,1fr))_auto]">
         {preservedQueryInputs}
-        <label className="relative">
+        <label className="relative min-w-0 md:col-span-2 lg:col-span-3 xl:col-span-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--color-muted)]" />
           <CatalogSearchInput aria-label="Search catalog" name="q" value={filters.q ?? ""} sourceKey={getCatalogHref(locale, rawSearchParams)} className="pl-9" />
         </label>
@@ -165,7 +165,7 @@ function renderCatalogFilterFields({
   tags: Array<{ slug: string; name: string }>;
   productTypes: string[];
 }) {
-  const selectClassName = "h-11 min-w-0 rounded-md border border-[var(--color-border)] bg-white px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]";
+  const selectClassName = "h-11 min-w-0 rounded-md border border-[var(--color-border)] bg-white pl-3 pr-9 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]";
 
   return (
     <>

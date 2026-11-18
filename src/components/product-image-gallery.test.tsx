@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/image", async (importOriginal) => ({
   ...await importOriginal<typeof import("next/image")>(),
-  default: ({ src, alt, loading, className, onLoad, onError }: React.ImgHTMLAttributes<HTMLImageElement>) =>
-    createElement("img", { src, alt, loading, className, onLoad, onError }),
+  default: ({ src, alt, loading, className, onLoad, onError, fetchPriority, sizes }: React.ImgHTMLAttributes<HTMLImageElement>) =>
+    createElement("img", { src, alt, loading, className, onLoad, onError, fetchPriority, sizes }),
 }));
 
 import { ProductImageGallery } from "@/components/product-image-gallery";
@@ -61,6 +61,14 @@ function makeLabels(count: number) {
   };
 }
 
+function loadVisibleThumbnails() {
+  for (const image of screen.getAllByRole("img")) {
+    if (!(image instanceof HTMLImageElement)) continue;
+    Object.defineProperty(image, "currentSrc", { configurable: true, value: image.getAttribute("src") });
+    fireEvent.load(image);
+  }
+}
+
 let showModalDescriptor: PropertyDescriptor | undefined;
 let closeDescriptor: PropertyDescriptor | undefined;
 
@@ -103,6 +111,7 @@ describe("ProductImageGallery", () => {
   it("opens a large preview and navigates with controls and arrow keys", async () => {
     const user = userEvent.setup();
     render(<ProductImageGallery images={images} labels={labels} />);
+    loadVisibleThumbnails();
 
     await user.click(screen.getByRole("button", { name: "Open image 1" }));
 
@@ -135,6 +144,51 @@ describe("ProductImageGallery", () => {
     await user.click(screen.getByRole("button", { name: "Open image 1" }));
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     expect(within(dialog).getByRole("img", { name: images[0].alt })).toHaveAttribute("src", selectedSource);
+  });
+
+  it("does not initiate unknown thumbnail fallbacks for active or adjacent previews", async () => {
+    const user = userEvent.setup();
+    const pages = makeImages(3).map((image, index) => ({ ...image, path: `/thumb-${index}.webp?width=480`, detailPath: `/detail-${index}.webp?width=2048`, unoptimized: true }));
+    render(<ProductImageGallery images={pages} labels={makeLabels(3)} />);
+    await user.click(screen.getByRole("button", { name: "Open image 1" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector("[data-gallery-display]")).toBeNull();
+    expect(dialog.querySelector('img[src*="480"]')).toBeNull();
+    expect(within(dialog).getByRole("status")).toHaveTextContent("Loading larger preview");
+    const preloads = Array.from(dialog.querySelectorAll('img[alt=""]'));
+    expect(preloads.map(image => image.getAttribute("src"))).toEqual(pages.map(image => image.detailPath));
+    expect(preloads.map(image => image.getAttribute("loading"))).toEqual(["eager", "eager", "eager"]);
+    expect(preloads.map(image => image.getAttribute("fetchpriority"))).toEqual(["high", "low", "low"]);
+  });
+
+  it("uses only the active known thumbnail and retains a neighboring decode across rapid navigation", async () => {
+    const user = userEvent.setup();
+    const pages = makeImages(3).map((image, index) => ({ ...image, path: `/thumb-${index}.webp?width=480`, detailPath: `/detail-${index}.webp?width=2048`, unoptimized: true }));
+    render(<ProductImageGallery images={pages} labels={makeLabels(3)} />);
+    const thumbnail = screen.getByRole("img", { name: "Page 1" });
+    Object.defineProperty(thumbnail, "currentSrc", { value: "/actually-loaded-thumbnail.webp" });
+    fireEvent.load(thumbnail);
+    await user.click(screen.getByRole("button", { name: "Open image 1" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelectorAll("[data-gallery-display]")).toHaveLength(1);
+    expect(within(dialog).getByRole("img", { name: "Page 1" })).toHaveAttribute("src", "/actually-loaded-thumbnail.webp");
+    const neighbor = dialog.querySelector('img[src="/detail-1.webp?width=2048"]') as HTMLImageElement;
+    let resolveDecode!: () => void;
+    const decode = vi.fn(() => new Promise<void>(resolve => { resolveDecode = resolve; }));
+    Object.defineProperty(neighbor, "decode", { value: decode });
+    Object.defineProperty(neighbor, "currentSrc", { value: "/decoded-neighbor.webp" });
+    fireEvent.load(neighbor);
+    await user.click(within(dialog).getByRole("button", { name: "Next image" }));
+    expect(dialog.querySelector("[data-gallery-display]")).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Previous image" }));
+    await act(async () => resolveDecode());
+    expect(dialog.querySelector('img[src="/detail-1.webp?width=2048"]')).toBe(neighbor);
+    expect(dialog.querySelectorAll("[data-gallery-display]")).toHaveLength(1);
+    await user.click(within(dialog).getByRole("button", { name: "Next image" }));
+    expect(within(dialog).getByRole("img", { name: "Page 2" })).toHaveAttribute("src", "/decoded-neighbor.webp");
+    expect(within(dialog).queryByRole("status")).toBeNull();
+    expect(decode).toHaveBeenCalledTimes(1);
+    expect(dialog.querySelector('img[src*="480"]')).toBeNull();
   });
 
   it("keeps the thumbnail until detail decode completes, and retries a failed detail", async () => {
@@ -178,19 +232,21 @@ describe("ProductImageGallery", () => {
   it("supports touch swiping and wraps around the image sequence", async () => {
     const user = userEvent.setup();
     render(<ProductImageGallery images={images} labels={labels} />);
+    loadVisibleThumbnails();
 
     await user.click(screen.getByRole("button", { name: "Open image 1" }));
 
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     const frame = within(dialog).getByTestId("product-gallery-preview-frame");
-    const nextPreview = frame.querySelector('img[data-gallery-display][src="/page-two.svg"]');
-    expect(nextPreview).toHaveAttribute("loading", "eager");
-    expect(nextPreview).toHaveClass("invisible");
+    const nextPreload = frame.querySelector('img[alt=""][src="/page-two.svg"]') as HTMLImageElement;
+    expect(nextPreload).toHaveAttribute("loading", "eager");
+    expect(nextPreload).toHaveClass("invisible");
+    await act(async () => fireEvent.load(nextPreload));
     fireEvent.pointerDown(frame, { pointerType: "touch", clientX: 280 });
     fireEvent.pointerUp(frame, { pointerType: "touch", clientX: 80 });
 
     expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBeVisible();
-    expect(within(dialog).getByRole("img", { name: "Sleepy flower page" })).toBe(nextPreview);
+    expect(frame.querySelector('img[alt=""][src="/page-two.svg"]')).toBe(nextPreload);
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
     expect(within(dialog).getByRole("img", { name: "Stars and little houses" })).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Close image preview" }));
@@ -212,6 +268,7 @@ describe("ProductImageGallery", () => {
       src: `/api/reader-artworks/public-${index + 1}`,
     }));
     const { container } = render(<ReaderArtworkGallery artworks={artworks} />);
+    loadVisibleThumbnails();
 
     expect(screen.getByRole("heading", { name: "Colored by Our Readers" })).toBeVisible();
     expect(screen.getByText("Colored by Mira")).toBeVisible();
@@ -258,6 +315,7 @@ describe("ProductImageGallery", () => {
   it("keeps a single image usable without carousel controls", async () => {
     const user = userEvent.setup();
     render(<ProductImageGallery images={makeImages(1)} labels={makeLabels(1)} />);
+    loadVisibleThumbnails();
 
     const thumbnail = screen.getByRole("button", { name: "Open image 1" });
     expect(thumbnail.querySelector("img")).toHaveAttribute("loading", "lazy");
@@ -294,12 +352,16 @@ describe("ProductImageGallery", () => {
     expect(lastThumbnail.firstElementChild)
       .toHaveClass("aspect-[8.5/11]");
 
+    loadVisibleThumbnails();
     await user.click(lastThumbnail);
     const dialog = screen.getByRole("dialog", { name: "Image preview" });
     const frame = within(dialog).getByTestId("product-gallery-preview-frame");
     expect(within(dialog).getByRole("img", { name: "Page 4" })).toBeVisible();
     expect(Array.from(frame.querySelectorAll("img[data-gallery-display]"), (image) => image.getAttribute("src")))
+      .toEqual(["/page-4.svg"]);
+    expect(Array.from(frame.querySelectorAll('img[alt=""]'), (image) => image.getAttribute("src")))
       .toEqual(["/page-4.svg", "/page-5.svg", "/page-3.svg"]);
+    await act(async () => fireEvent.load(frame.querySelector('img[alt=""][src="/page-5.svg"]')!));
     await user.click(within(dialog).getByRole("button", { name: "Next image" }));
     expect(within(dialog).getByRole("img", { name: "Page 5" })).toBeVisible();
   });
