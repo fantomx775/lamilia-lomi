@@ -31,6 +31,26 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
   if (info.config.workers !== 1) throw new Error("Catalog fixture requires --workers=1.");
   if (Number(process.env.LAMILIA_TEST_CATALOG_LOADING_DELAY_MS) < 1000) throw new Error("Configure the existing dev-only catalogue result delay in app and runner for observable pending; never use a Production delay.");
   if (!(await isLocalDemoAppTarget(page, info.project.use.baseURL))) throw new Error("Refusing to change a content fixture outside verified local-demo mode.");
+  const browserDiagnostics = {
+    consoleErrors: [] as string[],
+    pageErrors: [] as string[],
+    failedRequests: [] as string[],
+    serverErrors: [] as string[],
+  };
+  page.on("console", (message) => {
+    if (message.type() === "error") browserDiagnostics.consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => browserDiagnostics.pageErrors.push(error.message));
+  page.on("requestfailed", (request) => {
+    browserDiagnostics.failedRequests.push(
+      `${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText ?? "request failed"}`,
+    );
+  });
+  page.on("response", (response) => {
+    if (response.status() >= 500) {
+      browserDiagnostics.serverErrors.push(`${response.status()} ${new URL(response.url()).pathname}`);
+    }
+  });
   await page.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
   const release = await acquireLocalContentStoreLock();
   const filename = path.resolve("data/lamilialomi-content.local.json");
@@ -54,7 +74,12 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         await page.evaluate(() => document.fonts.ready);
         const before = await geometry(page);
         const phase = `r5-c${categoryCount}-cols${desktopColumns}-w${width}`;
-        await page.screenshot({ path: info.outputPath(`${phase}-before.png`), animations: "disabled" });
+        await page.screenshot({
+          path: info.outputPath(`${phase}-before.png`),
+          animations: "disabled",
+          caret: "initial",
+          style: "nextjs-portal { display: none !important; }",
+        });
         // Native documents resolve critical content before sending it. Enhanced
         // GET transitions keep the actual result grid and shell while pending.
         const form = page.getByTestId(width < 768 ? "catalog-mobile-search" : "catalog-desktop-filters");
@@ -71,7 +96,12 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
         const pending = await geometry(page);
         sameGeometry(submitted, pending);
-        await page.screenshot({ path: info.outputPath(`${phase}-pending.png`), animations: "disabled" });
+        await page.screenshot({
+          path: info.outputPath(`${phase}-pending.png`),
+          animations: "disabled",
+          caret: "initial",
+          style: "nextjs-portal { display: none !important; }",
+        });
         await expect(grid).toBeVisible();
         await expect(grid).toContainText(productTitle);
         await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
@@ -79,7 +109,12 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         const final = await geometry(page);
         sameGeometry(pending, final);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-        await page.screenshot({ path: info.outputPath(`${phase}-after.png`), animations: "disabled" });
+        await page.screenshot({
+          path: info.outputPath(`${phase}-after.png`),
+          animations: "disabled",
+          caret: "initial",
+          style: "nextjs-portal { display: none !important; }",
+        });
         await info.attach(`${phase}-bounds.json`, { body: JSON.stringify({ before, submitted, pending, final }), contentType: "application/json" });
         await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
         await expect(results).not.toHaveAttribute("aria-busy", "true");
@@ -90,5 +125,13 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
     if (previous) fs.writeFileSync(filename, previous);
     else if (fs.existsSync(filename)) fs.unlinkSync(filename);
     release();
+    await info.attach("browser-diagnostics.json", {
+      body: JSON.stringify(browserDiagnostics, null, 2),
+      contentType: "application/json",
+    });
   }
+  expect(browserDiagnostics.consoleErrors).toEqual([]);
+  expect(browserDiagnostics.pageErrors).toEqual([]);
+  expect(browserDiagnostics.failedRequests).toEqual([]);
+  expect(browserDiagnostics.serverErrors).toEqual([]);
 });
