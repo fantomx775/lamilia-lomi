@@ -34,12 +34,15 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
   await expect(page.locator("main").getByRole("link", { name: "My Library" })).toHaveCount(0);
   const mobileMenuButton = page.getByRole("button", { name: "Open navigation menu", exact: true });
   await expect(mobileMenuButton).toBeVisible();
+  await expect(mobileMenuButton).toHaveAttribute("data-navigation-hydrated", "true");
   await mobileMenuButton.click();
+  await expect(mobileMenuButton).toHaveAttribute("aria-expanded", "true");
   const mobileNavigation = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
   const libraryLink = mobileNavigation.getByRole("link", { name: "My Library", exact: true });
   await expect(libraryLink).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(mobileNavigation).not.toBeVisible();
+  await expect(mobileMenuButton).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByText("Role", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Communication preferences" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: "I agree to receive marketing emails." })).toBeChecked();

@@ -31,6 +31,10 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
   }, [navigateCommunity, router]);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const setTriggerRef = useCallback((element: HTMLButtonElement | null) => {
+    triggerRef.current = element;
+    if (element) element.setAttribute("data-navigation-hydrated", "true");
+  }, []);
   const openedPath = useRef<string | null>(null);
   const pendingClose = useRef<{ destination?: string; version: number } | null>(null);
   const [open, setOpen] = useState(false);
@@ -181,7 +185,7 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
 
   return (
     <div className="lg:hidden">
-      <button ref={triggerRef} type="button" aria-label="Open navigation menu" aria-expanded={open}
+      <button ref={setTriggerRef} type="button" aria-label="Open navigation menu" aria-expanded={open}
         aria-controls="mobile-primary-navigation" aria-haspopup="dialog" onClick={openMenu} className={mobileActionClass}>
         <Menu className="size-5" aria-hidden />
       </button>
