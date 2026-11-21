@@ -8,11 +8,11 @@ import { isLocalDemoAppTarget } from "./local-target";
 test.setTimeout(180_000);
 
 const imageFixtures = [
-  { name: "01-red.png", rgb: [230, 42, 52] },
-  { name: "02-green.png", rgb: [30, 160, 90] },
-  { name: "03-blue.png", rgb: [35, 90, 210] },
-  { name: "04-yellow.png", rgb: [240, 180, 35] },
-  { name: "05-purple.png", rgb: [175, 45, 190] },
+  { name: "01-red.webp", rgb: [230, 42, 52] },
+  { name: "02-green.webp", rgb: [30, 160, 90] },
+  { name: "03-blue.webp", rgb: [35, 90, 210] },
+  { name: "04-yellow.webp", rgb: [240, 180, 35] },
+  { name: "05-purple.webp", rgb: [175, 45, 190] },
 ] as const;
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -199,7 +199,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
 
     await page.locator("#media-upload-gallery").setInputFiles(
       imageFixtures.slice(0, 4).map((fixture, index) => ({
-        name: fixture.name,
+        name: inputFilename(fixture.name),
         mimeType: "image/png",
         buffer: makePng(fixture.rgb, index),
       })),
@@ -209,8 +209,8 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     let expectedOrder = imageFixtures.slice(0, 4);
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     await assertArrowTargets(page, expectedOrder.map((fixture) => fixture.name), testInfo);
-    await expect(page.getByRole("button", { name: "Przenieś 01-red.png wyżej" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.png niżej" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Przenieś 01-red.webp wyżej" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.webp niżej" })).toBeDisabled();
     await capture(page, testInfo, "01-four-images-uploaded");
 
     for (const nextOrder of [
@@ -218,12 +218,12 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       [imageFixtures[0], imageFixtures[3], imageFixtures[1], imageFixtures[2]],
       [imageFixtures[3], imageFixtures[0], imageFixtures[1], imageFixtures[2]],
     ]) {
-      await page.getByRole("button", { name: "Przenieś 04-yellow.png wyżej" }).click();
+      await page.getByRole("button", { name: "Przenieś 04-yellow.webp wyżej" }).click();
       expectedOrder = nextOrder;
       await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     }
-    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.png wyżej" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Przenieś 01-red.png wyżej" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.webp wyżej" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Przenieś 01-red.webp wyżej" })).toBeEnabled();
     await capture(page, testInfo, "02-fourth-image-moved-to-first");
 
     for (const nextOrder of [
@@ -231,36 +231,36 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       [imageFixtures[0], imageFixtures[1], imageFixtures[3], imageFixtures[2]],
       [imageFixtures[0], imageFixtures[1], imageFixtures[2], imageFixtures[3]],
     ]) {
-      await page.getByRole("button", { name: "Przenieś 04-yellow.png niżej" }).click();
+      await page.getByRole("button", { name: "Przenieś 04-yellow.webp niżej" }).click();
       expectedOrder = nextOrder;
       await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     }
-    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.png niżej" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.webp niżej" })).toBeDisabled();
 
     await page.locator("#media-upload-gallery").setInputFiles({
-      name: imageFixtures[4].name,
+      name: inputFilename(imageFixtures[4].name),
       mimeType: "image/png",
       buffer: makePng(imageFixtures[4].rgb, 4),
     });
     await expect(page.getByText("Przesłano", { exact: true })).toHaveCount(5);
     expectedOrder = [...imageFixtures];
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
-    await page.getByRole("button", { name: "Przenieś 05-purple.png wyżej" }).click();
+    await page.getByRole("button", { name: "Przenieś 05-purple.webp wyżej" }).click();
     expectedOrder = [imageFixtures[0], imageFixtures[1], imageFixtures[2], imageFixtures[4], imageFixtures[3]];
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
-    await page.getByRole("button", { name: "Przenieś 05-purple.png wyżej" }).click();
+    await page.getByRole("button", { name: "Przenieś 05-purple.webp wyżej" }).click();
     expectedOrder = [imageFixtures[0], imageFixtures[1], imageFixtures[4], imageFixtures[2], imageFixtures[3]];
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     await capture(page, testInfo, "03-fifth-image-uploaded-and-reordered");
 
-    const removedImage = page.getByRole("img", { name: "Podgląd 02-green.png" });
+    const removedImage = page.getByRole("img", { name: "Podgląd 02-green.webp" });
     await removedImage.locator("xpath=..").getByRole("button", { name: "Usuń", exact: true }).click();
-    await expect(page.getByRole("img", { name: "Podgląd 02-green.png" })).toHaveCount(0);
+    await expect(page.getByRole("img", { name: "Podgląd 02-green.webp" })).toHaveCount(0);
     expectedOrder = [imageFixtures[0], imageFixtures[4], imageFixtures[2], imageFixtures[3]];
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     await assertArrowTargets(page, expectedOrder.map((fixture) => fixture.name), testInfo);
-    await expect(page.getByRole("button", { name: "Przenieś 01-red.png wyżej" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.png niżej" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Przenieś 01-red.webp wyżej" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.webp niżej" })).toBeDisabled();
     await assertSubmittedGalleryOrder(page, expectedOrder.map((fixture) => fixture.name));
     await capture(page, testInfo, "04-image-removed-and-order-ready-to-save");
 
@@ -287,13 +287,13 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     // Reopen the editor and exercise arrows on previously uploaded assets.
     await page.goto(productPath);
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
-    await expect(page.getByRole("button", { name: "Przenieś 01-red.png wyżej" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.png niżej" })).toBeDisabled();
-    await page.getByRole("button", { name: "Przenieś 04-yellow.png wyżej" }).click();
+    await expect(page.getByRole("button", { name: "Przenieś 01-red.webp wyżej" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Przenieś 04-yellow.webp niżej" })).toBeDisabled();
+    await page.getByRole("button", { name: "Przenieś 04-yellow.webp wyżej" }).click();
     expectedOrder = [imageFixtures[0], imageFixtures[4], imageFixtures[3], imageFixtures[2]];
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     await capture(page, testInfo, "07-existing-image-moved-in-editor");
-    await page.getByRole("button", { name: "Przenieś 04-yellow.png niżej" }).click();
+    await page.getByRole("button", { name: "Przenieś 04-yellow.webp niżej" }).click();
     expectedOrder = [imageFixtures[0], imageFixtures[4], imageFixtures[2], imageFixtures[3]];
     await expect.poll(() => readGallerySignature(page)).toEqual(signatureFor(expectedOrder));
     const editUrlBeforeSave = page.url();
@@ -563,6 +563,10 @@ function signatureFor(fixtures: ReadonlyArray<(typeof imageFixtures)[number]>) {
     label: "Podgląd " + fixture.name,
     rgb: [...fixture.rgb],
   }));
+}
+
+function inputFilename(filename: string) {
+  return filename.replace(/\.webp$/i, ".png");
 }
 
 async function capture(page: Page, testInfo: TestInfo, name: string) {

@@ -29,9 +29,9 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
   }
   const store = path.resolve("data/lamilialomi-content.local.json");
   const original = fs.existsSync(store) ? fs.readFileSync(store) : null;
-  const mediaDirectory = path.resolve("public/uploads/issue-127-video");
+  const mediaDirectory = path.resolve("public/uploads/12712712-7127-4127-8127-127127127127");
   const existed = fs.existsSync(mediaDirectory);
-  if (existed) { release(); throw new Error("The exclusive video fixture directory already exists; inspect its ownership before proceeding."); }
+  if (existed) { release(); throw new Error("The exclusive media fixture directory already exists; inspect its ownership before proceeding."); }
   const pageErrors: Array<{ category: "unexpected-page-error"; path: string }> = [];
   const consoleErrors: Array<{ category: "unexpected-console-error"; path: string }> = [];
   const expectedImageFaultConsole: Array<{ category: "controlled-image-resource-error"; path: string }> = [];
@@ -53,8 +53,11 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
   page.on("requestfailed", (request) => failedRequests.push({ method: request.method(), path: locationPath(request.url(), String(testInfo.project.use.baseURL)), error: networkErrorCategory(request), expectedImageFault: imageFaultRequests.has(request) }));
   try {
     fs.mkdirSync(mediaDirectory, { recursive: true });
-    fs.copyFileSync(path.resolve("tests/e2e/fixtures/issue-127/flower.mp4"), path.join(mediaDirectory, "flower.mp4"));
-    fs.writeFileSync(path.join(mediaDirectory, "cover.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="850" height="1100"><rect width="850" height="1100" fill="#c5d4bd"/><text x="100" y="500" font-size="60">Local video fixture</text></svg>');
+    fs.mkdirSync(path.join(mediaDirectory, "video"), { recursive: true });
+    fs.mkdirSync(path.join(mediaDirectory, "cover"), { recursive: true });
+    fs.mkdirSync(path.join(mediaDirectory, "gallery"), { recursive: true });
+    fs.copyFileSync(path.resolve("tests/e2e/fixtures/issue-127/flower.mp4"), path.join(mediaDirectory, "video", "flower.mp4"));
+    fs.writeFileSync(path.join(mediaDirectory, "cover", "cover.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="850" height="1100"><rect width="850" height="1100" fill="#c5d4bd"/><text x="100" y="500" font-size="60">Local video fixture</text></svg>');
     const snapshot = getSeedContentSnapshot();
     const product = structuredClone(snapshot.products[0]);
     product.id = "12712712-7127-4127-8127-127127127127";
@@ -62,19 +65,22 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     product.status = "published";
     product.categoryIds = []; product.tagIds = []; product.premiumCodes = [];
     product.translations = [{ ...product.translations[0], locale: "en", title: "Local video playback fixture", shortDescription: "Independent controlled media", longDescription: "" }];
-    const media = (kind: "cover" | "video", filename: string, contentType: string): ProductAsset => ({ id: `ux127-${kind}`, productId: product.id, kind, bucket: "public-media", path: `/uploads/issue-127-video/${filename}`, filename, contentType, sortOrder: 0, isPublic: true, title: kind === "video" ? "flower.mp4" : "Local cover" });
+    const media = (kind: "cover" | "video", filename: string, contentType: string): ProductAsset => {
+      const id = `ux127-${kind}`;
+      return { id, productId: product.id, kind, bucket: "public-media", path: `/api/media/${id}`, storagePath: `/uploads/${product.id}/${kind}/${encodeURIComponent(filename)}`, storageProvider: "local", filename, contentType, sortOrder: 0, isPublic: true, title: kind === "video" ? "flower.mp4" : "Local cover" };
+    };
     const gallery: ProductAsset[] = [];
     for (const [index, [width, height]] of [[2000, 2000], [1200, 1800], [1700, 2200]].entries()) {
       const filename = `page-${index}.png`;
-      await sharp({ create: { width, height, channels: 3, background: ["#b5c7d6", "#d6c7b5", "#c7d6b5"][index] } }).png().toFile(path.join(mediaDirectory, filename));
-      gallery.push({ id: `ux127-page-${index}`, productId: product.id, kind: "gallery", bucket: "public-media", path: `/uploads/issue-127-video/${filename}`, filename, contentType: "image/png", sortOrder: index + 1, isPublic: true, title: `Controlled page ${index + 1}` });
+      await sharp({ create: { width, height, channels: 3, background: ["#b5c7d6", "#d6c7b5", "#c7d6b5"][index] } }).png().toFile(path.join(mediaDirectory, "gallery", filename));
+      gallery.push({ id: `ux127-page-${index}`, productId: product.id, kind: "gallery", bucket: "public-media", path: `/api/media/ux127-page-${index}`, storagePath: `/uploads/${product.id}/gallery/${encodeURIComponent(filename)}`, storageProvider: "local", filename, contentType: "image/png", sortOrder: index + 1, isPublic: true, title: `Controlled page ${index + 1}` });
     }
     product.assets = [media("cover", "cover.svg", "image/svg+xml"), media("video", "flower.mp4", "video/mp4"), ...gallery];
     product.coverAssetId = "ux127-cover"; product.videoAssetId = "ux127-video";
     snapshot.products.push(product);
     fs.mkdirSync(path.dirname(store), { recursive: true }); fs.writeFileSync(store, JSON.stringify(snapshot));
     await page.addInitScript(() => localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false })));
-    const range = await page.request.get("/uploads/issue-127-video/flower.mp4", { headers: { Range: "bytes=0-127" } });
+    const range = await page.request.get("/api/media/ux127-video", { headers: { Range: "bytes=0-127" } });
     expect(range.status()).toBe(206); expect(range.headers()["content-range"]).toMatch(/^bytes 0-127\//);
     expect((await range.body()).byteLength).toBe(128);
     const samples: Array<{ cache: string; clickToFrameMs: number }> = [];

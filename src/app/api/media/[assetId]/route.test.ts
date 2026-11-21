@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 
 vi.mock("server-only", () => ({}));
 
@@ -61,6 +63,50 @@ describe("public media delivery", () => {
     expect(response.status).toBe(404);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(mocks.getAssetByIdForRequest).not.toHaveBeenCalled();
+  });
+
+  it("serves a bounded local upload byte range through the asset route", async () => {
+    const directory = path.resolve("public/uploads", productId, "video");
+    const filename = `ux127-range-${Date.now()}.mp4`;
+    const filePath = path.join(directory, filename);
+    const bytes = Buffer.from("0123456789abcdef");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(filePath, bytes, { flag: "wx" });
+    try {
+      mocks.getBackendMode.mockReturnValue("local");
+      mocks.getAssetByIdForRequest.mockResolvedValue({
+        id: assetId,
+        productId,
+        kind: "video",
+        bucket: "public-videos",
+        path: `/api/media/${assetId}`,
+        storagePath: `/uploads/${productId}/video/${filename}`,
+        storageProvider: "local",
+        filename,
+        contentType: "video/mp4",
+        isPublic: true,
+        isActive: true,
+      });
+      mocks.getProductByIdForRequest.mockResolvedValue({ id: productId, status: "published" });
+
+      const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`, {
+        headers: { Range: "bytes=4-9" },
+      }), { params: Promise.resolve({ assetId }) });
+
+      expect(response.status).toBe(206);
+      expect(response.headers.get("accept-ranges")).toBe("bytes");
+      expect(response.headers.get("content-range")).toBe("bytes 4-9/16");
+      expect(response.headers.get("content-length")).toBe("6");
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes.subarray(4, 10));
+
+      const unsatisfiable = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`, {
+        headers: { Range: "bytes=16-" },
+      }), { params: Promise.resolve({ assetId }) });
+      expect(unsatisfiable.status).toBe(416);
+      expect(unsatisfiable.headers.get("content-range")).toBe("bytes */16");
+    } finally {
+      fs.rmSync(filePath, { force: true });
+    }
   });
 
   it.each([false, true])("serves current UUID-versioned public R2 bytes (extended cache: %s)", async (extendedCache) => {

@@ -1,18 +1,24 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test("consent gates Google, instruments interactions, and can be withdrawn", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   let googleLoads = 0;
   await page.route("https://www.googletagmanager.com/**", route => { googleLoads++; return route.fulfill({ contentType: "application/javascript", body: "/* isolated Google transport */" }); });
   await page.goto("/en");
-  await expect(page.getByRole("button", { name: "Essential only", exact: true })).toBeVisible();
+  const essentialOnly = page.getByRole("button", { name: "Essential only", exact: true });
+  await expect(essentialOnly).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("cookie-consent.png"), fullPage: false });
-  await page.getByRole("button", { name: "Essential only", exact: true }).click();
+  await hideLocalNextDevPortalIfBlocking(page, essentialOnly);
+  await essentialOnly.click();
   await page.reload();
   await expect(page.getByRole("button", { name: "Cookie settings", exact: true })).toBeVisible();
   expect(googleLoads).toBe(0);
-  await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
-  await page.getByRole("button", { name: "Allow analytics", exact: true }).click();
+  const cookieSettings = page.getByRole("button", { name: "Cookie settings", exact: true });
+  await hideLocalNextDevPortalIfBlocking(page, cookieSettings);
+  await cookieSettings.click();
+  const allowAnalytics = page.getByRole("button", { name: "Allow analytics", exact: true });
+  await hideLocalNextDevPortalIfBlocking(page, allowAnalytics);
+  await allowAnalytics.click();
   await expect.poll(() => googleLoads).toBe(1);
   const events = () => page.evaluate(() => (window as unknown as { dataLayer: ArrayLike<unknown>[] }).dataLayer?.map(item => Array.from(item)).filter(item => item[0] === "event") ?? []);
   expect((await events()).filter(item => item[1] === "page_view")).toHaveLength(1);
@@ -60,8 +66,10 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
       return originalSetItem.call(this, key, value);
     };
   });
-  await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
-  await page.getByRole("button", { name: "Essential only", exact: true }).click();
+  await hideLocalNextDevPortalIfBlocking(page, cookieSettings);
+  await cookieSettings.click();
+  await hideLocalNextDevPortalIfBlocking(page, essentialOnly);
+  await essentialOnly.click();
   await expect(page.getByRole("button", { name: "Cookie settings", exact: true })).toBeVisible();
   await page.evaluate(() => {
     const video = document.createElement("video");
@@ -74,6 +82,29 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
   await page.reload();
   expect(await page.locator('script[src*="googletagmanager"]').count()).toBe(0);
 });
+
+async function hideLocalNextDevPortalIfBlocking(page: Page, target: Locator) {
+  const hostname = new URL(page.url()).hostname;
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) return;
+
+  const portalInterceptsTarget = await target.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const top = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    let candidate: Element | null = top;
+
+    while (candidate) {
+      if (candidate.localName === "nextjs-portal") return true;
+      const root = candidate.getRootNode();
+      candidate = root instanceof ShadowRoot ? root.host : candidate.parentElement;
+    }
+
+    return false;
+  });
+
+  if (portalInterceptsTarget) {
+    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
+  }
+}
 
 
 test("real Google tag encodes the configured measurement ID and page view", async ({ page }) => {

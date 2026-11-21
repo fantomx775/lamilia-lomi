@@ -33,8 +33,10 @@ test("replacing a synthetic product cover keeps one active image and retires the
   const suffix = `issue-23-${testInfo.project.name}-${Date.now()}`;
   const title = `Media lifecycle ${suffix}`;
   const slug = `media-lifecycle-${suffix}`;
-  const firstFilename = "issue-23-cover-first.png";
-  const replacementFilename = "issue-23-cover-replacement.png";
+  const firstUploadFilename = "issue-23-cover-first.png";
+  const replacementUploadFilename = "issue-23-cover-replacement.png";
+  const firstFilename = "issue-23-cover-first.webp";
+  const replacementFilename = "issue-23-cover-replacement.webp";
   const diagnostics = {
     consoleErrors: [] as Array<{ message: string; disposition: string; reason?: string }>,
     pageErrors: [] as string[],
@@ -106,7 +108,7 @@ test("replacing a synthetic product cover keeps one active image and retires the
 
     const coverSection = page.locator("#media-section-cover");
     const coverInput = page.locator("#media-upload-cover");
-    await coverInput.setInputFiles({ name: firstFilename, mimeType: "image/png", buffer: makePng([205, 67, 75]) });
+    await coverInput.setInputFiles({ name: firstUploadFilename, mimeType: "image/png", buffer: makePng([205, 67, 75]) });
     await expect(coverSection.getByRole("img", { name: `Podgląd ${firstFilename}` })).toBeVisible();
     await expect(coverSection.getByText("Przesłano", { exact: true })).toBeVisible();
 
@@ -131,7 +133,7 @@ test("replacing a synthetic product cover keeps one active image and retires the
     const initialCoverPath = path.resolve(process.cwd(), "public", initialCover!.path!.replace(/^\/+/, ""));
     expect(fs.existsSync(initialCoverPath)).toBe(true);
 
-    await coverInput.setInputFiles({ name: replacementFilename, mimeType: "image/png", buffer: makePng([43, 126, 191]) });
+    await coverInput.setInputFiles({ name: replacementUploadFilename, mimeType: "image/png", buffer: makePng([43, 126, 191]) });
     await expect(coverSection.getByRole("img", { name: `Podgląd ${replacementFilename}` })).toBeVisible();
     await expect(coverSection.getByText(new RegExp(firstFilename))).toContainText("zostanie usunięty po zapisaniu");
 

@@ -190,9 +190,15 @@ test("registration and verification resume the unlock journey", async ({ page })
   await page.getByRole("link", { name: "Go to My Library" }).click();
   await expect(page).toHaveURL(/\/en\/library/);
   await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Moon Garden Coloring Book/ })).toBeVisible();
+  const libraryCard = page.getByTestId("library-book-card").filter({ hasText: "Moon Garden Coloring Book" });
+  await expect(libraryCard.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
+  await expect(libraryCard.getByRole("link", { name: "Open my files", exact: true })).toBeVisible();
+  await expect(libraryCard.getByRole("link", { name: "View book details", exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("link", { name: /Moon Garden Coloring Book/ })).toBeVisible();
+  const reloadedLibraryCard = page.getByTestId("library-book-card").filter({ hasText: "Moon Garden Coloring Book" });
+  await expect(reloadedLibraryCard.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
+  await expect(reloadedLibraryCard.getByRole("link", { name: "Open my files", exact: true })).toBeVisible();
+  await expect(reloadedLibraryCard.getByRole("link", { name: "View book details", exact: true })).toBeVisible();
 });
 
 test("verified owner reaches Library and downloads only through the authorized route", async ({ page }) => {
@@ -248,7 +254,7 @@ test("empty Library state is actionable for an authenticated locked reader", asy
   await page.getByRole("button", { name: "Continue" }).click();
 
   await expect(page.getByTestId("library-empty-state")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Browse products" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Unlock my book bonus", exact: true })).toBeVisible();
 });
 
 test("unknown QR product, guest download, and external return targets are controlled", async ({ page }) => {

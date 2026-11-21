@@ -31,7 +31,15 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
   await page.goto("/en/account");
   await expect(page).toHaveURL(/\/en\/account/);
   await expect(page.getByText("Email verified")).toBeVisible();
-  await expect(page.locator("main").getByRole("link", { name: "My Library" }).last()).toBeVisible();
+  await expect(page.locator("main").getByRole("link", { name: "My Library" })).toHaveCount(0);
+  const mobileMenuButton = page.getByRole("button", { name: "Open navigation menu", exact: true });
+  await expect(mobileMenuButton).toBeVisible();
+  await mobileMenuButton.click();
+  const mobileNavigation = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+  const libraryLink = mobileNavigation.getByRole("link", { name: "My Library", exact: true });
+  await expect(libraryLink).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(mobileNavigation).not.toBeVisible();
   await expect(page.getByText("Role", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Communication preferences" })).toBeVisible();
   await expect(page.getByText("Marketing emails:")).toContainText("Subscribed");
@@ -41,6 +49,10 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
   await expect(page.getByRole("heading", { name: "Join the Coloring Club" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.getByRole("main").last().screenshot({ path: join(screenshotDirectory, "account-390.png") });
+  await mobileMenuButton.click();
+  await libraryLink.click();
+  await expect(page).toHaveURL(/\/en\/library$/);
+  await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
 
   for (const width of [320, 375, 390]) {
     await page.setViewportSize({ width, height: 844 });

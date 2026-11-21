@@ -111,7 +111,9 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await expect(header.getByRole("button", { name: /navigation menu/ })).toHaveCount(0);
       await expect(page.getByTestId("catalog-desktop-filters")).toBeVisible();
       await expect(page.getByTestId("product-catalog-grid").locator("article")).toHaveCount(1);
-      await expect(page.getByTestId("product-catalog-grid").locator("article summary")).toBeVisible();
+      const desktopCard = page.getByTestId("product-catalog-grid").locator("article").first();
+      await expect(desktopCard.locator("[data-product-card-title]")).toHaveText(product.translations[0].title);
+      await expect(desktopCard.locator("details, summary")).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await saveScreenshot(page, "desktop-catalog", true);
     } else {
@@ -155,11 +157,21 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await expect(mobileMenu).not.toBeVisible();
 
       const card = page.getByTestId("product-catalog-grid").locator("article").first();
-      const disclosure = card.locator("summary");
-      await expect(disclosure).toBeVisible();
-      await page.mouse.move(0, 0);
-      await disclosure.tap();
-      await expect(card.locator("details")).toHaveAttribute("open", "");
+      await expect(card.locator("[data-product-card-title]")).toHaveText(product.translations[0].title);
+      await expect(card.locator("details, summary")).toHaveCount(0);
+      const productLink = card.getByRole("link");
+      const productHref = await productLink.getAttribute("href");
+      expect(productHref).not.toBeNull();
+      const productUrl = new URL(productHref!, page.url());
+      expect(productUrl.pathname).toBe(`/en/products/${product.slug}`);
+      const catalogContext = productUrl.searchParams.get("catalog");
+      expect(catalogContext).not.toBeNull();
+      const catalogUrl = new URL(catalogContext!, page.url());
+      expect(catalogUrl.pathname).toBe("/en/products");
+      for (const key of ["q", "audience", "type", "category", "tag", "sort"]) {
+        expect(catalogUrl.searchParams.get(key)).toBe(search.get(key));
+      }
+      expect(catalogUrl.hash).toBe(`#${await card.getAttribute("id")}`);
       await page.mouse.move(0, 0);
       await expect.poll(async () => card.evaluate((element) => getComputedStyle(element).boxShadow)).not.toContain("197, 111, 93");
 

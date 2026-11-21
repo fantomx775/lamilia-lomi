@@ -130,7 +130,19 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await page.goto(`/en/products?q=${encodeURIComponent("split phrase")}`);
     await waitForDocumentFonts(page);
     const grid = page.getByTestId("product-catalog-grid");
-    await expect(grid.locator(`a[href="/en/products/${productSlug}"]`)).toBeVisible();
+    const productLink = grid.locator(`a[href^="/en/products/${productSlug}?catalog="]`);
+    await expect(productLink).toBeVisible();
+    const productHref = await productLink.getAttribute("href");
+    expect(productHref).not.toBeNull();
+    const productUrl = new URL(productHref!, page.url());
+    expect(productUrl.pathname).toBe(`/en/products/${productSlug}`);
+    const catalogContext = productUrl.searchParams.get("catalog");
+    expect(catalogContext).not.toBeNull();
+    const catalogUrl = new URL(catalogContext!, page.url());
+    expect(catalogUrl.pathname).toBe("/en/products");
+    expect(catalogUrl.searchParams.get("q")).toBe("split phrase");
+    const cardId = await productLink.evaluate((link) => link.closest("article")?.id ?? "");
+    expect(catalogUrl.hash).toBe(`#${cardId}`);
     await expect(page.getByText("No products found", { exact: true })).toHaveCount(0);
     await page.screenshot({ path: screenshotPath, fullPage: true, animations: "disabled" });
 

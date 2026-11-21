@@ -83,10 +83,15 @@ export async function GET(request: Request, { params }: Props) {
       return NextResponse.redirect(new URL(asset.path, request.url));
     }
 
+    const localUploadPath = asset.path.startsWith("/uploads/")
+      ? asset.path
+      : asset.path === `/api/media/${assetId}` && asset.storagePath?.startsWith("/uploads/")
+        ? asset.storagePath
+        : null;
     const relativePath = asset.path.startsWith("/assets/")
       ? asset.path.slice(1)
-      : asset.path.startsWith("/uploads/")
-        ? `uploads/${asset.path.slice("/uploads/".length)}`
+      : localUploadPath
+        ? localUploadRelativePath(localUploadPath, asset.productId, asset.kind)
         : null;
 
     if (!relativePath) {
@@ -99,17 +104,37 @@ export async function GET(request: Request, { params }: Props) {
       return notFoundMediaResponse();
     }
 
+    const bytes = fs.readFileSync(filePath);
+    const range = parseByteRange(request.headers.get("range"), bytes.byteLength);
+    if (range.kind === "unsatisfiable") {
+      return new NextResponse(null, {
+        status: 416,
+        headers: {
+          "Accept-Ranges": "bytes",
+          "Content-Range": `bytes */${bytes.byteLength}`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    const selectedBytes = range.kind === "range"
+      ? bytes.subarray(range.start, range.end + 1)
+      : bytes;
     const headers = new Headers({
       "Content-Type": asset.contentType,
-      "Content-Length": String(fs.statSync(filePath).size),
+      "Content-Length": String(selectedBytes.byteLength),
+      "Accept-Ranges": "bytes",
       "Cache-Control": requestedVersion === null
         ? "public, max-age=31536000, immutable"
         : "public, max-age=60, s-maxage=60",
     });
+    if (range.kind === "range") {
+      headers.set("Content-Range", `bytes ${range.start}-${range.end}/${bytes.byteLength}`);
+    }
     if (isDownload) {
       headers.set("Content-Disposition", `attachment; filename="${safeFilename(asset.filename)}"`);
     }
-    return new NextResponse(fs.readFileSync(filePath), { headers });
+    return new NextResponse(selectedBytes, { status: range.kind === "range" ? 206 : 200, headers });
   }
 
   if (!isMediaKind(asset.kind) || asset.bucket !== mediaBucketForKind(asset.kind)) {
@@ -215,6 +240,53 @@ export async function GET(request: Request, { params }: Props) {
     adminPreviewAuthorized ? "private, no-store" : "private, max-age=30",
   );
   return response;
+}
+
+function parseByteRange(value: string | null, size: number):
+  | { kind: "full" }
+  | { kind: "range"; start: number; end: number }
+  | { kind: "unsatisfiable" } {
+  if (!value) return { kind: "full" };
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return { kind: "full" };
+
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0 || size === 0) {
+      return { kind: "unsatisfiable" };
+    }
+    return { kind: "range", start: Math.max(0, size - suffixLength), end: size - 1 };
+  }
+
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start >= size || start > requestedEnd) {
+    return { kind: "unsatisfiable" };
+  }
+  return { kind: "range", start, end: Math.min(requestedEnd, size - 1) };
+}
+
+function localUploadRelativePath(value: string, productId: string, kind: string) {
+  if (!value.startsWith("/uploads/")) return null;
+  let segments: string[];
+  try {
+    segments = value.slice("/uploads/".length).split("/").map((part) => decodeURIComponent(part));
+  } catch {
+    return null;
+  }
+  if (
+    segments.length !== 3 ||
+    segments[0] !== productId ||
+    segments[1] !== kind ||
+    !segments[2] ||
+    segments[2] === "." ||
+    segments[2] === ".." ||
+    segments[2].includes("/") ||
+    segments[2].includes("\\")
+  ) {
+    return null;
+  }
+  return path.join("uploads", ...segments);
 }
 
 function safeFilename(value: string) {

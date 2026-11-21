@@ -76,7 +76,13 @@ test("public pages use English only and retired locale links reach English", asy
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   await expect(page.getByTestId("localized-page-loading")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "LamiliaLomi", level: 1 })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Real product paths from the first screen", level: 2 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Find your next book", level: 2 })).toBeVisible();
+  const kidsAudienceCard = page.locator('main a[href="/en/products?audience=kids"]');
+  const adultsAudienceCard = page.locator('main a[href="/en/products?audience=adults"]');
+  await expect(kidsAudienceCard).toBeVisible();
+  await expect(kidsAudienceCard).toContainText("Kids");
+  await expect(adultsAudienceCard).toBeVisible();
+  await expect(adultsAudienceCard).toContainText("Adults");
   const firstProductCard = page
     .locator('main a[href^="/en/products/"]')
     .filter({ has: page.locator("h3") })

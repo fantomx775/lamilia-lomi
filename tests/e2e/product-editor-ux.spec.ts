@@ -1033,7 +1033,7 @@ async function uploadCoverFixture(
     await fileSelection;
     await withTimeout(multipartRequestStarted, 15_000, "Asset upload request did not start");
     expect(multipartRequestBodySize).toBeGreaterThan(0);
-    await page.getByText("ux-cover.png", { exact: true }).waitFor({ state: "visible" });
+    await page.getByText("ux-cover.webp", { exact: true }).waitFor({ state: "visible" });
     await expect(page.getByText("Przesyłanie…", { exact: true })).toBeVisible();
   } finally {
     releaseMultipartResponse();
@@ -1143,8 +1143,8 @@ function listFilesRecursively(directory: string): string[] {
 }
 
 function makePng() {
-  const width = 640;
-  const height = 640;
+  const width = 850;
+  const height = 1100;
   const scanlines = Buffer.alloc(height * (1 + width * 4));
   for (let y = 0; y < height; y += 1) {
     const rowOffset = y * (1 + width * 4);
@@ -1227,7 +1227,9 @@ test("saves a title-only draft and highlights missing publication fields", async
     await expect(page.getByLabel("Krótki opis")).toBeFocused();
     await expect(page.locator("#media-section-cover")).toContainText("Dodaj okładkę, aby opublikować produkt.");
     await expect(page.getByRole("group", { name: "Linki do Amazona" })).toContainText("Dodaj link do Amazona, aby opublikować produkt.");
-    await expect(page.getByRole("alert").filter({ has: page.getByRole("button", { name: "Zamknij powiadomienie" }) }).filter({ hasText: /Uzupełnij krótki opis.*Dodaj link do Amazona/ })).toBeVisible();
+    const validationSummary = page.locator('#product-editor-form [role="alert"]');
+    await expect(validationSummary).toContainText("Uzupełnij krótki opis, aby opublikować produkt.");
+    await expect(validationSummary).toContainText("Dodaj link do Amazona, aby opublikować produkt.");
     await page.screenshot({ path: testInfo.outputPath("publication-validation.png"), fullPage: true, caret: "initial" });
 
     await page.getByLabel("Status", { exact: true }).selectOption("draft");

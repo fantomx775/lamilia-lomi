@@ -199,13 +199,24 @@ test("primary navigation feedback keeps the storefront journey semantic and resp
 
     await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
     const product = page.getByRole("link", { name: /Moon Garden Coloring Book/i }).first();
+    const productHref = await product.getAttribute("href");
+    expect(productHref).not.toBeNull();
+    const productUrl = new URL(productHref!, page.url());
+    const catalogContext = productUrl.searchParams.get("catalog");
+    expect(productUrl.pathname).toBe("/en/products/moon-garden-coloring-book");
+    expect(catalogContext).not.toBeNull();
+    const catalogUrl = new URL(catalogContext!, page.url());
+    expect(catalogUrl.pathname).toBe("/en/products");
+    expect(catalogUrl.hash).toBe(`#${await product.evaluate((link) => link.closest("article")?.id ?? "")}`);
     await product.click();
+    await expect(page).toHaveURL((url) => url.pathname === productUrl.pathname && url.searchParams.get("catalog") === catalogContext);
     await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
     await capture("product-detail.png");
 
     const backToCatalog = page.getByRole("link", { name: "Back to catalog" });
-    await expect(backToCatalog).toHaveAttribute("href", "/en/products");
+    await expect(backToCatalog).toHaveAttribute("href", catalogContext!);
     await backToCatalog.click();
+    await expect(page).toHaveURL((url) => url.pathname === catalogUrl.pathname && url.search === catalogUrl.search && url.hash === catalogUrl.hash);
     await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
 
     const header = await primaryNavigation(page);
