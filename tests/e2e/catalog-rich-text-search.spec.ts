@@ -115,15 +115,13 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await page.getByLabel("Adres strony").fill("https://metadata-only.example/catalog");
     await page.getByRole("button", { name: "Zapisz link" }).click();
 
-    const saveActionFinished = page.waitForEvent("requestfinished", (request) => {
-      const url = new URL(request.url());
-      return request.method() === "POST" &&
-        url.pathname === productPath &&
-        (Boolean(request.headers()["next-action"]) || request.isNavigationRequest());
+    const saveActionResponse = page.waitForResponse((response) => {
+      const request = response.request();
+      return request.method() === "POST" && new URL(response.url()).pathname === productPath;
     });
     await page.getByRole("button", { name: /Zapisz/ }).first().click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
-    await saveActionFinished;
+    expect((await saveActionResponse).status()).toBe(200);
     await expect(readerArtworkManager.getByText("Nie dodano jeszcze prac.", { exact: true })).toBeVisible();
     await expect.poll(() => readerArtworkRequests.size).toBe(0);
     expect([...readerArtworkStatuses.values()].every((status) => status === 200)).toBe(true);

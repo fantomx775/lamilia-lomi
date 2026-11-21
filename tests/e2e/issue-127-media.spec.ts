@@ -15,6 +15,7 @@ type MediaRangeEvidence = {
   request: Request;
   requestSequence: number;
   responseSequence?: number;
+  requestFinishedSequence?: number;
   status?: number;
   contentRange?: string;
   failureSequence?: number;
@@ -104,7 +105,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
   });
   page.on("request", (request) => {
     if (
-      request.method() === "GET" && request.resourceType() === "media" &&
+      request.method() === "GET" &&
       locationPath(request.url(), String(testInfo.project.use.baseURL)) === "/api/media/ux127-video" &&
       /^bytes=\d+-\d*$/.test(request.headers()["range"] ?? "")
     ) {
@@ -120,11 +121,15 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       evidence.status = response.status();
       evidence.contentRange = headers["content-range"];
     }
+  });
+  page.on("requestfinished", (request) => {
+    const evidence = mediaRangeEvidence.get(request);
+    if (!evidence) return;
+    evidence.requestFinishedSequence = ++mediaEventSequence;
     if (
-      request.method() === "GET" && request.resourceType() === "media" &&
-      locationPath(response.url(), String(testInfo.project.use.baseURL)) === "/api/media/ux127-video" &&
-      /^bytes=\d+-\d*$/.test(request.headers()["range"] ?? "") && response.status() === 206 &&
-      /^bytes \d+-\d+\/\d+$/.test(headers["content-range"] ?? "")
+      evidence.status === 206 &&
+      /^bytes \d+-\d+\/\d+$/.test(evidence.contentRange ?? "") &&
+      evidence.failureSequence === undefined
     ) successfulBrowserVideoRanges += 1;
   });
   try {
@@ -179,12 +184,12 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
         const player = element as HTMLVideoElement;
         const state = window as unknown as { ux127VideoTiming: { started: number; frame: number | null } };
         state.ux127VideoTiming = { started: 0, frame: null };
-        document.querySelector('[data-testid="product-video-play"]')!.addEventListener("click", () => {
+        player.addEventListener("playing", () => {
           state.ux127VideoTiming.started = performance.now();
           const requestFrame = player.requestVideoFrameCallback;
           if (typeof requestFrame === "function") requestFrame.call(player, () => { state.ux127VideoTiming.frame = performance.now(); });
           else player.addEventListener("timeupdate", () => { state.ux127VideoTiming.frame ??= performance.now(); }, { once: true });
-        }, { once: true, capture: true });
+        }, { once: true });
       });
       let timing: { started: number; frame: number };
       let playbackState: { currentTime: number; readyState: number };
@@ -334,7 +339,11 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
           candidate.requestSequence > failureSequence &&
           candidate.responseSequence !== undefined &&
           candidate.responseSequence > failureSequence &&
+          candidate.requestFinishedSequence !== undefined &&
+          candidate.requestFinishedSequence > candidate.responseSequence &&
+          candidate.failureSequence === undefined &&
           candidate.responseSequence <= (operation.completedSequence ?? -1) &&
+          candidate.requestFinishedSequence <= (operation.completedSequence ?? -1) &&
           candidate.status === 206 &&
           /^bytes \d+-\d+\/\d+$/.test(candidate.contentRange ?? ""),
         )
@@ -354,6 +363,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
         abortSequence: failureSequence,
         replacementRequestSequence: replacement?.requestSequence ?? null,
         replacementResponseSequence: replacement?.responseSequence ?? null,
+        replacementRequestFinishedSequence: replacement?.requestFinishedSequence ?? null,
         replacementStatus: replacement?.status ?? null,
         replacementContentRange: replacement?.contentRange ?? null,
         decodedSeekRecovered,

@@ -5,18 +5,17 @@ const hydrationMismatchPrefix =
 export function isKnownCaretOnlyHydrationWarning(message: string) {
   if (!message.startsWith(hydrationMismatchPrefix)) return false;
 
-  const changedAttributes = message
-    .split(/\r?\n/)
-    .filter((line) => /^\s*[+-]\s/.test(line));
-  if (changedAttributes.length !== 2) return false;
+  const normalized = message.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  const lines = normalized.split(/\r?\n/);
+  const diffStart = lines.findIndex((line) => line.trim() === "...");
+  if (diffStart < 0) return false;
 
-  const isCaretColorStyle = (line: string) =>
-    /^\s*[+-]\s*style=\{\{\s*caretColor:\s*(?:undefined|null|"[^"]*"|'[^']*')\s*\}\}\s*$/.test(line) ||
-    /^\s*[+-]\s*caret-color:\s*[^;\s]+;?\s*$/.test(line);
-
+  const changedAttributes = lines
+    .slice(diffStart + 1)
+    .filter((line) => /^\s*[+-]\s/.test(line))
+    .map((line) => line.trim().replace(/^([+-])\s+/, "$1 "));
   return (
-    changedAttributes.some((line) => line.trimStart().startsWith("+ ")) &&
-    changedAttributes.some((line) => line.trimStart().startsWith("- ")) &&
-    changedAttributes.every(isCaretColorStyle)
+    changedAttributes.length === 1 &&
+    changedAttributes[0] === '- style={{caret-color:"transparent"}}'
   );
 }

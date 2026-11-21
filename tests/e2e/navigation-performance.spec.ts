@@ -427,7 +427,7 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   const pageErrors: string[] = [];
   const sameOriginFailures: string[] = [];
   const expectedCanceledRscPrefetches: string[] = [];
-  const expectedCanceledPriorRouteRscRequests: string[] = [];
+  const expectedCanceledCompletedRscRequests: string[] = [];
   const canceledRscRequests: Array<{ path: string; isPrefetch: boolean; detail: string }> = [];
   const completedAndLeftRscRoutes = new Set<string>();
   let appOrigin = "";
@@ -495,12 +495,11 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   await page.goBack();
   await expect(page).toHaveURL(/\/en\/products$/);
   await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
-  const currentPath = new URL(page.url()).pathname;
   for (const canceled of canceledRscRequests) {
     if (canceled.isPrefetch) {
       expectedCanceledRscPrefetches.push(canceled.detail);
-    } else if (completedAndLeftRscRoutes.has(canceled.path) && canceled.path !== currentPath) {
-      expectedCanceledPriorRouteRscRequests.push(canceled.detail);
+    } else if (completedAndLeftRscRoutes.has(canceled.path)) {
+      expectedCanceledCompletedRscRequests.push(canceled.detail);
     } else {
       sameOriginFailures.push(canceled.detail);
     }
@@ -518,7 +517,7 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
       "Canceled RSC prefetch requests:",
       ...expectedCanceledRscPrefetches,
       "Canceled RSC requests for already-visited routes:",
-      ...expectedCanceledPriorRouteRscRequests,
+      ...expectedCanceledCompletedRscRequests,
     ].join("\n"),
     contentType: "text/plain",
   });

@@ -154,7 +154,9 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await expect(mobileMenu).not.toBeVisible();
 
       await menuButton.click();
-      await page.mouse.click(4, 180);
+      const dialogBounds = await mobileMenu.boundingBox();
+      expect(dialogBounds).not.toBeNull();
+      await page.mouse.click(dialogBounds!.x + dialogBounds!.width - 2, dialogBounds!.y + dialogBounds!.height / 2);
       await expect(mobileMenu).not.toBeVisible();
 
       const card = page.getByTestId("product-catalog-grid").locator("article").first();

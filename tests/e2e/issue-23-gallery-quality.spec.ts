@@ -26,8 +26,11 @@ test("versioned public images reach the optimizer and delivered raster pixels co
     // Owned local raster, not customer media or a hosted R2 acceptance fixture.
     const sourceWidth = 2400;
     const raster = await sharp({ create: { width: sourceWidth, height: 3200, channels: 3, background: "#d7b89a" } }).png().toBuffer();
-    fs.mkdirSync(fixtureDirectory, { recursive: true });
-    fs.writeFileSync(path.join(fixtureDirectory, "source.png"), raster);
+    for (const kind of ["cover", "gallery"]) {
+      const assetDirectory = path.join(fixtureDirectory, kind);
+      fs.mkdirSync(assetDirectory, { recursive: true });
+      fs.writeFileSync(path.join(assetDirectory, "source.png"), raster);
+    }
     const snapshot = original ? JSON.parse(original.toString()) : getSeedContentSnapshot();
     const product = structuredClone(getSeedContentSnapshot().products[0]);
     const cover = product.assets.find((asset) => asset.kind === "cover")!;
@@ -40,7 +43,7 @@ test("versioned public images reach the optimizer and delivered raster pixels co
     product.premiumCodes = [];
     product.assets = [cover, gallery].map((asset, index) => ({ ...asset,
       id: index === 0 ? product.coverAssetId : randomUUID(), productId: fixtureId,
-      path: `/uploads/${fixtureId}/source.png`, filename: "source.png", contentType: "image/png", sizeBytes: raster.byteLength,
+      path: `/uploads/${fixtureId}/${asset.kind}/source.png`, filename: "source.png", contentType: "image/png", sizeBytes: raster.byteLength,
     }));
     snapshot.products.push(product);
     fs.mkdirSync(path.dirname(store), { recursive: true });

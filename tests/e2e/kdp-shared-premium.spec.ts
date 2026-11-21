@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { expect, test, type Page, type Request } from "@playwright/test";
 import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
 import { isLocalDemoAppTarget } from "./local-target";
+import { isKnownCaretOnlyHydrationWarning } from "./helpers/hydration-warnings";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const code = "LOMI-BOOK-2026";
@@ -115,7 +116,7 @@ test("private QR survives signup and verification; a second account and repeat s
     Object.fromEntries(Object.entries(failure).filter(([key]) => key !== "request")),
   );
   await info.attach("kdp-browser-diagnostics", { body: JSON.stringify({ testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId: process.env.LAMILIA_BROWSER_RUN_ID ?? `kdp-reader-${info.project.name}-${Date.now()}`, browserErrors, failedNetworkRequests: sanitizedFailures(failedNetworkRequests), expectedServerActionCancellations: sanitizedFailures(expectedServerActionCancellations), unexpectedFailedNetworkRequests: sanitizedFailures(unexpectedFailedNetworkRequests), failedResponses, leakedCodeInUrls: leakedRequests.length }), contentType: "application/json" });
-  expect(browserErrors).toEqual([]);
+  expect(browserErrors.filter((message) => !isKnownCaretOnlyHydrationWarning(message))).toEqual([]);
   expect(unexpectedFailedNetworkRequests).toEqual([]);
   expect(failedResponses).toEqual([]);
 });

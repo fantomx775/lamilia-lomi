@@ -206,9 +206,13 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
           event.preventDefault();
           controls[(index + offset + controls.length) % controls.length]?.focus();
         }}
+        onClick={(event) => {
+          const target = event.target;
+          if (target === event.currentTarget || (target instanceof Element && target.matches("[data-mobile-navigation-surface]"))) closeMenu();
+        }}
         onCancel={(event) => { event.preventDefault(); closeMenu(); }}
         onClose={() => { if (!dialogRef.current?.open) setOpen(false); }}>
-        <div className="flex min-h-full flex-col px-4 pt-[env(safe-area-inset-top)] pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div data-mobile-navigation-surface className="flex min-h-full flex-col px-4 pt-[env(safe-area-inset-top)] pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div className="flex min-h-16 items-center justify-between gap-3 border-b border-[var(--color-border)]">
             <div className="flex min-w-0 items-center gap-2 font-serif text-xl font-semibold">
               <Image src="/assets/home/lamilia-lomi-logo-192.webp" width={48} height={48} alt="" unoptimized />
@@ -218,7 +222,7 @@ export function MobileNavigation({ locale, communityEnabled, accountHref, showCr
               <X className="size-5" aria-hidden />
             </button>
           </div>
-          <nav className="flex flex-1 flex-col gap-1 py-4" aria-label="Storefront">
+          <nav data-mobile-navigation-surface className="flex flex-1 flex-col gap-1 py-4" aria-label="Storefront">
             {links.map(({ href, label, icon: Icon }) => (
               <NavigationLink key={href} href={href} pendingLabel={`Opening ${label}`}
                 className={`${menuLinkClass}${label === "Log in" ? " mt-auto border-t border-[var(--color-border)]" : ""}`}

@@ -34,7 +34,8 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
   const mobileMenuButton = page.getByRole("button", { name: "Open navigation menu" });
   if (await mobileMenuButton.isVisible()) {
     await mobileMenuButton.click();
-    await page.getByRole("navigation", { name: "Mobile primary navigation" }).getByRole("link", { name: "Catalog", exact: true }).click();
+    const mobileMenu = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+    await mobileMenu.getByRole("navigation", { name: "Storefront", exact: true }).getByRole("link", { name: "Catalog", exact: true }).click();
   } else {
     await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Catalog", exact: true }).click();
   }

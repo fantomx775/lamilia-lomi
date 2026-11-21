@@ -93,7 +93,10 @@ test("auth fields have a mobile font floor, login returns to account and logout 
   await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeHidden();
   await expect(page.getByText("User dashboard", { exact: true }).first()).toBeHidden();
   expect(await page.evaluate(() => visualViewport?.scale)).toBe(1);
-  if (await cookie.isVisible()) await cookie.click();
+  if (await cookie.isVisible()) {
+    await hideLocalNextDevPortalIfBlocking(page, cookie);
+    await cookie.click();
+  }
   await page.screenshot({ path: testInfo.outputPath("account.png"), fullPage: true, animations: "disabled" });
   await page.getByRole("button", { name: "Open navigation menu" }).click();
   const logout = page.getByRole("button", { name: "Log out", exact: true });
