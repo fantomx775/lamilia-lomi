@@ -26,7 +26,8 @@ type MediaSeekOperation = {
   kind: "playback" | "seek";
   startedSequence: number;
   completedSequence?: number;
-  result?: { targetTime: number; observedTime: number; readyState: number; framePainted: boolean };
+  decodedFrameSequences: number[];
+  result?: { targetTime: number; observedTime: number; readyState: number; framePainted: boolean; frameSequence: number };
   abortedRanges: MediaRangeEvidence[];
 };
 
@@ -133,6 +134,11 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     ) successfulBrowserVideoRanges += 1;
   });
   try {
+    await page.exposeFunction("ux127RecordDecodedVideoFrame", () => {
+      const frameSequence = ++mediaEventSequence;
+      activeMediaSeek?.decodedFrameSequences.push(frameSequence);
+      return frameSequence;
+    });
     fs.mkdirSync(mediaDirectory, { recursive: true });
     fs.mkdirSync(path.join(mediaDirectory, "video"), { recursive: true });
     fs.mkdirSync(path.join(mediaDirectory, "cover"), { recursive: true });
@@ -170,6 +176,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
         id: mediaSeekOperations.length + 1,
         kind: "playback",
         startedSequence: mediaEventSequence,
+        decodedFrameSequences: [],
         abortedRanges: [],
       };
       mediaSeekOperations.push(playbackOperation);
@@ -182,22 +189,46 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       await expect(page.getByText("flower.mp4", { exact: true })).toHaveCount(0);
       await video.evaluate((element) => {
         const player = element as HTMLVideoElement;
-        const state = window as unknown as { ux127VideoTiming: { started: number; frame: number | null } };
-        state.ux127VideoTiming = { started: 0, frame: null };
+        const state = window as unknown as { ux127VideoTiming: { started: number; frame: number | null; frameSequence: number | null; monitoring: boolean } };
+        state.ux127VideoTiming = { started: 0, frame: null, frameSequence: null, monitoring: true };
         player.addEventListener("playing", () => {
           state.ux127VideoTiming.started = performance.now();
           const requestFrame = player.requestVideoFrameCallback;
-          if (typeof requestFrame === "function") requestFrame.call(player, () => { state.ux127VideoTiming.frame = performance.now(); });
-          else player.addEventListener("timeupdate", () => { state.ux127VideoTiming.frame ??= performance.now(); }, { once: true });
+          const recordFrame = (window as unknown as { ux127RecordDecodedVideoFrame: () => Promise<number> }).ux127RecordDecodedVideoFrame;
+          if (typeof requestFrame === "function") {
+            const observeFrame = async () => {
+              if (!state.ux127VideoTiming.monitoring) return;
+              const frameSequence = await recordFrame();
+              state.ux127VideoTiming.frame ??= performance.now();
+              state.ux127VideoTiming.frameSequence = frameSequence;
+              if (state.ux127VideoTiming.monitoring) requestFrame.call(player, observeFrame);
+            };
+            requestFrame.call(player, observeFrame);
+          } else {
+            const observeFrame = async () => {
+              if (!state.ux127VideoTiming.monitoring) return;
+              const frameSequence = await recordFrame();
+              state.ux127VideoTiming.frame ??= performance.now();
+              state.ux127VideoTiming.frameSequence = frameSequence;
+              if (state.ux127VideoTiming.monitoring) player.addEventListener("timeupdate", observeFrame, { once: true });
+            };
+            player.addEventListener("timeupdate", observeFrame, { once: true });
+          }
         }, { once: true });
       });
-      let timing: { started: number; frame: number };
+      let timing: { started: number; frame: number; frameSequence: number };
       let playbackState: { currentTime: number; readyState: number };
       try {
         await page.getByRole("button", { name: /Play Inside the book/ }).click();
         await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0.2);
-        await expect.poll(() => page.evaluate(() => (window as unknown as { ux127VideoTiming: { frame: number | null } }).ux127VideoTiming.frame)).not.toBeNull();
-        timing = await page.evaluate(() => (window as unknown as { ux127VideoTiming: { started: number; frame: number } }).ux127VideoTiming);
+        await expect.poll(() => page.evaluate(() => (window as unknown as { ux127VideoTiming: { frameSequence: number | null } }).ux127VideoTiming.frameSequence)).not.toBeNull();
+        const playbackRanges = () => [...mediaRangeEvidence.values()];
+        if (playbackRanges().length > 0) {
+          await expect.poll(() => playbackRanges().every((evidence) => evidence.requestFinishedSequence !== undefined || evidence.failureSequence !== undefined), { timeout: 20_000 }).toBe(true);
+          const latestPlaybackRangeTerminal = Math.max(...playbackRanges().map((evidence) => evidence.requestFinishedSequence ?? evidence.failureSequence ?? 0));
+          await expect.poll(() => playbackOperation.decodedFrameSequences.some((sequence) => sequence > latestPlaybackRangeTerminal), { timeout: 10_000 }).toBe(true);
+        }
+        timing = await page.evaluate(() => (window as unknown as { ux127VideoTiming: { started: number; frame: number; frameSequence: number } }).ux127VideoTiming);
         playbackState = await video.evaluate((element) => {
           const player = element as HTMLVideoElement;
           return { currentTime: player.currentTime, readyState: player.readyState };
@@ -207,7 +238,9 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
           observedTime: playbackState.currentTime,
           readyState: playbackState.readyState,
           framePainted: timing.frame >= timing.started,
+          frameSequence: timing.frameSequence,
         };
+        await page.evaluate(() => { (window as unknown as { ux127VideoTiming: { monitoring: boolean } }).ux127VideoTiming.monitoring = false; });
         playbackOperation.completedSequence = mediaEventSequence;
       } finally {
         activeMediaSeek = null;
@@ -218,6 +251,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
         id: mediaSeekOperations.length + 1,
         kind: "seek",
         startedSequence: mediaEventSequence,
+        decodedFrameSequences: [],
         abortedRanges: [],
       };
       mediaSeekOperations.push(seekOperation);
@@ -349,7 +383,10 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
         )
         .sort((left, right) => left.requestSequence - right.requestSequence)[0];
       const decodedSeekRecovered = Boolean(
-        replacement && operation.result && operation.result.readyState >= 2 && operation.result.framePainted &&
+        replacement && failureSequence !== undefined && operation.result && operation.result.readyState >= 2 && operation.result.framePainted &&
+        operation.result.frameSequence > failureSequence &&
+        operation.result.frameSequence > replacement.requestFinishedSequence! &&
+        operation.result.frameSequence <= (operation.completedSequence ?? -1) &&
         (operation.kind === "playback"
           ? operation.result.observedTime > operation.result.targetTime
           : Math.abs(operation.result.observedTime - operation.result.targetTime) < 0.12),
@@ -366,6 +403,8 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
         replacementRequestFinishedSequence: replacement?.requestFinishedSequence ?? null,
         replacementStatus: replacement?.status ?? null,
         replacementContentRange: replacement?.contentRange ?? null,
+        recoveryFrameSequence: operation.result?.frameSequence ?? null,
+        recoveryFrameAfterReplacement: Boolean(replacement && operation.result && operation.result.frameSequence > replacement.requestFinishedSequence!),
         decodedSeekRecovered,
         accepted: failure.expectedBrowserMediaRangeAbort,
       };
@@ -427,21 +466,22 @@ async function seekAndPaint(locator: Locator) {
     let timeoutId = 0;
     let onSeeked!: () => void;
     const seeked = new Promise<void>((resolve) => { onSeeked = resolve; video.addEventListener("seeked", onSeeked, { once: true }); });
+    const recordFrame = (window as unknown as { ux127RecordDecodedVideoFrame: () => Promise<number> }).ux127RecordDecodedVideoFrame;
     const requestFrame = video.requestVideoFrameCallback;
     const hasFrameCallback = typeof requestFrame === "function";
-    const painted = hasFrameCallback ? new Promise<void>((resolve) => {
+    const painted = hasFrameCallback ? new Promise<number>((resolve) => {
       const frame = (_time: number, metadata: VideoFrameCallbackMetadata) => {
-        if (Math.abs(metadata.mediaTime - target) < 0.12) resolve();
+        if (Math.abs(metadata.mediaTime - target) < 0.12) void recordFrame().then(resolve);
         else frameId = requestFrame.call(video, frame);
       };
       frameId = requestFrame.call(video, frame);
-    }) : seeked.then(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    }) : seeked.then(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))).then(() => recordFrame());
     const timeout = new Promise<never>((_, reject) => { timeoutId = window.setTimeout(() => reject(new Error("A decoded post-seek frame did not arrive.")), 20000); });
     try {
       video.currentTime = target;
-      await Promise.race([Promise.all([seeked, painted]), timeout]);
+      const [, frameSequence] = await Promise.race([Promise.all([seeked, painted]), timeout]);
       if (video.readyState < 2) throw new Error("The post-seek video frame is not decoded.");
-      return { method: hasFrameCallback ? "requestVideoFrameCallback" : "seeked-readyState-two-animation-frames", targetTime: target, observedTime: video.currentTime, readyState: video.readyState };
+      return { method: hasFrameCallback ? "requestVideoFrameCallback" : "seeked-readyState-two-animation-frames", targetTime: target, observedTime: video.currentTime, readyState: video.readyState, frameSequence };
     } finally {
       window.clearTimeout(timeoutId); video.removeEventListener("seeked", onSeeked);
       if (frameId !== undefined) video.cancelVideoFrameCallback?.(frameId);

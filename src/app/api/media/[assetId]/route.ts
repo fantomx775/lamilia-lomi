@@ -99,8 +99,22 @@ export async function GET(request: Request, { params }: Props) {
     }
 
     const publicRoot = path.resolve(process.cwd(), "public");
-    const filePath = path.resolve(publicRoot, ...relativePath.split("/").map((part) => decodeURIComponent(part)));
-    if (!filePath.startsWith(`${publicRoot}${path.sep}`) || !fs.existsSync(filePath)) {
+    const isLocalUpload = localUploadPath !== null;
+    let filePath: string;
+    try {
+      const segments = relativePath.split("/");
+      filePath = path.resolve(publicRoot, ...(isLocalUpload ? segments : segments.map((part) => decodeURIComponent(part))));
+    } catch {
+      return notFoundMediaResponse();
+    }
+    const expectedUploadDirectory = isLocalUpload
+      ? path.resolve(publicRoot, "uploads", asset.productId, asset.kind)
+      : null;
+    if (
+      !isPathInsideDirectory(publicRoot, filePath) ||
+      (expectedUploadDirectory && !isPathInsideDirectory(expectedUploadDirectory, filePath)) ||
+      !fs.existsSync(filePath)
+    ) {
       return notFoundMediaResponse();
     }
 
@@ -278,6 +292,10 @@ function localUploadRelativePath(value: string, productId: string, kind: string)
     segments.length !== 3 ||
     segments[0] !== productId ||
     segments[1] !== kind ||
+    segments[0].includes("/") ||
+    segments[0].includes("\\") ||
+    segments[1].includes("/") ||
+    segments[1].includes("\\") ||
     !segments[2] ||
     segments[2] === "." ||
     segments[2] === ".." ||
@@ -287,6 +305,11 @@ function localUploadRelativePath(value: string, productId: string, kind: string)
     return null;
   }
   return path.join("uploads", ...segments);
+}
+
+function isPathInsideDirectory(directory: string, candidate: string) {
+  const relative = path.relative(directory, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 function safeFilename(value: string) {

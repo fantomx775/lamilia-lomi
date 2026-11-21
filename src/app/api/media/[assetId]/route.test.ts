@@ -109,6 +109,52 @@ describe("public media delivery", () => {
     }
   });
 
+  it("rejects double-encoded separators that point outside a local upload kind directory", async () => {
+    const traversalProductId = "12712712-7127-4127-8127-127127127128";
+    const productUploadDirectory = path.resolve("public/uploads", traversalProductId);
+    if (fs.existsSync(productUploadDirectory)) {
+      throw new Error("The isolated local media path fixture already exists; inspect it before running this test.");
+    }
+    const siblingDirectory = path.join(productUploadDirectory, "cover");
+    const filename = "owned-local-path-fixture.jpg";
+    const fixturePath = path.join(siblingDirectory, filename);
+    let fixtureOwned = false;
+    try {
+      fs.mkdirSync(siblingDirectory, { recursive: true });
+      fs.writeFileSync(fixturePath, Buffer.from("sibling media"), { flag: "wx" });
+      fixtureOwned = true;
+      mocks.getBackendMode.mockReturnValue("local");
+      mocks.getAssetByIdForRequest.mockResolvedValue({
+        id: assetId,
+        productId: traversalProductId,
+        kind: "video",
+        bucket: "public-videos",
+        path: `/api/media/${assetId}`,
+        storagePath: `/uploads/${traversalProductId}/video/%252e%252e%252fcover%252f${filename}`,
+        storageProvider: "local",
+        filename,
+        contentType: "video/mp4",
+        isPublic: true,
+        isActive: true,
+      });
+      mocks.getProductByIdForRequest.mockResolvedValue({ id: traversalProductId, status: "published" });
+
+      const response = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`), {
+        params: Promise.resolve({ assetId }),
+      });
+
+      expect(response.status).toBe(404);
+      expect(Buffer.from(await response.arrayBuffer()).toString()).toBe("Not found");
+    } finally {
+      if (fixtureOwned) fs.rmSync(fixturePath, { force: true });
+      for (const directory of [siblingDirectory, productUploadDirectory]) {
+        try { fs.rmdirSync(directory); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT" && (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error;
+        }
+      }
+    }
+  });
+
   it.each([false, true])("serves current UUID-versioned public R2 bytes (extended cache: %s)", async (extendedCache) => {
     if (extendedCache) {
       vi.stubEnv("PRODUCT_IMAGE_CLOUDFLARE_PURGE_TOKEN", "test");
