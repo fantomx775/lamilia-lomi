@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -23,6 +24,13 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
   const { service, anon } = fixtures;
   const origin = COMMUNITY_TEST_ORIGIN;
   const artEndpoint = `${origin}/api/community/artworks`;
+  const runId = process.env.UX127_COMMUNITY_MEDIA_RUN_ID ?? `ux127-community-media-${testInfo.project.name}-${randomUUID()}`;
+  const variantWidths = [480, 960, 2048] as const;
+  async function expectVariantStatus(target: Page, artworkId: string, status: number) {
+    for (const width of variantWidths) {
+      expect((await target.request.get(`${artEndpoint}/${artworkId}/media?width=${width}`)).status()).toBe(status);
+    }
+  }
   try {
     const member = await fixtures.actor("upload-owner", { username: "cc_upload_artist" });
     const outsider = await fixtures.actor("upload-other", { username: "cc_upload_other" });
@@ -89,10 +97,13 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
     expect((await otherPage.request.get(mediaUrl)).status()).toBe(404);
     const visitor = await fixtures.newPage(browser);
     expect((await visitor.request.get(mediaUrl)).status()).toBe(404);
-    const raw = await service.from("community_artworks").select("storage_path,storage_provider").eq("id", id).single();
+    await expectVariantStatus(visitor, id, 404);
+    const raw = await service.from("community_artworks").select("storage_path,storage_provider,image_width,image_height").eq("id", id).single();
     expect(raw.error).toBeNull();
     expect(raw.data?.storage_provider).toBe("supabase");
     expect(raw.data?.storage_path).toBe(`community/${member.id}/${key}`);
+    expect(raw.data?.image_width).toBe(normalized.width);
+    expect(raw.data?.image_height).toBe(normalized.height);
     expect((await anon.storage.from("collection-media").download(raw.data!.storage_path)).error).toBeTruthy();
     const signed = await anon.auth.signInWithPassword({ email: member.email, password: member.password });
     expect(signed.error).toBeNull();
@@ -115,16 +126,54 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
     expect((await service.rpc("community_moderate_artwork", { p_actor_user_id: moderator.id, p_artwork_id: id,
       p_expected_revision: 1, p_action: "approve", p_reason: null })).error).toBeNull();
     expect((await visitor.request.get(mediaUrl)).status()).toBe(200);
+    const variantMetadata: Array<{ requestedWidth: number; width: number; height: number }> = [];
+    for (const width of variantWidths) {
+      const response = await visitor.request.get(`${mediaUrl}?width=${width}`);
+      expect(response.status()).toBe(200);
+      expect(response.headers()["cache-control"]).toContain("no-store");
+      const metadata = await sharp(await response.body()).metadata();
+      expect(metadata.format).toBe("webp");
+      const actualWidth = metadata.width ?? 0;
+      const actualHeight = metadata.height ?? 0;
+      expect(actualWidth).toBe(Math.min(width, normalized.width!));
+      expect(actualHeight).toBe(Math.round(actualWidth * normalized.height! / normalized.width!));
+      variantMetadata.push({ requestedWidth: width, width: actualWidth, height: actualHeight });
+    }
+    await visitor.goto(`${origin}/en/club/artworks/${id}`);
+    const publicImage = visitor.getByTestId("community-artwork-media");
+    await expect.poll(() => publicImage.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await publicImage.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
+    const renderedMedia = await publicImage.evaluate((element) => {
+      const image = element as HTMLImageElement;
+      return { srcSet: image.srcset, currentSrc: image.currentSrc, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight };
+    });
+    expect(renderedMedia.srcSet).toContain(`${new URL(mediaUrl).pathname}?width=480 480w`);
+    expect(renderedMedia.srcSet).toContain(`${new URL(mediaUrl).pathname}?width=960 640w`);
+    expect(renderedMedia.srcSet).not.toMatch(/(?:960|2048)w(?:,|$)/);
+    const selectedWidth = Number(new URL(renderedMedia.currentSrc).searchParams.get("width"));
+    expect(variantWidths).toContain(selectedWidth);
+    expect(renderedMedia.naturalWidth).toBe(Math.min(selectedWidth, normalized.width!));
+    expect(renderedMedia.naturalHeight).toBe(Math.round(renderedMedia.naturalWidth * normalized.height! / normalized.width!));
+    const screenshots = await communityScreenshots(visitor, "issue-127", "f12-approved-artwork", runId);
+    await testInfo.attach("f12-responsive-media-evidence", {
+      body: JSON.stringify({ status: "PASS", testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId,
+        databaseDimensions: { width: raw.data?.image_width, height: raw.data?.image_height }, variantMetadata, renderedMedia,
+        screenshots: screenshots.map((screenshot) => ({ ...screenshot,
+          path: process.env.COMMUNITY_ARTIFACT_DIR ? path.relative(process.env.COMMUNITY_ARTIFACT_DIR, screenshot.path) : screenshot.path })) }, null, 2),
+      contentType: "application/json",
+    });
     const optimizer = `${origin}/_next/image?url=${encodeURIComponent(`/api/community/artworks/${id}/media`)}&w=640&q=75`;
     expect((await visitor.request.get(optimizer)).status()).toBe(400);
     expect((await service.from("products").update({ status: "archived" }).eq("id", book.id)).error).toBeNull();
     expect((await visitor.request.get(mediaUrl)).status()).toBe(404);
+    await expectVariantStatus(visitor, id, 404);
     expect((await service.from("products").update({ status: "published" }).eq("id", book.id)).error).toBeNull();
     expect((await visitor.request.get(mediaUrl)).status()).toBe(200);
 
     const edited = await page.request.patch(`${artEndpoint}/${id}`, { headers: { Origin: origin }, data: { revision: 2, description: "A revised garden afternoon" } });
     expect(edited.status()).toBe(200);
     expect((await visitor.request.get(mediaUrl)).status()).toBe(404);
+    await expectVariantStatus(visitor, id, 404);
     expect((await page.request.get(mediaUrl)).status()).toBe(200);
     expect((await service.from("community_artworks").select("status,revision").eq("id", id).single()).data).toMatchObject({ status: "pending", revision: 3 });
     expect((await service.rpc("community_moderate_artwork", { p_actor_user_id: moderator.id, p_artwork_id: id,
@@ -133,6 +182,7 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
     const deleted = await page.request.delete(`${artEndpoint}/${id}`, { headers: { Origin: origin }, data: { revision: 4 } });
     expect(deleted.status()).toBe(200);
     for (const target of [page, visitor, adminPage]) expect((await target.request.get(mediaUrl)).status()).toBe(404);
+    await expectVariantStatus(visitor, id, 404);
     expect((await visitor.request.get(optimizer)).status()).toBe(400);
     await expect.poll(async () => !(await service.storage.from("collection-media").download(raw.data!.storage_path)).data,
       { timeout: 15_000, message: "Deleted fixture bytes must be cleaned after access is revoked." }).toBe(true);
