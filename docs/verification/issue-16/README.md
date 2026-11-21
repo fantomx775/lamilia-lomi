@@ -1,5 +1,7 @@
 # Issue #16 local catalog fallback proof
 
+> Historical behavior: the route-level Catalog fallback described here was superseded by `ef637f5` on 2026-11-18. That change removed Catalog streaming fallbacks so a native GET with JavaScript disabled returns complete content. Current evidence checks complete native HTML and pending feedback on the source navigation link; see the Issue #127 integration journal.
+
 - Tested source SHA: `2a2fde1963c75688df3573c6ccb5dedabf6a435f`
 - Run ID: `issue-16-catalog-fallback-2026-10-16T08-37-20-2a2fde1`
 - Flow: Home → Catalog while the local catalog data request is delayed

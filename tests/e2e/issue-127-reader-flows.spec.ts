@@ -33,7 +33,13 @@ async function capture(page: Page, info: TestInfo, phase: string) {
   const sourceClean = !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "next.config.ts", "next.config.mjs", "playwright.config.ts", "package.json", "package-lock.json"], { encoding: "utf8" }).trim();
   const screenshotPath = `docs/verification/issue-127/reader-${project}-${phase}.png`;
   await mkdir(path.dirname(path.resolve(screenshotPath)), { recursive: true });
-  await page.screenshot({ path: screenshotPath, animations: "disabled", fullPage: false, caret: "hide" });
+  await page.screenshot({
+    path: screenshotPath,
+    animations: "disabled",
+    fullPage: false,
+    caret: "hide",
+    style: "nextjs-portal { display: none !important; }",
+  });
   const screenshot = { path: screenshotPath, phase, testedSha, runId: record.runId, sourceClean };
   record.screenshots.push(screenshot);
   const manifestDirectory = path.resolve(".task/runtime-manifests");

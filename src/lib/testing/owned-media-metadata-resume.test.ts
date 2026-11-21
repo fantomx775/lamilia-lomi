@@ -6,14 +6,14 @@ function proof() {
   const api = "/api/media/controlled", storage = "/storage/v1/object/sign/public-videos/controlled.mp4";
   const a = "a".repeat(64), b = "b".repeat(64);
   const identity = { status: "sampled", documentId: "doc-11111111-1111-4111-8111-111111111111", elementId: "element-1", generation: 0, sourceIndex: 0, sampledAtEpochMs: 1150, timeOrigin: 900 };
-  const request = (id: number, start: number, path = storage, hash = b) => ({ requestId: id, startedAtEpochMs: start, method: "GET", path, resource: "media", navigation: false, rsc: false, prefetch: false, urlSha256: hash, responseStatus: 206, contentRange: "bytes 0-999/1000", allHeadersRange: "bytes=0-", identitySample: { ...identity } });
-  const parent = { ...request(1, 1050, api, a), responseStatus: 307, contentRange: null as string | null };
+  const request = (id: number, start: number, path = storage, hash = b) => ({ requestId: id, startedAtEpochMs: start, method: "GET", path, originKind: "test-origin", resource: "media", navigation: false, rsc: false, prefetch: false, urlSha256: hash, responseStatus: 206, contentRange: "bytes 0-999/1000", allHeadersRange: "bytes=0-", identitySample: { ...identity } });
+  const parent = { ...request(1, 1050, api, a), responseStatus: 307, contentRange: null as string | null, redirectTargetPath: storage, redirectTargetOrigin: "https://127.0.0.1:3443", redirectTargetOriginKind: "test-origin" };
   const failed = { ...request(2, 1100), error: "net::ERR_ABORTED", failedAtEpochMs: 1200, expectedPause: false, expectedFault: false, pauseGateRequest: false, pauseRequestedAtFailure: false, redirectChain: [parent] };
   const tail = { ...request(3, 1280), allHeadersRange: "bytes=350-", contentRange: "bytes 350-999/1000", identitySample: { ...identity, sampledAtEpochMs: 1290 }, terminal: "finished", finishedAtEpochMs: 1320, responseBodyBytes: 650 };
   const event = (event: string, at: number) => ({ ...identity, event, atEpochMs: at, sourcePath: api, trusted: true, connected: true, paused: true, preload: "metadata", networkState: 1, readyState: 4, mediaErrorPresent: false, errorCode: 0, mediaTime: -1, currentTime: 0 });
   const cdp = (event: string, requestId = "cdp-1", hash = b) => ({ event, requestId, urlSha256: hash, sourceIndex: 1, receivedDataBytes: 0, timestamp: 11.1, wallTime: 1.1, loaderId: "loader-1", frameId: "frame-1", range: "bytes=0-", redirectStatus: 307, canceled: false, category: "", status: 206, contentRange: "bytes 0-999/1000", fromServiceWorker: false, fromDiskCache: false, fromPrefetchCache: false, fromEarlyHints: false });
   return {
-    cdpStatus: "OBSERVING", observerErrors: [], consoleErrors: [], pageErrors: [], ownedMedia: { apiPath: api, storagePath: storage },
+    cdpStatus: "OBSERVING", observerErrors: [], consoleErrors: [], pageErrors: [], ownedMedia: { apiPath: api, storagePath: storage, origin: "https://127.0.0.1:3443" },
     failed: [failed], mediaRequests: [parent, request(2, 1100), tail], successfulMedia: [tail], lifecycleActions: [] as Array<{ action: string; atEpochMs: number }>,
     nativeTimeline: [event("loadstart", 1000), event("suspend", 1130), event("loadedmetadata", 1150), event("loadeddata", 1160), event("canplay", 1170), event("play-intent", 1250), { ...event("play", 1260), paused: false }, { ...event("playing", 1270), paused: false }, { ...event("frame", 1400), paused: false, trusted: false, mediaTime: 0.3, currentTime: 0.25 }],
     cdpMedia: [
@@ -31,8 +31,12 @@ const negative: Array<[string, (d: Proof) => void]> = [
   ...[401, 403, 500].map((status): [string, (d: Proof) => void] => [`HTTP ${status}`, d => { d.failed[0].responseStatus = status; d.mediaRequests[1].responseStatus = status; }]),
   ["ERR_FAILED", d => { d.failed[0].error = "net::ERR_FAILED"; }],
   ["wrong source", d => { d.failed[0].path = "/wrong"; d.mediaRequests[1].path = "/wrong"; }],
+  ["foreign origin with same path", d => { d.failed[0].originKind = "other-origin"; d.mediaRequests[1].originKind = "other-origin"; }],
+  ["foreign inventory origin with same path", d => { d.mediaRequests[1].originKind = "other-origin"; }],
   ["wrong hash", d => { d.failed[0].urlSha256 = "c".repeat(64); }],
   ["wrong redirect parent", d => { d.failed[0].redirectChain[0].path = "/wrong"; }],
+  ["foreign redirect target with same path", d => { d.failed[0].redirectChain[0].redirectTargetOrigin = "https://attacker.example"; }],
+  ["same host with wrong test port", d => { d.ownedMedia.origin = "https://127.0.0.1:4443"; }],
   ["remount", d => { d.nativeTimeline.at(-1)!.elementId = "element-2"; }],
   ["generation reset", d => { d.nativeTimeline.at(-1)!.generation = 1; }],
   ["missing trusted intent", d => { d.nativeTimeline.find(e => e.event === "play-intent")!.trusted = false; }],

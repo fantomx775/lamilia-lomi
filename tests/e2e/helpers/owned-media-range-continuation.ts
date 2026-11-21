@@ -7,8 +7,9 @@ const identity = z.object({
   sourceIndex: number.nullable().optional(), sampledAtEpochMs: number.nullable().optional(),
   timeOrigin: number.nullable().optional(),
 });
+const originKind = z.enum(["test-origin", "loopback", "other-origin", "invalid-origin"]);
 const request = z.object({
-  requestId: number, method: z.string(), path: z.string(), resource: z.string(), urlSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  requestId: number, method: z.string(), path: z.string(), originKind, resource: z.string(), urlSha256: z.string().regex(/^[a-f0-9]{64}$/),
   startedAtEpochMs: number, responseStatus: number.nullable(), contentRange: z.string().nullable(),
   range: z.string().nullable(), allHeadersRange: z.string().nullable().optional(), identitySample: identity.optional(),
   redirectTargetPath: z.string().optional(), redirectTargetOrigin: z.string().optional(),
@@ -25,7 +26,7 @@ const timelineEvent = z.object({
   paused: z.boolean(), readyState: number, mediaErrorPresent: z.boolean(), mediaTime: number, currentTime: number,
 });
 const cdpEvent = z.object({
-  event: z.string(), requestId: z.string(), urlSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  event: z.string(), requestId: z.string(), urlSha256: z.string().regex(/^[a-f0-9]{64}$/), sourceIndex: number,
   timestamp: number, wallTime: number.optional(), receivedDataBytes: number, status: number.optional(),
   contentRange: z.string().nullable().optional(), range: z.string().nullable().optional(),
   fromDiskCache: z.boolean().optional(), fromServiceWorker: z.boolean().optional(),
@@ -50,17 +51,23 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
   }
   const data = parsed.data;
   const unresolved = (reason: string) => ({ disposition: "UNRESOLVED" as const, reason });
+  let parsedExpectedOrigin: URL;
+  try { parsedExpectedOrigin = new URL(data.ownedMedia.origin); } catch { return unresolved("invalid-owned-origin"); }
+  if (parsedExpectedOrigin.origin !== data.ownedMedia.origin || parsedExpectedOrigin.protocol !== "https:" ||
+      !["localhost", "127.0.0.1"].includes(parsedExpectedOrigin.hostname) || parsedExpectedOrigin.port !== "3443") {
+    return unresolved("invalid-owned-origin");
+  }
   const failures = data.failed.filter((entry) => entry.requestId === requestId);
   if (failures.length !== 1) return unresolved("nonunique-failure");
   const failure = failures[0];
-  const { apiPath, storagePath, origin: expectedOrigin } = data.ownedMedia;
+  const { apiPath, storagePath } = data.ownedMedia;
   const [parent] = failure.redirectChain;
   const fullRange = `bytes 0-${fixtureBytes - 1}/${fixtureBytes}`;
-  if (failure.method !== "GET" || failure.resource !== "media" || failure.path !== storagePath ||
+  if (failure.method !== "GET" || failure.originKind !== "test-origin" || failure.resource !== "media" || failure.path !== storagePath ||
       failure.error !== "net::ERR_ABORTED" || failure.responseStatus !== 206 || failure.contentRange !== fullRange ||
       failure.expectedPause || failure.expectedFault || failure.redirectChain.length !== 1 ||
-      parent.method !== "GET" || parent.resource !== "media" || parent.path !== apiPath || parent.responseStatus !== 307 ||
-      parent.allHeadersRange !== "bytes=0-" || parent.redirectTargetOrigin !== expectedOrigin ||
+      parent.method !== "GET" || parent.originKind !== "test-origin" || parent.resource !== "media" || parent.path !== apiPath || parent.responseStatus !== 307 ||
+      parent.allHeadersRange !== "bytes=0-" || parent.redirectTargetOrigin !== parsedExpectedOrigin.origin ||
       parent.redirectTargetPath !== storagePath || parent.urlSha256.length !== 64) {
     return unresolved("not-an-owned-full-range-redirect-abort");
   }
@@ -68,7 +75,7 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
   const owner = parent.identitySample;
   if (owner?.status !== "sampled" || !/^doc-[a-f0-9-]{36}$/.test(owner.documentId ?? "") ||
       !/^element-\d+$/.test(owner.elementId ?? "") || !Number.isSafeInteger(owner.generation) ||
-      (owner.generation ?? -1) < 0 || typeof owner.timeOrigin !== "number") {
+      (owner.generation ?? -1) < 0 || owner.sourceIndex !== 0 || typeof owner.timeOrigin !== "number") {
     return unresolved("missing-owned-element-generation");
   }
   const sameOwner = (sample: z.infer<typeof identity> | undefined) => sample?.status === "sampled" &&
@@ -81,10 +88,10 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
     const closeInTime = (event: z.infer<typeof cdpEvent>, epochMs: number) => event.wallTime !== undefined &&
       Math.abs(event.wallTime * 1000 - epochMs) <= 20;
     const requests = data.cdpMedia.filter((event) => event.event === "cdp-request" &&
-      event.urlSha256 === failure.urlSha256 && closeInTime(event, failure.startedAtEpochMs));
+      event.sourceIndex === 1 && event.urlSha256 === failure.urlSha256 && closeInTime(event, failure.startedAtEpochMs));
     if (requests.length !== 1 || requests[0].wallTime === undefined) return unresolved("ambiguous-cdp-aborted-request");
     const terminals = data.cdpMedia.filter((event) => event.event === "cdp-failed" &&
-      event.requestId === requests[0].requestId && event.urlSha256 === failure.urlSha256);
+      event.sourceIndex === 1 && event.requestId === requests[0].requestId && event.urlSha256 === failure.urlSha256);
     if (terminals.length !== 1 || !terminals[0].canceled || terminals[0].category !== "net::ERR_ABORTED") {
       return unresolved("cdp-does-not-prove-owned-range-abort");
     }
@@ -108,7 +115,7 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
   if (!frame) return unresolved("missing-post-abort-decoded-frame");
 
   const tails = data.successfulMedia.filter((entry) => {
-    if (entry.method !== "GET" || entry.resource !== "media" || entry.path !== storagePath ||
+    if (entry.method !== "GET" || entry.originKind !== "test-origin" || entry.resource !== "media" || entry.path !== storagePath ||
         entry.urlSha256 !== failure.urlSha256 || entry.responseStatus !== 206 || entry.terminal !== "finished" ||
         entry.startedAtEpochMs <= failure.failedAtEpochMs || entry.finishedAtEpochMs >= frame.atEpochMs ||
         (entry.identitySample ? !sameOwner(entry.identitySample) : data.cdpStatus !== "OBSERVING") ||
@@ -136,13 +143,13 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
     const closeInTime = (event: z.infer<typeof cdpEvent>, epochMs: number) => event.wallTime !== undefined &&
       Math.abs(event.wallTime * 1000 - epochMs) <= 20;
     const canceledRequests = data.cdpMedia.filter((event) => event.event === "cdp-request" &&
-      event.urlSha256 === failure.urlSha256 && closeInTime(event, failure.startedAtEpochMs));
+      event.sourceIndex === 1 && event.urlSha256 === failure.urlSha256 && closeInTime(event, failure.startedAtEpochMs));
     if (canceledRequests.length !== 1) return unresolved("ambiguous-cdp-aborted-request");
     const canceledRequest = canceledRequests[0];
     const canceledResponse = data.cdpMedia.filter((event) => event.event === "cdp-response" &&
-      event.requestId === canceledRequest.requestId && event.urlSha256 === failure.urlSha256);
+      event.sourceIndex === 1 && event.requestId === canceledRequest.requestId && event.urlSha256 === failure.urlSha256);
     const canceledTerminal = data.cdpMedia.filter((event) => event.event === "cdp-failed" &&
-      event.requestId === canceledRequest.requestId && event.urlSha256 === failure.urlSha256);
+      event.sourceIndex === 1 && event.requestId === canceledRequest.requestId && event.urlSha256 === failure.urlSha256);
     if (canceledResponse.length !== 1 || canceledResponse[0].status !== 206 ||
         canceledResponse[0].contentRange !== fullRange || canceledTerminal.length !== 1 ||
         !canceledTerminal[0].canceled || canceledTerminal[0].category !== "net::ERR_ABORTED" ||
@@ -156,13 +163,13 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
       : canceledTerminal[0].receivedDataBytes;
     const tailHeaders = tail.allHeadersRange ?? tail.range ?? "";
     const tailRequests = data.cdpMedia.filter((event) => event.event === "cdp-request" &&
-      event.urlSha256 === tail.urlSha256 && event.range === tailHeaders && closeInTime(event, tail.startedAtEpochMs));
+      event.sourceIndex === 1 && event.urlSha256 === tail.urlSha256 && event.range === tailHeaders && closeInTime(event, tail.startedAtEpochMs));
     if (tailRequests.length !== 1) return unresolved("ambiguous-cdp-range-tail");
     const tailRequest = tailRequests[0];
     const tailResponse = data.cdpMedia.filter((event) => event.event === "cdp-response" &&
-      event.requestId === tailRequest.requestId && event.urlSha256 === tail.urlSha256);
+      event.sourceIndex === 1 && event.requestId === tailRequest.requestId && event.urlSha256 === tail.urlSha256);
     const tailFinished = data.cdpMedia.filter((event) => event.event === "cdp-finished" &&
-      event.requestId === tailRequest.requestId && event.urlSha256 === tail.urlSha256);
+      event.sourceIndex === 1 && event.requestId === tailRequest.requestId && event.urlSha256 === tail.urlSha256);
     if (tailRequest.loaderId !== canceledRequest.loaderId || tailRequest.frameId !== canceledRequest.frameId ||
         tailResponse.length !== 1 || tailResponse[0].status !== 206 || tailResponse[0].contentRange !== tail.contentRange ||
         tailResponse[0].fromDiskCache !== false || tailResponse[0].fromServiceWorker !== false ||

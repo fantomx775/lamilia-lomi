@@ -7,7 +7,7 @@ import sharp from "sharp";
 import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 import { classifyOwnedMetadataResume } from "./helpers/owned-media-metadata-resume";
 import { classifyOwnedMediaRangeContinuation } from "./helpers/owned-media-range-continuation";
-import { observeOwnedMediaCdp } from "./helpers/owned-media-diagnostics";
+import { observeOwnedMediaCdp, type OwnedMediaSource } from "./helpers/owned-media-diagnostics";
 import { NextCancellationObserver } from "./helpers/next-navigation-cancellations";
 import { controlIssue127MediaGate, readIssue127MediaGateState, type MediaGateState } from "./helpers/issue-127-media-gate";
 
@@ -55,7 +55,8 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   const objects: Array<{ bucket: string; path: string }> = [];
   const consoleErrors: Array<{ category: "unexpected-console-error"; path: string }> = [];
   const pageErrors: Array<{ category: "unexpected-page-error"; path: string }> = [];
-  type RequestMetadata = { requestId: number; method: string; path: string; resource: string; phaseAtStart: string; navigation: boolean; rsc: boolean; prefetch: boolean;
+  type RequestMetadata = { requestId: number; method: string; path: string; originKind: "test-origin" | "loopback" | "other-origin" | "invalid-origin";
+    resource: string; phaseAtStart: string; navigation: boolean; rsc: boolean; prefetch: boolean;
     urlSha256: string; startedAtEpochMs: number; range: string | null; responseStatus: number | null; contentRange: string | null;
     responseAtEpochMs?: number; finishedAtEpochMs?: number;
     redirectTargetPath?: string; redirectTargetOrigin?: string; redirectTargetOriginKind?: "test-origin" | "loopback" | "other-origin";
@@ -90,17 +91,18 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     if (existing) return existing;
     const headers = request.headers();
     const metadata: RequestMetadata = { requestId: ++requestSequence, method: request.method(), path: locationPath(request.url(), COMMUNITY_TEST_ORIGIN),
+      originKind: locationOriginKind(request.url(), COMMUNITY_TEST_ORIGIN),
       resource: request.resourceType(), phaseAtStart: phase, navigation: request.isNavigationRequest(),
       rsc: headers.rsc === "1", prefetch: headers["next-router-prefetch"] === "1" || Boolean(headers["next-router-segment-prefetch"]),
       urlSha256: createHash("sha256").update(request.url()).digest("hex"), startedAtEpochMs: Date.now(),
       range: headers.range ? /^bytes=\d{1,16}-\d{0,16}$/.test(headers.range) ? headers.range : "unknown-range" : null,
       responseStatus: null as number | null, contentRange: null as string | null };
     requestIdentity.set(request, metadata);
-    const isOwnedVideoRequest = ownedVideoPath !== "" && metadata.path === ownedVideoPath;
-    const isOwnedStorageRequest = isOwnedStorageMediaPath(metadata.path);
+    const isOwnedVideoRequest = ownedVideoPath !== "" && metadata.originKind === "test-origin" && metadata.path === ownedVideoPath;
+    const isOwnedStorageRequest = isOwnedStorageMediaPath(metadata);
     if (request.resourceType() === "media") mediaRequests.push(metadata);
     if (isOwnedVideoRequest || isOwnedStorageRequest) ownedMediaTransportRequests.push(metadata);
-    if (metadata.path.startsWith("/storage/v1/")) storageTransportRequests.push(metadata);
+    if (metadata.originKind === "test-origin" && metadata.path.startsWith("/storage/v1/")) storageTransportRequests.push(metadata);
     if (request.resourceType() === "media" || isOwnedVideoRequest || isOwnedStorageRequest) {
       diagnosticWork.push((async () => {
         const headers = await request.allHeaders();
@@ -128,7 +130,8 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     lifecycleActions.push({ action: "drain-start", phase, atEpochMs: Date.now() });
     // Wait for genuine document/prefetch/script/image work; do not abort it or
     // count this wait as part of click-to-frame latency. Media is observed separately.
-    await expect.poll(() => [...inFlight.values()].filter((request) => request.resource !== "media" && request.path !== ownedVideoPath && !isOwnedStorageMediaPath(request.path)).length,
+    await expect.poll(() => [...inFlight.values()].filter((request) => request.resource !== "media" &&
+      !(request.originKind === "test-origin" && request.path === ownedVideoPath) && !isOwnedStorageMediaPath(request)).length,
       { timeout: 20_000, message: "Started non-media document requests must settle before a test-driven reset." }).toBe(0);
     lifecycleActions.push({ action: "drain-complete", phase, atEpochMs: Date.now() });
   }
@@ -157,7 +160,8 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     }
     if ([...byHash.values()].some((outcomes) => outcomes.length)) nextFinalizationFailed = true;
     for (const request of failed) {
-      if (!request.pauseGateRequest || !request.pauseRequestedAtFailure || request.method !== "GET" || request.path !== ownedVideoPath) continue;
+      if (!request.pauseGateRequest || !request.pauseRequestedAtFailure || request.method !== "GET" ||
+          request.originKind !== "test-origin" || request.path !== ownedVideoPath) continue;
       const witness = nativeTimeline.find((event) => event.event === "pause" && event.trusted === true && event.paused === true && event.connected === true &&
         (event.sourcePath === ownedVideoPath || event.sourcePath === ownedStoragePath) && typeof event.atEpochMs === "number" &&
         event.atEpochMs >= request.startedAtEpochMs && event.atEpochMs < request.failedAtEpochMs);
@@ -207,10 +211,11 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   let pauseGateActive = false;
   let ownedVideoPath = "";
   let ownedStoragePath = "";
-  function isOwnedStorageMediaPath(pathname: string) {
+  function isOwnedStorageMediaPath(request: Pick<RequestMetadata, "originKind" | "path">) {
     if (!ownedStoragePath) return false;
-    let decoded = pathname;
-    try { decoded = decodeURIComponent(pathname); } catch { return false; }
+    if (request.originKind !== "test-origin") return false;
+    let decoded = request.path;
+    try { decoded = decodeURIComponent(request.path); } catch { return false; }
     return decoded === ownedStoragePath;
   }
   let pauseConfirmed = false;
@@ -218,14 +223,15 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   page.on("console", (message) => {
     if (message.type() !== "error") return;
     const consolePath = locationPath(message.location().url, COMMUNITY_TEST_ORIGIN);
-    if (faultActive && consolePath === ownedVideoPath && /^Failed to load resource:/.test(message.text())) expectedFaultConsole.push({ category: "controlled-media-resource-error", path: consolePath });
+    if (faultActive && locationOriginKind(message.location().url, COMMUNITY_TEST_ORIGIN) === "test-origin" &&
+        consolePath === ownedVideoPath && /^Failed to load resource:/.test(message.text())) expectedFaultConsole.push({ category: "controlled-media-resource-error", path: consolePath });
     else consoleErrors.push({ category: "unexpected-console-error", path: consolePath });
   });
   page.on("pageerror", () => pageErrors.push({ category: "unexpected-page-error", path: locationPath(page.url(), COMMUNITY_TEST_ORIGIN) }));
   page.on("request", (request) => {
     const metadata = requestMetadata(request);
     inFlight.set(request, metadata);
-    if (request.method() === "GET" && metadata.path === ownedVideoPath) {
+    if (request.method() === "GET" && metadata.originKind === "test-origin" && metadata.path === ownedVideoPath) {
       if (pauseGateActive) delayedRequests.add(request);
     }
   });
@@ -233,11 +239,11 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     const metadata = requestMetadata(response.request());
     metadata.responseStatus = response.status();
     metadata.responseAtEpochMs = Date.now();
-    if (faultActive && metadata.path === ownedVideoPath && response.status() === 503 &&
+    if (faultActive && metadata.originKind === "test-origin" && metadata.path === ownedVideoPath && response.status() === 503 &&
         !controlledFaultResponses.some((entry) => entry.requestId === metadata.requestId)) controlledFaultResponses.push(metadata);
     const contentRange = response.headers()["content-range"];
     metadata.contentRange = contentRange ? /^bytes \d{1,16}-\d{1,16}\/(?:\d{1,16}|\*)$/.test(contentRange) ? contentRange : "unknown-content-range" : null;
-    if (metadata.path === ownedVideoPath && response.status() >= 300 && response.status() < 400) {
+    if (metadata.originKind === "test-origin" && metadata.path === ownedVideoPath && response.status() >= 300 && response.status() < 400) {
       const location = response.headers()["location"];
       if (location) {
         try {
@@ -253,7 +259,8 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   page.on("requestfinished", (request) => {
     const metadata = requestMetadata(request);
     metadata.finishedAtEpochMs = Date.now();
-    if (metadata.resource === "media" || metadata.path === ownedVideoPath || isOwnedStorageMediaPath(metadata.path)) {
+    if (metadata.resource === "media" ||
+        (metadata.originKind === "test-origin" && metadata.path === ownedVideoPath) || isOwnedStorageMediaPath(metadata)) {
       const terminal = { ...metadata, terminal: "finished", finishedAtEpochMs: Date.now(), redirectChain: [] as RequestMetadata[] };
       for (let previous = request.redirectedFrom(); previous; previous = previous.redirectedFrom()) terminal.redirectChain.unshift(requestMetadata(previous));
       diagnosticWork.push((async () => {
@@ -282,10 +289,10 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     const webkit = testInfo.project.use.browserName === "webkit";
     const expectedResource = webkit ? "other" : "media";
     const responseCandidates = controlledFaultResponses.filter((request) => request.phaseAtStart === "controlled-fault:navigation" &&
-      request.path === gate.path && request.method === "GET" && request.resource === expectedResource && request.responseStatus === 503 &&
+      request.originKind === "test-origin" && request.path === gate.path && request.method === "GET" && request.resource === expectedResource && request.responseStatus === 503 &&
       typeof request.responseAtEpochMs === "number" && typeof request.finishedAtEpochMs === "number");
     const failureCandidates = webkit ? failed.filter((request) => request.phaseAtStart === "controlled-fault:navigation" &&
-      request.path === gate.path && request.method === "GET" && request.resource === expectedResource && request.responseStatus === null &&
+      request.originKind === "test-origin" && request.path === gate.path && request.method === "GET" && request.resource === expectedResource && request.responseStatus === null &&
       ["Load request cancelled", "NS_BINDING_ABORTED"].includes(request.error ?? "")) : [];
     if (responseCandidates.length + failureCandidates.length !== arrivals.length ||
         new Set([...responseCandidates, ...failureCandidates].map((request) => request.requestId)).size !== arrivals.length) return [];
@@ -346,11 +353,12 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     const videoPath = `/api/media/${video}`;
     ownedVideoPath = videoPath;
     ownedStoragePath = `/storage/v1/object/sign/public-videos/${objects.find((object) => object.bucket === "public-videos")!.path}`;
+    const ownedSources: OwnedMediaSource[] = [ownedVideoPath, ownedStoragePath].map((ownedPath) => ({ origin: COMMUNITY_TEST_ORIGIN, path: ownedPath }));
     if (testInfo.project.use.browserName !== "webkit" && page.context().browser()?.browserType().name() === "chromium") {
-      stopCdp = await observeOwnedMediaCdp(page, [ownedVideoPath, ownedStoragePath], (value) => cdpMedia.push({ ...value, phaseAtReceipt: phase, receivedAtEpochMs: Date.now() }));
+      stopCdp = await observeOwnedMediaCdp(page, ownedSources, (value) => cdpMedia.push({ ...value, phaseAtReceipt: phase, receivedAtEpochMs: Date.now() }));
       cdpStatus = "OBSERVING";
     }
-    await observeNativeMedia(page, [ownedVideoPath, ownedStoragePath], (observation) => {
+    await observeNativeMedia(page, ownedSources, (observation) => {
       if (!observation) observerErrors.push({ category: "invalid-native-observation" });
       else nativeTimeline.push({ ...observation, phaseAtReceipt: phase, receivedAtEpochMs: Date.now() });
     });
@@ -429,8 +437,9 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       // its media response open while paused, so requestfinished is not a
       // portable readiness signal across browser engines.
       await expect.poll(() => ownedMediaTransportRequests.some((request) =>
-        request.path === ownedStoragePath && request.phaseAtStart === "pending-playback:resume" &&
-        ((request.responseStatus === 200 && successfulMedia.some((finished) => finished.path === ownedStoragePath &&
+        request.originKind === "test-origin" && request.path === ownedStoragePath && request.phaseAtStart === "pending-playback:resume" &&
+        ((request.responseStatus === 200 && successfulMedia.some((finished) => finished.requestId === request.requestId &&
+          finished.originKind === "test-origin" && finished.path === ownedStoragePath &&
           finished.phaseAtStart === "pending-playback:resume" && finished.responseBodyBytes === ownedVideoBytes)) ||
           (request.responseStatus === 206 && request.contentRange === `bytes 0-${ownedVideoBytes - 1}/${ownedVideoBytes}`)))).toBe(true);
       await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).readyState))
@@ -598,7 +607,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       const rangeContinuation = rangeContinuationProofs.get(request.requestId);
       if (rangeContinuation?.disposition === "EXPECTED_OWNED_NATIVE_RANGE_CONTINUATION") {
         expect(request.method).toBe("GET"); expect(request.resource).toBe("media");
-        expect(request.path).toBe(ownedStoragePath); expect(request.error).toBe("net::ERR_ABORTED");
+        expect(request.originKind).toBe("test-origin"); expect(request.path).toBe(ownedStoragePath); expect(request.error).toBe("net::ERR_ABORTED");
         expect(request.responseStatus).toBe(206);
         continue;
       }
@@ -642,7 +651,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   }
 });
 
-async function observeNativeMedia(page: Page, ownedPaths: string[], receive: (value: Record<string, unknown> | null) => void) {
+async function observeNativeMedia(page: Page, ownedSources: OwnedMediaSource[], receive: (value: Record<string, unknown> | null) => void) {
   const binding = `__ux127Media_${randomUUID().replaceAll("-", "")}`;
   const events = ["play", "playing", "pause", "waiting", "stalled", "abort", "emptied", "loadstart", "loadedmetadata", "loadeddata", "suspend", "canplay", "seeking", "seeked", "error", "ended", "pagehide", "beforeunload", "visibilitychange", "video-detached", "src-change", "load-call", "play-intent", "frame"];
   await page.exposeBinding(binding, (_source, input: unknown) => {
@@ -658,9 +667,9 @@ async function observeNativeMedia(page: Page, ownedPaths: string[], receive: (va
     receive({ event: value.event, documentId: value.documentId, elementId: value.elementId, generation: value.generation, mediaTime: value.mediaTime, atEpochMs: value.atEpochMs, performanceMs: value.performanceMs, timeOrigin: value.timeOrigin,
       currentTime: value.currentTime, readyState: value.readyState, networkState: value.networkState, errorCode: value.errorCode, preload: value.preload, mediaErrorPresent: value.mediaErrorPresent,
       paused: value.paused, connected: value.connected, trusted: value.trusted, documentHidden: value.documentHidden,
-      sourcePath: value.sourceIndex === 0 || value.sourceIndex === 1 ? ownedPaths[value.sourceIndex] : "[no-owned-media-source]" });
+      sourcePath: value.sourceIndex === 0 || value.sourceIndex === 1 ? ownedSources[value.sourceIndex].path : "[no-owned-media-source]" });
   });
-  await page.addInitScript(({ binding, ownedPaths }) => {
+  await page.addInitScript(({ binding, ownedSources }) => {
     let lastVideo: HTMLVideoElement | null = null;
     const documentId = `doc-${crypto.randomUUID()}`;
     let sequence = 0;
@@ -674,12 +683,18 @@ async function observeNativeMedia(page: Page, ownedPaths: string[], receive: (va
       const video = document.querySelector<HTMLVideoElement>("video[data-flipthrough]");
       if (!video) return { status: "no-video", documentId, sampledAtEpochMs: Date.now() };
       let sourceIndex = -1;
-      try { sourceIndex = ownedPaths.indexOf(new URL(video.currentSrc || video.src, location.href).pathname); } catch { /* No raw source. */ }
+      try {
+        const source = new URL(video.currentSrc || video.src, location.href);
+        sourceIndex = ownedSources.findIndex((owned) => source.origin === owned.origin && source.pathname === owned.path);
+      } catch { /* No raw source. */ }
       return { status: "sampled", documentId, ...identity(video), sourceIndex, sampledAtEpochMs: Date.now(), timeOrigin: performance.timeOrigin };
     };
     const emit = (video: HTMLVideoElement, event: string, trusted: boolean, mediaTime = -1) => {
       let sourceIndex = -1;
-      try { sourceIndex = ownedPaths.indexOf(new URL(video.currentSrc || video.src, location.href).pathname); } catch { /* No raw URL is sent. */ }
+      try {
+        const source = new URL(video.currentSrc || video.src, location.href);
+        sourceIndex = ownedSources.findIndex((owned) => source.origin === owned.origin && source.pathname === owned.path);
+      } catch { /* No raw URL is sent. */ }
       const payload = { event, documentId, ...identity(video), mediaTime, atEpochMs: Date.now(), performanceMs: performance.now(), timeOrigin: performance.timeOrigin,
         currentTime: video.currentTime, readyState: video.readyState, networkState: video.networkState, errorCode: video.error?.code ?? 0,
         preload: ["none", "metadata", "auto"].includes(video.preload) ? video.preload : video.preload === "" ? "empty" : "unknown",
@@ -736,7 +751,7 @@ async function observeNativeMedia(page: Page, ownedPaths: string[], receive: (va
       const video = document.querySelector<HTMLVideoElement>("video[data-flipthrough]");
       lastVideo = video;
     }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
-  }, { binding, ownedPaths });
+  }, { binding, ownedSources });
 }
 
 function projectIdentitySample(input: Record<string, unknown>) {
@@ -755,6 +770,15 @@ function locationPath(value: string, base: string) {
     const location = new URL(value || base, base);
     return location.protocol === "http:" || location.protocol === "https:" ? location.pathname : "[non-http-location]";
   } catch { return "[invalid-location]"; }
+}
+
+function locationOriginKind(value: string, expectedOrigin: string): "test-origin" | "loopback" | "other-origin" | "invalid-origin" {
+  try {
+    const location = new URL(value);
+    if (location.protocol !== "http:" && location.protocol !== "https:") return "invalid-origin";
+    if (location.origin === expectedOrigin) return "test-origin";
+    return ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname) ? "loopback" : "other-origin";
+  } catch { return "invalid-origin"; }
 }
 
 function networkErrorCategory(request: Request) {

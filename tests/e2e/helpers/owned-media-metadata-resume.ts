@@ -2,20 +2,22 @@ import { z } from "zod";
 
 // Reviewed narrow test-only lifecycle proof. No path-only or engine-independent exemption.
 const n = z.number().finite();
+const originKindSchema = z.enum(["test-origin", "loopback", "other-origin", "invalid-origin"]);
 const identitySchema = z.object({
   status: z.string().optional(), documentId: z.string().nullable().optional(), elementId: z.string().nullable().optional(),
   generation: n.nullable().optional(), sourceIndex: n.nullable().optional(), sampledAtEpochMs: n.nullable().optional(), timeOrigin: n.nullable().optional(),
 });
 type Identity = z.infer<typeof identitySchema>;
 const requestSchema = z.object({
-  requestId: n, method: z.string(), path: z.string(), resource: z.string(), navigation: z.boolean(), rsc: z.boolean(), prefetch: z.boolean(),
+  requestId: n, method: z.string(), path: z.string(), originKind: originKindSchema, resource: z.string(), navigation: z.boolean(), rsc: z.boolean(), prefetch: z.boolean(),
   urlSha256: z.string().regex(/^[a-f0-9]{64}$/), startedAtEpochMs: n, responseStatus: n.nullable(), contentRange: z.string().nullable(),
   allHeadersRange: z.string().nullable().optional(), identitySample: identitySchema.optional(),
+  redirectTargetPath: z.string().optional(), redirectTargetOrigin: z.string().optional(), redirectTargetOriginKind: originKindSchema.optional(),
 });
 type MediaRequest = z.infer<typeof requestSchema>;
 const snapshotSchema = z.object({
   cdpStatus: z.string(), observerErrors: z.array(z.unknown()), consoleErrors: z.array(z.unknown()), pageErrors: z.array(z.unknown()),
-  ownedMedia: z.object({apiPath: z.string(), storagePath: z.string()}),
+  ownedMedia: z.object({apiPath: z.string(), storagePath: z.string(), origin: z.string().url()}),
   failed: z.array(requestSchema.extend({error: z.string().nullable(), expectedPause: z.boolean(), expectedFault: z.boolean(), pauseGateRequest: z.boolean(), pauseRequestedAtFailure: z.boolean(), failedAtEpochMs: n, redirectChain: z.array(requestSchema)})),
   mediaRequests: z.array(requestSchema),
   successfulMedia: z.array(requestSchema.extend({terminal: z.string(), finishedAtEpochMs: n, responseBodyBytes: n.optional()})),
@@ -40,21 +42,27 @@ export function classifyOwnedMetadataResume(input: unknown, requestId: number, f
   const d = parsed.data;
   const no = (reason: string) => ({ disposition: 'UNRESOLVED' as const, reason });
   if (!Number.isSafeInteger(fixtureBytes) || fixtureBytes <= 0 || d.cdpStatus !== 'OBSERVING' || d.observerErrors.length || d.consoleErrors.length || d.pageErrors.length) return no('missing-or-invalid-observations');
+  let expectedOrigin: URL;
+  try { expectedOrigin = new URL(d.ownedMedia.origin); } catch { return no('invalid-owned-origin'); }
+  if (expectedOrigin.origin !== d.ownedMedia.origin || expectedOrigin.protocol !== 'https:' ||
+      !['localhost', '127.0.0.1'].includes(expectedOrigin.hostname) || expectedOrigin.port !== '3443') return no('invalid-owned-origin');
   const failures = d.failed.filter(r => r.requestId === requestId);
   if (failures.length !== 1) return no('nonunique-failure');
   const r = failures[0], api = d.ownedMedia.apiPath, storage = d.ownedMedia.storagePath;
   const inventory = d.mediaRequests.filter(x => x.requestId === requestId);
   if (inventory.length !== 1) return no('missing-current-inventory');
   const current = inventory[0], identity = current.identitySample;
-  if (current.path !== r.path || current.urlSha256 !== r.urlSha256 || current.responseStatus !== r.responseStatus) return no('inventory-mismatch');
+  const isGetMedia = (x: MediaRequest) => x.method === 'GET' && x.originKind === 'test-origin' && x.resource === 'media' && !x.navigation && !x.rsc && !x.prefetch;
+  if (!isGetMedia(current) || current.path !== r.path || current.urlSha256 !== r.urlSha256 || current.responseStatus !== r.responseStatus) return no('inventory-mismatch');
   const same = (x: Identity | undefined) => x?.documentId === identity?.documentId && x?.elementId === identity?.elementId && x?.generation === identity?.generation && x?.timeOrigin === identity?.timeOrigin;
   const validSample = (x: Identity | undefined, start: number, end: number) => x?.status === 'sampled' && same(x) && x.sourceIndex === 0 && typeof x.sampledAtEpochMs === 'number' && x.sampledAtEpochMs >= start && x.sampledAtEpochMs < end;
   if (!identity || !/^doc-[a-f0-9-]{36}$/.test(identity.documentId ?? "") || !/^element-\d+$/.test(identity.elementId ?? "") || !Number.isSafeInteger(identity.generation) || (identity.generation ?? -1) < 0) return no('invalid-identity');
-  const isGetMedia = (x: MediaRequest) => x.method === 'GET' && x.resource === 'media' && !x.navigation && !x.rsc && !x.prefetch;
   if (!isGetMedia(r) || r.path !== storage || r.error !== 'net::ERR_ABORTED' || r.responseStatus !== 206 || r.expectedPause || r.expectedFault || r.pauseGateRequest || r.pauseRequestedAtFailure || current.allHeadersRange !== 'bytes=0-' || r.contentRange !== `bytes 0-${fixtureBytes-1}/${fixtureBytes}`) return no('not-owned-partial-range-abort');
   if (r.redirectChain.length !== 1) return no('wrong-redirect-chain');
   const parent = r.redirectChain[0];
-  if (!isGetMedia(parent) || parent.path !== api || parent.responseStatus !== 307 || parent.allHeadersRange !== 'bytes=0-' || !validSample(parent.identitySample,parent.startedAtEpochMs,r.failedAtEpochMs) || !validSample(identity,r.startedAtEpochMs,r.failedAtEpochMs)) return no('unbound-parent-or-generation');
+  if (!isGetMedia(parent) || parent.path !== api || parent.responseStatus !== 307 || parent.allHeadersRange !== 'bytes=0-' ||
+      parent.redirectTargetPath !== storage || parent.redirectTargetOrigin !== expectedOrigin.origin || parent.redirectTargetOriginKind !== 'test-origin' ||
+      !validSample(parent.identitySample,parent.startedAtEpochMs,r.failedAtEpochMs) || !validSample(identity,r.startedAtEpochMs,r.failedAtEpochMs)) return no('unbound-parent-or-generation');
   const uniqueCdpRequest = (hash: string,start: number) => d.cdpMedia.filter(e => e.event === 'cdp-request' && e.urlSha256 === hash && e.wallTime !== undefined && Math.abs(e.wallTime*1000-start) <= 20);
   const childCdp = uniqueCdpRequest(r.urlSha256,r.startedAtEpochMs), parentCdp = uniqueCdpRequest(parent.urlSha256,parent.startedAtEpochMs);
   if (childCdp.length !== 1 || parentCdp.length !== 1) return no('ambiguous-cdp-request');
