@@ -6,6 +6,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
+import { isKnownCaretOnlyHydrationWarning } from "./helpers/hydration-warnings";
 
 test("PR 44 catalog search uses visible rich-text content", async ({ page }, testInfo) => {
   test.skip(
@@ -156,14 +157,14 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
         browserRunId,
         screenshotPath,
         consoleErrors: diagnostics.consoleErrors,
-        knownHydrationWarnings: diagnostics.consoleErrors.filter(isKnownHydrationCaretWarning),
+        knownHydrationWarnings: diagnostics.consoleErrors.filter(isKnownCaretOnlyHydrationWarning),
         pageErrors: diagnostics.pageErrors,
         failedNetworkRequests: diagnostics.failedNetworkRequests,
         expectedNavigationAborts: diagnostics.failedNetworkRequests.filter(isExpectedLoginRedirectAbort),
         failedResponses: diagnostics.failedResponses,
       })}`,
     );
-    expect(diagnostics.consoleErrors.filter((message) => !isKnownHydrationCaretWarning(message))).toEqual([]);
+    expect(diagnostics.consoleErrors.filter((message) => !isKnownCaretOnlyHydrationWarning(message))).toEqual([]);
     expect(diagnostics.pageErrors).toEqual([]);
     expect(diagnostics.failedNetworkRequests.filter((request) => !isExpectedLoginRedirectAbort(request))).toEqual([]);
     expect(diagnostics.failedResponses).toEqual([]);
@@ -203,10 +204,6 @@ async function waitForDocumentFonts(page: Page) {
 function safeUrl(value: string) {
   const url = new URL(value);
   return `${url.origin}${url.pathname}`;
-}
-
-function isKnownHydrationCaretWarning(message: string) {
-  return message.includes("A tree hydrated") && message.includes("caret-color");
 }
 
 function isExpectedLoginRedirectAbort(request: {

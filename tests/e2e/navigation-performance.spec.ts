@@ -150,6 +150,9 @@ test("tablet header navigation is visible and fits the viewport", async ({ page 
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.goto("/en/products");
 
+  const menuButton = page.getByRole("button", { name: "Open navigation menu", exact: true });
+  await expect(menuButton).toBeVisible();
+  await menuButton.click();
   const dialog = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
   await expect(dialog).toBeVisible();
   const nav = dialog.getByRole("navigation", { name: "Storefront", exact: true });

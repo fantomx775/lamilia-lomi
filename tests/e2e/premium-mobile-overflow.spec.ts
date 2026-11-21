@@ -42,14 +42,14 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
   await expect(mobileNavigation).not.toBeVisible();
   await expect(page.getByText("Role", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Communication preferences" })).toBeVisible();
-  await expect(page.getByText("Marketing emails:")).toContainText("Subscribed");
-  await expect(page.getByRole("button", { name: "Log out" })).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "I agree to receive marketing emails." })).toBeChecked();
   await expect(page.getByText("Account management")).toBeVisible();
   await expect(page.locator("details")).not.toHaveAttribute("open", "");
   await expect(page.getByRole("heading", { name: "Join the Coloring Club" })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.getByRole("main").last().screenshot({ path: join(screenshotDirectory, "account-390.png") });
   await mobileMenuButton.click();
+  await expect(mobileNavigation.getByRole("button", { name: "Log out", exact: true })).toBeVisible();
   await libraryLink.click();
   await expect(page).toHaveURL(/\/en\/library$/);
   await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
@@ -72,8 +72,8 @@ test("unlocked premium and account fit narrow mobile widths", async ({ page }, t
     await expect(downloadLink).toBeVisible();
     const bounds = await downloadLink.boundingBox();
     const filenameBounds = await filename.boundingBox();
-    const libraryBounds = await page.getByTestId("unlock-success-state").locator("..")
-      .getByRole("link", { name: "Go to My Library" }).boundingBox();
+    const libraryBounds = await page.getByTestId("unlock-success-state")
+      .getByRole("link", { name: "Go to My Library", exact: true }).boundingBox();
     if (!bounds || !filenameBounds || !libraryBounds) throw new Error("Premium actions must be visible.");
     expect(bounds.x + bounds.width).toBeLessThanOrEqual(width + 1);
     expect(bounds.y).toBeGreaterThanOrEqual(libraryBounds.y + libraryBounds.height);

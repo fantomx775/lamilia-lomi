@@ -1033,7 +1033,7 @@ async function uploadCoverFixture(
     await fileSelection;
     await withTimeout(multipartRequestStarted, 15_000, "Asset upload request did not start");
     expect(multipartRequestBodySize).toBeGreaterThan(0);
-    await page.getByText("ux-cover.webp", { exact: true }).waitFor({ state: "visible" });
+    await page.getByText("ux-cover.png", { exact: true }).waitFor({ state: "visible" });
     await expect(page.getByText("Przesyłanie…", { exact: true })).toBeVisible();
   } finally {
     releaseMultipartResponse();
@@ -1227,7 +1227,7 @@ test("saves a title-only draft and highlights missing publication fields", async
     await expect(page.getByLabel("Krótki opis")).toBeFocused();
     await expect(page.locator("#media-section-cover")).toContainText("Dodaj okładkę, aby opublikować produkt.");
     await expect(page.getByRole("group", { name: "Linki do Amazona" })).toContainText("Dodaj link do Amazona, aby opublikować produkt.");
-    const validationSummary = page.locator('#product-editor-form [role="alert"]');
+    const validationSummary = page.locator('#product-editor-form [role="alert"]').first();
     await expect(validationSummary).toContainText("Uzupełnij krótki opis, aby opublikować produkt.");
     await expect(validationSummary).toContainText("Dodaj link do Amazona, aby opublikować produkt.");
     await page.screenshot({ path: testInfo.outputPath("publication-validation.png"), fullPage: true, caret: "initial" });

@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { hideLocalNextDevPortalIfBlocking } from "./helpers/hide-local-next-dev-portal";
 
 test("consent gates Google, instruments interactions, and can be withdrawn", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
@@ -38,8 +39,8 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
     await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Catalog", exact: true }).click();
   }
   await expect(page).toHaveURL(/\/en\/products$/);
-  await page.locator('a[href="/en/products/moon-garden-coloring-book"]').first().click();
-  await expect(page).toHaveURL(/\/en\/products\/moon-garden-coloring-book$/);
+  await page.locator('a[href^="/en/products/moon-garden-coloring-book"]').first().click();
+  await expect(page).toHaveURL(/\/en\/products\/moon-garden-coloring-book(?:\?.*)?$/);
   await expect.poll(async () => (await events()).filter(item => item[1] === "page_view").length).toBe(4);
   const pageViews = (await events()).filter(item => item[1] === "page_view").map(item => item[2] as Record<string, unknown>);
   const origin = await page.evaluate(() => location.origin);
@@ -82,30 +83,6 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
   await page.reload();
   expect(await page.locator('script[src*="googletagmanager"]').count()).toBe(0);
 });
-
-async function hideLocalNextDevPortalIfBlocking(page: Page, target: Locator) {
-  const hostname = new URL(page.url()).hostname;
-  if (!["localhost", "127.0.0.1", "[::1]"].includes(hostname)) return;
-
-  const portalInterceptsTarget = await target.evaluate((element) => {
-    const bounds = element.getBoundingClientRect();
-    const top = document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
-    let candidate: Element | null = top;
-
-    while (candidate) {
-      if (candidate.localName === "nextjs-portal") return true;
-      const root = candidate.getRootNode();
-      candidate = root instanceof ShadowRoot ? root.host : candidate.parentElement;
-    }
-
-    return false;
-  });
-
-  if (portalInterceptsTarget) {
-    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
-  }
-}
-
 
 test("real Google tag encodes the configured measurement ID and page view", async ({ page }) => {
   test.setTimeout(60_000);

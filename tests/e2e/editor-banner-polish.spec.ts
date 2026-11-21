@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
+import { hideLocalNextDevPortalIfBlocking } from "./helpers/hide-local-next-dev-portal";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const screenshotDirectory = (outputDirectory: string) =>
@@ -35,6 +36,7 @@ test("homepage banner selects the supplied responsive artwork and keeps navigati
       const essentialConsent = page.getByRole("button", { name: "Essential only", exact: true });
       if (width === 390) {
         await expect(essentialConsent).toBeVisible();
+        await hideLocalNextDevPortalIfBlocking(page, essentialConsent);
         await essentialConsent.click();
         await expect(essentialConsent).toBeHidden();
         await expect(page.getByText(/We use essential cookies/)).toBeHidden();
@@ -84,12 +86,15 @@ test("homepage banner selects the supplied responsive artwork and keeps navigati
 
       if (width === 390) {
         const openMenu = page.getByRole("button", { name: "Open navigation menu" });
+        await hideLocalNextDevPortalIfBlocking(page, openMenu);
         await openMenu.click();
-        const mobileNavigation = page.getByRole("navigation", { name: "Mobile primary navigation" });
-        await expect(mobileNavigation).toBeVisible();
+        const mobileDialog = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+        const mobileNavigation = mobileDialog.getByRole("navigation", { name: "Storefront", exact: true });
+        await expect(mobileDialog).toBeVisible();
         await page.getByRole("button", { name: "Close navigation menu" }).click();
-        await expect(mobileNavigation).toBeHidden();
-        await page.getByRole("button", { name: "Open navigation menu" }).click();
+        await expect(mobileDialog).toBeHidden();
+        await hideLocalNextDevPortalIfBlocking(page, openMenu);
+        await openMenu.click();
         await mobileNavigation.getByRole("link", { name: "About", exact: true }).click();
         await expect(page).toHaveURL(/\/en\/about(?:\?.*)?$/);
         await expect(page.getByRole("button", { name: "Open navigation menu" })).toHaveAttribute("aria-expanded", "false");
@@ -122,7 +127,7 @@ test("homepage banner selects the supplied responsive artwork and keeps navigati
         const productLink = page.getByTestId("product-catalog-grid").locator("article a").first();
         await expect(productLink).toBeVisible();
         await productLink.click();
-        await expect(page).toHaveURL(/\/en\/products\/[^/?#]+$/);
+        await expect(page).toHaveURL(/\/en\/products\/[^/?#]+(?:\?.*)?$/);
         await expect(page.locator("h1")).toBeVisible();
         await expect.poll(() => page.locator("[data-testid='product-hero'] img").evaluateAll((images) =>
           images.length > 0 && images.every((element) => {

@@ -212,7 +212,8 @@ test("verified owner reaches Library and downloads only through the authorized r
 
   await page.getByRole("link", { name: "Go to My Library" }).click();
   await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
-  await page.getByRole("link", { name: /Moon Garden Coloring Book/ }).click();
+  await page.getByRole("link", { name: "Open my files", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   const directDownloadResponse = await page.request.get(
     `/api/downloads/${premiumAssetId}?locale=en&returnTo=%2Fen%2Fproducts%2F${productSlug}`,
   );

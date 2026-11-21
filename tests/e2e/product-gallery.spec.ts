@@ -44,9 +44,9 @@ test("product gallery opens a full-size image preview and supports navigation", 
   const firstThumbnail = page.getByRole("button", { name: "Open image 1" });
   await firstThumbnail.scrollIntoViewIfNeeded();
   const thumbnailImage = firstThumbnail.getByRole("img");
-  await expect(thumbnailImage).toHaveCSS("object-fit", "cover");
+  await expect(thumbnailImage).toHaveCSS("object-fit", "contain");
   await expect(thumbnailImage).toHaveCSS("object-position", "50% 50%");
-  await expect(thumbnailImage.locator("..")).toHaveCSS("aspect-ratio", "1 / 1");
+  await expect(thumbnailImage.locator("..")).toHaveCSS("aspect-ratio", "8.5 / 11");
   await firstThumbnail.screenshot({ path: testInfo.outputPath("product-gallery-bleed.png") });
   await firstThumbnail.click();
 

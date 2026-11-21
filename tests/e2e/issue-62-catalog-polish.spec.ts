@@ -25,11 +25,16 @@ test("catalog category recovery, full titles and configurable responsive cards",
   page.on("console", message => { if (message.type() === "error") consoleErrors.push(message.text()); });
   page.on("pageerror", error => pageErrors.push(error.message));
   page.on("response", response => {
-    if (response.status() >= 400) failedResponses.push({
-      path: new URL(response.url()).pathname,
-      status: response.status(),
-      disposition: response.status() === 404 && response.url().includes(missingImage) ? "intentional-missing-image" : "unresolved",
-    });
+    if (response.status() >= 400) {
+      const responseUrl = new URL(response.url());
+      const optimizedSource = responseUrl.pathname === "/_next/image" ? responseUrl.searchParams.get("url") : null;
+      failedResponses.push({
+        path: responseUrl.pathname,
+        status: response.status(),
+        disposition: response.status() === 404 && (response.url().includes(missingImage) || optimizedSource === missingImage)
+          ? "intentional-missing-image" : "unresolved",
+      });
+    }
   });
   page.on("requestfailed", request => failedRequests.push({
     path: new URL(request.url()).pathname,
@@ -138,6 +143,7 @@ test("catalog category recovery, full titles and configurable responsive cards",
     await expect(grid.locator("details, summary")).toHaveCount(0);
     expect(pageErrors).toEqual([]);
     expect(failedResponses.filter(entry => entry.disposition === "unresolved")).toEqual([]);
+    expect(failedResponses.filter(entry => entry.disposition === "intentional-missing-image").length).toBeGreaterThan(0);
     expect(failedRequests.filter(entry => entry.disposition === "unresolved")).toEqual([]);
     expect(consoleErrors.filter(message => !message.includes("404 (Not Found)"))).toEqual([]);
   } finally {

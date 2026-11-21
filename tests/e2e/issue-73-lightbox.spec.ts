@@ -20,10 +20,15 @@ test("product lightbox fits common viewports, keeps controls outside the artwork
         JSON.stringify({ essential: true, analytics: false }),
       );
     });
-    await page.goto("/en/products/moon-garden-coloring-book", { waitUntil: "domcontentloaded" });
+    await page.goto("/en/products/moon-garden-coloring-book", { waitUntil: "networkidle" });
 
     const opener = page.getByRole("button", { name: "Open image 1" });
     await expect(opener).toBeVisible();
+    await opener.scrollIntoViewIfNeeded();
+    await expect.poll(() => opener.getByRole("img").evaluate((image) => {
+      const candidate = image as HTMLImageElement;
+      return candidate.complete && candidate.naturalWidth > 0;
+    })).toBe(true);
     await opener.click();
 
     const dialog = page.getByRole("dialog", { name: "Image preview" });

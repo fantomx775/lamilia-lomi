@@ -1,4 +1,5 @@
 import { primaryNavigation } from "./helpers/navigation";
+import { hideLocalNextDevPortalIfBlocking } from "./helpers/hide-local-next-dev-portal";
 import { expect, test } from "@playwright/test";
 
 const navigationTestBaseUrl = new URL(
@@ -182,7 +183,9 @@ test("primary navigation feedback keeps the storefront journey semantic and resp
 
   try {
     await page.goto("/en");
-    await page.getByRole("button", { name: "Essential only" }).click();
+    const essentialOnly = page.getByRole("button", { name: "Essential only", exact: true });
+    await hideLocalNextDevPortalIfBlocking(page, essentialOnly);
+    await essentialOnly.click();
     await capture("home.png");
 
     const browseCatalog = page.getByRole("link", { name: "Browse catalog" });
@@ -291,7 +294,9 @@ test("admin navigation shows pending feedback for local demo admins", async ({ p
     });
 
     await page.goto("/en/login?redirectTo=/admin");
-    await page.getByRole("button", { name: "Essential only" }).click();
+    const essentialOnly = page.getByRole("button", { name: "Essential only", exact: true });
+    await hideLocalNextDevPortalIfBlocking(page, essentialOnly);
+    await essentialOnly.click();
     await page.getByLabel("Email").fill("admin@lamilialomi.test");
     await page.getByLabel("Password").fill("demo-password");
     await Promise.all([

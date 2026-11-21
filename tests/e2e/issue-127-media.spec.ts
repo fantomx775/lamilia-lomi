@@ -11,6 +11,24 @@ import { isLocalDemoAppTarget } from "./local-target";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
+type MediaRangeEvidence = {
+  request: Request;
+  requestSequence: number;
+  responseSequence?: number;
+  status?: number;
+  contentRange?: string;
+  failureSequence?: number;
+};
+
+type MediaSeekOperation = {
+  id: number;
+  kind: "playback" | "seek";
+  startedSequence: number;
+  completedSequence?: number;
+  result?: { targetTime: number; observedTime: number; readyState: number; framePainted: boolean };
+  abortedRanges: MediaRangeEvidence[];
+};
+
 test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inline playback", async ({ page, browser }, testInfo) => {
   const imagePayloads = observeImagePayloads(page);
   test.skip(!(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)), "Only a verified disposable loopback local-content app may be mutated.");
@@ -35,10 +53,25 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
   const pageErrors: Array<{ category: "unexpected-page-error"; path: string }> = [];
   const consoleErrors: Array<{ category: "unexpected-console-error"; path: string }> = [];
   const expectedImageFaultConsole: Array<{ category: "controlled-image-resource-error"; path: string }> = [];
-  const imageFaultRequests = new WeakSet<Request>();
+  const imageFaultRequestUrls = new Set<string>();
   let imageFaultActive = false;
   let imageFaultSource = "";
-  const failedRequests: Array<{ method: string; path: string; error: string | null; expectedImageFault: boolean }> = [];
+  const failedRequests: Array<{
+    method: string;
+    path: string;
+    error: string | null;
+    expectedImageFault: boolean;
+    expectedBrowserMediaRangeAbort: boolean;
+    mediaAbortOperationId: number | null;
+    mediaRequestSequence: number | null;
+    mediaFailureSequence: number | null;
+  }> = [];
+  const mediaRangeEvidence = new Map<Request, MediaRangeEvidence>();
+  const failedMediaAborts: Array<{ failure: (typeof failedRequests)[number]; evidence: MediaRangeEvidence; operation: MediaSeekOperation }> = [];
+  const mediaSeekOperations: MediaSeekOperation[] = [];
+  let activeMediaSeek: MediaSeekOperation | null = null;
+  let mediaEventSequence = 0;
+  let successfulBrowserVideoRanges = 0;
   page.on("pageerror", () => pageErrors.push({ category: "unexpected-page-error", path: locationPath(page.url(), String(testInfo.project.use.baseURL)) }));
   page.on("console", (message) => {
     if (message.type() !== "error") return;
@@ -50,7 +83,50 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     if (imageFaultActive && safePath === "/_next/image" && matchesOwnedImage && /^Failed to load resource:/.test(message.text())) expectedImageFaultConsole.push({ category: "controlled-image-resource-error", path: safePath });
     else consoleErrors.push({ category: "unexpected-console-error", path: safePath });
   });
-  page.on("requestfailed", (request) => failedRequests.push({ method: request.method(), path: locationPath(request.url(), String(testInfo.project.use.baseURL)), error: networkErrorCategory(request), expectedImageFault: imageFaultRequests.has(request) }));
+  page.on("requestfailed", (request) => {
+    const requestPath = locationPath(request.url(), String(testInfo.project.use.baseURL));
+    const error = networkErrorCategory(request);
+    const evidence = mediaRangeEvidence.get(request);
+    if (evidence) evidence.failureSequence = ++mediaEventSequence;
+    const failure = { method: request.method(), path: requestPath, error,
+      expectedImageFault: imageFaultRequestUrls.has(request.url()),
+      expectedBrowserMediaRangeAbort: false,
+      mediaAbortOperationId: evidence && isBrowserMediaCancellation(error) ? activeMediaSeek?.id ?? null : null,
+      mediaRequestSequence: evidence?.requestSequence ?? null,
+      mediaFailureSequence: evidence?.failureSequence ?? null };
+    failedRequests.push(failure);
+    if (evidence) {
+      if (isBrowserMediaCancellation(error) && activeMediaSeek) {
+        activeMediaSeek.abortedRanges.push(evidence);
+        failedMediaAborts.push({ failure, evidence, operation: activeMediaSeek });
+      }
+    }
+  });
+  page.on("request", (request) => {
+    if (
+      request.method() === "GET" && request.resourceType() === "media" &&
+      locationPath(request.url(), String(testInfo.project.use.baseURL)) === "/api/media/ux127-video" &&
+      /^bytes=\d+-\d*$/.test(request.headers()["range"] ?? "")
+    ) {
+      mediaRangeEvidence.set(request, { request, requestSequence: ++mediaEventSequence });
+    }
+  });
+  page.on("response", (response) => {
+    const request = response.request();
+    const headers = response.headers();
+    const evidence = mediaRangeEvidence.get(request);
+    if (evidence) {
+      evidence.responseSequence = ++mediaEventSequence;
+      evidence.status = response.status();
+      evidence.contentRange = headers["content-range"];
+    }
+    if (
+      request.method() === "GET" && request.resourceType() === "media" &&
+      locationPath(response.url(), String(testInfo.project.use.baseURL)) === "/api/media/ux127-video" &&
+      /^bytes=\d+-\d*$/.test(request.headers()["range"] ?? "") && response.status() === 206 &&
+      /^bytes \d+-\d+\/\d+$/.test(headers["content-range"] ?? "")
+    ) successfulBrowserVideoRanges += 1;
+  });
   try {
     fs.mkdirSync(mediaDirectory, { recursive: true });
     fs.mkdirSync(path.join(mediaDirectory, "video"), { recursive: true });
@@ -67,13 +143,13 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     product.translations = [{ ...product.translations[0], locale: "en", title: "Local video playback fixture", shortDescription: "Independent controlled media", longDescription: "" }];
     const media = (kind: "cover" | "video", filename: string, contentType: string): ProductAsset => {
       const id = `ux127-${kind}`;
-      return { id, productId: product.id, kind, bucket: "public-media", path: `/api/media/${id}`, storagePath: `/uploads/${product.id}/${kind}/${encodeURIComponent(filename)}`, storageProvider: "local", filename, contentType, sortOrder: 0, isPublic: true, title: kind === "video" ? "flower.mp4" : "Local cover" };
+      return { id, productId: product.id, kind, bucket: "public-media", path: `/api/media/${id}`, storagePath: `/uploads/${product.id}/${kind}/${encodeURIComponent(filename)}`, filename, contentType, sortOrder: 0, isPublic: true, title: kind === "video" ? "flower.mp4" : "Local cover" };
     };
     const gallery: ProductAsset[] = [];
     for (const [index, [width, height]] of [[2000, 2000], [1200, 1800], [1700, 2200]].entries()) {
       const filename = `page-${index}.png`;
       await sharp({ create: { width, height, channels: 3, background: ["#b5c7d6", "#d6c7b5", "#c7d6b5"][index] } }).png().toFile(path.join(mediaDirectory, "gallery", filename));
-      gallery.push({ id: `ux127-page-${index}`, productId: product.id, kind: "gallery", bucket: "public-media", path: `/api/media/ux127-page-${index}`, storagePath: `/uploads/${product.id}/gallery/${encodeURIComponent(filename)}`, storageProvider: "local", filename, contentType: "image/png", sortOrder: index + 1, isPublic: true, title: `Controlled page ${index + 1}` });
+      gallery.push({ id: `ux127-page-${index}`, productId: product.id, kind: "gallery", bucket: "public-media", path: `/api/media/ux127-page-${index}`, storagePath: `/uploads/${product.id}/gallery/${encodeURIComponent(filename)}`, filename, contentType: "image/png", sortOrder: index + 1, isPublic: true, title: `Controlled page ${index + 1}` });
     }
     product.assets = [media("cover", "cover.svg", "image/svg+xml"), media("video", "flower.mp4", "video/mp4"), ...gallery];
     product.coverAssetId = "ux127-cover"; product.videoAssetId = "ux127-video";
@@ -85,6 +161,14 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
     expect((await range.body()).byteLength).toBe(128);
     const samples: Array<{ cache: string; clickToFrameMs: number }> = [];
     for (const cache of ["cold", "warm"]) {
+      const playbackOperation: MediaSeekOperation = {
+        id: mediaSeekOperations.length + 1,
+        kind: "playback",
+        startedSequence: mediaEventSequence,
+        abortedRanges: [],
+      };
+      mediaSeekOperations.push(playbackOperation);
+      activeMediaSeek = playbackOperation;
       await page.goto("/en/products/issue-127-video-fixture");
       const video = page.locator("video[data-flipthrough]");
       await video.scrollIntoViewIfNeeded();
@@ -102,16 +186,49 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
           else player.addEventListener("timeupdate", () => { state.ux127VideoTiming.frame ??= performance.now(); }, { once: true });
         }, { once: true, capture: true });
       });
-      await page.getByRole("button", { name: /Play Inside the book/ }).click();
-      await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0.2);
-      await expect.poll(() => page.evaluate(() => (window as unknown as { ux127VideoTiming: { frame: number | null } }).ux127VideoTiming.frame)).not.toBeNull();
-      const timing = await page.evaluate(() => (window as unknown as { ux127VideoTiming: { started: number; frame: number } }).ux127VideoTiming);
+      let timing: { started: number; frame: number };
+      let playbackState: { currentTime: number; readyState: number };
+      try {
+        await page.getByRole("button", { name: /Play Inside the book/ }).click();
+        await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0.2);
+        await expect.poll(() => page.evaluate(() => (window as unknown as { ux127VideoTiming: { frame: number | null } }).ux127VideoTiming.frame)).not.toBeNull();
+        timing = await page.evaluate(() => (window as unknown as { ux127VideoTiming: { started: number; frame: number } }).ux127VideoTiming);
+        playbackState = await video.evaluate((element) => {
+          const player = element as HTMLVideoElement;
+          return { currentTime: player.currentTime, readyState: player.readyState };
+        });
+        playbackOperation.result = {
+          targetTime: 0.2,
+          observedTime: playbackState.currentTime,
+          readyState: playbackState.readyState,
+          framePainted: timing.frame >= timing.started,
+        };
+        playbackOperation.completedSequence = mediaEventSequence;
+      } finally {
+        activeMediaSeek = null;
+      }
       expect(timing.started).toBeGreaterThan(0); expect(timing.frame).toBeGreaterThanOrEqual(timing.started);
       samples.push({ cache, clickToFrameMs: timing.frame - timing.started });
-      const postSeekFrame = await seekAndPaint(video);
+      const seekOperation: MediaSeekOperation = {
+        id: mediaSeekOperations.length + 1,
+        kind: "seek",
+        startedSequence: mediaEventSequence,
+        abortedRanges: [],
+      };
+      mediaSeekOperations.push(seekOperation);
+      activeMediaSeek = seekOperation;
+      let postSeekFrame: Awaited<ReturnType<typeof seekAndPaint>>;
+      try {
+        postSeekFrame = await seekAndPaint(video);
+        seekOperation.result = { ...postSeekFrame, framePainted: true };
+        seekOperation.completedSequence = mediaEventSequence;
+      } finally {
+        activeMediaSeek = null;
+      }
       await testInfo.attach(`${cache}-post-seek-frame`, { body: JSON.stringify({ testedSha, runId, ...postSeekFrame }), contentType: "application/json" });
       expect(await video.evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true);
       await capture(page, `${cache}-video`);
+      await page.waitForLoadState("networkidle", { timeout: 15_000 });
     }
     const opener = page.getByRole("button", { name: /Open image 1/ });
     await opener.scrollIntoViewIfNeeded();
@@ -129,7 +246,7 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       if (width > thumbnailWidth) await detailGate;
       if (!imageFaultInjected && width > thumbnailWidth && source.searchParams.get("url") === imageFaultSource) {
         imageFaultInjected = true; imageFaultActive = true;
-        imageFaultRequests.add(route.request()); await route.abort("failed"); return;
+        imageFaultRequestUrls.add(route.request().url()); await route.abort("failed"); return;
       }
       await route.continue();
     });
@@ -207,11 +324,55 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       } finally { releaseThumbnails(); }
     } finally { await tallContext.close(); }
     }
-    await testInfo.attach("local-video-first-frame-samples", { body: JSON.stringify({ testedSha, runId, project: testInfo.project.name, samples, pageErrors, consoleErrors, expectedImageFaultConsole, failedRequests }), contentType: "application/json" });
+    const claimedReplacementRanges = new Set<MediaRangeEvidence>();
+    const mediaAbortRecoveries = failedMediaAborts.map(({ failure, evidence, operation }) => {
+      const failureSequence = evidence.failureSequence;
+      const replacement = [...mediaRangeEvidence.values()]
+        .filter((candidate) =>
+          !claimedReplacementRanges.has(candidate) &&
+          failureSequence !== undefined &&
+          candidate.requestSequence > failureSequence &&
+          candidate.responseSequence !== undefined &&
+          candidate.responseSequence > failureSequence &&
+          candidate.responseSequence <= (operation.completedSequence ?? -1) &&
+          candidate.status === 206 &&
+          /^bytes \d+-\d+\/\d+$/.test(candidate.contentRange ?? ""),
+        )
+        .sort((left, right) => left.requestSequence - right.requestSequence)[0];
+      const decodedSeekRecovered = Boolean(
+        replacement && operation.result && operation.result.readyState >= 2 && operation.result.framePainted &&
+        (operation.kind === "playback"
+          ? operation.result.observedTime > operation.result.targetTime
+          : Math.abs(operation.result.observedTime - operation.result.targetTime) < 0.12),
+      );
+      if (replacement && decodedSeekRecovered) {
+        claimedReplacementRanges.add(replacement);
+        failure.expectedBrowserMediaRangeAbort = true;
+      }
+      return {
+        operationId: operation.id,
+        abortSequence: failureSequence,
+        replacementRequestSequence: replacement?.requestSequence ?? null,
+        replacementResponseSequence: replacement?.responseSequence ?? null,
+        replacementStatus: replacement?.status ?? null,
+        replacementContentRange: replacement?.contentRange ?? null,
+        decodedSeekRecovered,
+        accepted: failure.expectedBrowserMediaRangeAbort,
+      };
+    });
+    await testInfo.attach("local-video-first-frame-samples", { body: JSON.stringify({ testedSha, runId, project: testInfo.project.name, samples, pageErrors, consoleErrors, expectedImageFaultConsole, failedRequests, mediaAbortRecoveries }), contentType: "application/json" });
     expect(pageErrors).toEqual([]); expect(consoleErrors).toEqual([]);
+    expect(successfulBrowserVideoRanges).toBeGreaterThan(0);
+    expect(mediaAbortRecoveries).toHaveLength(failedMediaAborts.length);
     for (const request of failedRequests) {
-      expect(request.expectedImageFault).toBe(true); expect(request.method).toBe("GET"); expect(request.path).toBe("/_next/image");
-      expect(["net::ERR_FAILED", "Load failed", "Unknown error", "Failed"]).toContain(request.error);
+      if (request.expectedImageFault) {
+        expect(request.method).toBe("GET"); expect(request.path).toBe("/_next/image");
+        expect(["net::ERR_FAILED", "Load failed", "Unknown error", "Failed"]).toContain(request.error);
+      } else {
+        expect(request.expectedBrowserMediaRangeAbort, JSON.stringify(request)).toBe(true);
+        expect(request.method).toBe("GET"); expect(request.path).toBe("/api/media/ux127-video");
+        expect(["net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"]).toContain(request.error);
+      }
     }
     expect(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(testedSha);
     completed = true;
@@ -310,7 +471,7 @@ async function selectedPixels(locator: Locator, page: Page, payloads: Map<string
     return value !== null && /^\d+$/.test(value) && allowed.includes(Number(value)) ? Number(value) : null;
   };
   const candidatePath = locationPath(selectedUrl.searchParams.get("url") ?? source.currentSrc, page.url());
-  const sourcePath = /^\/uploads\/issue-127-video\/page-[0-2]\.png$/.test(candidatePath) ? candidatePath : "[unexpected-source-path]";
+  const sourcePath = /^\/api\/media\/ux127-page-[0-2]$/.test(candidatePath) ? candidatePath : "[unexpected-source-path]";
   expect(sourcePath).not.toBe("[unexpected-source-path]");
   // Decode the actual negotiated browser response, never a default-Accept replay.
   // Evidence contains only structured paths and discrete public numeric options.
@@ -338,4 +499,8 @@ function networkErrorCategory(request: Request) {
   const value = request.failure()?.errorText;
   const known = ["net::ERR_FAILED", "Load failed", "Unknown error", "Failed", "net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"];
   return value && known.includes(value) ? value : "unknown-network-error";
+}
+
+function isBrowserMediaCancellation(error: string | null) {
+  return ["net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"].includes(error ?? "");
 }

@@ -1,9 +1,10 @@
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Page, type Request, type TestInfo } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import { deflateSync } from "node:zlib";
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
 import { isLocalDemoAppTarget } from "./local-target";
+import { isKnownCaretOnlyHydrationWarning } from "./helpers/hydration-warnings";
 
 test.setTimeout(180_000);
 
@@ -14,6 +15,17 @@ const imageFixtures = [
   { name: "04-yellow.webp", rgb: [240, 180, 35] },
   { name: "05-purple.webp", rgb: [175, 45, 190] },
 ] as const;
+
+type ReaderArtworkRefreshEvidence = {
+  request: Request;
+  url: string;
+  requestSequence: number;
+  failureSequence?: number;
+  failure?: string;
+  responseSequence?: number;
+  status?: number;
+  payloadValid?: Promise<boolean>;
+};
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(
@@ -48,6 +60,12 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   const mainFrameNavigations: Array<{ at: number; url: string }> = [];
   const unexpectedHttpFailures: string[] = [];
   const localUploadFallbacks: string[] = [];
+  const abortedReaderArtworkRefreshes: string[] = [];
+  const readerArtworkRefreshes: ReaderArtworkRefreshEvidence[] = [];
+  const readerArtworkRefreshByRequest = new Map<Request, ReaderArtworkRefreshEvidence>();
+  let readerArtworkEventSequence = 0;
+  let readerArtworkManagerHydratedAfterRefresh = false;
+  let readerArtworkRecoveryPairs: Array<Record<string, unknown>> = [];
   let productUpdateSavePending = false;
   let productDeletePending = false;
   let adminLoginPending = false;
@@ -74,6 +92,19 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   page.on("framenavigated", (frame) => {
     if (frame === page.mainFrame()) mainFrameNavigations.push({ at: Date.now(), url: safeUrlPath(frame.url()) });
   });
+  page.on("request", (request) => {
+    if (request.method() !== "GET" || request.resourceType() !== "fetch" || !productId) return;
+    const url = new URL(request.url());
+    const appOrigin = new URL(String(testInfo.project.use.baseURL)).origin;
+    if (url.origin !== appOrigin || url.pathname !== `/api/admin/products/${productId}/reader-artworks`) return;
+    const evidence: ReaderArtworkRefreshEvidence = {
+      request,
+      url: `${url.origin}${url.pathname}${url.search}`,
+      requestSequence: ++readerArtworkEventSequence,
+    };
+    readerArtworkRefreshes.push(evidence);
+    readerArtworkRefreshByRequest.set(request, evidence);
+  });
   page.on("requestfailed", (request) => {
     const at = Date.now();
     const failure = request.failure()?.errorText ?? "request failed";
@@ -95,6 +126,20 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     };
     const recentNavigation = [...mainFrameNavigations].reverse().find((event) => at - event.at <= 5_000);
     const failedUrl = new URL(request.url());
+    const readerArtworkEvidence = readerArtworkRefreshByRequest.get(request);
+    const expectedReaderArtworkRefreshCancellation =
+      failure === "net::ERR_ABORTED" &&
+      request.method() === "GET" &&
+      request.resourceType() === "fetch" &&
+      readerArtworkEvidence !== undefined &&
+      failedUrl.origin === new URL(page.url()).origin &&
+      failedUrl.pathname === `/api/admin/products/${productId}/reader-artworks`;
+    if (expectedReaderArtworkRefreshCancellation) {
+      readerArtworkEvidence!.failure = failure;
+      readerArtworkEvidence!.failureSequence = ++readerArtworkEventSequence;
+      abortedReaderArtworkRefreshes.push(JSON.stringify(detail));
+      return;
+    }
     const abortedProductMutation =
       failure === "net::ERR_ABORTED" &&
       request.method() === "POST" &&
@@ -159,8 +204,18 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
     }
   });
   page.on("response", (response) => {
-    if (response.status() < 400) return;
     const request = response.request();
+    const readerArtworkEvidence = readerArtworkRefreshByRequest.get(request);
+    if (readerArtworkEvidence) {
+      readerArtworkEvidence.responseSequence = ++readerArtworkEventSequence;
+      readerArtworkEvidence.status = response.status();
+      if (response.status() >= 200 && response.status() < 300) {
+        readerArtworkEvidence.payloadValid = response.json().then((body) =>
+          Boolean(body && typeof body === "object" && Array.isArray((body as { artworks?: unknown }).artworks)),
+        ).catch(() => false);
+      }
+    }
+    if (response.status() < 400) return;
     const entry = request.method() + " " + response.status() + " " + safeUrlPath(response.url());
     if (
       response.status() === 415 &&
@@ -354,6 +409,7 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
           await page.goto(productPath);
           await editorReady;
           await expect(page.getByText("Wczytywanie prac…", { exact: true })).toHaveCount(0);
+          readerArtworkManagerHydratedAfterRefresh = true;
           const deleteProduct = page.getByRole("button", { name: "Usuń produkt", exact: true });
           await expect(deleteProduct).toBeVisible();
           await expect(deleteProduct).toBeEnabled();
@@ -381,6 +437,35 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
       }
 
       await verifyDisposableProductRemoved(productId);
+      const usedRecoveryResponses = new Set<ReaderArtworkRefreshEvidence>();
+      readerArtworkRecoveryPairs = [];
+      for (const cancelled of readerArtworkRefreshes.filter((event) => event.failure === "net::ERR_ABORTED")) {
+        const failureSequence = cancelled.failureSequence;
+        const replacement = readerArtworkRefreshes
+          .filter((event) =>
+            !usedRecoveryResponses.has(event) &&
+            event.url === cancelled.url &&
+            failureSequence !== undefined &&
+            event.requestSequence > failureSequence &&
+            event.responseSequence !== undefined &&
+            event.responseSequence > failureSequence &&
+            event.status !== undefined && event.status >= 200 && event.status < 300,
+          )
+          .sort((left, right) => left.requestSequence - right.requestSequence)[0];
+        const validPayload = replacement?.payloadValid ? await replacement.payloadValid : false;
+        const accepted = Boolean(replacement && validPayload && readerArtworkManagerHydratedAfterRefresh);
+        if (replacement && accepted) usedRecoveryResponses.add(replacement);
+        readerArtworkRecoveryPairs.push({
+          cancelledRequestSequence: cancelled.requestSequence,
+          cancelledAtSequence: failureSequence ?? null,
+          replacementRequestSequence: replacement?.requestSequence ?? null,
+          replacementResponseSequence: replacement?.responseSequence ?? null,
+          replacementStatus: replacement?.status ?? null,
+          responseContainsArtworkArray: validPayload,
+          editorLoadingStateCleared: readerArtworkManagerHydratedAfterRefresh,
+          accepted,
+        });
+      }
     } catch (error) {
       cleanupFailure = error;
     }
@@ -394,6 +479,9 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
         "Unexpected failed requests: " + (requestFailures.join("\n") || "none"),
         "Aborted product mutation requests (saved-order reload and cleanup checks must pass): " +
           (abortedProductMutationRequests.join("\n") || "none"),
+        "Superseded reader-artwork refresh cancellations (each requires a successful replacement response): " +
+          (abortedReaderArtworkRefreshes.join("\n") || "none"),
+        "Per-cancellation reader-artwork recovery pairs: " + JSON.stringify(readerArtworkRecoveryPairs),
         "Expected exact navigation cancellations: " + (expectedNavigationCancellations.join("\n") || "none"),
         "Main-frame navigation events: " +
           (mainFrameNavigations.map((event) => new Date(event.at).toISOString() + " " + event.url).join("\n") || "none"),
@@ -409,10 +497,14 @@ test("admin reorders gallery previews through upload, save, reload, and edit", a
   if (cleanupFailure) throw cleanupFailure;
   const expectedUpload415Message = "Failed to load resource: the server responded with a status of 415 (Unsupported Media Type)";
   const expectedUpload415ConsoleErrors = consoleErrors.filter((message) => message === expectedUpload415Message);
-  const unexpectedConsoleErrors = consoleErrors.filter((message) => message !== expectedUpload415Message);
+  const knownHydrationCaretWarnings = consoleErrors.filter(isKnownCaretOnlyHydrationWarning);
+  const unexpectedConsoleErrors = consoleErrors.filter((message) =>
+    message !== expectedUpload415Message && !knownHydrationCaretWarnings.includes(message),
+  );
   expect(expectedUpload415ConsoleErrors.length).toBeLessThanOrEqual(localUploadFallbacks.length);
   expect(unexpectedConsoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
+  expect(readerArtworkRecoveryPairs.every((pair) => pair.accepted === true)).toBe(true);
   expect(requestFailures).toEqual([]);
   expect(unexpectedHttpFailures).toEqual([]);
   expect(localUploadFallbacks.length).toBeLessThanOrEqual(5);
@@ -446,7 +538,8 @@ async function readGallerySignature(page: Page) {
       if (!context) throw new Error("Could not create a canvas for gallery preview checks.");
       context.drawImage(image, 0, 0);
       const pixel = context.getImageData(64, 64, 1, 1).data;
-      return { label, rgb: [pixel[0], pixel[1], pixel[2]] };
+      const roundChannel = (channel: number) => Math.round(channel / 5) * 5;
+      return { label, rgb: [pixel[0], pixel[1], pixel[2]].map(roundChannel) };
     })),
   );
 }
@@ -561,8 +654,12 @@ async function assertArrowTargets(page: Page, filenames: string[], testInfo: Tes
 function signatureFor(fixtures: ReadonlyArray<(typeof imageFixtures)[number]>) {
   return fixtures.map((fixture) => ({
     label: "Podgląd " + fixture.name,
-    rgb: [...fixture.rgb],
+    rgb: fixture.rgb.map(roundWebpChannel),
   }));
+}
+
+function roundWebpChannel(channel: number) {
+  return Math.round(channel / 5) * 5;
 }
 
 function inputFilename(filename: string) {

@@ -141,12 +141,13 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await saveScreenshot(page, "pixel7-catalog", true);
 
       await menuButton.click();
-      const mobileMenu = header.getByRole("navigation", { name: "Mobile primary navigation" });
+      const mobileMenu = header.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+      const mobileNavigation = mobileMenu.getByRole("navigation", { name: "Storefront", exact: true });
       await expect(mobileMenu).toBeVisible();
       for (const label of ["Catalog", "About", "My Library", "Log in", "Sign up"]) {
-        await expect(mobileMenu.getByRole("link", { name: label, exact: true })).toBeVisible();
+        await expect(mobileNavigation.getByRole("link", { name: label, exact: true })).toBeVisible();
       }
-      await expect(mobileMenu.getByRole("link", { name: "Sign up" })).toHaveAttribute("href", "/en/register");
+      await expect(mobileNavigation.getByRole("link", { name: "Sign up" })).toHaveAttribute("href", "/en/register");
       await saveScreenshot(page, "pixel7-header-menu");
       await page.keyboard.press("Escape");
       await expect(menuButton).toBeFocused();
@@ -264,8 +265,9 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await expect(webkitHeader.getByRole("link", { name: "Log in", exact: true })).toBeVisible();
       const webkitMenuButton = webkitHeader.getByRole("button", { name: "Open navigation menu" });
       await webkitMenuButton.tap();
-      const webkitMenu = webkitHeader.getByRole("navigation", { name: "Mobile primary navigation" });
-      await expect(webkitMenu.getByRole("link", { name: "Sign up", exact: true })).toHaveAttribute("href", "/en/register");
+      const webkitMenu = webkitHeader.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+      const webkitNavigation = webkitMenu.getByRole("navigation", { name: "Storefront", exact: true });
+      await expect(webkitNavigation.getByRole("link", { name: "Sign up", exact: true })).toHaveAttribute("href", "/en/register");
       await saveScreenshot(webkitPage, "webkit-iphone-header-menu");
       await webkitPage.keyboard.press("Escape");
       await expect(webkitMenuButton).toBeFocused();
