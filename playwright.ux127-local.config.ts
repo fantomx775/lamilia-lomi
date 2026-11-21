@@ -1,13 +1,15 @@
 import { defineConfig } from "@playwright/test";
 import base from "./playwright.config";
 
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+
 // Functional demo gate: all base projects, actual Next development mode.
 // The private campaign runner sanitizes inherited provider/backend credentials.
 export default defineConfig(base, {
   workers: 1,
   use: { baseURL: "http://127.0.0.1:3000" },
   webServer: {
-    command: "npm.cmd run dev -- --hostname 127.0.0.1 --port 3000",
+    command: `${npmCommand} run dev -- --hostname 127.0.0.1 --port 3000`,
     cwd: process.cwd(),
     env: {
       LAMILIA_BACKEND: "local",
