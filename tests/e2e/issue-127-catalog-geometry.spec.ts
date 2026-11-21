@@ -34,17 +34,51 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
   const browserDiagnostics = {
     consoleErrors: [] as string[],
     pageErrors: [] as string[],
-    failedRequests: [] as string[],
+    failedRequests: [] as Array<Record<string, unknown>>,
+    expectedCancellations: [] as Array<Record<string, unknown>>,
     serverErrors: [] as string[],
   };
+  let currentCase = "setup";
+  let currentPhase = "setup";
+  const requestMetadata = new WeakMap<object, Record<string, unknown>>();
   page.on("console", (message) => {
     if (message.type() === "error") browserDiagnostics.consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => browserDiagnostics.pageErrors.push(error.message));
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    const headers = request.headers();
+    requestMetadata.set(request, {
+      case: currentCase,
+      phase: currentPhase,
+      method: request.method(),
+      pathname: url.pathname,
+      hasSearchQuery: url.searchParams.has("q"),
+      resourceType: request.resourceType(),
+      isNavigationRequest: request.isNavigationRequest(),
+      isRscRequest: headers.rsc === "1",
+    });
+  });
   page.on("requestfailed", (request) => {
-    browserDiagnostics.failedRequests.push(
-      `${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText ?? "request failed"}`,
-    );
+    const metadata = requestMetadata.get(request) ?? {};
+    const failure = request.failure()?.errorText ?? "request failed";
+    const isSupersededCatalogTransition =
+      failure === "net::ERR_ABORTED" &&
+      metadata.phase === "catalog-submit" &&
+      metadata.method === "GET" &&
+      metadata.pathname === "/en/products" &&
+      metadata.hasSearchQuery === true &&
+      metadata.resourceType === "fetch" &&
+      metadata.isNavigationRequest === false &&
+      metadata.isRscRequest === true &&
+      currentPhase === "navigation" &&
+      currentCase !== metadata.case;
+    const outcome = { ...metadata, failure };
+    if (isSupersededCatalogTransition) {
+      browserDiagnostics.expectedCancellations.push({ ...outcome, supersededBy: currentCase });
+    } else {
+      browserDiagnostics.failedRequests.push(outcome);
+    }
   });
   page.on("response", (response) => {
     if (response.status() >= 500) {
@@ -65,6 +99,8 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
       fs.mkdirSync(path.dirname(filename), { recursive: true });
       fs.writeFileSync(filename, JSON.stringify(snapshot), "utf8");
       for (const width of [390, 768, 1024, 1440]) {
+        currentCase = `c${categoryCount}-cols${desktopColumns}-w${width}`;
+        currentPhase = "navigation";
         await page.setViewportSize({ width, height: 1000 });
         await page.goto(`/en/products?ux127case=${categoryCount}-${desktopColumns}-${width}`, { waitUntil: "commit" });
         await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
@@ -86,6 +122,7 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         const productTitle = snapshot.products[0].translations.find((item) => item.locale === "en")!.title;
         await form.getByRole("textbox", { name: "Search catalog" }).fill(productTitle);
         const submitted = await geometry(page);
+        currentPhase = "catalog-submit";
         await form.getByRole("textbox", { name: "Search catalog" }).press("Enter");
         await expect(form.locator('[data-catalog-form-pending="true"]')).toBeVisible();
         const results = page.getByTestId("catalog-results-region");
