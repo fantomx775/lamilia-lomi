@@ -152,12 +152,16 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await page.keyboard.press("Escape");
       await expect(menuButton).toBeFocused();
       await expect(mobileMenu).not.toBeVisible();
+      await expect(header.locator("dialog#mobile-primary-navigation")).toHaveJSProperty("open", false);
 
       await menuButton.click();
+      await expect.poll(() => mobileMenu.evaluate((dialog) => dialog.getBoundingClientRect().x)).toBeGreaterThanOrEqual(-1);
       const dialogBounds = await mobileMenu.boundingBox();
       expect(dialogBounds).not.toBeNull();
-      await page.mouse.click(dialogBounds!.x + dialogBounds!.width - 2, dialogBounds!.y + dialogBounds!.height / 2);
+      // Click the blank dialog padding away from the mobile scrollbar hit area.
+      await page.mouse.click(dialogBounds!.x + 2, dialogBounds!.y + dialogBounds!.height / 2);
       await expect(mobileMenu).not.toBeVisible();
+      await expect(header.locator("dialog#mobile-primary-navigation")).toHaveJSProperty("open", false);
 
       const card = page.getByTestId("product-catalog-grid").locator("article").first();
       await expect(card.locator("[data-product-card-title]")).toHaveText(product.translations[0].title);

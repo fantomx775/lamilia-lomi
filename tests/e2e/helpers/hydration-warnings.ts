@@ -7,15 +7,15 @@ export function isKnownCaretOnlyHydrationWarning(message: string) {
 
   const normalized = message.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
   const lines = normalized.split(/\r?\n/);
-  const diffStart = lines.findIndex((line) => line.trim() === "...");
+  const diffStart = lines.findIndex((line) => line.includes("https://react.dev/link/hydration-mismatch"));
   if (diffStart < 0) return false;
 
-  const changedAttributes = lines
+  const changedLines = lines
     .slice(diffStart + 1)
     .filter((line) => /^\s*[+-]\s/.test(line))
     .map((line) => line.trim().replace(/^([+-])\s+/, "$1 "));
   return (
-    changedAttributes.length === 1 &&
-    changedAttributes[0] === '- style={{caret-color:"transparent"}}'
+    changedLines.length === 1 &&
+    changedLines[0] === '- style={{caret-color:"transparent"}}'
   );
 }
