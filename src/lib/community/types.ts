@@ -2,6 +2,7 @@ export type CommunityArtworkStatus = "pending" | "approved" | "rejected" | "remo
 export type CommunityStorageProvider = "local" | "supabase" | "r2";
 export type CommunityImageContentType = "image/jpeg" | "image/png" | "image/webp";
 export type CommunityAudience = "kids" | "adults";
+export type CommunityArtworkDimensions = { width: number; height: number };
 
 export type CommunityPublicProduct = {
   id: string;
@@ -24,6 +25,8 @@ export type CommunityPublicArtwork = {
   product: CommunityPublicProduct;
   creator: CommunityPublicCreator;
   contentType: CommunityImageContentType;
+  /** Validated dimensions after upload normalization; absent on legacy rows. */
+  imageDimensions?: CommunityArtworkDimensions | null;
   description: string;
   publishedAt: string;
   likesCount: number;

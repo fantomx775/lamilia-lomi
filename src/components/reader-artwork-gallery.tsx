@@ -12,7 +12,7 @@ export function ReaderArtworkGallery({ artworks, communityArtworks = [], product
   const communityImages = communityArtworks.map((item) => ({
     id: `community-${item.id}`,
     path: communityArtworkMediaUrl(item.id, 480),
-    thumbnailSrcSet: communityArtworkMediaSrcSet(item.id),
+    thumbnailSrcSet: communityArtworkMediaSrcSet(item.id, item.imageDimensions),
     detailPath: communityArtworkMediaUrl(item.id, 2048),
     alt: `Colored by @${item.creator.username}`,
     caption: `Colored by @${item.creator.username}`,

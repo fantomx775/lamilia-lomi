@@ -45,7 +45,7 @@ export default async function CommunityArtworkPage({ params }: Props) {
       <div className="relative min-h-[24rem] aspect-[4/5] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-alt)] sm:aspect-[5/4] lg:aspect-[4/5]">
         {/* Authenticated variants preserve immediate visibility checks. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img data-testid="community-artwork-media" src={communityArtworkMediaUrl(artwork.id, 960)} srcSet={communityArtworkMediaSrcSet(artwork.id)} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} loading="eager" sizes="(min-width: 1024px) 65vw, 100vw" className="absolute inset-0 size-full object-contain" />
+        <img data-testid="community-artwork-media" src={communityArtworkMediaUrl(artwork.id, 960)} srcSet={communityArtworkMediaSrcSet(artwork.id, artwork.imageDimensions)} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} loading="eager" sizes="(min-width: 1024px) 65vw, 100vw" className="absolute inset-0 size-full object-contain" />
       </div>
       <aside className="self-start rounded-2xl border border-[var(--color-border)] bg-white/85 p-5 sm:p-7">
         <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--color-terracotta)]">Community artwork</p>

@@ -24,8 +24,9 @@ import type {
   CommunityStorageProvider,
 } from "./types";
 import type { CommunityUploadReservationInput } from "./local-store";
+import { communityArtworkDimensions } from "./media-urls";
 
-const PUBLIC_ARTWORK_SELECT = "id,product_id,content_type,description,published_at,likes_count,community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username,avatar_seed,is_adult,opted_in_at,participation_revoked_at,suspended_at,rules_version),products!inner(id,slug,audience,status,product_translations!inner(locale,title))";
+const PUBLIC_ARTWORK_SELECT = "id,product_id,content_type,image_width,image_height,description,published_at,likes_count,community_profiles:community_profiles!community_artworks_author_profile_fkey!inner(username,avatar_seed,is_adult,opted_in_at,participation_revoked_at,suspended_at,rules_version),products!inner(id,slug,audience,status,product_translations!inner(locale,title))";
 const OWNER_ARTWORK_SELECT = "id,product_id,content_type,description,status,revision,moderation_reason,created_at,updated_at,products(id,slug,audience,status,product_translations(locale,title))";
 const ADMIN_ARTWORK_SELECT = `${OWNER_ARTWORK_SELECT},community_profiles(username)`;
 
@@ -363,11 +364,13 @@ export async function assertUploadEligibility(actor: CommunityActor, productId: 
   }
 }
 
-export async function finalizeArtworkUpload(actor: CommunityActor, idempotencyKey: string, leaseToken: string) {
+export async function finalizeArtworkUpload(actor: CommunityActor, idempotencyKey: string, leaseToken: string, imageDimensions: { width: number; height: number }) {
   return rpc("community_finalize_upload", {
     p_actor_user_id: actor.userId,
     p_idempotency_key: idempotencyKey,
     p_lease_token: leaseToken,
+    p_image_width: imageDimensions.width,
+    p_image_height: imageDimensions.height,
   }) as Promise<string>;
 }
 
@@ -687,6 +690,7 @@ function mapPublicArtwork(row: Row, likedByMe = false): CommunityPublicArtwork {
     },
     creator: { username: String(profile.username), avatarSeed: String(profile.avatar_seed) },
     contentType: row.content_type as CommunityPublicArtwork["contentType"],
+    imageDimensions: communityArtworkDimensions(row.image_width, row.image_height),
     description: String(row.description ?? ""),
     publishedAt: String(row.published_at),
     likesCount: Number.isSafeInteger(Number(row.likes_count)) ? Math.max(0, Number(row.likes_count)) : 0,

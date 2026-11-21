@@ -2,7 +2,7 @@
 -- Run ONLY in supabase_db_lamilia-coloring-club-p0. All fixtures roll back.
 BEGIN;
 SET LOCAL search_path=public,extensions;
-SELECT plan(36);
+SELECT plan(39);
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid='public.community_upload_reservations'::regclass),'upload reservations enforce RLS');
 SELECT ok(NOT has_table_privilege('anon','public.community_upload_reservations','SELECT,INSERT,UPDATE,DELETE'),'anon has no reservation grants');
 SELECT ok(NOT has_table_privilege('authenticated','public.community_upload_reservations','SELECT,INSERT,UPDATE,DELETE'),'authenticated has no reservation grants');
@@ -30,14 +30,17 @@ SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-80
 SELECT is((public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture'))->>'state','reserved','first request reserves private upload');
 SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture')$$,'40001','upload is already processing','simultaneous request cannot steal a live writer lease');
 SELECT throws_ok($$SELECT public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('b',64),'supabase',200,120,'image/webp','State fixture')$$,'40001','idempotency key was reused with different artwork','same key with changed bytes conflicts');
-SELECT throws_ok($$SELECT public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001')$$,'40001','upload reservation changed','unverified stored state cannot finalize');
+SELECT throws_ok($$SELECT public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',120,80)$$,'40001','upload reservation changed','unverified stored state cannot finalize');
 SELECT throws_ok($$SELECT public.community_mark_upload_stored('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002')$$,'40001','upload reservation changed','wrong writer token cannot mark stored');
 SELECT is(public.community_mark_upload_stored('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001'),true,'own writer marks durable stored state');
+SELECT throws_ok($$SELECT public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',NULL,80)$$,'22023','invalid image dimensions','finalization rejects incomplete dimensions');
 SELECT is((public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture'))->>'state','stored','same payload retry resumes stored bytes without another PUT');
 SELECT is((public.community_reserve_upload('20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','11111111-1111-4111-8111-111111111111','40000000-0000-4000-8000-000000000001',repeat('a',64),'supabase',200,120,'image/webp','State fixture'))->>'leaseToken','30000000-0000-4000-8000-000000000001','stored retry preserves original finalization fence');
-INSERT INTO cc_upload_result SELECT public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001');
-SELECT ok((SELECT a.status='pending' AND a.revision=1 FROM public.community_artworks a JOIN cc_upload_result r ON r.id=a.id),'finalization creates exactly a private pending artwork');
-SELECT is(public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001'),(SELECT id FROM cc_upload_result),'finalization retries return the same artwork');
+INSERT INTO cc_upload_result SELECT public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',120,80);
+SELECT ok((SELECT a.status='pending' AND a.revision=1 AND a.image_width=120 AND a.image_height=80 FROM public.community_artworks a JOIN cc_upload_result r ON r.id=a.id),'finalization persists validated dimensions on the private pending artwork');
+SELECT throws_ok($$UPDATE public.community_artworks SET image_width=NULL WHERE id=(SELECT id FROM cc_upload_result)$$,'23514','new row for relation "community_artworks" violates check constraint "community_artworks_image_dimensions_valid"','dimension constraint rejects a missing width');
+SELECT throws_ok($$UPDATE public.community_artworks SET image_height=NULL WHERE id=(SELECT id FROM cc_upload_result)$$,'23514','new row for relation "community_artworks" violates check constraint "community_artworks_image_dimensions_valid"','dimension constraint rejects a missing height');
+SELECT is(public.community_finalize_upload('20000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001',120,80),(SELECT id FROM cc_upload_result),'finalization retries return the same artwork');
 SELECT is((SELECT count(*) FROM public.community_moderation_email_outbox mail
   JOIN public.community_moderation_events event ON event.id=mail.moderation_event_id
   JOIN cc_upload_result result ON result.id=event.artwork_id

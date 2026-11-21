@@ -9,6 +9,7 @@ import type {
   CommunityAdminReport,
   CommunityAdminProductOption,
   CommunityArtworkStatus,
+  CommunityArtworkDimensions,
   CommunityArtworkSort,
   CommunityAudience,
   CommunityCreateArtworkInput,
@@ -34,6 +35,7 @@ import {
 } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
 import { decodeCommunityPopularCursor, decodeCommunityTimestampCursor, encodeCommunityPopularCursor, encodeCommunityTimestampCursor } from "./cursor";
+import { communityArtworkDimensions } from "./media-urls";
 
 export {
   CommunityAuthorizationError,
@@ -76,6 +78,7 @@ type LocalArtwork = {
   storagePath: string | null;
   storageProvider: CommunityStorageProvider;
   contentType: CommunityImageContentType;
+  imageDimensions?: CommunityArtworkDimensions | null;
   sizeBytes: number;
   description: string;
   status: "pending" | "approved" | "rejected" | "removed";
@@ -393,8 +396,11 @@ export class CommunityLocalStore {
     });
   }
 
-  async finalizeArtworkUpload(actor: LocalCommunityActor, idempotencyKey: string, leaseToken: string, products: Product[]) {
+  async finalizeArtworkUpload(actor: LocalCommunityActor, idempotencyKey: string, leaseToken: string, products: Product[], imageDimensions: CommunityArtworkDimensions) {
     assertEligibleForSubmission(actor);
+    if (!communityArtworkDimensions(imageDimensions.width, imageDimensions.height)) {
+      throw new CommunityValidationError("Invalid image dimensions.");
+    }
     return this.transact((snapshot) => {
       const reservation = snapshot.uploadReservations.find((item) => item.authorId === actor.userId && item.idempotencyKey === idempotencyKey);
       if (!reservation) throw new CommunityConflictError("Upload reservation is no longer available.");
@@ -412,6 +418,7 @@ export class CommunityLocalStore {
         id: this.uuid(), authorId: actor.userId, productId: reservation.productId,
         storagePath: reservation.storagePath, storageProvider: reservation.storageProvider,
         contentType: reservation.contentType, sizeBytes: reservation.sizeBytes,
+        imageDimensions,
         description: reservation.description, status: "pending", revision: 1,
         moderationReason: null, createdAt: now, updatedAt: now, publishedAt: null,
         unlockVerifiedAt: now, deletedAt: null, idempotencyKey,
@@ -1265,6 +1272,7 @@ function toPublicArtwork(artwork: LocalArtwork, product: Product, profile: Local
     product: publicProduct(product),
     creator: { username: profile.username, avatarSeed: profile.avatarSeed },
     contentType: artwork.contentType,
+    imageDimensions: communityArtworkDimensions(artwork.imageDimensions?.width, artwork.imageDimensions?.height),
     description: artwork.description,
     publishedAt: artwork.publishedAt!,
     likesCount,

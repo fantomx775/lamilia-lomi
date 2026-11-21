@@ -127,7 +127,7 @@ describe("Coloring Club local adapter", () => {
       product: { id: product.id, slug: product.slug },
     });
     expect(Object.keys(publicArtwork ?? {}).sort()).toEqual([
-      "contentType", "creator", "description", "id", "likedByMe", "likesCount", "product", "publishedAt",
+      "contentType", "creator", "description", "id", "imageDimensions", "likedByMe", "likesCount", "product", "publishedAt",
     ]);
     expect(JSON.stringify(publicArtwork)).not.toMatch(/authorId|userId|email|storagePath|reason/i);
 
@@ -399,19 +399,22 @@ describe("Coloring Club local adapter", () => {
       uploadFingerprint: "a".repeat(64),
     };
     const reservation = await store.reserveArtworkUpload(unlocked, input, [product]);
+    const imageDimensions = { width: 320, height: 240 };
     expect(reservation).toMatchObject({ state: "reserved", storagePath: `community/${USER_A}/${ID_KEY}` });
     await expect(store.reserveArtworkUpload(unlocked, { ...input, reservationToken: "66666666-6666-4666-8666-666666666666" }, [product]))
       .rejects.toBeInstanceOf(CommunityConflictError);
     await expect(store.reserveArtworkUpload(unlocked, { ...input, uploadFingerprint: "b".repeat(64) }, [product]))
       .rejects.toBeInstanceOf(CommunityConflictError);
     if (reservation.state !== "reserved") throw new Error("Expected a new reservation.");
-    await expect(store.finalizeArtworkUpload(unlocked, ID_KEY, reservation.leaseToken, [product]))
+    await expect(store.finalizeArtworkUpload(unlocked, ID_KEY, reservation.leaseToken, [product], imageDimensions))
       .rejects.toBeInstanceOf(CommunityConflictError);
     await store.markArtworkUploadStored(unlocked, ID_KEY, reservation.leaseToken);
-    const artworkId = await store.finalizeArtworkUpload(unlocked, ID_KEY, reservation.leaseToken, [product]);
-    expect(await store.finalizeArtworkUpload(unlocked, ID_KEY, reservation.leaseToken, [product])).toBe(artworkId);
+    const artworkId = await store.finalizeArtworkUpload(unlocked, ID_KEY, reservation.leaseToken, [product], imageDimensions);
+    expect(await store.finalizeArtworkUpload(unlocked, ID_KEY, reservation.leaseToken, [product], imageDimensions)).toBe(artworkId);
     expect(await store.getMyArtwork(unlocked, artworkId, [product])).toMatchObject({ id: artworkId, status: "pending", revision: 1 });
-    await store.deleteArtwork(unlocked, artworkId, 1);
+    await store.moderate(admin, artworkId, 1, "approve", undefined, [product]);
+    await expect(store.getPublicArtwork(artworkId, [product])).resolves.toMatchObject({ imageDimensions });
+    await store.deleteArtwork(unlocked, artworkId, 2);
     const [cleanup] = await store.claimUploadCleanup(unlocked);
     expect(cleanup).toMatchObject({ authorId: USER_A, idempotencyKey: ID_KEY, storagePath: `community/${USER_A}/${ID_KEY}` });
     expect(await store.finishUploadCleanup(cleanup)).toBe(true);

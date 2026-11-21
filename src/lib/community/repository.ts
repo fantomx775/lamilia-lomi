@@ -21,6 +21,7 @@ import type {
   CommunityAudience,
   CommunityAdminProductOption,
   CommunityArtworkStatus,
+  CommunityArtworkDimensions,
   CommunityArtworkSort,
   CommunityCreateArtworkInput,
   CommunityHeartAccess,
@@ -180,10 +181,10 @@ export async function assertCommunityArtworkUploadEligibility(actor: CommunityAc
   return supabase.assertUploadEligibility(actor, productId);
 }
 
-export async function finalizeCommunityArtworkUpload(idempotencyKey: string, leaseToken: string) {
+export async function finalizeCommunityArtworkUpload(idempotencyKey: string, leaseToken: string, imageDimensions: CommunityArtworkDimensions) {
   const actor = await assertCommunityActor();
-  if (actor.backend === "local") return localStore.finalizeArtworkUpload(actor, idempotencyKey, leaseToken, getContentSnapshot().products);
-  return supabase.finalizeArtworkUpload(actor, idempotencyKey, leaseToken);
+  if (actor.backend === "local") return localStore.finalizeArtworkUpload(actor, idempotencyKey, leaseToken, getContentSnapshot().products, imageDimensions);
+  return supabase.finalizeArtworkUpload(actor, idempotencyKey, leaseToken, imageDimensions);
 }
 
 export async function markCommunityArtworkUploadStored(idempotencyKey: string, leaseToken: string) {

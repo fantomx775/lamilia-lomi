@@ -33,7 +33,9 @@ test("disabled switches block real public images and mutations while preserving 
     const storagePath = `community/${owner.id}/${key}`;
     expect((await fixtures.service.storage.from("collection-media").upload(storagePath, image, { contentType: "image/webp", upsert: false })).error).toBeNull();
     expect((await fixtures.service.rpc("community_mark_upload_stored", { p_actor_user_id: owner.id, p_idempotency_key: key, p_lease_token: lease })).error).toBeNull();
-    const finalized = await fixtures.service.rpc("community_finalize_upload", { p_actor_user_id: owner.id, p_idempotency_key: key, p_lease_token: lease });
+    const finalized = await fixtures.service.rpc("community_finalize_upload", {
+      p_actor_user_id: owner.id, p_idempotency_key: key, p_lease_token: lease, p_image_width: 80, p_image_height: 60,
+    });
     expect(finalized.error).toBeNull();
     const artworkId = finalized.data as string;
     const adminPage = await fixtures.newPage(browser);

@@ -173,7 +173,7 @@ export function CommunityArtworkCard({ artwork, heartAccess = "guest" }: { artwo
         <LinkPendingIndicator label="Opening artwork" />
         {/* Authenticated, revocable responsive variants are served by our media route. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={communityArtworkMediaUrl(artwork.id, 480)} srcSet={communityArtworkMediaSrcSet(artwork.id)} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} loading="lazy" sizes="(max-width: 639px) 48vw, (max-width: 1023px) 46vw, 24vw" className="absolute inset-0 size-full object-contain transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transition-none" />
+        <img src={communityArtworkMediaUrl(artwork.id, 480)} srcSet={communityArtworkMediaSrcSet(artwork.id, artwork.imageDimensions)} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} loading="lazy" sizes="(max-width: 639px) 48vw, (max-width: 1023px) 46vw, 24vw" className="absolute inset-0 size-full object-contain transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transition-none" />
       </NavigationLink>
       <div className="absolute bottom-2 right-2"><CommunityHeartControl artworkId={artwork.id} likesCount={artwork.likesCount} likedByMe={artwork.likedByMe} access={heartAccess} compact /></div>
     </div>
