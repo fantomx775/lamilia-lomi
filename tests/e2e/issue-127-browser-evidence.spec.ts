@@ -91,7 +91,7 @@ async function observePrimary(page: Page, info: TestInfo, campaign: string) {
     if (pendingNavigation) {
       expect([...pendingRequests].some((request) => request.isNavigationRequest() || request.headers().rsc === "1"), "A pending capture must observe an actual in-flight document/RSC request").toBe(true);
     } else await drain();
-    const relative = `docs/verification/issue-127/ux127-primary-${campaign}-${project}-${phase}.png`;
+    const relative = `docs/verification/issue-127/runs/${runId}/${phase}.png`;
     await mkdir(path.dirname(path.resolve(relative)), { recursive: true });
     await page.screenshot({ path: relative, fullPage: false, animations: "disabled", caret: "hide", mask });
     screenshots.push({ path: relative, testedSha, runId }); decodedImages.push({ phase, images });
