@@ -1,0 +1,237 @@
+{
+  "purpose": "Historical local visual evidence with controlled synthetic fixtures",
+  "currentHeadAcceptance": "NOT RUN at time of handoff",
+  "screenshots": [
+    {
+      "path": "docs/verification/issue-127/ux127-admin-chromium-retained.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-admin-chromium-7f07728b",
+      "sha256": "43e913c091d2f723dbd1efe49dc8e26f30c981208e566ce2fd0191eaa2d58d4a",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-admin-chromium-reloaded.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-admin-chromium-7f07728b",
+      "sha256": "69d7459a41516d7813ef8295087de7a8bc47739733c02bfc7cc2da4dbad425eb",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-chunked-pdf-chromium-reloaded.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-chunked-pdf-chromium-b272e0a4",
+      "sha256": "71054934aaa3fe38cc9efce237774fea8f55dd9ee779bb534f131c17c8d3e815",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-large-video-chromium-preparing.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-large-video-chromium-b1a44d0d",
+      "sha256": "8278c1358f15ba4f25b234b083981e104cabcdbc4715c78d27e7909ac902b968",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-large-video-chromium-cancelled.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-large-video-chromium-b1a44d0d",
+      "sha256": "ddeedcaa24c175361e8c33f3b1996c1cc23d2a781304961316b6793e5fe41dd7",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-large-video-chromium-reloaded.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-large-video-chromium-b1a44d0d",
+      "sha256": "c0042cc01740c12b73585c1206b6e54f444f7a4d0bf16b572758a918898e8425",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/owner-chromium-edited-reloaded.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-owner-chromium-dfe59b39",
+      "sha256": "636ea5b6a4d9d296c78fafc0f098f92d4acd21702500c7b1d652e2a814b891dd",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/owner-chromium-deleted-reloaded.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-owner-chromium-dfe59b39",
+      "sha256": "14a139cb9470668736f16ca7905f97be6f6828cc4e22a2b1e34d92c59d8ce1f0",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/reader-chromium-f23-returned-context.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-reader-chromium-17501a1d1ffc-d8ea1876-4f08-4e49-aa30-da2559504e6e",
+      "sha256": "e1a5e6bf427b9d0703faea7c33aa42741da09ace38e5462ba1b0f7fac22dbb02",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/reader-chromium-f07-native-before-search.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-reader-chromium-17501a1d1ffc-d8ea1876-4f08-4e49-aa30-da2559504e6e",
+      "sha256": "fd1e91d49b38bbf93a9c47217df833d732faf75235597b857ba1f437aca5d193",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/supabase-media-chromium-cold-media.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "supabase-media-27690982-3610-4c28-b217-dd587662979b",
+      "sha256": "376214f1097c2c92da6c514423de1a6ff22c20df393047bb102c7c3898cb635a",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/supabase-media-chromium-warm-media.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "supabase-media-27690982-3610-4c28-b217-dd587662979b",
+      "sha256": "d2f1fa2986973bc433853593063ee0715a4969c4bce6eb84447a6c445e4b0603",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/supabase-media-chromium-controlled-video-error.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "supabase-media-27690982-3610-4c28-b217-dd587662979b",
+      "sha256": "2b78e1d241ce5eb2d967001e7929ef62ccd4f98a5495f275fff6fa1eb6bb94f1",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/supabase-media-chromium-video-recovered-real-storage.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "supabase-media-27690982-3610-4c28-b217-dd587662979b",
+      "sha256": "f9c92269fab5599aa14b5ceb486532d7dee8aeaed8e0e003d8253b910fae0840",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/supabase-media-chromium-video-after-tab-return.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "supabase-media-27690982-3610-4c28-b217-dd587662979b",
+      "sha256": "376214f1097c2c92da6c514423de1a6ff22c20df393047bb102c7c3898cb635a",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/supabase-media-chromium-decoded-gallery.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "supabase-media-27690982-3610-4c28-b217-dd587662979b",
+      "sha256": "967ece869f664fe8c759bf51f8564b66fc80aec9379cd29f3c47414fa1f54d13",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-catalog-w320.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "7b21c1a6d207d6ce91950bd1ef3e3398b42c9c2294ee453b035cfacb0515aaee",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-keyboard-menu-w320.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "c0d2c120cf8f5e3c4d630fc675f3e21260d92f830d065cbf3d8880fc0fc11e48",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-catalog-w375.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "57b15c82266a5b82bfe5f2fa3e440e5f55ffa5148ca7fddb6282002f1535682e",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-catalog-w390.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "979ae4b375150be3c4c19c24c96a1287e4c61abc2aaaa2f0189fe4fe8cd25ec7",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-keyboard-menu-w390.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "52ae8e22882e0bc55bb7915ae77f50b9cbd9dcbf66afaa24779b6b0992f12ab3",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-catalog-w430.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "0e9b5cb0c5168a13e21e0efd91aa4d0b2586eb393349c5297cd3ee0427c76e69",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-catalog-w768.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "8460931f838dfcb1ab360e3c0f9f1a7f48b06dec045e08fbfae288b15c2916f0",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-keyboard-menu-w768.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "b8b5b887f3df35292c8c4b80de02aaa4da29d264f39a3081eca1ff459ae74110",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-catalog-w1440.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "9c6808e29d99981e66abce0c754cc0052b58c33502e463c3a88f5e9c1de6ca77",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-product-after-navigation.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "3629ed2fc8bf28b54d6f0719cd8b280f3d5d225d5ad4e43ce8ffc438db1cf4ee",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-chromium-about-clean.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-chromium-ba4ced46",
+      "sha256": "17037a7f0d0598dc52a649c052c341fa863a2dc9b7113ca0f5738c53feca244b",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-toast-modal-chromium-join-success-w320.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-toast-modal-chromium-4f6702cc",
+      "sha256": "243f143925cb39f85eb80ae48169acf0c4c45e6df979b92d4e23e9346bbe0b5d",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-toast-modal-chromium-toast-focused-in-modal-w320.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-toast-modal-chromium-4f6702cc",
+      "sha256": "087e5e3733cf31a56c0598c8a639cfcd7ec1b7338718f6e23b9efbece09994df",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-toast-modal-chromium-toast-after-modal-close-w320.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-toast-modal-chromium-4f6702cc",
+      "sha256": "49f15b6cec77fe0b89bfd0f71792c1b2c17b1cb47abb502328f5f899fedc271f",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-webkit-mobile-catalog-w390.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-webkit-mobile-1420b30c",
+      "sha256": "48e4a19d086a23cc273ed6eddad3e63ab9497c4b24fab75f2807d998c5ac5b60",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-responsive-navigation-webkit-mobile-keyboard-menu-w768.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-responsive-navigation-webkit-mobile-1420b30c",
+      "sha256": "2e1d7fc85c5cd732ba171e222737cd2fb183ea05da66493fa777d786cebf8b32",
+      "review": "Individually viewed on original capture bytes"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-toast-modal-webkit-mobile-join-success-w320.png",
+      "testedSha": "3f391ce5add753e188c75f79a4131e128a289b69",
+      "runId": "ux127-primary-toast-modal-webkit-mobile-e881459e",
+      "sha256": "b32957fa7bfb8ebf7953c79ea73635d990a5fa7b62121b331d45f7d0b7a33b96",
+      "review": "Individually viewed on original capture bytes"
+    }
+  ]
+}
