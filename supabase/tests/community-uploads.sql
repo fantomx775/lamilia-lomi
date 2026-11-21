@@ -1,5 +1,5 @@
 -- SQL/RPC state security only; real image/storage behavior is covered by the isolated browser suite.
--- Run ONLY in supabase_db_lamilia-coloring-club-p0. All fixtures roll back.
+-- Run only against a dedicated local test Supabase project after applying repository migrations. All fixtures roll back.
 BEGIN;
 SET LOCAL search_path=public,extensions;
 SELECT plan(39);
