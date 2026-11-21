@@ -47,10 +47,15 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   async function capture(target: Page, screenshotPhase: string) {
     setPhase(`capture:${screenshotPhase}`);
     await settleVisibleMedia(target);
-    const artifact = `docs/verification/issue-127/supabase-media-${testInfo.project.name}-${screenshotPhase}.png`;
-    await mkdir(path.dirname(path.resolve(artifact)), { recursive: true });
-    await target.screenshot({ path: path.resolve(artifact), animations: "disabled" });
-    screenshots.push({ path: artifact, testedSha, runId, phase: screenshotPhase, viewport: target.viewportSize(), dpr: await target.evaluate(() => devicePixelRatio) });
+    const filename = `supabase-media-${testInfo.project.name}-${screenshotPhase}.png`;
+    const artifactRoot = process.env.COMMUNITY_ARTIFACT_DIR;
+    if (artifactRoot && !path.isAbsolute(artifactRoot)) throw new Error("Evidence directory must be absolute.");
+    const artifact = artifactRoot
+      ? path.join(artifactRoot, "issue-127", filename)
+      : path.resolve("docs", "verification", "issue-127", filename);
+    await mkdir(path.dirname(artifact), { recursive: true });
+    await target.screenshot({ path: artifact, animations: "disabled" });
+    screenshots.push({ path: artifactRoot ? path.relative(artifactRoot, artifact) : path.relative(process.cwd(), artifact), testedSha, runId, phase: screenshotPhase, viewport: target.viewportSize(), dpr: await target.evaluate(() => devicePixelRatio) });
   }
   const objects: Array<{ bucket: string; path: string }> = [];
   const consoleErrors: Array<{ category: "unexpected-console-error"; path: string }> = [];
