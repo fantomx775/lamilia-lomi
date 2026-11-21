@@ -18,7 +18,7 @@ type Props = {
 };
 
 export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access, returnTo = "/en/club", compact = false }: Props) {
-  const { showToast } = useToast();
+  const { showToast, resolveToast } = useToast();
   const [liked, setLiked] = useState(likedByMe);
   const [count, setCount] = useState(likesCount);
   const [pending, setPending] = useState(false);
@@ -43,11 +43,12 @@ export function CommunityHeartControl({ artworkId, likesCount, likedByMe, access
       if (!response.ok || typeof result.liked !== "boolean" || !Number.isSafeInteger(result.likesCount)) throw new Error("Reaction unavailable");
       setLiked(result.liked);
       setCount(Math.max(0, result.likesCount!));
+      resolveToast(`community-heart-${artworkId}`);
       if (!previousLiked && result.liked) trackEvent("like_created");
     } catch {
       setLiked(previousLiked);
       setCount(previousCount);
-      showToast("error", "Your reaction was not saved.");
+      showToast("error", "Your reaction was not saved.", { scope: `community-heart-${artworkId}` });
     } finally {
       busy.current = false;
       setPending(false);

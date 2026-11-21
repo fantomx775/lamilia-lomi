@@ -5,10 +5,8 @@ import {
   type ProductGalleryImage,
   type ProductImageGalleryLabels,
 } from "@/components/product-image-gallery";
-import {
-  isPlayableVideoAsset,
-  ProductVideoPreview,
-} from "@/components/product-video-preview";
+import { ProductVideoPreview } from "@/components/product-video-preview";
+import { isPlayableVideoAsset } from "@/lib/product-video";
 
 type ProductVideoAsset = Pick<ProductAsset, "contentType" | "path" | "title">;
 

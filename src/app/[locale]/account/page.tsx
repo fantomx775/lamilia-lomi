@@ -19,7 +19,8 @@ type Props = {
 };
 
 export const metadata = {
-  title: "Account | LamiliaLomi",
+  title: "Account",
+  description: "Manage your account details, book access and Coloring Club settings.",
   robots: { index: false, follow: false },
 };
 

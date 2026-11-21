@@ -116,17 +116,17 @@ function TaxonomyEditorForm({
       } catch {
         const errors = [ADMIN_ERROR_CODES.INTERNAL];
         setErrors(errors);
-        publishToast("error", getAdminErrorMessage(errors[0], "pl"));
+        publishToast("error", getAdminErrorMessage(errors[0], "pl"), { scope: `taxonomy-${kind}-${itemId || "new"}-save` });
         return;
       }
 
       if (!result.ok) {
         setErrors(result.errors);
-        publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+        publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "), { scope: `taxonomy-${kind}-${itemId || "new"}-save` });
         return;
       }
 
-      publishToast("success", `${isCategory ? "Kategoria" : "Tag"} został${isCategory ? "a" : ""} zapisany${isCategory ? "a" : ""}.`);
+      publishToast("success", `${isCategory ? "Kategoria" : "Tag"} został${isCategory ? "a" : ""} zapisany${isCategory ? "a" : ""}.`, { scope: `taxonomy-${kind}-${itemId || "new"}-save` });
       onSaved();
     });
   };
@@ -150,17 +150,17 @@ function TaxonomyEditorForm({
       } catch {
         const errors = [ADMIN_ERROR_CODES.INTERNAL];
         setErrors(errors);
-        publishToast("error", getAdminErrorMessage(errors[0], "pl"));
+        publishToast("error", getAdminErrorMessage(errors[0], "pl"), { scope: `taxonomy-${kind}-${itemId || "new"}-delete` });
         return;
       }
 
       if (!result.ok) {
         setErrors(result.errors);
-        publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+        publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "), { scope: `taxonomy-${kind}-${itemId || "new"}-delete` });
         return;
       }
 
-      publishToast("success", `${isCategory ? "Kategoria" : "Tag"} został${isCategory ? "a" : ""} usunięty${isCategory ? "a" : ""}.`);
+      publishToast("success", `${isCategory ? "Kategoria" : "Tag"} został${isCategory ? "a" : ""} usunięty${isCategory ? "a" : ""}.`, { scope: `taxonomy-${kind}-${itemId || "new"}-delete` });
       if (onDeleted) onDeleted(result);
       else onSaved();
     });
@@ -206,7 +206,7 @@ function TaxonomyEditorForm({
       if (!response.ok || !result?.image) {
         const message = result?.error ?? "Nie udało się zapisać obrazu kategorii.";
         setImageError(message);
-        publishToast("error", message);
+        publishToast("error", message, { scope: `taxonomy-${kind}-${itemId || "new"}-image-save` });
         if (result?.cleanupDeferred) {
           const cleanupCategoryId = result.categoryId ?? itemId;
           const cleanupImageId = result.cleanupImageId ?? "nieznane";
@@ -215,13 +215,13 @@ function TaxonomyEditorForm({
         return;
       }
       setCategoryImage(result.image);
-      publishToast("success", result.cleanupDeferred ? "Obraz kategorii zapisano; poprzedni plik wymaga sprzątnięcia." : "Obraz kategorii został zapisany.");
+      publishToast("success", result.cleanupDeferred ? "Obraz kategorii zapisano; poprzedni plik wymaga sprzątnięcia." : "Obraz kategorii został zapisany.", { scope: `taxonomy-${kind}-${itemId || "new"}-image-save` });
       setImageMessage(result.cleanupDeferred ? "Obraz został podmieniony. Poprzedni plik wymaga sprzątnięcia." : "Obraz kategorii został zapisany.");
       router.refresh();
     } catch {
       const message = "Nie udało się zapisać obrazu kategorii. Spróbuj ponownie.";
       setImageError(message);
-      publishToast("error", message);
+      publishToast("error", message, { scope: `taxonomy-${kind}-${itemId || "new"}-image-save` });
     } finally {
       setImagePending(false);
     }
@@ -243,17 +243,17 @@ function TaxonomyEditorForm({
       if (!response.ok) {
         const message = result?.error ?? "Nie udało się usunąć obrazu kategorii.";
         setImageError(message);
-        publishToast("error", message);
+        publishToast("error", message, { scope: `taxonomy-${kind}-${itemId || "new"}-image-delete` });
         return;
       }
       setCategoryImage(undefined);
-      publishToast("success", result?.cleanupDeferred ? "Obraz odłączono; plik wymaga sprzątnięcia." : "Obraz kategorii został usunięty.");
+      publishToast("success", result?.cleanupDeferred ? "Obraz odłączono; plik wymaga sprzątnięcia." : "Obraz kategorii został usunięty.", { scope: `taxonomy-${kind}-${itemId || "new"}-image-delete` });
       setImageMessage(result?.cleanupDeferred ? "Obraz został odłączony. Plik wymaga sprzątnięcia." : "Obraz kategorii został usunięty.");
       router.refresh();
     } catch {
       const message = "Nie udało się usunąć obrazu kategorii. Spróbuj ponownie.";
       setImageError(message);
-      publishToast("error", message);
+      publishToast("error", message, { scope: `taxonomy-${kind}-${itemId || "new"}-image-delete` });
     } finally {
       setImagePending(false);
     }

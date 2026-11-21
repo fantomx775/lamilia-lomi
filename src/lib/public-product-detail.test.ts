@@ -184,6 +184,13 @@ describe("targeted public product detail read", () => {
     ]);
   });
 
+  it("does not await reader artwork for core page/metadata reads", async () => {
+    mocks.listReaderArtworks.mockImplementation(() => new Promise(() => {}));
+    const product = await getLocalizedProductDetailViewForRequest("moon-garden-coloring-book", "en");
+    expect(product?.title).toBe("Moon Garden");
+    expect(mocks.listReaderArtworks).not.toHaveBeenCalled();
+  });
+
   it("shares one targeted read between metadata and page calls for the same product", async () => {
     const [metadataProduct, pageProduct] = await Promise.all([
       getLocalizedProductDetailViewForRequest("moon-garden-coloring-book", "en"),

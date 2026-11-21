@@ -59,7 +59,7 @@ test("Catalog fallback remains visible while local catalog data is held", async 
   // Local next dev latency is diagnostic only; Production owns the 150 ms feedback budget.
   const loadingUiMs = Date.now() - startedAt;
   expect(Number.isFinite(loadingUiMs)).toBe(true);
-  await expect(catalogHeading).not.toBeVisible();
+  await expect(catalogHeading).toBeVisible();
   const pendingState = await page.evaluate(() => {
     const fallback = document.querySelector<HTMLElement>("[data-testid='product-catalog-loading']");
     const heading = [...document.querySelectorAll("h1")].find((element) =>
@@ -74,7 +74,7 @@ test("Catalog fallback remains visible while local catalog data is held", async 
   });
   expect(pendingState.pathname).toBe("/en/products");
   expect(pendingState.fallbackOpacity).toBeGreaterThanOrEqual(0.1);
-  expect(pendingState.headingVisible).toBe(false);
+  expect(pendingState.headingVisible).toBe(true);
   await page.screenshot({
     path: testInfo.outputPath("catalog-destination-pending.png"),
     fullPage: false,

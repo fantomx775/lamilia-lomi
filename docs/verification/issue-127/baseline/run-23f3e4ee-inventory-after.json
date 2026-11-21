@@ -1,0 +1,18 @@
+{
+  "project": "lomi-ux127-isolated-20261117",
+  "databaseContainerId": "eff945d9592eb825cbd6e9162b3bc6ddcdbc252426c3f6b692a8a666c9204957",
+  "state": {
+    "temporaryProducts": 0,
+    "temporaryActors": 0,
+    "communityArtworks": 0,
+    "products": 4,
+    "storageObjects": 0,
+    "productsDigest": "a61c7fd4f4e447c646415d03e3428aba",
+    "translationsDigest": "06827618f2d35e713b01cfc1867b2a2b",
+    "assetsDigest": "47f4abb43ddaf2ac3f6e712998ff7372",
+    "readerDigest": "d751713988987e9331980363e24189ce",
+    "storageDigest": "d751713988987e9331980363e24189ce"
+  },
+  "fingerprint": "636c2e593842cc5c5f02b430fa2b3e6c19dd13cc62ba13d26d38da3f1608e4df",
+  "scope": "public benchmark read-model tables and stable Storage size/MIME/etag metadata; not an entire database backup"
+}

@@ -91,3 +91,11 @@ export function communityUploadFingerprint(input: {
 function sha256(value: Uint8Array | string) {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
+
+/** Generated only after the media route has checked current visibility.
+ * No public derivative or cache survives deletion/moderation; existing images
+ * automatically get the same bounded variants without a data backfill. */
+export async function resizeCommunityArtworkImage(bytes: Uint8Array, width: 480 | 960 | 2048) {
+  return sharp(Buffer.from(bytes), { failOn: "warning", limitInputPixels: COMMUNITY_IMAGE_MAX_PIXELS })
+    .rotate().resize({ width, withoutEnlargement: true }).webp({ quality: 82, effort: 4 }).toBuffer();
+}

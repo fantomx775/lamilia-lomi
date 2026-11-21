@@ -1,0 +1,11 @@
+{
+  "driverSha": "ad7c3ecf554bcd718d135b70b2838ff0f027553e",
+  "capturedWhileSourceFrozen": true,
+  "hashes": {
+    ".task/ux127/run-production-benchmark.mjs": "6ac650b76d0ed386f12deb87af6cec5d8c4aa743aa7e82b6c5ff29e0e4ea76da",
+    "tests/e2e/issue-127-benchmark.spec.ts": "0736301d7aa3fb2d5f8ed57dcc406664152286c443dfb2e9b3b120c0412d591a",
+    "playwright.ux127-benchmark.config.ts": "d21937ada6061e1409bf7755ae2ecad7cb21ca46ca584991959a61a04e038abc",
+    "tests/e2e/helpers/next-navigation-cancellations.ts": "e00a8e5c35b9da11408b161bda6d05e252ecb452da06247a444604ef17659539",
+    "scripts/testing/issue-127-production-server.mjs": "c240b15e45646a8f1eaf5583c96d523b5eb5d1abf685ab23601f754a3917174a"
+  }
+}

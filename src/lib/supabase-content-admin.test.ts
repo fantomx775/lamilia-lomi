@@ -1320,6 +1320,7 @@ describe("Supabase content admin mutations", () => {
     await expect(saveProductForRequest(form)).resolves.toEqual({
       ok: false,
       errors: ["admin.validation.image_dimensions"],
+      mediaOutcomes: [{ assetId, state: "retained" }],
     });
 
     expect(mocks.storageDownload).toHaveBeenCalledWith(storagePath);
@@ -1337,6 +1338,7 @@ describe("Supabase content admin mutations", () => {
     await expect(saveProductForRequest(form)).resolves.toEqual({
       ok: false,
       errors: ["admin.validation.asset_file"],
+      mediaOutcomes: [{ assetId, state: "retained" }],
     });
 
     expect(mocks.storageInfo).toHaveBeenCalledWith(`products/${productId}/cover/${assetId}-cover.jpg`);

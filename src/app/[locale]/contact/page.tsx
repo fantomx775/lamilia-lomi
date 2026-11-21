@@ -1,11 +1,11 @@
-import { Send } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
+import type { Metadata } from "next";
+import { randomUUID } from "node:crypto";
+import { ContactForm } from "@/components/contact-form";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import type { Locale } from "@/i18n/routing";
+
+export const metadata: Metadata = { title: "Contact", description: "Ask about a LamiliaLomi book or get help with your bonus files.", alternates: { canonical: "/en/contact" } };
+export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -20,8 +20,8 @@ export default async function ContactPage({ params }: Props) {
         <p className="text-sm font-medium text-[var(--color-terracotta)]">Contact</p>
         <h1 className="mt-2 font-serif text-4xl font-semibold">Send a calm note</h1>
         <p className="mt-4 text-[var(--color-muted)]">
-          Production sends contact messages through Resend. Without an API key,
-          the route returns a safe local stub response.
+          Have a question about a book or need help with your bonus files?
+          Leave a message and an email address where we can reply.
         </p>
       </div>
       <Card>
@@ -29,25 +29,7 @@ export default async function ContactPage({ params }: Props) {
           <h2 className="font-serif text-2xl font-semibold">Message</h2>
         </CardHeader>
         <CardContent>
-          <form data-analytics-form="contact" action="/api/contact" method="post" className="grid gap-4">
-            <input type="hidden" name="locale" value={locale} />
-            <div className="grid gap-2">
-              <Label htmlFor="name">Name</Label>
-              <Input id="name" name="name" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" name="email" type="email" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="message">Message</Label>
-              <Textarea id="message" name="message" />
-            </div>
-            <Button type="submit">
-              <Send className="size-4" aria-hidden />
-              Send
-            </Button>
-          </form>
+          <ContactForm locale={locale} requestId={randomUUID()} />
         </CardContent>
       </Card>
     </div>

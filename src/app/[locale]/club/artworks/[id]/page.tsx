@@ -1,5 +1,5 @@
-import Image from "next/image";
-import Link from "next/link";
+import { communityArtworkMediaUrl, communityArtworkMediaSrcSet } from "@/lib/community/media-urls";
+import { NavigationLink } from "@/components/navigation-link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
@@ -40,30 +40,32 @@ export default async function CommunityArtworkPage({ params }: Props) {
   const ownedArtwork = heartContext.access === "member" || heartContext.access === "join"
     ? await getMyCommunityArtwork(id) : null;
   return <div data-testid="community-artwork-detail" className="mx-auto min-h-[60vh] max-w-7xl px-4 py-7 sm:px-6 sm:py-10 lg:px-8">
-    <Link href="/en/club" className="inline-flex min-h-10 items-center rounded-md px-3 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">← Back to Coloring Club</Link>
+    <NavigationLink pendingLabel="Opening page" href="/en/club" className="inline-flex min-h-10 items-center rounded-md px-3 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">← Back to Coloring Club</NavigationLink>
     <div className="mt-5 grid gap-7 lg:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.75fr)] lg:gap-10">
       <div className="relative min-h-[24rem] aspect-[4/5] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-bg-alt)] sm:aspect-[5/4] lg:aspect-[4/5]">
-        <Image data-testid="community-artwork-media" src={`/api/community/artworks/${artwork.id}/media`} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} fill priority unoptimized sizes="(min-width: 1024px) 65vw, 100vw" className="object-contain" />
+        {/* Authenticated variants preserve immediate visibility checks. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img data-testid="community-artwork-media" src={communityArtworkMediaUrl(artwork.id, 960)} srcSet={communityArtworkMediaSrcSet(artwork.id)} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} loading="eager" sizes="(min-width: 1024px) 65vw, 100vw" className="absolute inset-0 size-full object-contain" />
       </div>
       <aside className="self-start rounded-2xl border border-[var(--color-border)] bg-white/85 p-5 sm:p-7">
         <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--color-terracotta)]">Community artwork</p>
         <h1 className="mt-3 break-words font-serif text-3xl font-semibold text-[var(--color-ink)]">{artwork.description || `Coloring by @${artwork.creator.username}`}</h1>
         <div className="mt-6 flex items-center gap-3">
           <CommunityAvatar username={artwork.creator.username} seed={artwork.creator.avatarSeed} photoSrc={artwork.creator.photoSrc} className="size-12" />
-          <div><p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">Colored by</p><Link data-testid="community-artwork-creator" href={`/en/club/creators/${encodeURIComponent(artwork.creator.username)}`} className="font-semibold text-[var(--color-ink)] underline underline-offset-4">@{artwork.creator.username}</Link></div>
+          <div><p className="text-xs uppercase tracking-wide text-[var(--color-muted)]">Colored by</p><NavigationLink pendingLabel="Opening page" data-testid="community-artwork-creator" href={`/en/club/creators/${encodeURIComponent(artwork.creator.username)}`} className="font-semibold text-[var(--color-ink)] underline underline-offset-4">@{artwork.creator.username}</NavigationLink></div>
         </div>
         <time className="mt-5 block text-sm text-[var(--color-muted)]" dateTime={artwork.publishedAt}>Shared {new Intl.DateTimeFormat("en", { dateStyle: "long" }).format(new Date(artwork.publishedAt))}</time>
         <div className="mt-5"><CommunityHeartControl artworkId={artwork.id} likesCount={artwork.likesCount} likedByMe={artwork.likedByMe} access={heartContext.access} returnTo={`/en/club/artworks/${artwork.id}`} /></div>
-        {ownedArtwork ? <Link data-testid="community-artwork-manage" href={`/en/library/creations#creation-${artwork.id}`} className="mt-5 inline-flex min-h-11 items-center rounded-md border border-[var(--color-border)] px-4 text-sm font-semibold underline underline-offset-4">Edit or delete your artwork</Link> : null}
+        {ownedArtwork ? <NavigationLink pendingLabel="Opening page" data-testid="community-artwork-manage" href={`/en/library/creations#creation-${artwork.id}`} className="mt-5 inline-flex min-h-11 items-center rounded-md border border-[var(--color-border)] px-4 text-sm font-semibold underline underline-offset-4">Edit or delete your artwork</NavigationLink> : null}
         <CommunityArtworkReport artworkId={artwork.id} access={heartContext.access} returnTo={`/en/club/artworks/${artwork.id}`} />
         <div className="mt-7 border-t border-[var(--color-border)] pt-5">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-muted)]">From this book</p>
-          <Link data-testid="community-artwork-book" href={`/en/products/${encodeURIComponent(artwork.product.slug)}`} className="mt-2 block rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-4 hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">
+          <NavigationLink pendingLabel="Opening page" data-testid="community-artwork-book" href={`/en/products/${encodeURIComponent(artwork.product.slug)}`} className="mt-2 block rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-4 hover:border-[var(--color-terracotta)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">
             <span className="block font-serif text-xl font-semibold text-[var(--color-ink)]">{artwork.product.title}</span>
             <span className="mt-1 block text-sm text-[var(--color-muted)]">{artwork.product.audience === "kids" ? "For kids" : "For adults"}</span>
-          </Link>
+          </NavigationLink>
         </div>
-        {getCommunityFlags().uploadsEnabled ? <Link data-testid="community-artwork-share" href="/en/library/creations" className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-[var(--color-terracotta)] px-5 text-sm font-semibold text-white hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">Share your art</Link> : null}
+        {getCommunityFlags().uploadsEnabled ? <NavigationLink pendingLabel="Opening page" data-testid="community-artwork-share" href="/en/library/creations" className="mt-6 inline-flex min-h-11 w-full items-center justify-center rounded-md bg-[var(--color-terracotta)] px-5 text-sm font-semibold text-white hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]">Share your art</NavigationLink> : null}
       </aside>
     </div>
   </div>;

@@ -85,6 +85,27 @@ describe("Coloring Club local adapter", () => {
     expect(second.nextCursor).toBeNull();
   });
 
+  it("pages all owner artworks with tied timestamps and can manage beyond the first 100", async () => {
+    const store = makeStore();
+    const product = getPublishedProduct();
+    const owner = { ...member, unlockedProductIds: [product.id] };
+    await store.join(owner, { username: "owner_many", adultAttested: true });
+    const ids: string[] = [];
+    for (let index = 0; index < 105; index += 1) {
+      ids.push(await store.createPendingArtwork(owner, { ...input(product.id), idempotencyKey: `55555555-5555-4555-8555-${String(index).padStart(12, "0")}` }, [product]));
+    }
+    const first = await store.listMyArtworks(owner, [product], 50);
+    const lastFirst = first.at(-1)!;
+    const second = await store.listMyArtworks(owner, [product], 50, { timestamp: lastFirst.createdAt, id: lastFirst.id });
+    const lastSecond = second.at(-1)!;
+    const third = await store.listMyArtworks(owner, [product], 50, { timestamp: lastSecond.createdAt, id: lastSecond.id });
+    expect([...first, ...second, ...third].map((item) => item.id)).toEqual(ids.slice().sort().reverse());
+    expect(third).toHaveLength(5);
+    expect(await store.listMyArtworks(otherMember, [product], 50)).toEqual([]);
+    expect(await store.getMyArtwork(owner, ids[0], [product])).toMatchObject({ id: ids[0] });
+    expect(await store.getMyArtwork(otherMember, ids[0], [product])).toBeNull();
+  });
+
   it("keeps approved public DTOs allow-listed and applies status/revision transitions", async () => {
     const store = makeStore();
     const product = getPublishedProduct();

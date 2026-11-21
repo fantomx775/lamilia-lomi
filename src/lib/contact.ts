@@ -3,9 +3,9 @@ import { z } from "zod";
 import { routing } from "@/i18n/routing";
 
 export const contactSchema = z.object({
-  name: z.string().min(2).max(80),
-  email: z.string().email(),
-  message: z.string().min(10).max(3_000),
+  name: z.string().trim().min(2).max(80),
+  email: z.string().trim().email().max(254),
+  message: z.string().trim().min(10).max(3_000),
   locale: z.enum(routing.locales).default(routing.defaultLocale),
 });
 

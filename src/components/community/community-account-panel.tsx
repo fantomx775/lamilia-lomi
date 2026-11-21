@@ -80,7 +80,7 @@ export function CommunityAccountPanel({
       setUsername(nextProfile.username);
       setAdultAttested(false);
       setRulesAccepted(false);
-      showToast("success", "You joined the Coloring Club. Your artwork stays private until approved.");
+      showToast("success", "You joined the Coloring Club. Your artwork stays private until approved.", { scope: "community-membership" });
     } catch (caught) {
       setError(toMessage(caught));
       usernameRef.current?.focus();
@@ -98,7 +98,7 @@ export function CommunityAccountPanel({
       const nextProfile = result.profile as CommunityProfileView;
       setProfile(nextProfile);
       setUsername(nextProfile.username);
-      showToast("success", "Your public username was updated.");
+      showToast("success", "Your public username was updated.", { scope: "community-username" });
     } catch (caught) {
       setError(toMessage(caught));
       usernameRef.current?.focus();
@@ -114,9 +114,9 @@ export function CommunityAccountPanel({
       const result = await sendCommunityRequest("/api/community/profile", "DELETE");
       setProfile(result.profile as CommunityProfileView | null);
       setConfirmLeave(false);
-      showToast("success", "You left the Coloring Club. Your profile and work are no longer public.");
+      showToast("success", "You left the Coloring Club. Your profile and work are no longer public.", { scope: "community-membership" });
     } catch (caught) {
-      showToast("error", toMessage(caught));
+      showToast("error", toMessage(caught), { scope: "community-membership" });
     } finally {
       setBusy(false);
     }

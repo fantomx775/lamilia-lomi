@@ -2,6 +2,11 @@ import type { Locale } from "@/i18n/routing";
 import { RichTextContent } from "@/components/rich-text-content";
 import { getStaticPageForRequest } from "@/lib/static-pages";
 
+export const metadata = {
+  title: "Terms",
+  description: "Read the terms for using LamiliaLomi.",
+};
+
 type Props = {
   params: Promise<{ locale: Locale }>;
 };

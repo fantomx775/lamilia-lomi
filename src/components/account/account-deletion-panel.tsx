@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 export function AccountDeletionPanel({ locale }: { locale: string }) {
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
-  const { showToast } = useToast();
+  const { showToast, resolveToast } = useToast();
   const [error, setError] = useState("");
 
   async function deleteAccount() {
@@ -24,9 +24,10 @@ export function AccountDeletionPanel({ locale }: { locale: string }) {
       if (!response.ok || !result.ok) {
         const message = result.message ?? "We could not delete your account. Try again later.";
         if (response.status === 400) setError(message);
-        else showToast("error", message);
+        else showToast("error", message, { scope: "account-delete" });
         return;
       }
+      resolveToast("account-delete");
       try {
         sessionStorage.setItem("lamilia-account-deleted", "1");
       } catch {
@@ -36,7 +37,7 @@ export function AccountDeletionPanel({ locale }: { locale: string }) {
       // the account; the next document reads the cleared session cookie.
       globalThis.location.replace(`/${locale}/account`);
     } catch {
-      showToast("error", "We could not reach the account service. Try again.");
+      showToast("error", "We could not reach the account service. Try again.", { scope: "account-delete" });
     } finally {
       setBusy(false);
     }

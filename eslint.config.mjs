@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Private task scratch/evidence, never application source.
+    ".task/**",
+    // Vendor files copied by scripts/prepare-admin-video-encoder.mjs.
+    "public/admin-video-encoder/**",
   ]),
 ]);
 

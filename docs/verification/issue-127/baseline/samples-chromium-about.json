@@ -1,0 +1,592 @@
+[
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "fresh browser context; normal prefetch allowed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "about",
+    "round": 0,
+    "requestedRounds": 3,
+    "cache": "cold",
+    "project": "chromium",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "metrics": {
+      "token": "about-0-cold",
+      "destination": "https://localhost:3443/en/about",
+      "start": 2235.4000000059605,
+      "feedback": null,
+      "fallback": null,
+      "useful": 402.90000000596046,
+      "completed": 402.90000000596046
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 1,
+      "typedNextCancellations": 10,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/_next/image",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/club",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/about",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "about",
+    "round": 0,
+    "requestedRounds": 3,
+    "cache": "warm",
+    "project": "chromium",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "metrics": {
+      "token": "about-0-warm",
+      "destination": "https://localhost:3443/en/about",
+      "start": 642.5,
+      "feedback": null,
+      "fallback": null,
+      "useful": 223.7000000178814,
+      "completed": 223.7000000178814
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 1,
+      "typedNextCancellations": 10,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/_next/image",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/club",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/about",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "fresh browser context; normal prefetch allowed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "about",
+    "round": 1,
+    "requestedRounds": 3,
+    "cache": "cold",
+    "project": "chromium",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "metrics": {
+      "token": "about-1-cold",
+      "destination": "https://localhost:3443/en/about",
+      "start": 2229.7999999821186,
+      "feedback": null,
+      "fallback": null,
+      "useful": 402.2000000178814,
+      "completed": 402.2000000178814
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 1,
+      "typedNextCancellations": 12,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/_next/image",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/club",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/about",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "about",
+    "round": 1,
+    "requestedRounds": 3,
+    "cache": "warm",
+    "project": "chromium",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "metrics": {
+      "token": "about-1-warm",
+      "destination": "https://localhost:3443/en/about",
+      "start": 820.5,
+      "feedback": null,
+      "fallback": null,
+      "useful": 264.89999997615814,
+      "completed": 264.89999997615814
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 1,
+      "typedNextCancellations": 12,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/_next/image",
+          "method": "GET"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/club",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/login",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/about",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/author",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "fresh browser context; normal prefetch allowed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "about",
+    "round": 2,
+    "requestedRounds": 3,
+    "cache": "cold",
+    "project": "chromium",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "metrics": {
+      "token": "about-2-cold",
+      "destination": "https://localhost:3443/en/about",
+      "start": 2253.2000000178814,
+      "feedback": null,
+      "fallback": null,
+      "useful": 388,
+      "completed": 388
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 1,
+      "typedNextCancellations": 10,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/_next/image",
+          "method": "GET"
+        },
+        {
+          "path": "/en/club",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/library",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/club",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  },
+  {
+    "testedSha": "79df809db41ca824913719e91eaea4c5a3132fb4",
+    "runId": "ux127-baseline-79df809-23f3e4ee",
+    "inputModel": "controlled 50ms mouse pointer press on desktop/mobile viewport emulation, not physical touch",
+    "browserVersion": "148.0.7778.96",
+    "backend": "isolated Supabase",
+    "runtime": "next start production + owned HTTPS proxy",
+    "network": {
+      "latencyMs": 120,
+      "downloadBytesPerSecond": 1250000,
+      "uploadBytesPerSecond": 125000
+    },
+    "cacheDefinition": "same context repeat after full document navigation; browser HTTP cache available; router cache retention not claimed",
+    "completionDefinition": "destination h1 paint-stable for two frames with no route fallback/aria-busy; not full media completion",
+    "journey": "about",
+    "round": 2,
+    "requestedRounds": 3,
+    "cache": "warm",
+    "project": "chromium",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "metrics": {
+      "token": "about-2-warm",
+      "destination": "https://localhost:3443/en/about",
+      "start": 673.8000000119209,
+      "feedback": null,
+      "fallback": null,
+      "useful": 226.5,
+      "completed": 226.5
+    },
+    "failures": [],
+    "networkDiagnostics": {
+      "unresolvedCount": 1,
+      "typedNextCancellations": 10,
+      "closedPrefetches": 1,
+      "failures": [
+        {
+          "path": "/_next/image",
+          "method": "GET"
+        },
+        {
+          "path": "/en/club",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/unlock/bedtime-forest-picture-book",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/library",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/club",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/products",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/contact",
+          "method": "GET",
+          "disposition": "next-canceled"
+        },
+        {
+          "path": "/en/terms",
+          "method": "GET",
+          "disposition": "next-canceled"
+        }
+      ]
+    }
+  }
+]

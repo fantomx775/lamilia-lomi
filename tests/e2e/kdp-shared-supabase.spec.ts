@@ -1,9 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import { expect, test } from "@playwright/test";
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { communityTestOrigin, isolatedCommunityConfig, loadIsolatedCommunityTarget } from "../../scripts/testing/isolated-community-target.mjs";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 const productId = "11111111-1111-4111-8111-111111111111";
@@ -14,11 +16,15 @@ test("real shared QR: concurrent readers, renamed book, cross-device email confi
   test.setTimeout(300_000);
   test.skip(process.env.RUN_KDP_SUPABASE_E2E !== "1", "Requires explicitly configured isolated local Supabase.");
   test.skip(info.project.name !== "chromium", "Mutates isolated database fixtures once.");
-  const app = new URL(process.env.PLAYWRIGHT_BASE_URL!);
-  const api = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!);
-  if (app.hostname !== "127.0.0.1" || app.port !== "3031" || api.hostname !== "127.0.0.1" || api.port !== "57321") throw new Error("KDP integration requires the dedicated loopback app/database.");
-  const admin = createClient(api.href, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false, autoRefreshToken: false } });
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const target = loadIsolatedCommunityTarget();
+  const app = new URL(communityTestOrigin());
+  if (process.env.LAMILIA_BACKEND !== "supabase" || info.project.use.baseURL !== app.origin) {
+    throw new Error("KDP regression requires the guarded isolated HTTPS application.");
+  }
+  const api = new URL(target.apiUrl);
+  const mail = await guardedMailOrigin(target);
+  const admin = createClient(api.href, target.serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const anon = target.publishableKey;
   const users: string[] = [];
   const credentials = [0, 1, 2].map(() => ({ email: `kdp-${randomUUID()}@example.test`, password: `${randomBytes(20).toString("hex")}A1!` }));
   const objectPath = `products/${productId}/premium_download/kdp-${randomUUID()}.pdf`;
@@ -63,7 +69,7 @@ test("real shared QR: concurrent readers, renamed book, cross-device email confi
     await page.getByRole("checkbox", { name: /Terms/ }).check();
     await page.getByRole("button", { name: "Create account", exact: true }).click();
     await expect(page.getByTestId("unlock-guest-state")).toBeVisible();
-    const confirmation = await readConfirmation(credentials[2].email);
+    const confirmation = await readConfirmation(credentials[2].email, mail, app);
     expect(confirmation.includes(code)).toBe(false);
     const verified = await context.newPage();
     await verified.goto(confirmation);
@@ -117,8 +123,28 @@ test("real shared QR: concurrent readers, renamed book, cross-device email confi
   }
 });
 
-async function readConfirmation(email: string) {
-  const mail = "http://127.0.0.1:57324";
+async function guardedMailOrigin(target: ReturnType<typeof loadIsolatedCommunityTarget>) {
+  const { statusPath } = isolatedCommunityConfig();
+  const status = JSON.parse(await readFile(statusPath, "utf8"));
+  const mail = new URL(status.INBUCKET_URL ?? status.MAILPIT_URL ?? "");
+  if (mail.origin !== "http://127.0.0.1:55424" || mail.pathname !== "/" || mail.search || mail.hash || mail.username || mail.password) {
+    throw new Error("KDP mail fixture requires the exclusive local mail sink on port 55424.");
+  }
+  const format = '{"running":{{json .State.Running}},"labels":{{json .Config.Labels}},"networks":{{json .NetworkSettings.Networks}},"ports":{{json .NetworkSettings.Ports}}}';
+  const container = JSON.parse(execFileSync(target.dockerExecutable, ["inspect", "--format", format, `supabase_inbucket_${target.projectId}`], {
+    encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
+  }));
+  const bindings = Object.values(container.ports ?? {}).flat() as Array<{ HostIp: string; HostPort: string }>;
+  if (!container.running || container.labels?.["com.supabase.cli.project"] !== target.projectId ||
+    container.labels?.["com.docker.compose.project"] !== target.projectId || !container.networks?.[`supabase_network_${target.projectId}`] ||
+    !bindings.some((binding) => binding.HostPort === "55424" && ["127.0.0.1", "0.0.0.0"].includes(binding.HostIp))) {
+    throw new Error("Cannot verify the exclusive local mail container identity.");
+  }
+  return mail.origin;
+}
+
+async function readConfirmation(email: string, mail: string, app: URL) {
   for (let attempt = 0; attempt < 40; attempt++) {
     const search = await (await fetch(`${mail}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}`)).json();
     const id = search.messages?.[0]?.ID;
@@ -127,7 +153,7 @@ async function readConfirmation(email: string) {
       const content = `${detail.Text ?? ""}\n${detail.HTML ?? ""}`.replace(/&amp;/g, "&");
       for (const candidate of content.match(/https?:\/\/[^\s<>"']+/g) ?? []) {
         const url = new URL(candidate.replace(/[),.;]+$/, ""));
-        if (url.hostname === "127.0.0.1" && url.port === "3031" && url.pathname === "/auth/callback" && url.searchParams.has("token_hash")) return url.href;
+        if (url.origin === app.origin && !url.username && !url.password && !url.hash && url.pathname === "/auth/callback" && url.searchParams.has("token_hash")) return url.href;
       }
       throw new Error("Missing local confirmation callback.");
     }

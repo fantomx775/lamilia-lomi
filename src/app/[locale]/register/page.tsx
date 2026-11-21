@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { getTranslations } from "next-intl/server";
 
 import { registerDemoAction } from "@/app/actions";
@@ -9,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import type { Locale } from "@/i18n/routing";
 import { productSlugFromReturnTo, sanitizeReturnTo } from "@/lib/return-to";
 import { getUnlockIntent } from "@/lib/unlock-intent";
+
+export const metadata: Metadata = { title: "Create account", description: "Create your LamiliaLomi account to unlock your book extras.", robots: { index: false, follow: false } };
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -68,18 +71,19 @@ export default async function RegisterPage({ params, searchParams }: Props) {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="password">{t("password")}</Label>
-              <Input id="password" name="password" type="password" autoComplete="new-password" required minLength={8} />
+              <Input id="password" name="password" type="password" autoComplete="new-password" required minLength={8} aria-describedby="registration-password-help" />
             </div>
+            <p id="registration-password-help" className="-mt-2 text-sm text-[var(--color-muted)]">Use at least 8 characters for your password.</p>
             <label className="flex gap-3 text-sm leading-6">
               <input className="mt-1 size-4" type="checkbox" name="termsAccepted" required />
               <span>
-                {t("terms")} {" "}
+                I accept the {" "}
                 <NavigationLink pendingLabel="Opening terms" className="text-[var(--color-terracotta)]" href={`/${locale}/terms`}>
                   {t("termsLink")}
-                </NavigationLink>{" "}
+                </NavigationLink>{" "}and the {" "}
                 <NavigationLink pendingLabel="Opening privacy policy" className="text-[var(--color-terracotta)]" href={`/${locale}/privacy`}>
                   {t("privacyLink")}
-                </NavigationLink>
+                </NavigationLink>.
               </span>
             </label>
             <label className="flex gap-3 text-sm leading-6">

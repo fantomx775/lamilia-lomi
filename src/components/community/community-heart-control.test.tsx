@@ -39,6 +39,30 @@ describe("community heart control", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("resolves only the retried artwork error and keeps successful reactions silent", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockResolvedValueOnce(new Response("{}", { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ liked: true, likesCount: 1 }))
+      .mockResolvedValueOnce(Response.json({ liked: true, likesCount: 1 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<ToastProvider><CommunityHeartControl artworkId="art-1" likesCount={0} likedByMe={false} access="member" />
+      <CommunityHeartControl artworkId="art-2" likesCount={0} likedByMe={false} access="member" /></ToastProvider>);
+    const buttons = screen.getAllByTestId("community-heart-toggle");
+    await user.click(buttons[0]);
+    await waitFor(() => expect(buttons[0]).toBeEnabled());
+    await user.click(buttons[1]);
+    await waitFor(() => expect(buttons[1]).toBeEnabled());
+    expect(screen.getByRole("alert")).toHaveTextContent("Your reaction was not saved.");
+    await user.click(buttons[0]);
+    await waitFor(() => expect(buttons[0]).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Your reaction was not saved.");
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.click(buttons[1]);
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("rolls back a failed optimistic action and offers safe guest login return", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 503 })));
     const user = userEvent.setup();

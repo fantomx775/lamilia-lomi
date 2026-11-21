@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   ProductInsideBookSection,
 } from "@/components/product-inside-book-section";
-import { isPlayableVideoAsset } from "@/components/product-video-preview";
+import { isPlayableVideoAsset } from "@/lib/product-video";
 import type {
   ProductGalleryImage,
   ProductImageGalleryLabels,

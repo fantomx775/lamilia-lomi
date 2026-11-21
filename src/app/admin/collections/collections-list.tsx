@@ -118,7 +118,7 @@ export function CollectionsResourceList({
   };
 
   const saved = (result: SuccessfulMutation, savedImagePath: string) => {
-    publishToast("success", "Kolekcja została zapisana.");
+    publishToast("success", "Kolekcja została zapisana.", { scope: `collection-save-${result.id}` });
     const collectionId = result.id;
     const pending = pendingImagesRef.current.filter((image) => image.path !== savedImagePath);
     pendingImagesRef.current = [];
@@ -137,7 +137,7 @@ export function CollectionsResourceList({
     const failed = await cleanupPendingImages(collectionId, pending);
     pendingImagesRef.current = [];
     setOpen(false);
-    publishToast("success", "Kolekcja została usunięta.");
+    publishToast("success", "Kolekcja została usunięta.", { scope: `collection-delete-${collectionId}` });
     router.refresh();
     showCleanupWarning(result.id, [
       result.cleanupDeferred ? result.cleanupImagePath : undefined,
@@ -334,14 +334,14 @@ function CollectionEditorForm({
         const result = await saveAction(formData);
         if (!result.ok) {
           setErrors(result.errors);
-          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "), { scope: `collection-save-${id}` });
           return;
         }
         onSaved(result, String(formData.get("imagePath") ?? ""));
       } catch {
         const errors = [ADMIN_ERROR_CODES.INTERNAL];
         setErrors(errors);
-        publishToast("error", getAdminErrorMessage(errors[0], "pl"));
+        publishToast("error", getAdminErrorMessage(errors[0], "pl"), { scope: `collection-save-${id}` });
       } finally {
         onMutationStateChange(false);
       }
@@ -359,14 +359,14 @@ function CollectionEditorForm({
         const result = await deleteAction(formData);
         if (!result.ok) {
           setErrors(result.errors);
-          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "));
+          publishToast("error", result.errors.map((code) => getAdminErrorMessage(code, "pl")).join(" "), { scope: `collection-delete-${id}` });
           return;
         }
         await onDeleted(result, item.id);
       } catch {
         const errors = [ADMIN_ERROR_CODES.INTERNAL];
         setErrors(errors);
-        publishToast("error", getAdminErrorMessage(errors[0], "pl"));
+        publishToast("error", getAdminErrorMessage(errors[0], "pl"), { scope: `collection-delete-${id}` });
       } finally {
         onMutationStateChange(false);
       }

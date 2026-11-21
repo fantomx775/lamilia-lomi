@@ -936,6 +936,26 @@ describe("signed media upload targets", () => {
     mocks.getBackendMode.mockReturnValue("supabase");
   });
 
+  it.each([
+    ["https://localhost:3443", "https://localhost:3443/storage/v1/upload/resumable"],
+    ["http://127.0.0.1:55421", "http://127.0.0.1:55421/storage/v1/upload/resumable"],
+    ["https://project.supabase.co", "https://project.storage.supabase.co/storage/v1/upload/resumable"],
+    ["https://fixture-user:fixture-pass@localhost:3443/unused/base?discard=1#fragment", "https://localhost:3443/storage/v1/upload/resumable"],
+    ["http://[::1]:55421/base?discard=1#fragment", "http://[::1]:55421/storage/v1/upload/resumable"],
+  ])("preserves the intended TUS origin for %s", async (supabaseUrl, endpoint) => {
+    const createSignedUploadUrl = vi.fn().mockResolvedValue({ data: { token: "fixture-upload-token" }, error: null });
+    mocks.getRequiredSupabaseEnv.mockReturnValue({ url: supabaseUrl });
+    mocks.createServiceRoleClient.mockReturnValue({ storage: { from: vi.fn(() => ({ createSignedUploadUrl })) } });
+    const result = await createSignedMediaUpload({ assetId: "22222222-2222-4222-8222-222222222222", productId,
+      kind: "gallery", filename: "fixture.webp" });
+    expect(result.uploadEndpoint).toBe(endpoint);
+    const target = new URL(result.uploadEndpoint);
+    expect(target.username).toBe("");
+    expect(target.password).toBe("");
+    expect(target.search).toBe("");
+    expect(target.hash).toBe("");
+  });
+
   it("keeps the original filename for display while generating a Storage-safe path", async () => {
     const createSignedUploadUrl = vi.fn().mockResolvedValue({
       data: { token: "signed-token" },

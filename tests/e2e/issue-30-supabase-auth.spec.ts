@@ -186,15 +186,13 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       sensitiveValues.add(userFour.email);
       sensitiveValues.add(userFour.password);
 
-      // The home CTA and public QR URL must both resolve to published product pages.
+      // Generic home entry lets the reader explicitly select the owned book.
       await page.goto("/en");
-      const homeQrLink = page.getByRole("link", { name: "Try QR unlock", exact: true });
-      const homeQrHref = await homeQrLink.getAttribute("href");
-      expect(homeQrHref).toMatch(/^\/en\/unlock\/[a-z0-9]+(?:-[a-z0-9]+)*$/);
-      if (!homeQrHref) {
-        throw new Error("The homepage QR link did not have a product destination.");
-      }
-      await page.goto(homeQrHref);
+      const homeQrLink = page.getByRole("link", { name: "Unlock my book bonus", exact: true });
+      await expect(homeQrLink).toHaveAttribute("href", "/en/unlock");
+      await homeQrLink.click();
+      const selectedBook = page.locator("li").filter({ has: page.locator(`a[href="/en/products/${productSlug}#premium"]`) });
+      await selectedBook.getByRole("link", { name: "Choose this book", exact: true }).click();
       await expect(page.getByTestId("product-unlock-section")).toBeVisible();
       completed.homepageQrCtaResolvesToPublishedProduct = true;
 
@@ -416,18 +414,21 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
       await crossDevicePage.getByRole("link", { name: "Go to My Library", exact: true }).click();
       await waitForLocation(crossDevicePage, { pathname: "/en/library" });
       const library = crossDevicePage.getByTestId("library-page");
-      await expect(library).toContainText("Moon Garden");
-      completed.unlockedProductAppearsInLibrary = true;
-      await library.getByRole("link", { name: /Moon Garden/i }).first().click();
-      await waitForLocation(crossDevicePage, {
-        pathname: `/en/products/${productSlug}`,
+      const ownedBook = library.getByTestId("library-book-card").filter({
+        has: crossDevicePage.getByRole("heading", { name: "Moon Garden Coloring Book", exact: true }),
       });
-      await expect(crossDevicePage.getByTestId("premium-download-links")).toContainText(
-        "Premium printable PDF",
-      );
-      const privateDownloadLink = crossDevicePage
-        .getByTestId("premium-download-links")
-        .getByRole("link", { name: "Premium printable PDF", exact: true });
+      await expect(ownedBook).toHaveCount(1);
+      const ownFilesLink = ownedBook.getByRole("link", { name: "Open my files", exact: true });
+      await expect(ownFilesLink).toHaveAttribute("href", `/en/library/books/${productSlug}`);
+      await expect(ownedBook.getByRole("link", { name: "View book details", exact: true }))
+        .toHaveAttribute("href", `/en/products/${productSlug}`);
+      completed.unlockedProductAppearsInLibrary = true;
+      await ownFilesLink.click();
+      await waitForLocation(crossDevicePage, { pathname: `/en/library/books/${productSlug}` });
+      const files = crossDevicePage.getByTestId("library-files-page");
+      await expect(files.getByRole("heading", { name: "Moon Garden Coloring Book", exact: true })).toBeVisible();
+      const privateDownloadLink = files.getByRole("link", { name: "Premium printable PDF Download PDF", exact: true });
+      await expect(privateDownloadLink).toBeVisible();
       const privateDownloadHref = await privateDownloadLink.getAttribute("href");
       const privateDownloadTargetsExpectedAsset = Boolean(
         privateDownloadHref &&
@@ -435,18 +436,35 @@ test.describe("Issue 30 with the isolated local Supabase Auth service", () => {
             `/api/downloads/${premiumAssetId}`,
       );
       expect(privateDownloadTargetsExpectedAsset).toBe(true);
+      const directFileUrl = new URL(privateDownloadHref!, appUrl.origin);
+      expect(directFileUrl.origin).toBe(appUrl.origin);
+      expect(directFileUrl.searchParams.get("locale")).toBe("en");
+      expect(directFileUrl.searchParams.get("returnTo")).toBe(`/en/library/books/${productSlug}`);
       const premiumFileDownloadPromise = crossDevicePage.waitForEvent("download");
       await privateDownloadLink.click();
       const premiumFileDownload = await premiumFileDownloadPromise;
-      const downloadedFilePath = await premiumFileDownload.path();
-      const downloadedFileBytes = downloadedFilePath
-        ? await readFile(downloadedFilePath)
-        : Buffer.alloc(0);
+      // Download.path() is unavailable over browserType.connect(). Consume
+      // the real public download stream on both local and remote browsers.
+      const downloadStream = await premiumFileDownload.createReadStream();
+      const downloadChunks: Buffer[] = [];
+      try {
+        for await (const chunk of downloadStream) downloadChunks.push(Buffer.from(chunk));
+      } finally {
+        downloadStream.destroy();
+      }
+      const downloadedFileBytes = Buffer.concat(downloadChunks);
+      expect(downloadedFileBytes.equals(pdf)).toBe(true);
       const privateFileOpenedFromLibraryProduct =
         premiumFileDownload.suggestedFilename().toLowerCase().endsWith(".pdf") &&
         downloadedFileBytes.subarray(0, 4).toString("ascii") === "%PDF";
       expect(privateFileOpenedFromLibraryProduct).toBe(true);
       completed.privateFileOpenedFromLibraryProduct = privateFileOpenedFromLibraryProduct;
+      // Preserve the secondary product route and its protected asset projection.
+      await files.getByRole("link", { name: "View book details", exact: true }).click();
+      await waitForLocation(crossDevicePage, { pathname: `/en/products/${productSlug}` });
+      await expect(crossDevicePage.getByTestId("premium-download-links")
+        .getByRole("link", { name: "Premium printable PDF", exact: true }))
+        .toHaveAttribute("href", new RegExp(`/api/downloads/${premiumAssetId}(?:\\?|$)`));
 
       await crossDevicePage.goto(`/en/unlock/${productSlug}`);
       await waitForLocation(crossDevicePage, {

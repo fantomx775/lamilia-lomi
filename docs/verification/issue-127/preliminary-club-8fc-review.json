@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "status": "VISUALLY_REVIEWED_PRELIMINARY_ONLY",
+  "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+  "runId": "ux127-primary-club-public-chromium-9b05f586",
+  "automatedStatus": "PASS",
+  "visualReview": {
+    "reviewer": "QA agent, with root sample reinspection",
+    "individuallyViewed": 17,
+    "overviewOnly": 0,
+    "confirmedDefects": [],
+    "controlledSyntheticFixtures": true,
+    "physicalDevices": "NOT RUN"
+  },
+  "finalHeadAcceptance": "NOT RUN; fresh final exact-head execution, screenshot byte comparison and external v1 record remain required",
+  "screenshots": [
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-entry-before.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "8b6f7205c3884d820797f1b8691ee4f9399f7df36ef83733cd8a1d79a89bc761"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-gallery-link-feedback.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "45d3d3d167b4b861b6e0886606c668f52664ae6ec675d726b7a0a0294be3890a"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-gallery-real-loading.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "45d3d3d167b4b861b6e0886606c668f52664ae6ec675d726b7a0a0294be3890a"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-gallery-decoded.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "5a40103cd34f149264c5ebc0eb18329a5355a34087e4248df019223238e41c49"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-artwork-link-feedback.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "15518b446247a62764bc48c233819ee0287a15aadea4839142c8122fbd17cacd"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-artwork-real-loading.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "15518b446247a62764bc48c233819ee0287a15aadea4839142c8122fbd17cacd"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-artwork-decoded.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "bb04da7d466038c39c275d4f9224bb4193c640e6f7d22332e26bc0c0c8973194"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-creator-link-feedback.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "8a7b2602c50e39b5012b97cee27150f8adb0d02a29afa7e1f213af86b31eae89"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-creator-real-loading.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "8a7b2602c50e39b5012b97cee27150f8adb0d02a29afa7e1f213af86b31eae89"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-cold-creator-decoded.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "b730046ea15520cd51897d0d162c05c1985708ecd8ae587a0a0042caf1272a98"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-warm-entry-before.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "17037a7f0d0598dc52a649c052c341fa863a2dc9b7113ca0f5738c53feca244b"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-warm-gallery-link-feedback.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "6e2d112f428b8663be97b9d0a9042807d8d77efbec56ece926ef5778e7e9a78c"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-warm-gallery-decoded.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "bdccdd85464f01cb6e331dfadabc543ab366f73640f68233679b03c86bd1c59b"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-warm-artwork-link-feedback.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "15ff8d3af6cd0c666a8357636987192968d8d947fa94318d110f778a66a2eacf"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-warm-artwork-decoded.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "b39b3a7a32b15d1b1c8bd2eda668aec698f0500e40b569b912a2bc54ab0046aa"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-warm-creator-link-feedback.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "29a4feb8167167db8ea557ed07f5348e2012f912c36b370689b800f5005217d5"
+    },
+    {
+      "path": "docs/verification/issue-127/ux127-primary-club-public-chromium-warm-creator-decoded.png",
+      "testedSha": "8fc0242fbd94d8ffd3282359a0f1b237b8869ebf",
+      "runId": "ux127-primary-club-public-chromium-9b05f586",
+      "sha256": "ce91e737121a2c87ef332b26d194bdbbbb55ed600f18cd21b10ee95715abaf45"
+    }
+  ]
+}

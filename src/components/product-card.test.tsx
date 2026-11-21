@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { AnchorHTMLAttributes } from "react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -30,86 +30,31 @@ const product = {
   cover: { path: "/cover.png", title: "Cover", id: "cover-1" },
 } as LocalizedProductView;
 
-class TestResizeObserver {
-  static instances: TestResizeObserver[] = [];
-  private readonly callback: ResizeObserverCallback;
-
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback;
-    TestResizeObserver.instances.push(this);
-  }
-
-  observe() {}
-  disconnect() {}
-
-  trigger() {
-    this.callback([], this as unknown as ResizeObserver);
-  }
-}
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-  TestResizeObserver.instances = [];
-});
-
-function setTitleMeasurements(heading: HTMLElement, clientHeight: number, scrollHeight: number) {
-  Object.defineProperties(heading, {
-    clientHeight: { configurable: true, get: () => clientHeight },
-    scrollHeight: { configurable: true, get: () => scrollHeight },
-  });
-}
-
-function triggerResize() {
-  act(() => TestResizeObserver.instances.at(-1)?.trigger());
-}
+afterEach(() => cleanup());
 
 describe("ProductCard", () => {
-  it("keeps short titles free of a disclosure and updates when the card width changes", () => {
-    vi.stubGlobal("ResizeObserver", TestResizeObserver);
-    const shortProduct = { ...product, title: "Moon Garden" } as LocalizedProductView;
-
-    render(<ProductCard product={shortProduct} locale="en" />);
-
-    const heading = screen.getByRole("heading", { name: "Moon Garden" });
-    expect(heading).toHaveClass("line-clamp-3", "min-h-[3lh]", "[overflow-wrap:anywhere]");
-    setTitleMeasurements(heading, 60, 60);
-    triggerResize();
-    expect(screen.queryByText("Read full title")).not.toBeInTheDocument();
-
-    setTitleMeasurements(heading, 60, 80);
-    triggerResize();
-    expect(screen.getByText("Read full title")).toBeInTheDocument();
-
-    setTitleMeasurements(heading, 60, 60);
-    triggerResize();
-    expect(screen.queryByText("Read full title")).not.toBeInTheDocument();
-  });
-
-  it("reserves a three-line title area and exposes a truncated full title through a keyboard and touch disclosure", () => {
-    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+  it("always exposes the complete title without a separate disclosure", () => {
     render(<ProductCard product={product} locale="en" />);
-
     const heading = screen.getByRole("heading", { name: longTitle });
-    const productLink = screen.getByRole("link");
-    const card = productLink.closest("article");
-    expect(heading).toHaveClass("line-clamp-3", "min-h-[3lh]", "[overflow-wrap:anywhere]");
-    expect(card).not.toHaveClass("focus-within:ring-2");
-    expect(productLink).toHaveClass("focus-visible:outline-2");
     expect(heading).toHaveTextContent(longTitle);
-    expect(heading).toHaveAttribute("aria-label", longTitle);
-
-    setTitleMeasurements(heading, 60, 80);
-    triggerResize();
-
-    const fullTitleDisclosure = screen.getByText("Read full title");
-    expect(fullTitleDisclosure.tagName).toBe("SUMMARY");
-    expect(fullTitleDisclosure).toHaveClass("focus-visible:outline-2");
-    fireEvent.click(fullTitleDisclosure);
-    expect(screen.getByTestId("full-product-title")).toHaveTextContent(longTitle);
-    expect(fullTitleDisclosure.parentElement).toHaveAttribute("open");
-
+    expect(heading).not.toHaveClass("line-clamp-3");
+    expect(heading).toHaveClass("break-words", "[overflow-wrap:anywhere]");
+    expect(screen.queryByText("Read full title")).toBeNull();
     expect(screen.getByRole("link")).toHaveAttribute("href", "/en/products/sleepy-garden");
+    const link = screen.getByRole("link");
+    expect(link).toHaveClass("focus-visible:outline-2");
+    expect(link).toHaveAccessibleName(expect.stringContaining(longTitle));
+    expect(link.closest("article")).not.toHaveClass("focus-within:ring-2");
+    expect(heading).toHaveAttribute("aria-label", longTitle);
     expect(screen.getByRole("img", { hidden: true })).toHaveAttribute("src", "/cover.png");
+    expect(screen.getByRole("img", { hidden: true })).toHaveAttribute("alt", "Cover");
   });
+  it("carries a validated result URL and card anchor to the product", () => {
+    render(<ProductCard product={product} locale="en" catalogHref="/en/products?q=garden&audience=kids&sort=az" />);
+    const href = new URL(screen.getByRole("link").getAttribute("href")!, "https://example.test");
+    expect(href.pathname).toBe("/en/products/sleepy-garden");
+    expect(href.searchParams.get("catalog")).toBe("/en/products?q=garden&audience=kids&sort=az#catalog-product-product-1");
+    expect(screen.getByRole("link").closest("article")).toHaveAttribute("id", "catalog-product-product-1");
+  });
+
 });
