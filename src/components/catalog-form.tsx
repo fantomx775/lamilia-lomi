@@ -6,7 +6,6 @@ import { useFormStatus } from "react-dom";
 import { createContext, useContext, useState, useTransition, type ComponentProps, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ProductCatalogLoading } from "@/components/product-catalog-loading";
 
 type CatalogSubmission = { id: number; href: string };
 const CatalogNavigation = createContext<{ pending: boolean; submission: CatalogSubmission | null; navigate: (url: string) => void } | null>(null);
@@ -23,9 +22,11 @@ export function CatalogNavigationProvider({ children }: { children: ReactNode })
   } }}>{children}</CatalogNavigation.Provider>;
 }
 
-export function CatalogResults({ children, desktopColumns }: { children: ReactNode; desktopColumns: 3 | 4 | 5 }) {
+export function CatalogResults({ children }: { children: ReactNode }) {
   const navigation = useContext(CatalogNavigation);
-  return navigation?.pending ? <ProductCatalogLoading resultsOnly desktopColumns={desktopColumns} /> : children;
+  return <section aria-label="Catalog results" aria-busy={navigation?.pending || undefined} data-testid="catalog-results-region">
+    {children}
+  </section>;
 }
 
 /** Keep the same focused DOM input when an enhanced GET commits its new query. */

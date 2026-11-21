@@ -25,7 +25,7 @@ export default async function ProductsPage({ params, searchParams }: Props) {
   // need inline scripts to replace their fallback, so resolve its content first.
   await delayCatalogForE2E();
   return <ProductCatalogShell snapshot={snapshot} locale={locale} rawSearchParams={rawSearchParams}>
-    <CatalogResults desktopColumns={snapshot.catalogSettings.desktopColumns}>
+    <CatalogResults>
       <CatalogProductGrid snapshot={snapshot} locale={locale} rawSearchParams={rawSearchParams} />
     </CatalogResults>
   </ProductCatalogShell>;

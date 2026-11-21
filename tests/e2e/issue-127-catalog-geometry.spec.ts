@@ -56,17 +56,24 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         const phase = `r5-c${categoryCount}-cols${desktopColumns}-w${width}`;
         await page.screenshot({ path: info.outputPath(`${phase}-before.png`), animations: "disabled" });
         // Native documents resolve critical content before sending it. Enhanced
-        // GET transitions keep this actual shell and show the results skeleton.
+        // GET transitions keep the actual result grid and shell while pending.
         const form = page.getByTestId(width < 768 ? "catalog-mobile-search" : "catalog-desktop-filters");
-        await form.getByRole("textbox", { name: "Search catalog" }).fill(snapshot.products[0].translations.find((item) => item.locale === "en")!.title);
+        const productTitle = snapshot.products[0].translations.find((item) => item.locale === "en")!.title;
+        await form.getByRole("textbox", { name: "Search catalog" }).fill(productTitle);
         const submitted = await geometry(page);
         await form.getByRole("textbox", { name: "Search catalog" }).press("Enter");
         await expect(form.locator('[data-catalog-form-pending="true"]')).toBeVisible();
-        await expect(page.getByTestId("product-catalog-loading")).toBeVisible();
+        const results = page.getByTestId("catalog-results-region");
+        await expect(results).toHaveAttribute("aria-busy", "true");
+        const grid = page.getByTestId("product-catalog-grid");
+        await expect(grid).toBeVisible();
+        await expect(grid).toContainText(productTitle);
+        await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
         const pending = await geometry(page);
         sameGeometry(submitted, pending);
         await page.screenshot({ path: info.outputPath(`${phase}-pending.png`), animations: "disabled" });
-        await expect(page.getByTestId("product-catalog-grid")).toBeVisible();
+        await expect(grid).toBeVisible();
+        await expect(grid).toContainText(productTitle);
         await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
         await expect(form.getByRole("textbox", { name: "Search catalog" })).toBeFocused();
         const final = await geometry(page);
@@ -75,6 +82,7 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         await page.screenshot({ path: info.outputPath(`${phase}-after.png`), animations: "disabled" });
         await info.attach(`${phase}-bounds.json`, { body: JSON.stringify({ before, submitted, pending, final }), contentType: "application/json" });
         await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
+        await expect(results).not.toHaveAttribute("aria-busy", "true");
         await expect(form.locator('[data-catalog-form-pending="true"]')).toHaveCount(0);
       }
     }

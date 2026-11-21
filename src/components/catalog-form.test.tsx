@@ -51,6 +51,8 @@ describe("progressively enhanced catalog GET", () => {
     expect(html).toContain('action="/en/products"');
     expect(html).toContain('name="q" value="Garden"');
     expect(html).toContain('data-testid="actual-result"');
+    expect(html).toContain('aria-label="Catalog results"');
+    expect(html).toContain('data-testid="catalog-results-region"');
     expect(html).not.toContain('data-testid="product-catalog-loading"');
     expect(html).not.toContain("<!--$");
   });

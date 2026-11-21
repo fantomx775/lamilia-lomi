@@ -102,4 +102,3 @@ export function classifyOwnedMetadataResume(input: unknown, requestId: number, f
     documentId:identity.documentId,elementId:identity.elementId,generation:identity.generation,partialReceivedBytes:cancel.receivedDataBytes,
     resumedBytes:recovered.responseBodyBytes,canceledInitialResponseCompleted:false,readinessContract:'before-trusted-play-intent',requiresIndependentReview:true };
 }
-
