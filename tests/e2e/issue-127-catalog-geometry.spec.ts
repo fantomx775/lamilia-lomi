@@ -9,6 +9,33 @@ import { isLocalDemoAppTarget } from "./local-target";
 
 test.use({ trace: "off", screenshot: "off", video: "off" });
 
+const sourcePaths = [
+  "src",
+  "tests",
+  "scripts",
+  "public",
+  "messages",
+  "supabase",
+  "package.json",
+  "package-lock.json",
+  "AGENTS.md",
+  "next-env.d.ts",
+  "next.config.*",
+  "postcss.config.*",
+  "tailwind.config.*",
+  "eslint.config.*",
+  "playwright.config.ts",
+  "playwright.ux127-local.config.ts",
+  "tsconfig.json",
+];
+
+function sourceSnapshot() {
+  return {
+    sha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    dirty: execFileSync("git", ["status", "--porcelain", "--untracked-files=all", "--", ...sourcePaths], { encoding: "utf8" }).trim(),
+  };
+}
+
 async function geometry(page: Page) {
   return page.evaluate(() => {
     const box = (element: Element | null) => {
@@ -36,7 +63,9 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
     throw new Error("Configure the existing dev-only catalogue result delay in app and runner for observable pending; never use a Production delay.");
   }
   if (!(await isLocalDemoAppTarget(page, info.project.use.baseURL))) throw new Error("Refusing to change a content fixture outside verified local-demo mode.");
-  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const sourceAtStart = sourceSnapshot();
+  if (sourceAtStart.dirty) throw new Error("Catalog geometry evidence requires a clean tracked source/config tree.");
+  const testedSha = sourceAtStart.sha;
   const runId = process.env.UX127_RUN_ID?.trim() || `catalog-geometry-${testedSha.slice(0, 12)}-${randomUUID()}`;
   const browserDiagnostics = {
     runId,
@@ -49,6 +78,13 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
     catalogCaseResults: [] as Array<Record<string, unknown>>,
     unclassifiedRequestFailures: [] as Array<Record<string, unknown>>,
     serverErrors: [] as string[],
+    sourceIntegrity: null as null | {
+      testedSha: string;
+      finishedSha: string;
+      cleanAtStart: boolean;
+      cleanAtFinish: boolean;
+      matchesHead: boolean;
+    },
   };
   let currentCase = "setup";
   let currentPhase = "setup";
@@ -215,6 +251,14 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
     if (previous) fs.writeFileSync(filename, previous);
     else if (fs.existsSync(filename)) fs.unlinkSync(filename);
     release();
+    const sourceAtFinish = sourceSnapshot();
+    browserDiagnostics.sourceIntegrity = {
+      testedSha,
+      finishedSha: sourceAtFinish.sha,
+      cleanAtStart: true,
+      cleanAtFinish: !sourceAtFinish.dirty,
+      matchesHead: sourceAtFinish.sha === testedSha && !sourceAtFinish.dirty,
+    };
     for (const failure of browserDiagnostics.failedRequests) {
       const result = browserDiagnostics.catalogCaseResults.find((candidate) => candidate.case === failure.case);
       const queryRequests = browserDiagnostics.catalogRequests.filter((request) =>
@@ -266,4 +310,11 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
   expect(browserDiagnostics.pageErrors).toEqual([]);
   expect(browserDiagnostics.unclassifiedRequestFailures).toEqual([]);
   expect(browserDiagnostics.serverErrors).toEqual([]);
+  expect(browserDiagnostics.sourceIntegrity).toMatchObject({
+    testedSha: browserDiagnostics.testedSha,
+    finishedSha: browserDiagnostics.testedSha,
+    cleanAtStart: true,
+    cleanAtFinish: true,
+    matchesHead: true,
+  });
 });
