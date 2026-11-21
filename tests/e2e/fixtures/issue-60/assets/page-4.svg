@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1100" viewBox="0 0 800 1100">
+  <rect width="800" height="1100" fill="#e9f1dc"/><path d="M0 800 Q200 690 400 790 T800 790 V1100 H0Z" fill="#a5c49a"/>
+  <ellipse cx="400" cy="630" rx="185" ry="110" fill="#65aa78"/><circle cx="328" cy="510" r="59" fill="#79bd8c"/><circle cx="472" cy="510" r="59" fill="#79bd8c"/>
+  <circle cx="333" cy="505" r="14" fill="#203b32"/><circle cx="467" cy="505" r="14" fill="#203b32"/>
+  <path d="M330 418 L352 352 L391 404 L420 342 L450 404 L478 360 L491 430Z" fill="#e9b841" stroke="#8d6725" stroke-width="8"/>
+  <path d="M250 640 Q165 600 145 660 M550 640 Q635 600 655 660" fill="none" stroke="#477855" stroke-width="24" stroke-linecap="round"/>
+  <text x="400" y="930" text-anchor="middle" font-family="Georgia,serif" font-size="43" fill="#355d4a">A kind heart shines</text>
+</svg>

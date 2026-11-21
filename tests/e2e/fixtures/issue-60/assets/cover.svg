@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1100" viewBox="0 0 800 1100">
+  <rect width="800" height="1100" fill="#f8edcf"/>
+  <rect x="36" y="36" width="728" height="1028" rx="34" fill="#dce9d2" stroke="#355d4a" stroke-width="10"/>
+  <circle cx="400" cy="410" r="206" fill="#f2c55c"/>
+  <path d="M105 620 Q210 480 314 620 T523 620 T731 620 V900 H105Z" fill="#7f9f72"/>
+  <ellipse cx="402" cy="570" rx="145" ry="92" fill="#57976d"/>
+  <circle cx="350" cy="500" r="47" fill="#72b984"/><circle cx="454" cy="500" r="47" fill="#72b984"/>
+  <circle cx="350" cy="502" r="13" fill="#203b32"/><circle cx="454" cy="502" r="13" fill="#203b32"/>
+  <path d="M370 590 Q402 615 434 590" fill="none" stroke="#203b32" stroke-width="10" stroke-linecap="round"/>
+  <path d="M347 434 L364 393 L390 424 L414 385 L438 426 L463 397 L475 448Z" fill="#e9b841" stroke="#8d6725" stroke-width="7"/>
+  <text x="400" y="190" text-anchor="middle" font-family="Georgia,serif" font-size="59" font-weight="bold" fill="#284b3c">The Frog Prince</text>
+  <text x="400" y="985" text-anchor="middle" font-family="Georgia,serif" font-size="29" fill="#355d4a">A local storybook media fixture</text>
+</svg>

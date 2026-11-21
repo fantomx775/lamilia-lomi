@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1100" viewBox="0 0 800 1100">
+  <rect width="800" height="1100" fill="#fff8e7"/><path d="M0 760 Q170 650 340 760 T800 735 V1100 H0Z" fill="#bfd7b3"/>
+  <circle cx="620" cy="180" r="77" fill="#f2c55c"/><path d="M110 740 Q138 484 400 465 Q655 489 690 740Z" fill="#8f6b53"/>
+  <ellipse cx="400" cy="737" rx="258" ry="55" fill="#6c8c68"/><path d="M285 464 Q400 390 515 464" fill="none" stroke="#f0d9a4" stroke-width="18"/>
+  <text x="400" y="900" text-anchor="middle" font-family="Georgia,serif" font-size="43" fill="#355d4a">A quiet wishing well</text>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1100" viewBox="0 0 800 1100">
+  <rect width="800" height="1100" fill="#f8edcf"/><circle cx="400" cy="520" r="264" fill="#e7efd8"/>
+  <path d="M165 760 Q170 560 310 570 Q380 580 400 675 Q430 565 510 570 Q650 580 635 760Z" fill="#65aa78"/>
+  <circle cx="305" cy="552" r="40" fill="#79bd8c"/><circle cx="495" cy="552" r="40" fill="#79bd8c"/><circle cx="313" cy="548" r="11" fill="#203b32"/><circle cx="487" cy="548" r="11" fill="#203b32"/>
+  <path d="M280 810 Q400 900 520 810" fill="none" stroke="#d39832" stroke-width="13" stroke-linecap="round"/>
+  <text x="400" y="970" text-anchor="middle" font-family="Georgia,serif" font-size="43" fill="#355d4a">Friends keep their promises</text>
+</svg>

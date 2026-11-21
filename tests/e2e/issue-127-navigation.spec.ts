@@ -24,12 +24,21 @@ test("F04 tall card confirms a top-cover tap inside the visible cover", async ({
     const card = page.locator("article").filter({ has: page.locator("[data-product-card-title]") }).first();
     await expect(card).toBeVisible();
     const cover = card.locator("a > div").first();
-    await cover.evaluate((element) => element.scrollIntoView({ block: "start" }));
+    await cover.evaluate((element) => {
+      const headerBottom = document.querySelector("header")?.getBoundingClientRect().bottom ?? 64;
+      const desiredTop = headerBottom + 12;
+      window.scrollBy({ top: element.getBoundingClientRect().top - desiredTop, behavior: "instant" });
+    });
     const cardBox = await card.boundingBox();
+    const coverBoxBefore = await cover.boundingBox();
+    const headerBox = await page.getByRole("banner").boundingBox();
     expect(cardBox?.height).toBeGreaterThan(360);
+    expect(coverBoxBefore).not.toBeNull();
+    expect(headerBox).not.toBeNull();
+    expect(coverBoxBefore!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height);
     await page.screenshot({ path: info.outputPath("f04-before.png"), animations: "disabled" });
     const destination = await card.locator("a").getAttribute("href");
-    await card.locator("a").click({ position: { x: 30, y: 35 }, noWaitAfter: true });
+    await cover.click({ position: { x: 30, y: 35 }, noWaitAfter: true });
     const pending = card.getByTestId("product-card-pending");
     await expect(pending).toHaveAttribute("data-pending", "true");
     await expect(pending).toHaveCSS("opacity", "1");

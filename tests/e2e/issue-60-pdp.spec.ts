@@ -39,6 +39,8 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
   const failedResponses: { url: string; status: number }[] = [];
   const failedRequests: { url: string; error: string | null; disposition?: string; reason?: string }[] = [];
   let videoServer: Server | undefined;
+  let localMediaDirectory: string | undefined;
+  let ownsLocalMediaDirectory = false;
   const safeUrl = (url: string) => { const parsed = new URL(url); return parsed.origin + parsed.pathname; };
   page.on("console", message => { if (message.type() === "error") consoleErrors.push(message.text()); });
   page.on("pageerror", error => pageErrors.push(error.message));
@@ -61,24 +63,25 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
     product.productType="picture-book";
     const paragraphs=await page.evaluate(html=>[...new DOMParser().parseFromString(html,"text/html").querySelectorAll("p")].map(p=>p.textContent??""),frog.descriptionHtml);
     product.translations = [{locale:"en",title:frog.title,shortDescription:frog.shortDescription,longDescription:serializeRichTextDocument({type:"doc",content:paragraphs.map(text=>({type:"paragraph",content:[{type:"text",text}]}))})}];
-    // Keep original public bytes locally: Windows upstream requests in Next's image
-    // optimizer have a 7s deadline, shorter than these large source downloads.
-    // This exercises the real local image optimizer without mocking its responses.
-    const localMediaDirectory=path.resolve("public/uploads/issue-60-browser");
+    // Bundle all media locally so this functional test never depends on Production.
+    // The browser still loads the real local image and video endpoints.
+    const mediaRunId = `${runId}-${testInfo.project.name}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+    localMediaDirectory=path.resolve("public/uploads",`issue-60-browser-${mediaRunId}`);
+    if(fs.existsSync(localMediaDirectory)) throw new Error("The unique Issue 60 media fixture directory already exists.");
     fs.mkdirSync(localMediaDirectory,{recursive:true});
+    ownsLocalMediaDirectory=true;
     const localSources=new Map<string,string>();
+    const fixtureDirectory=path.resolve("tests/e2e/fixtures/issue-60/assets");
+    const localVideoFixture=path.resolve("tests/e2e/fixtures/issue-127/flower.mp4");
     for(const [index,source] of [frog.cover,...frog.images,...(frog.video?[frog.video]:[])].entries()) {
-      const name=`source-${index}.${index===frog.images.length+1?"mp4":"png"}`;
+      const name=`source-${index}.${index===frog.images.length+1?"mp4":"svg"}`;
       const destination=path.join(localMediaDirectory,name);
-      if(!fs.existsSync(destination)) {
-        const response=await fetch(source.path,{signal:AbortSignal.timeout(90_000)});
-        if(!response.ok) throw new Error(`Public fixture download returned ${response.status}`);
-        fs.writeFileSync(destination,Buffer.from(await response.arrayBuffer()));
-      }
-      localSources.set(source.path,`/uploads/issue-60-browser/${name}`);
+      const fixtureFile=index===frog.images.length+1?localVideoFixture:path.join(fixtureDirectory,index===0?"cover.svg":`page-${index}.svg`);
+      fs.copyFileSync(fixtureFile,destination);
+      localSources.set(source.path,`/uploads/${path.basename(localMediaDirectory)}/${name}`);
     }
     // The demo locale middleware does not expose .mp4 static paths. Serve the
-    // unchanged public video bytes on a temporary loopback origin with ranges.
+    // bundled video bytes on a temporary loopback origin with ranges.
     if(frog.video) {
       const file=path.join(localMediaDirectory,`source-${frog.images.length+1}.mp4`);
       const size=fs.statSync(file).size;
@@ -95,7 +98,7 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
       if(!address||typeof address==="string") throw new Error("Video fixture server did not bind a loopback port");
       localSources.set(frog.video.path,`http://127.0.0.1:${address.port}/video.mp4`);
     }
-    const asset = (id: string, kind: ProductAsset["kind"], source: {path:string;alt?:string;title?:string}, index: number): ProductAsset => ({id,productId:product.id,kind,bucket:"public-media",path:localSources.get(source.path)!,filename:source.alt??source.title??id,contentType:kind === "video" ? "video/mp4" : "image/png",sortOrder:index,isPublic:true,title:source.alt??source.title});
+    const asset = (id: string, kind: ProductAsset["kind"], source: {path:string;alt?:string;title?:string}, index: number): ProductAsset => ({id,productId:product.id,kind,bucket:"public-media",path:localSources.get(source.path)!,filename:source.alt??source.title??id,contentType:kind === "video" ? "video/mp4" : "image/svg+xml",sortOrder:index,isPublic:true,title:source.alt??source.title});
     product.assets = [asset("issue60-cover","cover",frog.cover,0),...frog.images.map((image,index)=>asset(`issue60-page-${index}`,"gallery",image,index))];
     product.coverAssetId = "issue60-cover";
     if (frog.video) { product.assets.push(asset("issue60-video","video",frog.video,0)); product.videoAssetId = "issue60-video"; }
@@ -154,7 +157,7 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
     await expect(dialog.getByText("4 of 5")).toBeVisible();
     await dialog.getByRole("button",{name:"Next image"}).click();
     await expect(dialog.getByText("5 of 5")).toBeVisible();
-    await expect.poll(()=>dialog.locator("img").evaluate(img=>(img as HTMLImageElement).naturalWidth),{timeout:45_000}).toBeGreaterThan(0);
+    await expect.poll(()=>dialog.locator('img[data-gallery-display][aria-hidden="false"]').evaluate(img=>(img as HTMLImageElement).naturalWidth),{timeout:45_000}).toBeGreaterThan(0);
     await shot("lightbox");
     await page.keyboard.press("ArrowRight");
     await expect(dialog.getByText("1 of 5")).toBeVisible();
@@ -230,6 +233,7 @@ test("Issue 60 compact PDP, complete gallery and rich-text disclosure", async ({
   } finally {
     videoServer?.closeAllConnections();
     if(videoServer) await new Promise<void>((resolve,reject)=>videoServer!.close(error=>error?reject(error):resolve()));
+    if(ownsLocalMediaDirectory && localMediaDirectory) fs.rmSync(localMediaDirectory,{recursive:true,force:true});
     fs.mkdirSync(directory,{recursive:true});
     fs.writeFileSync(path.join(directory,`diagnostics-${testInfo.project.name}.json`),JSON.stringify({runId,consoleErrors,pageErrors,failedResponses,failedRequests},null,2));
     if(original) fs.writeFileSync(store,original); else if(fs.existsSync(store)) fs.unlinkSync(store);
