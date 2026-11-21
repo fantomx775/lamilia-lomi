@@ -20,8 +20,9 @@ export async function observeOwnedMediaCdp(page: Page, ownedPaths: string[], rec
   session.on("Network.responseReceived", (event) => {
     const value = owned.get(event.requestId);
     if (value) receive({ event: "cdp-response", requestId: event.requestId, ...value, timestamp: event.timestamp, status: event.response.status,
-      contentRange: numericRange(header(event.response.headers, "content-range"), true), fromDiskCache: !!event.response.fromDiskCache,
-      fromServiceWorker: !!event.response.fromServiceWorker });
+      contentRange: numericRange(header(event.response.headers, "content-range"), true), fromDiskCache: event.response.fromDiskCache,
+      fromServiceWorker: event.response.fromServiceWorker, fromPrefetchCache: event.response.fromPrefetchCache,
+      fromEarlyHints: event.response.fromEarlyHints });
   });
   session.on("Network.dataReceived", (event) => {
     const value = owned.get(event.requestId);

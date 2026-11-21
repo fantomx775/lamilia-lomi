@@ -288,7 +288,11 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
           env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
         });
       }
-      for (const id of products) expect((await service.from("products").delete().eq("id", id)).error).toBeNull();
+      for (const id of products) {
+        const deleted = await service.from("products").delete().eq("id", id).select("id");
+        expect(deleted.error).toBeNull();
+        expect(deleted.data?.map((row) => row.id)).toEqual([id]);
+      }
       for (const id of users) {
         const existing = await service.auth.admin.getUserById(id);
         if (existing.error?.code === "user_not_found") continue;

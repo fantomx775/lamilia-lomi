@@ -11,7 +11,7 @@ function proof() {
   const failed = { ...request(2, 1100), error: "net::ERR_ABORTED", failedAtEpochMs: 1200, expectedPause: false, expectedFault: false, pauseGateRequest: false, pauseRequestedAtFailure: false, redirectChain: [parent] };
   const tail = { ...request(3, 1280), allHeadersRange: "bytes=350-", contentRange: "bytes 350-999/1000", identitySample: { ...identity, sampledAtEpochMs: 1290 }, terminal: "finished", finishedAtEpochMs: 1320, responseBodyBytes: 650 };
   const event = (event: string, at: number) => ({ ...identity, event, atEpochMs: at, sourcePath: api, trusted: true, connected: true, paused: true, preload: "metadata", networkState: 1, readyState: 4, mediaErrorPresent: false, errorCode: 0, mediaTime: -1, currentTime: 0 });
-  const cdp = (event: string, requestId = "cdp-1", hash = b) => ({ event, requestId, urlSha256: hash, sourceIndex: 1, receivedDataBytes: 0, timestamp: 11.1, wallTime: 1.1, loaderId: "loader-1", frameId: "frame-1", range: "bytes=0-", redirectStatus: 307, canceled: false, category: "", status: 206, contentRange: "bytes 0-999/1000", fromServiceWorker: false, fromDiskCache: false });
+  const cdp = (event: string, requestId = "cdp-1", hash = b) => ({ event, requestId, urlSha256: hash, sourceIndex: 1, receivedDataBytes: 0, timestamp: 11.1, wallTime: 1.1, loaderId: "loader-1", frameId: "frame-1", range: "bytes=0-", redirectStatus: 307, canceled: false, category: "", status: 206, contentRange: "bytes 0-999/1000", fromServiceWorker: false, fromDiskCache: false, fromPrefetchCache: false, fromEarlyHints: false });
   return {
     cdpStatus: "OBSERVING", observerErrors: [], consoleErrors: [], pageErrors: [], ownedMedia: { apiPath: api, storagePath: storage },
     failed: [failed], mediaRequests: [parent, request(2, 1100), tail], successfulMedia: [tail], lifecycleActions: [] as Array<{ action: string; atEpochMs: number }>,
@@ -47,6 +47,8 @@ const negative: Array<[string, (d: Proof) => void]> = [
   ["incomplete tail", d => { d.successfulMedia[0].responseBodyBytes--; }],
   ["no CDP finished tail", d => { d.cdpMedia = d.cdpMedia.filter(e => e.event !== "cdp-finished"); }],
   ["different loader", d => { d.cdpMedia.find(e => e.event === "cdp-request" && e.requestId === "cdp-2")!.loaderId = "other"; }],
+  ["prefetch cache source", d => { d.cdpMedia.find(e => e.event === "cdp-response" && e.requestId === "cdp-1")!.fromPrefetchCache = true; }],
+  ["unknown prefetch-cache source", d => { Reflect.deleteProperty(d.cdpMedia.find(e => e.event === "cdp-response" && e.requestId === "cdp-1")!, "fromPrefetchCache"); }],
   ["no decoded advance", d => { d.nativeTimeline.at(-1)!.currentTime = 0; }],
   ["WebKit without CDP", d => { d.cdpStatus = "NOT_APPLICABLE"; d.cdpMedia = []; }],
 ];

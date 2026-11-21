@@ -30,6 +30,7 @@ const snapshotSchema = z.object({
     receivedDataBytes: n, timestamp: n, wallTime: n.optional(), loaderId: z.string().optional(), frameId: z.string().nullable().optional(),
     range: z.string().nullable().optional(), redirectStatus: n.nullable().optional(), canceled: z.boolean().optional(), category: z.string().optional(),
     status: n.optional(), contentRange: z.string().nullable().optional(), fromServiceWorker: z.boolean().optional(), fromDiskCache: z.boolean().optional(),
+    fromPrefetchCache: z.boolean().optional(), fromEarlyHints: z.boolean().optional(),
   })),
 });
 
@@ -64,7 +65,7 @@ export function classifyOwnedMetadataResume(input: unknown, requestId: number, f
   const response = d.cdpMedia.filter(e => e.requestId === c.requestId && e.urlSha256 === r.urlSha256 && e.event === 'cdp-response');
   if (canceled.length !== 1 || response.length !== 1) return no('missing-cdp-terminal-or-response');
   const cancel = canceled[0];
-  if (!cancel.canceled || cancel.category !== 'net::ERR_ABORTED' || response[0].status !== 206 || response[0].contentRange !== r.contentRange || response[0].fromServiceWorker || response[0].fromDiskCache || !(cancel.receivedDataBytes > 0 && cancel.receivedDataBytes < fixtureBytes)) return no('not-observed-partial-browser-cancel');
+  if (!cancel.canceled || cancel.category !== 'net::ERR_ABORTED' || response[0].status !== 206 || response[0].contentRange !== r.contentRange || response[0].fromServiceWorker !== false || response[0].fromDiskCache !== false || response[0].fromPrefetchCache !== false || !(cancel.receivedDataBytes > 0 && cancel.receivedDataBytes < fixtureBytes)) return no('not-observed-partial-browser-cancel');
   // CDP actual cancellation precedes the host requestfailed callback. Do not conflate the two clocks.
   const cancelEpoch = c.wallTime*1000+(cancel.timestamp-c.timestamp)*1000;
   const events = d.nativeTimeline.filter(e => same(e) && e.sourcePath === api);
@@ -94,7 +95,7 @@ export function classifyOwnedMetadataResume(input: unknown, requestId: number, f
     const resume = uniqueCdpRequest(tail.urlSha256,tail.startedAtEpochMs); if(resume.length !== 1) return false;
     const q=resume[0];
     const responses=d.cdpMedia.filter(e=>e.event==='cdp-response'&&e.requestId===q.requestId&&e.urlSha256===r.urlSha256);
-    if(responses.length!==1||responses[0].status!==206||responses[0].contentRange!==tail.contentRange||responses[0].fromServiceWorker)return false;
+    if(responses.length!==1||responses[0].status!==206||responses[0].contentRange!==tail.contentRange||responses[0].fromServiceWorker!==false||responses[0].fromDiskCache!==false||responses[0].fromPrefetchCache!==false)return false;
     return q.loaderId===c.loaderId && q.frameId===c.frameId && q.range===tail.allHeadersRange && d.cdpMedia.some(e=>e.event==='cdp-finished'&&e.requestId===q.requestId&&e.urlSha256===r.urlSha256&&e.receivedDataBytes===fixtureBytes-offset) && !d.cdpMedia.some(e=>e.event==='cdp-failed'&&e.requestId===q.requestId);
   });
   if (!recovered) return no('no-exact-successful-resume-tail');
