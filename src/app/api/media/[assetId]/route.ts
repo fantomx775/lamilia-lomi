@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 import { hasAdminAccess } from "@/lib/auth";
 import { getBackendMode } from "@/lib/config";
@@ -112,43 +113,53 @@ export async function GET(request: Request, { params }: Props) {
       : null;
     if (
       !isPathInsideDirectory(publicRoot, filePath) ||
-      (expectedUploadDirectory && !isPathInsideDirectory(expectedUploadDirectory, filePath)) ||
-      !fs.existsSync(filePath)
+      (expectedUploadDirectory && !isPathInsideDirectory(expectedUploadDirectory, filePath))
     ) {
       return notFoundMediaResponse();
     }
 
-    const bytes = fs.readFileSync(filePath);
-    const range = parseByteRange(request.headers.get("range"), bytes.byteLength);
+    let fileSize: number;
+    try {
+      fileSize = fs.statSync(filePath).size;
+    } catch {
+      return notFoundMediaResponse();
+    }
+    const range = parseByteRange(request.headers.get("range"), fileSize);
     if (range.kind === "unsatisfiable") {
       return new NextResponse(null, {
         status: 416,
         headers: {
           "Accept-Ranges": "bytes",
-          "Content-Range": `bytes */${bytes.byteLength}`,
+          "Content-Range": `bytes */${fileSize}`,
           "Cache-Control": "no-store",
         },
       });
     }
 
-    const selectedBytes = range.kind === "range"
-      ? bytes.subarray(range.start, range.end + 1)
-      : bytes;
+    const contentLength = range.kind === "range" ? range.end - range.start + 1 : fileSize;
     const headers = new Headers({
       "Content-Type": asset.contentType,
-      "Content-Length": String(selectedBytes.byteLength),
+      "Content-Length": String(contentLength),
       "Accept-Ranges": "bytes",
       "Cache-Control": requestedVersion === null
         ? "public, max-age=31536000, immutable"
         : "public, max-age=60, s-maxage=60",
     });
     if (range.kind === "range") {
-      headers.set("Content-Range", `bytes ${range.start}-${range.end}/${bytes.byteLength}`);
+      headers.set("Content-Range", `bytes ${range.start}-${range.end}/${fileSize}`);
     }
     if (isDownload) {
       headers.set("Content-Disposition", `attachment; filename="${safeFilename(asset.filename)}"`);
     }
-    return new NextResponse(selectedBytes, { status: range.kind === "range" ? 206 : 200, headers });
+    const fileStream = fs.createReadStream(
+      filePath,
+      range.kind === "range" ? { start: range.start, end: range.end } : undefined,
+    );
+    const body = Readable.toWeb(fileStream) as unknown as BodyInit;
+    return new NextResponse(body, {
+      status: range.kind === "range" ? 206 : 200,
+      headers,
+    });
   }
 
   if (!isMediaKind(asset.kind) || asset.bucket !== mediaBucketForKind(asset.kind)) {

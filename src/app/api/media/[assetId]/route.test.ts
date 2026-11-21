@@ -72,6 +72,8 @@ describe("public media delivery", () => {
     const bytes = Buffer.from("0123456789abcdef");
     fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(filePath, bytes, { flag: "wx" });
+    const createReadStream = vi.spyOn(fs, "createReadStream");
+    const readFileSync = vi.spyOn(fs, "readFileSync");
     try {
       mocks.getBackendMode.mockReturnValue("local");
       mocks.getAssetByIdForRequest.mockResolvedValue({
@@ -98,6 +100,8 @@ describe("public media delivery", () => {
       expect(response.headers.get("content-range")).toBe("bytes 4-9/16");
       expect(response.headers.get("content-length")).toBe("6");
       expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes.subarray(4, 10));
+      expect(createReadStream).toHaveBeenCalledWith(filePath, { start: 4, end: 9 });
+      expect(readFileSync).not.toHaveBeenCalled();
 
       const unsatisfiable = await GET(new Request(`https://lamilialomi.com/api/media/${assetId}`, {
         headers: { Range: "bytes=16-" },
@@ -105,6 +109,8 @@ describe("public media delivery", () => {
       expect(unsatisfiable.status).toBe(416);
       expect(unsatisfiable.headers.get("content-range")).toBe("bytes */16");
     } finally {
+      createReadStream.mockRestore();
+      readFileSync.mockRestore();
       fs.rmSync(filePath, { force: true });
     }
   });
