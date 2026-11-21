@@ -35,7 +35,10 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
     consoleErrors: [] as string[],
     pageErrors: [] as string[],
     failedRequests: [] as Array<Record<string, unknown>>,
-    expectedCancellations: [] as Array<Record<string, unknown>>,
+    committedRouteCancellations: [] as Array<Record<string, unknown>>,
+    catalogRequests: [] as Array<Record<string, unknown>>,
+    catalogCaseResults: [] as Array<Record<string, unknown>>,
+    unclassifiedRequestFailures: [] as Array<Record<string, unknown>>,
     serverErrors: [] as string[],
   };
   let currentCase = "setup";
@@ -48,37 +51,41 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
   page.on("request", (request) => {
     const url = new URL(request.url());
     const headers = request.headers();
-    requestMetadata.set(request, {
+    const metadata: Record<string, unknown> = {
       case: currentCase,
       phase: currentPhase,
       method: request.method(),
       pathname: url.pathname,
       hasSearchQuery: url.searchParams.has("q"),
+      searchQuery: url.searchParams.get("q"),
       resourceType: request.resourceType(),
       isNavigationRequest: request.isNavigationRequest(),
       isRscRequest: headers.rsc === "1",
-    });
+      isPrefetchRequest: headers["next-router-prefetch"] === "1",
+      isHmrRefresh: headers["next-hmr-refresh"] === "1",
+    };
+    requestMetadata.set(request, metadata);
+    if (metadata.pathname === "/en/products" && metadata.hasSearchQuery && metadata.isRscRequest) {
+      browserDiagnostics.catalogRequests.push(metadata);
+    }
+  });
+  page.on("response", (response) => {
+    const metadata = requestMetadata.get(response.request());
+    if (metadata) Object.assign(metadata, { responseStatus: response.status(), contentType: response.headers()["content-type"] ?? null });
+  });
+  page.on("requestfinished", (request) => {
+    const metadata = requestMetadata.get(request);
+    if (metadata) metadata.finished = true;
   });
   page.on("requestfailed", (request) => {
     const metadata = requestMetadata.get(request) ?? {};
     const failure = request.failure()?.errorText ?? "request failed";
-    const isSupersededCatalogTransition =
-      failure === "net::ERR_ABORTED" &&
-      metadata.phase === "catalog-submit" &&
-      metadata.method === "GET" &&
-      metadata.pathname === "/en/products" &&
-      metadata.hasSearchQuery === true &&
-      metadata.resourceType === "fetch" &&
-      metadata.isNavigationRequest === false &&
-      metadata.isRscRequest === true &&
-      currentPhase === "navigation" &&
-      currentCase !== metadata.case;
-    const outcome = { ...metadata, failure };
-    if (isSupersededCatalogTransition) {
-      browserDiagnostics.expectedCancellations.push({ ...outcome, supersededBy: currentCase });
-    } else {
-      browserDiagnostics.failedRequests.push(outcome);
-    }
+    browserDiagnostics.failedRequests.push({
+      ...metadata,
+      failure,
+      observedDuring: { case: currentCase, phase: currentPhase },
+      urlAtFailure: page.url(),
+    });
   });
   page.on("response", (response) => {
     if (response.status() >= 500) {
@@ -92,9 +99,9 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
   try {
     for (const categoryCount of [0, 1, 7]) for (const desktopColumns of [3, 4, 5] as const) {
       const snapshot = getSeedContentSnapshot();
-      snapshot.products = snapshot.products.slice(0, 1);
+      snapshot.products = snapshot.products.slice(0, 2);
       snapshot.categories = Array.from({ length: categoryCount }, (_, index) => ({ id: `ux127-category-${index}`, slug: `ux127-category-${index}`, sortOrder: index, translations: [{ locale: "en", name: `Category ${index + 1}` }] }));
-      snapshot.products[0].categoryIds = snapshot.categories.slice(0, 1).map((item) => item.id);
+      for (const product of snapshot.products) product.categoryIds = snapshot.categories.slice(0, 1).map((item) => item.id);
       snapshot.catalogSettings.desktopColumns = desktopColumns;
       fs.mkdirSync(path.dirname(filename), { recursive: true });
       fs.writeFileSync(filename, JSON.stringify(snapshot), "utf8");
@@ -104,7 +111,9 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         await page.setViewportSize({ width, height: 1000 });
         await page.goto(`/en/products?ux127case=${categoryCount}-${desktopColumns}-${width}`, { waitUntil: "commit" });
         await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
-        await expect(page.getByTestId("product-catalog-grid")).toBeVisible();
+        const grid = page.getByTestId("product-catalog-grid");
+        await expect(grid).toBeVisible();
+        await expect(grid.locator("article")).toHaveCount(2);
         await expect(page.getByTestId("catalog-category-list")).toHaveCount(categoryCount ? 1 : 0);
         if (categoryCount) await expect(page.locator('[data-testid^="catalog-category-ux127-category-"]')).toHaveCount(categoryCount);
         await page.evaluate(() => document.fonts.ready);
@@ -119,16 +128,24 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         // Native documents resolve critical content before sending it. Enhanced
         // GET transitions keep the actual result grid and shell while pending.
         const form = page.getByTestId(width < 768 ? "catalog-mobile-search" : "catalog-desktop-filters");
-        const productTitle = snapshot.products[0].translations.find((item) => item.locale === "en")!.title;
-        await form.getByRole("textbox", { name: "Search catalog" }).fill(productTitle);
+        const initialProductTitle = snapshot.products[0].translations.find((item) => item.locale === "en")!.title;
+        const productTitle = snapshot.products[1].translations.find((item) => item.locale === "en")!.title;
+        await expect(grid).toContainText(initialProductTitle);
+        await expect(grid).toContainText(productTitle);
+        const searchInput = form.getByRole("textbox", { name: "Search catalog" });
+        await searchInput.fill(productTitle);
         const submitted = await geometry(page);
+        const pendingIndicator = form.locator('[data-catalog-form-pending="true"]');
         currentPhase = "catalog-submit";
-        await form.getByRole("textbox", { name: "Search catalog" }).press("Enter");
-        await expect(form.locator('[data-catalog-form-pending="true"]')).toBeVisible();
+        const pendingFeedback = expect(pendingIndicator).toBeVisible();
         const results = page.getByTestId("catalog-results-region");
-        await expect(results).toHaveAttribute("aria-busy", "true");
-        const grid = page.getByTestId("product-catalog-grid");
+        const busyFeedback = expect(results).toHaveAttribute("aria-busy", "true");
+        await searchInput.press("Enter");
+        await Promise.all([pendingFeedback, busyFeedback]);
+        currentPhase = "catalog-pending";
         await expect(grid).toBeVisible();
+        await expect(grid.locator("article")).toHaveCount(2);
+        await expect(grid).toContainText(initialProductTitle);
         await expect(grid).toContainText(productTitle);
         await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
         const pending = await geometry(page);
@@ -139,10 +156,15 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
           caret: "initial",
           style: "nextjs-portal { display: none !important; }",
         });
+        await expect(results).not.toHaveAttribute("aria-busy", "true");
+        await expect(pendingIndicator).toHaveCount(0);
         await expect(grid).toBeVisible();
+        await expect(grid.locator("article")).toHaveCount(1);
         await expect(grid).toContainText(productTitle);
+        await expect(grid).not.toContainText(initialProductTitle);
         await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
-        await expect(form.getByRole("textbox", { name: "Search catalog" })).toBeFocused();
+        await expect(searchInput).toBeFocused();
+        currentPhase = "catalog-settled";
         const final = await geometry(page);
         sameGeometry(pending, final);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -154,14 +176,75 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         });
         await info.attach(`${phase}-bounds.json`, { body: JSON.stringify({ before, submitted, pending, final }), contentType: "application/json" });
         await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
-        await expect(results).not.toHaveAttribute("aria-busy", "true");
-        await expect(form.locator('[data-catalog-form-pending="true"]')).toHaveCount(0);
+        const finalUrl = new URL(page.url());
+        const queryResultCommitted =
+          finalUrl.pathname === "/en/products" &&
+          finalUrl.searchParams.get("q") === productTitle &&
+          await grid.locator("article").count() === 1 &&
+          await grid.getByText(productTitle, { exact: true }).count() > 0 &&
+          await grid.getByText(initialProductTitle, { exact: true }).count() === 0 &&
+          !(await results.getAttribute("aria-busy"));
+        browserDiagnostics.catalogCaseResults.push({
+          case: currentCase,
+          pathname: finalUrl.pathname,
+          searchQuery: finalUrl.searchParams.get("q"),
+          queryResultCommitted,
+          resultArticleCount: await grid.locator("article").count(),
+          searchedProductVisible: (await grid.getByText(productTitle, { exact: true }).count()) > 0,
+          initialProductAbsent: (await grid.getByText(initialProductTitle, { exact: true }).count()) === 0,
+          resultsBusy: await results.getAttribute("aria-busy"),
+        });
+        expect(finalUrl.pathname).toBe("/en/products");
+        expect(finalUrl.searchParams.get("q")).toBe(productTitle);
+        expect(queryResultCommitted).toBe(true);
       }
     }
   } finally {
     if (previous) fs.writeFileSync(filename, previous);
     else if (fs.existsSync(filename)) fs.unlinkSync(filename);
     release();
+    for (const failure of browserDiagnostics.failedRequests) {
+      const result = browserDiagnostics.catalogCaseResults.find((candidate) => candidate.case === failure.case);
+      const queryRequests = browserDiagnostics.catalogRequests.filter((request) =>
+        request.case === failure.case && request.searchQuery === failure.searchQuery,
+      );
+      const observedDuring = failure.observedDuring as { case?: unknown; phase?: unknown } | undefined;
+      const isCommittedCatalogRscCancellation =
+        failure.failure === "net::ERR_ABORTED" &&
+        failure.phase === "catalog-submit" &&
+        failure.method === "GET" &&
+        failure.pathname === "/en/products" &&
+        failure.hasSearchQuery === true &&
+        typeof failure.searchQuery === "string" &&
+        failure.resourceType === "fetch" &&
+        failure.isNavigationRequest === false &&
+        failure.isRscRequest === true &&
+        failure.isPrefetchRequest === false &&
+        failure.isHmrRefresh === false &&
+        failure.responseStatus === 200 &&
+        failure.contentType === "text/x-component" &&
+        observedDuring?.case === failure.case &&
+        observedDuring?.phase === "catalog-pending" &&
+        queryRequests.length === 1 &&
+        result?.queryResultCommitted === true &&
+        result.searchQuery === failure.searchQuery;
+      if (!result || !isCommittedCatalogRscCancellation) {
+        browserDiagnostics.unclassifiedRequestFailures.push(failure);
+        continue;
+      }
+      browserDiagnostics.committedRouteCancellations.push({
+        ...failure,
+        disposition: "query-result-committed",
+        resultEvidence: {
+          query: result.searchQuery,
+          articleCount: result.resultArticleCount,
+          searchedProductVisible: result.searchedProductVisible,
+          initialProductAbsent: result.initialProductAbsent,
+          resultsBusy: result.resultsBusy,
+        },
+        reason: "The browser reported an aborted RSC response, and the same case then committed this exact query, rendered its unique seeded product, removed the initial product, and cleared pending state. No other request failure is classified by this rule.",
+      });
+    }
     await info.attach("browser-diagnostics.json", {
       body: JSON.stringify(browserDiagnostics, null, 2),
       contentType: "application/json",
@@ -169,6 +252,6 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
   }
   expect(browserDiagnostics.consoleErrors).toEqual([]);
   expect(browserDiagnostics.pageErrors).toEqual([]);
-  expect(browserDiagnostics.failedRequests).toEqual([]);
+  expect(browserDiagnostics.unclassifiedRequestFailures).toEqual([]);
   expect(browserDiagnostics.serverErrors).toEqual([]);
 });
