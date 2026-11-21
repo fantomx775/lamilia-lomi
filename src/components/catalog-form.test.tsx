@@ -47,7 +47,7 @@ describe("progressively enhanced catalog GET", () => {
     expect(input).toHaveFocus(); expect(input).toHaveValue("Earlier search");
   });
   it("server-renders the native action, usable fields and real results without a streamed fallback", () => {
-    const html = renderToStaticMarkup(<CatalogNavigationProvider><CatalogForm action="/en/products"><input name="q" defaultValue="Garden" /><CatalogSubmitButton>Search</CatalogSubmitButton></CatalogForm><CatalogResults desktopColumns={3}><div data-testid="actual-result">Garden book</div></CatalogResults></CatalogNavigationProvider>);
+    const html = renderToStaticMarkup(<CatalogNavigationProvider><CatalogForm action="/en/products"><input name="q" defaultValue="Garden" /><CatalogSubmitButton>Search</CatalogSubmitButton></CatalogForm><CatalogResults><div data-testid="actual-result">Garden book</div></CatalogResults></CatalogNavigationProvider>);
     expect(html).toContain('action="/en/products"');
     expect(html).toContain('name="q" value="Garden"');
     expect(html).toContain('data-testid="actual-result"');
