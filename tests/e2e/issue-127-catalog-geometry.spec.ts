@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { getSeedContentSnapshot } from "../../src/lib/local-content";
@@ -29,9 +31,16 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
   test.skip(process.env.RUN_ISSUE_127_CATALOG_GEOMETRY_E2E !== "1", "Requires exclusive verified local-demo dev app with catalogue result delay enabled.");
   test.setTimeout(240_000);
   if (info.config.workers !== 1) throw new Error("Catalog fixture requires --workers=1.");
-  if (Number(process.env.LAMILIA_TEST_CATALOG_LOADING_DELAY_MS) < 1000) throw new Error("Configure the existing dev-only catalogue result delay in app and runner for observable pending; never use a Production delay.");
+  const loadingDelayMs = Number(process.env.LAMILIA_TEST_CATALOG_LOADING_DELAY_MS);
+  if (!Number.isSafeInteger(loadingDelayMs) || loadingDelayMs < 1000) {
+    throw new Error("Configure the existing dev-only catalogue result delay in app and runner for observable pending; never use a Production delay.");
+  }
   if (!(await isLocalDemoAppTarget(page, info.project.use.baseURL))) throw new Error("Refusing to change a content fixture outside verified local-demo mode.");
+  const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const runId = process.env.UX127_RUN_ID?.trim() || `catalog-geometry-${testedSha.slice(0, 12)}-${randomUUID()}`;
   const browserDiagnostics = {
+    runId,
+    testedSha,
     consoleErrors: [] as string[],
     pageErrors: [] as string[],
     failedRequests: [] as Array<Record<string, unknown>>,
@@ -174,7 +183,10 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
           caret: "initial",
           style: "nextjs-portal { display: none !important; }",
         });
-        await info.attach(`${phase}-bounds.json`, { body: JSON.stringify({ before, submitted, pending, final }), contentType: "application/json" });
+        await info.attach(`${phase}-bounds.json`, {
+          body: JSON.stringify({ runId, testedSha, case: currentCase, before, submitted, pending, final }),
+          contentType: "application/json",
+        });
         await expect(page.getByTestId("product-catalog-opening")).toHaveCount(0);
         const finalUrl = new URL(page.url());
         const queryResultCommitted =
