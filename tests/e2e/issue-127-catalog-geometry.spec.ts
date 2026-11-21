@@ -44,7 +44,9 @@ async function geometry(page: Page) {
       return { x: value.x, y: value.y, width: value.width, height: value.height };
     };
     const visibleControls = [...document.querySelectorAll('[data-testid="catalog-mobile-search"],[data-testid="catalog-desktop-filters"]')].find((element) => element.getBoundingClientRect().height > 0);
-    return { heading: box(document.querySelector('[data-testid="catalog-heading"]')), categories: box(document.querySelector('[aria-label="Categories"]')), controls: box(visibleControls ?? null), cover: box(document.querySelector('[data-testid="catalog-result-skeleton-cover"]') ?? document.querySelector('[data-testid="product-catalog-grid"] article a > div')) };
+    const grid = document.querySelector('[data-testid="product-catalog-grid"]');
+    const gridColumns = grid ? getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length : null;
+    return { heading: box(document.querySelector('[data-testid="catalog-heading"]')), categories: box(document.querySelector('[aria-label="Categories"]')), controls: box(visibleControls ?? null), cover: box(document.querySelector('[data-testid="catalog-result-skeleton-cover"]') ?? grid?.querySelector('article a > div') ?? null), gridColumns };
   });
 }
 function sameGeometry(before: Awaited<ReturnType<typeof geometry>>, after: Awaited<ReturnType<typeof geometry>>) {
@@ -163,6 +165,8 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         if (categoryCount) await expect(page.locator('[data-testid^="catalog-category-ux127-category-"]')).toHaveCount(categoryCount);
         await page.evaluate(() => document.fonts.ready);
         const before = await geometry(page);
+        const expectedGridColumns = width >= 1280 ? desktopColumns : width >= 1024 ? 3 : width >= 640 ? 2 : 1;
+        expect(before.gridColumns, `configured catalog columns at ${width}px`).toBe(expectedGridColumns);
         const phase = `r5-c${categoryCount}-cols${desktopColumns}-w${width}`;
         await page.screenshot({
           path: info.outputPath(`${phase}-before.png`),
@@ -180,6 +184,7 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         const searchInput = form.getByRole("textbox", { name: "Search catalog" });
         await searchInput.fill(productTitle);
         const submitted = await geometry(page);
+        expect(submitted.gridColumns, `catalog columns while submitting at ${width}px`).toBe(expectedGridColumns);
         const pendingIndicator = form.locator('[data-catalog-form-pending="true"]');
         currentPhase = "catalog-submit";
         const pendingFeedback = expect(pendingIndicator).toBeVisible();
@@ -194,6 +199,7 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         await expect(grid).toContainText(productTitle);
         await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
         const pending = await geometry(page);
+        expect(pending.gridColumns, `catalog columns while pending at ${width}px`).toBe(expectedGridColumns);
         sameGeometry(submitted, pending);
         await page.screenshot({
           path: info.outputPath(`${phase}-pending.png`),
@@ -211,6 +217,7 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         await expect(searchInput).toBeFocused();
         currentPhase = "catalog-settled";
         const final = await geometry(page);
+        expect(final.gridColumns, `catalog columns after query at ${width}px`).toBe(expectedGridColumns);
         sameGeometry(pending, final);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         await page.screenshot({
