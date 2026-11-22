@@ -68,6 +68,11 @@ describe("flip-through recovery", () => {
     fireEvent.loadedData(video);
     expect(container.querySelector('img[aria-hidden="true"]')).not.toBeNull();
     fireEvent.playing(video);
+    // WebKit can emit `playing` before the native timeline advances. Keep the
+    // cover visible until a real timeupdate confirms the first decoded motion.
+    expect(container.querySelector('img[aria-hidden="true"]')).not.toBeNull();
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 0.1 });
+    fireEvent.timeUpdate(video);
     expect(container.querySelector('img[aria-hidden="true"]')).toBeNull();
     fireEvent.waiting(video);
     expect(screen.getByRole("status")).toHaveTextContent("Preparing video");
