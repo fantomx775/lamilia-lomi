@@ -35,9 +35,15 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
       resourceType: string;
       isNavigationRequest: boolean;
       hasNextActionHeader: boolean;
+      phase: string;
+      responseStatus?: number;
     }>,
     failedResponses: [] as Array<{ method: string; url: string; status: number }>,
   };
+  const actionRequestEvidence: Array<{ method: string; url: string; phase: string; status?: number; terminal?: string }> = [];
+  const actionRequests = new WeakMap<import("@playwright/test").Request, (typeof actionRequestEvidence)[number]>();
+  let diagnosticPhase = "initialization";
+  let verifiedProductSave = false;
   const readerArtworkRequests = new Set<import("@playwright/test").Request>();
   const readerArtworkStatuses = new Map<import("@playwright/test").Request, number>();
   let readerArtworkEndpoint = "";
@@ -49,6 +55,8 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
   page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
   page.on("requestfailed", (request) => {
     const failure = request.failure()?.errorText ?? null;
+    const actionEvidence = actionRequests.get(request);
+    if (actionEvidence) actionEvidence.terminal = `failed:${failure ?? "unknown"}`;
     diagnostics.failedNetworkRequests.push({
       method: request.method(),
       url: safeUrl(request.url()),
@@ -56,22 +64,33 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
       resourceType: request.resourceType(),
       isNavigationRequest: request.isNavigationRequest(),
       hasNextActionHeader: Boolean(request.headers()["next-action"]),
+      phase: actionEvidence?.phase ?? diagnosticPhase,
+      responseStatus: actionEvidence?.status,
     });
     if (request.method() === "GET" && new URL(request.url()).pathname === readerArtworkEndpoint) {
       readerArtworkRequests.delete(request);
     }
   });
   page.on("request", (request) => {
+    if (request.headers()["next-action"]) {
+      const evidence = { method: request.method(), url: safeUrl(request.url()), phase: diagnosticPhase };
+      actionRequestEvidence.push(evidence);
+      actionRequests.set(request, evidence);
+    }
     if (readerArtworkEndpoint && request.method() === "GET" && new URL(request.url()).pathname === readerArtworkEndpoint) {
       readerArtworkRequests.add(request);
     }
   });
   page.on("requestfinished", (request) => {
+    const actionEvidence = actionRequests.get(request);
+    if (actionEvidence) actionEvidence.terminal = "finished";
     if (request.method() === "GET" && new URL(request.url()).pathname === readerArtworkEndpoint) {
       readerArtworkRequests.delete(request);
     }
   });
   page.on("response", (response) => {
+    const actionEvidence = actionRequests.get(response.request());
+    if (actionEvidence) actionEvidence.status = response.status();
     if (response.request().method() === "GET" && new URL(response.url()).pathname === readerArtworkEndpoint) {
       readerArtworkStatuses.set(response.request(), response.status());
     }
@@ -88,14 +107,17 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await page.addInitScript(() => {
       window.localStorage.setItem("ll_cookie_consent", JSON.stringify({ essential: true, analytics: false }));
     });
+    diagnosticPhase = "admin login";
     await signInAsAdmin(page);
 
+    diagnosticPhase = "open product list";
     await page.goto("/admin/products");
     await waitForDocumentFonts(page);
     const firstProductLink = page.locator('a[href^="/admin/products/"]:not([href="/admin/products/new"])').first();
     const productPath = await firstProductLink.getAttribute("href");
     if (!productPath) throw new Error("The local product list did not provide an edit link.");
     readerArtworkEndpoint = `/api/admin/products/${productPath.split("/").at(-1)}/reader-artworks`;
+    diagnosticPhase = "open product editor";
     await page.goto(productPath);
     await waitForDocumentFonts(page);
     const readerArtworkManager = page.getByTestId("reader-artwork-manager");
@@ -119,6 +141,7 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
       const request = response.request();
       return request.method() === "POST" && new URL(response.url()).pathname === productPath;
     });
+    diagnosticPhase = "save product editor";
     await page.getByRole("button", { name: /Zapisz/ }).first().click();
     await expect(page.getByText("Zapisano. Zmiany są aktualne.")).toBeVisible();
     expect((await saveActionResponse).status()).toBe(200);
@@ -126,6 +149,7 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await expect.poll(() => readerArtworkRequests.size).toBe(0);
     expect([...readerArtworkStatuses.values()].every((status) => status === 200)).toBe(true);
 
+    diagnosticPhase = "navigate to split phrase catalog query";
     await page.goto(`/en/products?q=${encodeURIComponent("split phrase")}`);
     await waitForDocumentFonts(page);
     const grid = page.getByTestId("product-catalog-grid");
@@ -145,9 +169,17 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
     await expect(page.getByText("No products found", { exact: true })).toHaveCount(0);
     await page.screenshot({ path: screenshotPath, fullPage: true, animations: "disabled" });
 
+    diagnosticPhase = "navigate to metadata-only catalog query";
     await page.goto(`/en/products?q=${encodeURIComponent("metadata-only")}`);
     await waitForDocumentFonts(page);
     await expect(page.getByText("No products found", { exact: true })).toBeVisible();
+    verifiedProductSave = true;
+
+    const expectedNavigationAborts = diagnostics.failedNetworkRequests.filter(isExpectedLoginRedirectAbort);
+    const expectedCommittedProductActionAborts = diagnostics.failedNetworkRequests.filter((request) =>
+      isExpectedCommittedProductActionAbort(request, productPath, verifiedProductSave),
+    );
+    const expectedAborts = new Set([...expectedNavigationAborts, ...expectedCommittedProductActionAborts]);
 
     console.log(
       `PR44_BROWSER_EVIDENCE ${JSON.stringify({
@@ -158,13 +190,15 @@ test("PR 44 catalog search uses visible rich-text content", async ({ page }, tes
         knownHydrationWarnings: diagnostics.consoleErrors.filter(isKnownCaretOnlyHydrationWarning),
         pageErrors: diagnostics.pageErrors,
         failedNetworkRequests: diagnostics.failedNetworkRequests,
-        expectedNavigationAborts: diagnostics.failedNetworkRequests.filter(isExpectedLoginRedirectAbort),
+        actionRequestEvidence,
+        expectedNavigationAborts,
+        expectedCommittedProductActionAborts,
         failedResponses: diagnostics.failedResponses,
       })}`,
     );
     expect(diagnostics.consoleErrors.filter((message) => !isKnownCaretOnlyHydrationWarning(message))).toEqual([]);
     expect(diagnostics.pageErrors).toEqual([]);
-    expect(diagnostics.failedNetworkRequests.filter((request) => !isExpectedLoginRedirectAbort(request))).toEqual([]);
+    expect(diagnostics.failedNetworkRequests.filter((request) => !expectedAborts.has(request))).toEqual([]);
     expect(diagnostics.failedResponses).toEqual([]);
   } finally {
     try {
@@ -215,6 +249,34 @@ function isExpectedLoginRedirectAbort(request: {
     request.url.endsWith("/en/login") &&
     request.error === "net::ERR_ABORTED" &&
     request.hasNextActionHeader
+  );
+}
+
+function isExpectedCommittedProductActionAbort(
+  request: {
+    method: string;
+    url: string;
+    error: string | null;
+    hasNextActionHeader: boolean;
+    phase: string;
+    responseStatus?: number;
+    resourceType: string;
+    isNavigationRequest: boolean;
+  },
+  productPath: string,
+  verifiedProductSave: boolean,
+) {
+  // A later catalog readback proves this exact 200 server action committed before its fetch was canceled.
+  return (
+    verifiedProductSave &&
+    request.method === "POST" &&
+    request.url.endsWith(productPath) &&
+    request.error === "net::ERR_ABORTED" &&
+    request.hasNextActionHeader &&
+    request.phase === "save product editor" &&
+    request.resourceType === "fetch" &&
+    !request.isNavigationRequest &&
+    request.responseStatus === 200
   );
 }
 
