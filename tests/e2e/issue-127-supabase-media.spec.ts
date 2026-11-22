@@ -888,7 +888,11 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       const rangeContinuation = rangeContinuationProofs.get(request.requestId);
       if (rangeContinuation?.disposition === "EXPECTED_OWNED_NATIVE_FULL_RESPONSE_RANGE_REISSUE") {
         expect(isWebKit).toBe(false);
-        expect(["cold-media:video-play", "warm-media:video-play"]).toContain(request.phaseAtStart);
+        // Metadata preload can start the native request before the Play click.
+        // The classifier independently requires a later trusted Play intent,
+        // a complete same-object range tail, and a decoded frame on this element.
+        expect(["cold-media:video-intent", "cold-media:video-play", "warm-media:video-intent", "warm-media:video-play"])
+          .toContain(request.phaseAtStart);
         expect(request.allHeadersRange ?? request.range).toBe("bytes=0-");
         expect(request.contentRange).toBe(`bytes 0-${ownedVideoBytes - 1}/${ownedVideoBytes}`);
         expect(request.responseBodyBytes).toBe(ownedVideoBytes);
