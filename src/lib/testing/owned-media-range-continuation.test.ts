@@ -42,6 +42,7 @@ function proof() {
   return {
     cdpStatus: "OBSERVING",
     ownedMedia: { apiPath: api, storagePath: storage, origin },
+    ownedVideoContent: { byteLength: 1000, fixtureSha256: "c".repeat(64), storageReadbackSha256: "c".repeat(64) },
     failed: [{ ...failure, redirectChain: [parent] }],
     successfulMedia: [tail],
     nativeTimeline: [
@@ -69,6 +70,9 @@ describe("owned media Range continuation", () => {
   });
 
   it.each([
+    ["fixture and Storage readback hashes do not match", (d: ReturnType<typeof proof>) => {
+      d.ownedVideoContent.storageReadbackSha256 = "d".repeat(64);
+    }],
     ["foreign source with identical path", (d: ReturnType<typeof proof>) => { d.failed[0].originKind = "other-origin"; }],
     ["foreign redirect origin with identical path", (d: ReturnType<typeof proof>) => { d.failed[0].redirectChain[0].redirectTargetOrigin = "https://attacker.example"; }],
     ["foreign resumed source with identical path", (d: ReturnType<typeof proof>) => { d.successfulMedia[0].originKind = "other-origin"; }],

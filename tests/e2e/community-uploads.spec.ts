@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
@@ -144,6 +144,10 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
     await expect.poll(() => publicImage.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
     await publicImage.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
     let renderedMedia!: { srcSet: string; currentSrc: string; naturalWidth: number; naturalHeight: number; layoutWidth: number };
+    const selectedVariantResponses: Array<{
+      viewportWidth: number; currentSrc: string; requestedWidth: number; contentType: string;
+      byteLength: number; sha256: string; width: number; height: number; decoded: boolean;
+    }> = [];
     for (const viewportWidth of [390, 640, 768, 1024, 1279, 1280, 1440]) {
       await visitor.setViewportSize({ width: viewportWidth, height: 1000 });
       await publicImage.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
@@ -155,9 +159,27 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
       const source = new URL(measured.currentSrc);
       expect(source.origin).toBe(origin);
       expect(source.pathname).toBe(new URL(mediaUrl).pathname);
-      expect(variantWidths).toContain(Number(source.searchParams.get("width")));
+      const selectedWidth = Number(source.searchParams.get("width"));
+      expect(variantWidths).toContain(selectedWidth);
       expect(Math.abs(measured.naturalWidth - Math.round(measured.layoutWidth))).toBeLessThanOrEqual(1);
       expect(Math.abs(measured.naturalHeight - Math.round(measured.naturalWidth * normalized.height! / normalized.width!))).toBeLessThanOrEqual(1);
+      const displayedResponse = await visitor.request.get(measured.currentSrc);
+      expect(displayedResponse.status()).toBe(200);
+      const headers = displayedResponse.headers();
+      expect(headers["content-type"]).toMatch(/^image\/webp(?:;|$)/i);
+      expect(headers["cache-control"]).toContain("no-store");
+      expect(headers["x-content-type-options"]).toBe("nosniff");
+      const displayedBytes = await displayedResponse.body();
+      expect(displayedBytes.byteLength).toBeGreaterThan(0);
+      const displayedVariant = await sharp(displayedBytes).metadata();
+      expect(displayedVariant.format).toBe("webp");
+      expect(displayedVariant.width).toBe(Math.min(selectedWidth, normalized.width!));
+      expect(displayedVariant.height).toBe(Math.round(displayedVariant.width! * normalized.height! / normalized.width!));
+      selectedVariantResponses.push({
+        viewportWidth, currentSrc: measured.currentSrc, requestedWidth: selectedWidth, contentType: headers["content-type"],
+        byteLength: displayedBytes.byteLength, sha256: createHash("sha256").update(displayedBytes).digest("hex"),
+        width: displayedVariant.width!, height: displayedVariant.height!, decoded: true,
+      });
       renderedMedia = measured;
     }
     expect(renderedMedia.srcSet).toContain(`${new URL(mediaUrl).pathname}?width=480 480w`);
@@ -168,11 +190,7 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
     const currentSource = new URL(renderedMedia.currentSrc);
     expect(currentSource.origin).toBe(origin);
     expect(currentSource.pathname).toBe(new URL(mediaUrl).pathname);
-    const displayedResponse = await visitor.request.get(renderedMedia.currentSrc);
-    expect(displayedResponse.status()).toBe(200);
-    const displayedVariant = await sharp(await displayedResponse.body()).metadata();
-    expect(displayedVariant.width).toBe(Math.min(selectedWidth, normalized.width!));
-    expect(displayedVariant.height).toBe(Math.round(displayedVariant.width! * normalized.height! / normalized.width!));
+    expect(selectedVariantResponses.at(-1)?.requestedWidth).toBe(selectedWidth);
     // naturalWidth is density-corrected from the responsive `sizes` slot; inspect
     // the selected response bytes above for their actual pixel dimensions.
     expect(renderedMedia.naturalWidth).toBe(Math.round(renderedMedia.layoutWidth));
@@ -180,7 +198,7 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
     await testInfo.attach("f12-responsive-media-evidence", {
       body: JSON.stringify({ status: "PASS", testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId,
         databaseDimensions: { width: raw.data?.image_width, height: raw.data?.image_height }, variantMetadata, renderedMedia,
-        screenshots: screenshots.map((screenshot) => ({ ...screenshot,
+        selectedVariantResponses, screenshots: screenshots.map((screenshot) => ({ ...screenshot,
           path: process.env.COMMUNITY_ARTIFACT_DIR ? path.relative(process.env.COMMUNITY_ARTIFACT_DIR, screenshot.path) : screenshot.path })) }, null, 2),
       contentType: "application/json",
     });
