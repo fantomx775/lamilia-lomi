@@ -117,8 +117,8 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
           renderedSlotPhysicalPixels: { width: Math.ceil(state.slot.width * state.actualDpr), height: Math.ceil(state.slot.height * state.actualDpr) },
           resolutionModel: "vector scales to the measured CSS slot; intrinsic SVG viewport is not raster resolution",
           browserResponse: browserResponses.get(hash(state.currentSrc)) ?? null,
-          browserPayload: { source: "observed-browser-response-body", status: payload.status, sha256: hash(bytes) },
-          originalReferenceVerificationGet: { usesObservedImageAccept: true, status: originalResponse.status(), cache: cacheTokens(originalResponse.headers()["cache-control"]) },
+          browserPayload: { source: "observed-browser-response-body", status: payload.status, mime: payload.mime, sha256: hash(bytes) },
+          originalReferenceVerificationGet: { usesObservedImageAccept: true, status: originalResponse.status(), mime: safeImageMime(originalResponse.headers()["content-type"]), cache: cacheTokens(originalResponse.headers()["cache-control"]) },
           visualSharpness: "PENDING_VISUAL_REVIEW" });
         return;
       }
@@ -127,14 +127,16 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
       expect(decoded.width!).toBeGreaterThanOrEqual(requiredPixels);
       if (role.includes("logo") || role === "banner") {
         expect(decoded.format).toBe("webp");
+        expect(payload.mime).toBe("image/webp");
+        expect(safeImageMime(originalResponse.headers()["content-type"])).toBe("image/webp");
         if (role.includes("logo")) { expect(original.width).toBe(192); expect(bytes.length).toBeLessThanOrEqual(20_000); }
       }
       images.push({ role, status: "MEASURED", source: sourceProjection(selected, origin), originalSource: sourceProjection(underlying, origin),
         decoded: { width: decoded.width, height: decoded.height, format: decoded.format, bytes: bytes.length }, originalWidth: original.width,
         slot: state.slot, dpr, requiredPixels, reportedNaturalWidth: state.naturalWidth, loading: state.loading,
         browserResponse: browserResponses.get(hash(state.currentSrc)) ?? null,
-        browserPayload: { source: "observed-browser-response-body", status: payload.status, sha256: hash(bytes) },
-        originalReferenceVerificationGet: { usesObservedImageAccept: true, status: originalResponse.status(), cache: cacheTokens(originalResponse.headers()["cache-control"]) },
+        browserPayload: { source: "observed-browser-response-body", status: payload.status, mime: payload.mime, sha256: hash(bytes) },
+        originalReferenceVerificationGet: { usesObservedImageAccept: true, status: originalResponse.status(), mime: safeImageMime(originalResponse.headers()["content-type"]), cache: cacheTokens(originalResponse.headers()["cache-control"]) },
         budget: targetBudgetBytes ? { targetMaxBytes: targetBudgetBytes, withinTarget: bytes.length <= targetBudgetBytes, policy: "product target; quality tradeoff needs review" } : null,
         visualSharpness: "PENDING_VISUAL_REVIEW" });
     }
