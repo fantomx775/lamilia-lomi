@@ -2,6 +2,7 @@
 
 import { getImageProps } from "next/image";
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { isMediaProxyPath } from "@/lib/media-upload";
 import { publicImageAlt } from "@/lib/product-display";
 import { isPlayableVideoAsset, type VideoPreviewAsset } from "@/lib/product-video";
@@ -40,6 +41,7 @@ function VideoPlayer({ video, posterSrc }: { video: VideoPreviewAsset; posterSrc
   const playbackGeneration = useRef(0);
   const [prepared, setPrepared] = useState(false);
   const [started, setStarted] = useState(false);
+  const [retryGeneration, setRetryGeneration] = useState(0);
   const [state, setState] = useState<"idle" | "loading" | "playing" | "paused" | "waiting" | "error">("idle");
   const [slow, setSlow] = useState(false);
   const label = publicImageAlt(video.title, "Inside the book: flip-through preview");
@@ -70,12 +72,24 @@ function VideoPlayer({ video, posterSrc }: { video: VideoPreviewAsset; posterSrc
     return () => { window.clearTimeout(timer); setSlow(false); };
   }, [state]);
   async function play(retry = false) {
-    const element = player.current;
+    let element = player.current;
     if (!element) return;
-    setPrepared(true);
-    setState("loading");
     const generation = ++playbackGeneration.current;
-    if (retry) element.load();
+    if (retry) {
+      // WebKit can keep an errored native media element stalled after load()+play(),
+      // even when the retried Storage response is complete. Replace only that
+      // element and start its new ref synchronously within the Retry gesture.
+      flushSync(() => {
+        setPrepared(true);
+        setState("loading");
+        setRetryGeneration((current) => current + 1);
+      });
+      element = player.current;
+      if (!element) return;
+    } else {
+      setPrepared(true);
+      setState("loading");
+    }
     try { await element.play(); }
     catch (cause) {
       if (!alive.current || player.current !== element || generation !== playbackGeneration.current) return;
@@ -89,6 +103,7 @@ function VideoPlayer({ video, posterSrc }: { video: VideoPreviewAsset; posterSrc
     <figure className="group">
       <div onPointerEnter={prepare} onFocus={prepare} className="relative aspect-video overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
         <video
+          key={retryGeneration}
           ref={player}
           data-flipthrough
           src={video.path}

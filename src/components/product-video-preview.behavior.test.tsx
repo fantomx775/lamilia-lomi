@@ -76,7 +76,6 @@ describe("flip-through recovery", () => {
   });
   it("retains native controls and supports retry after a real player error event", async () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
-    const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
     const { container } = render(<ProductVideoPreview video={{ path: "/sample.mp4", contentType: "video/mp4" }} poster="/cover.png" />);
     const video = container.querySelector("video")!;
     expect(video).toHaveAttribute("controls");
@@ -84,11 +83,14 @@ describe("flip-through recovery", () => {
     fireEvent.error(video);
     expect(screen.getByRole("alert")).toHaveTextContent("could not be played");
     fireEvent.click(screen.getByRole("button", { name: "Retry video" }));
-    expect(load).toHaveBeenCalledTimes(1);
+    const retriedVideo = container.querySelector("video")!;
+    expect(retriedVideo).not.toBe(video);
+    expect(retriedVideo).toHaveAttribute("controls");
+    expect(retriedVideo).toHaveAttribute("playsinline");
     await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("alert")).toBeNull();
-    fireEvent.playing(video);
-    fireEvent.pause(video);
+    fireEvent.playing(retriedVideo);
+    fireEvent.pause(retriedVideo);
     expect(screen.queryByRole("status")).toBeNull();
   });
 });
