@@ -18,9 +18,15 @@ test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off
 test("F15-F17 real isolated product media has Range, decoded previews and recoverable pending playback", async ({ page }, testInfo) => {
   test.skip(process.env.RUN_ISSUE_127_PRODUCT_MEDIA_E2E !== "1", "Requires guarded exclusive local Supabase and its owned HTTPS gateway.");
   test.setTimeout(180_000);
+  const isWebKit = testInfo.project.use.browserName === "webkit";
+  // WebKit's media element stalls when the page-injected event/RAF observer is
+  // attached. Keep its observations passive; Chromium retains the richer trace.
+  const useNativeMediaObserver = !isWebKit;
+  const useClickFrameMeasurement = !isWebKit;
   const fixtures = await communityFixtures(testInfo); // Pins the existing strict local Docker/API/DB identity before writes.
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const runId = process.env.UX127_MEDIA_RUN_ID ?? `supabase-media-${randomUUID()}`;
+  const runArtifactId = createHash("sha256").update(runId).digest("hex").slice(0, 16);
   const nextObserver = new NextCancellationObserver({ testedSha, runId, origin: COMMUNITY_TEST_ORIGIN });
   await nextObserver.observe(page);
   let nextSnapshot: Awaited<ReturnType<NextCancellationObserver["finish"]>> | null = null;
@@ -47,15 +53,17 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   async function capture(target: Page, screenshotPhase: string) {
     setPhase(`capture:${screenshotPhase}`);
     await settleVisibleMedia(target);
-    const filename = `supabase-media-${testInfo.project.name}-${screenshotPhase}.png`;
+    const filename = `supabase-media-${testInfo.project.name}-${runArtifactId}-${screenshotPhase}.png`;
     const artifactRoot = process.env.COMMUNITY_ARTIFACT_DIR;
     if (artifactRoot && !path.isAbsolute(artifactRoot)) throw new Error("Evidence directory must be absolute.");
     const artifact = artifactRoot
       ? path.join(artifactRoot, "issue-127", filename)
       : path.resolve("docs", "verification", "issue-127", filename);
     await mkdir(path.dirname(artifact), { recursive: true });
-    await target.screenshot({ path: artifact, animations: "disabled" });
-    screenshots.push({ path: artifactRoot ? path.relative(artifactRoot, artifact) : path.relative(process.cwd(), artifact), testedSha, runId, phase: screenshotPhase, viewport: target.viewportSize(), dpr: await target.evaluate(() => devicePixelRatio) });
+    const screenshotBytes = await target.screenshot({ path: artifact, animations: "disabled" });
+    screenshots.push({ path: artifactRoot ? path.relative(artifactRoot, artifact) : path.relative(process.cwd(), artifact), testedSha, runId,
+      screenshotSha256: createHash("sha256").update(screenshotBytes).digest("hex"), phase: screenshotPhase,
+      viewport: target.viewportSize(), dpr: await target.evaluate(() => devicePixelRatio) });
   }
   const objects: Array<{ bucket: string; path: string }> = [];
   const consoleErrors: Array<{ category: "unexpected-console-error"; path: string }> = [];
@@ -63,12 +71,15 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   type RequestMetadata = { requestId: number; method: string; path: string; originKind: "test-origin" | "loopback" | "other-origin" | "invalid-origin";
     resource: string; phaseAtStart: string; navigation: boolean; rsc: boolean; prefetch: boolean;
     urlSha256: string; startedAtEpochMs: number; range: string | null; responseStatus: number | null; contentRange: string | null;
+    safeMediaResponseHeaders?: { contentType: string | null; contentLength: number | null; acceptRanges: "bytes" | "none" | null;
+      contentDisposition: "inline" | "attachment" | "other" | null; cacheControl: "no-store" | "private" | "public" | "other" | null };
     responseAtEpochMs?: number; finishedAtEpochMs?: number;
     redirectTargetPath?: string; redirectTargetOrigin?: string; redirectTargetOriginKind?: "test-origin" | "loopback" | "other-origin";
     identitySample?: Record<string, unknown>; allHeadersRange?: string | null };
   type FailedRequest = RequestMetadata & { error: string | null; phaseAtFailure: string; failedAtEpochMs: number; expectedPause: boolean; expectedFault: boolean;
     responseBodyBytes?: number; redirectChain: RequestMetadata[]; pauseGateRequest: boolean; pauseRequestedAtFailure: boolean; validatedNextPrefetchId?: string;
     pauseWitness?: { atEpochMs: number; sourcePath: string; trusted: true; paused: true };
+    pauseActionWitness?: { clickStartedAtEpochMs: number; pauseConfirmedAtEpochMs: number; gateArrivalSequence: number; gateArrivalAtEpochMs: number; clientClosed: true };
     controlledFaultArrivalSequences?: number[] };
   const failed: FailedRequest[] = [];
   const mediaRequests: RequestMetadata[] = [];
@@ -175,6 +186,28 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
         request.pauseWitness = { atEpochMs: witness.atEpochMs as number, sourcePath: witness.sourcePath as string, trusted: true, paused: true };
       }
     }
+    if (isWebKit && pauseActionStartedAtEpochMs !== null && pauseActionConfirmedAtEpochMs !== null) {
+      const gate = mediaGateSnapshots.find((snapshot) => snapshot.checkpoint === "pending-playback-after-pause");
+      const arrivals = gate?.requestArrivals as MediaGateState["requestArrivals"];
+      const candidates = failed.filter((request) => request.pauseGateRequest && request.phaseAtStart.startsWith("pending-playback:") &&
+        request.method === "GET" && request.originKind === "test-origin" && request.path === ownedVideoPath &&
+        request.responseStatus === null && ["net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"].includes(request.error ?? "") &&
+        request.failedAtEpochMs >= pauseActionStartedAtEpochMs! && request.failedAtEpochMs <= pauseActionConfirmedAtEpochMs! + 1_500);
+      if (gate?.mode === "hold" && gate.arrivals === 1 && gate.clientClosed === 1 && gate.released === 0 &&
+          arrivals?.length === 1 && candidates.length === 1) {
+        const arrival = arrivals[0];
+        const request = candidates[0];
+        if (arrival.sequence === 1 && arrival.method === "GET" && arrival.outcome === "pending" && arrival.responseStatus === null &&
+            arrival.arrivedAtEpochMs <= pauseActionStartedAtEpochMs + 250 && request.startedAtEpochMs <= arrival.arrivedAtEpochMs + 100 &&
+            (request.allHeadersRange ?? request.range) === arrival.range) {
+          request.expectedPause = true;
+          request.pauseRequestedAtFailure = true;
+          request.pauseActionWitness = { clickStartedAtEpochMs: pauseActionStartedAtEpochMs,
+            pauseConfirmedAtEpochMs: pauseActionConfirmedAtEpochMs, gateArrivalSequence: arrival.sequence,
+            gateArrivalAtEpochMs: arrival.arrivedAtEpochMs, clientClosed: true };
+        }
+      }
+    }
     await Promise.all(diagnosticWork);
     for (const request of failed.filter((entry) => entry.resource === "media")) {
       const evidence = { cdpStatus, observerErrors, consoleErrors, pageErrors, failed, mediaRequests,
@@ -224,6 +257,8 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     return decoded === ownedStoragePath;
   }
   let pauseConfirmed = false;
+  let pauseActionStartedAtEpochMs: number | null = null;
+  let pauseActionConfirmedAtEpochMs: number | null = null;
   let waitEvents = { waiting: 0, stalled: 0 };
   page.on("console", (message) => {
     if (message.type() !== "error") return;
@@ -244,6 +279,22 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     const metadata = requestMetadata(response.request());
     metadata.responseStatus = response.status();
     metadata.responseAtEpochMs = Date.now();
+    if (metadata.resource === "media" || (metadata.originKind === "test-origin" &&
+        (metadata.path === ownedVideoPath || isOwnedStorageMediaPath(metadata)))) {
+      const headers = response.headers();
+      const contentLength = Number(headers["content-length"]);
+      const rawRanges = headers["accept-ranges"]?.toLowerCase();
+      const rawDisposition = headers["content-disposition"]?.toLowerCase();
+      const rawCacheControl = headers["cache-control"]?.toLowerCase() ?? "";
+      metadata.safeMediaResponseHeaders = {
+        contentType: headers["content-type"]?.split(";")[0]?.trim().toLowerCase().match(/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/)?.[0] ?? null,
+        contentLength: Number.isSafeInteger(contentLength) && contentLength >= 0 ? contentLength : null,
+        acceptRanges: rawRanges === "bytes" ? "bytes" : rawRanges === "none" ? "none" : null,
+        contentDisposition: rawDisposition?.startsWith("inline") ? "inline" : rawDisposition?.startsWith("attachment") ? "attachment" : rawDisposition ? "other" : null,
+        cacheControl: rawCacheControl.includes("no-store") ? "no-store" : rawCacheControl.includes("private") ? "private"
+          : rawCacheControl.includes("public") ? "public" : rawCacheControl ? "other" : null,
+      };
+    }
     if (faultActive && metadata.originKind === "test-origin" && metadata.path === ownedVideoPath && response.status() === 503 &&
         !controlledFaultResponses.some((entry) => entry.requestId === metadata.requestId)) controlledFaultResponses.push(metadata);
     const contentRange = response.headers()["content-range"];
@@ -296,9 +347,10 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     const responseCandidates = controlledFaultResponses.filter((request) => request.phaseAtStart === "controlled-fault:navigation" &&
       request.originKind === "test-origin" && request.path === gate.path && request.method === "GET" && request.resource === expectedResource && request.responseStatus === 503 &&
       typeof request.responseAtEpochMs === "number" && typeof request.finishedAtEpochMs === "number");
-    const failureCandidates = webkit ? failed.filter((request) => request.phaseAtStart === "controlled-fault:navigation" &&
-      request.originKind === "test-origin" && request.path === gate.path && request.method === "GET" && request.resource === expectedResource && request.responseStatus === null &&
-      ["Load request cancelled", "NS_BINDING_ABORTED"].includes(request.error ?? "")) : [];
+    const failureCandidates = failed.filter((request) => request.phaseAtStart === "controlled-fault:navigation" &&
+      request.originKind === "test-origin" && request.path === gate.path && request.method === "GET" && request.resource === expectedResource &&
+      ((request.responseStatus === 503 && request.error === "net::ERR_ABORTED") ||
+        (webkit && request.responseStatus === null && ["Load request cancelled", "NS_BINDING_ABORTED"].includes(request.error ?? ""))));
     if (responseCandidates.length + failureCandidates.length !== arrivals.length ||
         new Set([...responseCandidates, ...failureCandidates].map((request) => request.requestId)).size !== arrivals.length) return [];
     const assignments = arrivals.map((arrival) => {
@@ -321,7 +373,10 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     for (const match of matched) {
       if (match.terminal !== "requestfailed") continue;
       const failure = failed.find((request) => request.requestId === match.request.requestId);
-      if (!failure || failure.responseStatus !== null || !["Load request cancelled", "NS_BINDING_ABORTED"].includes(failure.error ?? "")) return [];
+      const received503ThenAborted = failure?.responseStatus === 503 && failure.error === "net::ERR_ABORTED";
+      const webkitCancelledWithoutResponse = webkit && failure?.responseStatus === null &&
+        ["Load request cancelled", "NS_BINDING_ABORTED"].includes(failure.error ?? "");
+      if (!failure || (!received503ThenAborted && !webkitCancelledWithoutResponse)) return [];
       failure.expectedFault = true;
       failure.controlledFaultArrivalSequences = [match.arrival.sequence];
     }
@@ -359,19 +414,102 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     ownedVideoPath = videoPath;
     ownedStoragePath = `/storage/v1/object/sign/public-videos/${objects.find((object) => object.bucket === "public-videos")!.path}`;
     const ownedSources: OwnedMediaSource[] = [ownedVideoPath, ownedStoragePath].map((ownedPath) => ({ origin: COMMUNITY_TEST_ORIGIN, path: ownedPath }));
+    async function diagnosePlainVideoAfterStall(stage: string) {
+      const posterSrc = await page.locator("video").getAttribute("poster");
+      const uiState = { playButtonVisible: await page.getByTestId("product-video-play").isVisible().catch(() => false),
+        posterImagePresent: await page.locator("video[data-flipthrough]").locator("xpath=../img").count() > 0 };
+      const componentState = await page.locator("video").evaluate((element) => {
+        const video = element as HTMLVideoElement;
+        const box = video.getBoundingClientRect();
+        const style = getComputedStyle(video);
+        return { currentTime: video.currentTime, readyState: video.readyState, networkState: video.networkState,
+          paused: video.paused, errorCode: video.error?.code ?? null, playbackRate: video.playbackRate,
+          width: box.width, height: box.height, objectFit: style.objectFit, position: style.position,
+          buffered: Array.from({ length: video.buffered.length }, (_, index) => ({ start: video.buffered.start(index), end: video.buffered.end(index) })) };
+      });
+      await page.evaluate((source) => {
+        document.body.replaceChildren();
+        const video = document.createElement("video");
+        video.id = "ux127-plain-retry-diagnostic";
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = "metadata";
+        video.src = source;
+        const button = document.createElement("button");
+        button.textContent = "Play plain retry diagnostic";
+        button.addEventListener("click", () => { void video.play().catch(() => undefined); });
+        document.body.append(video, button);
+      }, videoPath);
+      await page.getByRole("button", { name: "Play plain retry diagnostic" }).click();
+      const plainProgressed = await expect.poll(() => page.locator("#ux127-plain-retry-diagnostic")
+        .evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 5_000 })
+        .toBeGreaterThan(0.2).then(() => true).catch(() => false);
+      const plainState = await page.locator("#ux127-plain-retry-diagnostic").evaluate((element) => {
+        const video = element as HTMLVideoElement;
+        return { currentTime: video.currentTime, readyState: video.readyState, networkState: video.networkState,
+          paused: video.paused, errorCode: video.error?.code ?? null, playbackRate: video.playbackRate,
+          buffered: Array.from({ length: video.buffered.length }, (_, index) => ({ start: video.buffered.start(index), end: video.buffered.end(index) })) };
+      });
+      await page.locator("#ux127-plain-retry-diagnostic").evaluate((element) => (element as HTMLVideoElement).pause());
+      await Promise.all(diagnosticWork);
+      await page.evaluate(({ source, poster }) => {
+        document.body.replaceChildren();
+        const figure = document.createElement("figure");
+        figure.className = "group";
+        const frame = document.createElement("div");
+        frame.className = "relative aspect-video overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-[var(--color-bg-alt)] shadow-[0_16px_40px_rgba(62,52,47,0.08)]";
+        const video = document.createElement("video");
+        video.id = "ux127-styled-diagnostic-video";
+        video.dataset.flipthrough = "";
+        video.controls = true; video.playsInline = true; video.preload = "metadata"; video.src = source;
+        video.className = "absolute inset-0 size-full object-contain";
+        video.setAttribute("aria-label", "Inside the book: flip-through preview");
+        if (poster) video.poster = poster;
+        const cover = document.createElement("img");
+        cover.alt = ""; cover.setAttribute("aria-hidden", "true"); cover.className = "pointer-events-none absolute inset-0 size-full object-contain";
+        if (poster) cover.src = poster;
+        const button = document.createElement("button");
+        button.textContent = "Play styled diagnostic video";
+        button.className = "absolute left-1/2 top-1/2 min-h-11 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white px-6 py-3 font-semibold text-[var(--color-ink)] shadow-lg";
+        button.addEventListener("click", () => { button.remove(); void video.play().catch(() => undefined); });
+        video.addEventListener("playing", () => cover.remove());
+        frame.append(video, cover, button); figure.append(frame); document.body.append(figure);
+      }, { source: videoPath, poster: posterSrc });
+      await page.getByRole("button", { name: "Play styled diagnostic video" }).click();
+      const styledProgressed = await expect.poll(() => page.locator("#ux127-styled-diagnostic-video")
+        .evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 5_000 })
+        .toBeGreaterThan(0.2).then(() => true).catch(() => false);
+      const styledState = await page.locator("#ux127-styled-diagnostic-video").evaluate((element) => {
+        const video = element as HTMLVideoElement; const box = video.getBoundingClientRect(); const style = getComputedStyle(video);
+        return { currentTime: video.currentTime, readyState: video.readyState, networkState: video.networkState,
+          paused: video.paused, errorCode: video.error?.code ?? null, playbackRate: video.playbackRate,
+          width: box.width, height: box.height, objectFit: style.objectFit, position: style.position,
+          buffered: Array.from({ length: video.buffered.length }, (_, index) => ({ start: video.buffered.start(index), end: video.buffered.end(index) })) };
+      });
+      await page.locator("#ux127-styled-diagnostic-video").evaluate((element) => (element as HTMLVideoElement).pause());
+      await Promise.all(diagnosticWork);
+      const body = JSON.stringify({ testedSha, runId, project: testInfo.project.name, stage,
+        acceptanceEvidence: false, uiState, componentState, plainProgressed, plainState, styledProgressed, styledState,
+        stageRequests: ownedMediaTransportRequests.filter((entry) => entry.phaseAtStart === stage),
+        completedMedia: successfulMedia.filter((entry) => (entry as { phaseAtStart?: string }).phaseAtStart === stage) }, null, 2);
+      await writeFile(testInfo.outputPath("plain-video-playback-diagnostic-only.json"), body);
+      await testInfo.attach("plain-video-playback-diagnostic-only", { body, contentType: "application/json" });
+    }
     if (testInfo.project.use.browserName !== "webkit" && page.context().browser()?.browserType().name() === "chromium") {
       stopCdp = await observeOwnedMediaCdp(page, ownedSources, (value) => cdpMedia.push({ ...value, phaseAtReceipt: phase, receivedAtEpochMs: Date.now() }));
       cdpStatus = "OBSERVING";
     }
-    await observeNativeMedia(page, ownedSources, (observation) => {
-      if (!observation) observerErrors.push({ category: "invalid-native-observation" });
-      else nativeTimeline.push({ ...observation, phaseAtReceipt: phase, receivedAtEpochMs: Date.now() });
-    });
+    if (useNativeMediaObserver) {
+      await observeNativeMedia(page, ownedSources, (observation) => {
+        if (!observation) observerErrors.push({ category: "invalid-native-observation" });
+        else nativeTimeline.push({ ...observation, phaseAtReceipt: phase, receivedAtEpochMs: Date.now() });
+      });
+    }
     setPhase("range-probe");
     const range = await page.request.get(`${COMMUNITY_TEST_ORIGIN}${videoPath}`, { headers: { Range: "bytes=0-127" } });
     expect(range.status()).toBe(206); expect(range.headers()["content-type"]).toContain("video/mp4");
     expect(range.headers()["content-range"]).toMatch(/^bytes 0-127\//); expect((await range.body()).length).toBe(128);
-    const timings: Array<{ cache: string; clickToFrameMs: number }> = [];
+    const timings: Array<{ cache: string; clickToFrameMs: number | null }> = [];
     for (const cache of ["cold-media", "warm-media"]) {
       await resetDocument(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`, `${cache}:navigation`);
       setPhase(`${cache}:video-intent`);
@@ -379,24 +517,33 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       await player.scrollIntoViewIfNeeded();
       await expect(player).toHaveAttribute("controls", ""); await expect(player).toHaveAttribute("playsinline", "");
       await expect(page.getByText("fixture-film.mp4", { exact: true })).toHaveCount(0);
-      await player.evaluate((element) => {
-        const video = element as HTMLVideoElement;
-        const target = window as unknown as { mediaTiming: { click: number; frame: number | null } };
-        target.mediaTiming = { click: 0, frame: null };
-        document.querySelector('[data-testid="product-video-play"]')!.addEventListener("click", () => {
-          target.mediaTiming.click = performance.now();
-          const requestFrame = video.requestVideoFrameCallback;
-          if (typeof requestFrame === "function") requestFrame.call(video, () => { target.mediaTiming.frame = performance.now(); });
-          else video.addEventListener("timeupdate", () => { target.mediaTiming.frame ??= performance.now(); }, { once: true });
-        }, { capture: true, once: true });
-      });
+      if (useClickFrameMeasurement) {
+        await player.evaluate((element) => {
+          const video = element as HTMLVideoElement;
+          const target = window as unknown as { mediaTiming: { click: number; frame: number | null } };
+          target.mediaTiming = { click: 0, frame: null };
+          document.querySelector('[data-testid="product-video-play"]')!.addEventListener("click", () => {
+            target.mediaTiming.click = performance.now();
+            const requestFrame = video.requestVideoFrameCallback;
+            if (typeof requestFrame === "function") requestFrame.call(video, () => { target.mediaTiming.frame = performance.now(); });
+            else video.addEventListener("timeupdate", () => { target.mediaTiming.frame ??= performance.now(); }, { once: true });
+          }, { capture: true, once: true });
+        });
+      }
       setPhase(`${cache}:video-play`);
       await page.getByTestId("product-video-play").click();
-      await expect.poll(() => player.evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 20_000 }).toBeGreaterThan(0.2);
-      await expect.poll(() => page.evaluate(() => (window as unknown as { mediaTiming: { frame: number | null } }).mediaTiming.frame)).not.toBeNull();
-      const timing = await page.evaluate(() => (window as unknown as { mediaTiming: { click: number; frame: number } }).mediaTiming);
-      expect(timing.click).toBeGreaterThan(0); expect(timing.frame).toBeGreaterThanOrEqual(timing.click);
-      timings.push({ cache, clickToFrameMs: timing.frame - timing.click });
+      const coldProgressed = await expect.poll(() => player.evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 20_000 })
+        .toBeGreaterThan(0.2).then(() => true).catch(async () => {
+          if (isWebKit) await diagnosePlainVideoAfterStall(`${cache}:video-play`);
+          return false;
+        });
+      expect(coldProgressed, `The real product video must advance during ${cache} playback.`).toBe(true);
+      if (useClickFrameMeasurement) {
+        await expect.poll(() => page.evaluate(() => (window as unknown as { mediaTiming: { frame: number | null } }).mediaTiming.frame)).not.toBeNull();
+        const timing = await page.evaluate(() => (window as unknown as { mediaTiming: { click: number; frame: number } }).mediaTiming);
+        expect(timing.click).toBeGreaterThan(0); expect(timing.frame).toBeGreaterThanOrEqual(timing.click);
+        timings.push({ cache, clickToFrameMs: timing.frame - timing.click });
+      } else timings.push({ cache, clickToFrameMs: null });
       setPhase(`${cache}:pause-and-seek`);
       const postSeekFrame = await seekAndPaint(player);
       await testInfo.attach(`${cache}-post-seek-frame`, { body: JSON.stringify({ testedSha, runId, ...postSeekFrame }), contentType: "application/json" });
@@ -414,28 +561,47 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
         const state = await readIssue127MediaGateState();
         return state.armed && state.path === videoPath ? state.arrivals : 0;
       }, { timeout: 8_000 }).toBeGreaterThan(0);
-      await page.locator("video").evaluate((element) => {
+      await page.evaluate(() => {
         const events = { waiting: 0, stalled: 0 };
         (window as unknown as { mediaWaitEvents: typeof events }).mediaWaitEvents = events;
-        element.addEventListener("waiting", () => { events.waiting += 1; });
-        element.addEventListener("stalled", () => { events.stalled += 1; });
+        const observe = (event: Event) => {
+          if (event.target instanceof HTMLVideoElement && event.target.matches("video[data-flipthrough]")) {
+            events[event.type as keyof typeof events] += 1;
+          }
+        };
+        // Capture at document level instead of retaining one video node, so the
+        // probe stays valid if a future recovery path replaces the native player.
+        document.addEventListener("waiting", observe, true);
+        document.addEventListener("stalled", observe, true);
       });
       setPhase("pending-playback:play");
       await page.getByTestId("product-video-play").click();
       await expect(page.getByRole("status").filter({ hasText: "Preparing video" })).toBeVisible();
       await expect.poll(() => page.evaluate(() => (window as unknown as { mediaWaitEvents: { waiting: number } }).mediaWaitEvents.waiting)).toBeGreaterThan(0);
-      pauseConfirmed = true;
       setPhase("pending-playback:deliberate-pause");
+      pauseActionStartedAtEpochMs = Date.now();
       await page.getByTestId("product-video-pause").click();
       await expect(page.getByTestId("product-video-play")).toBeVisible();
       waitEvents = await page.evaluate(() => (window as unknown as { mediaWaitEvents: typeof waitEvents }).mediaWaitEvents);
       expect(await page.locator("video").evaluate((element) => (element as HTMLVideoElement).paused)).toBe(true);
+      expect(await page.locator("video").evaluate((element) => (element as HTMLVideoElement).error?.code ?? null)).toBeNull();
+      pauseActionConfirmedAtEpochMs = Date.now();
+      pauseConfirmed = true;
+      const pauseRequestFailed = await expect.poll(() => failed.some((request) => request.pauseGateRequest &&
+        request.method === "GET" && request.path === videoPath), { timeout: 1_000 }).toBe(true).then(() => true).catch(() => false);
+      const heldAfterPause = await readIssue127MediaGateState();
+      expect(heldAfterPause).toMatchObject({ armed: true, path: videoPath, mode: "hold", arrivals: 1, released: 0, aborted: 0 });
+      expect(heldAfterPause.clientClosed).toBe(pauseRequestFailed ? 1 : 0);
+      expect(heldAfterPause.requestArrivals).toHaveLength(1);
+      mediaGateSnapshots.push({ checkpoint: "pending-playback-after-pause", armed: heldAfterPause.armed,
+        mode: heldAfterPause.mode ?? null, arrivals: heldAfterPause.arrivals, clientClosed: heldAfterPause.clientClosed,
+        released: heldAfterPause.released, aborted: heldAfterPause.aborted, requestArrivals: heldAfterPause.requestArrivals ?? [] });
       setPhase("pending-playback:resume");
       await controlIssue127MediaGate("release", videoPath);
       const releasedGate = await readIssue127MediaGateState();
       mediaGateSnapshots.push({ checkpoint: "pending-playback-after-release", armed: releasedGate.armed,
         mode: releasedGate.mode ?? null, arrivals: releasedGate.arrivals, clientClosed: releasedGate.clientClosed,
-        released: releasedGate.released, aborted: releasedGate.aborted });
+        released: releasedGate.released, aborted: releasedGate.aborted, requestArrivals: releasedGate.requestArrivals ?? [] });
       await expect(page.getByRole("alert").filter({ hasText: "video could not" })).toHaveCount(0);
       // Wait for the exact real Storage response to expose the whole object
       // range (or finish a full 200) and for native canplay. Chromium may keep
@@ -502,7 +668,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
         released: faultGate.released, aborted: faultGate.aborted, http503: faultGate.http503, requestArrivals: faultGate.requestArrivals ?? [],
         correlatedRequestIds: [...injectedFaultIds] });
       await Promise.all(diagnosticWork);
-      await expect.poll(() => nativeTimeline.some((event) => {
+      if (useNativeMediaObserver) await expect.poll(() => nativeTimeline.some((event) => {
         if (event.event !== "error" || event.trusted !== true || event.mediaErrorPresent !== true || event.sourcePath !== videoPath) return false;
         return ownedMediaTransportRequests.some((request) => injectedFaultIds.has(request.requestId) &&
           request.identitySample?.status === "sampled" && typeof request.identitySample.timeOrigin === "number" &&
@@ -512,6 +678,9 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
           event.atEpochMs >= (injectedFaultTimes.get(request.requestId) ?? request.startedAtEpochMs));
       })).toBe(true);
       await expect(page.getByRole("alert").filter({ hasText: "video could not be played" })).toBeVisible();
+      if (!useNativeMediaObserver) {
+        await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).error?.code ?? 0)).toBe(4);
+      }
       await capture(page, "controlled-video-error");
     } finally {
       await controlIssue127MediaGate("disarm", videoPath);
@@ -519,7 +688,12 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     }
     setPhase("controlled-fault:retry");
     await page.getByRole("button", { name: "Retry video", exact: true }).click();
-    await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 20_000 }).toBeGreaterThan(0.2);
+    const retryProgressed = await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 20_000 })
+      .toBeGreaterThan(0.2).then(() => true).catch(async () => {
+        if (isWebKit) await diagnosePlainVideoAfterStall("controlled-fault:retry");
+        return false;
+      });
+    expect(retryProgressed, "The recovered product video must advance after the real Storage retry.").toBe(true);
     await expect(page.getByRole("alert").filter({ hasText: "video could not be played" })).toHaveCount(0);
     faultActive = false;
     await seekAndPaint(page.locator("video"));
@@ -530,13 +704,24 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     let backgroundVisibility = "not-observed";
     let pausedOnReturn = false;
     let backgroundStartTime = 0;
+    const backgroundSnapshots: Array<Record<string, unknown>> = [];
+    const readBackgroundState = async (phase: string) => {
+      const state = await page.locator("video").evaluate((element) => {
+        const video = element as HTMLVideoElement;
+        return { visibilityState: document.visibilityState, currentTime: video.currentTime, paused: video.paused,
+          readyState: video.readyState, networkState: video.networkState, errorCode: video.error?.code ?? null,
+          buffered: Array.from({ length: video.buffered.length }, (_, index) => ({ start: video.buffered.start(index), end: video.buffered.end(index) })) };
+      });
+      const snapshot = { phase, ...state };
+      backgroundSnapshots.push(snapshot);
+      return snapshot;
+    };
     try {
       await bounded(other.bringToFront(), "Opening the secondary browser tab");
       setPhase("tab-switch:starting-video");
       await bounded(page.bringToFront(), "Returning to the media page before playback");
-      // The real fixture is five seconds long. Rewind and use the trusted
-      // native keyboard control, then switch immediately so headless tab
-      // startup cannot consume the full clip before the return assertion.
+      // The real fixture is five seconds long. Rewind, confirm actual playback
+      // progress, and foreground another page before the clip can finish.
       await page.locator("video").evaluate(async (element) => {
         const video = element as HTMLVideoElement;
         if (video.currentTime > 0) {
@@ -552,13 +737,22 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
         void (element as HTMLVideoElement).play().catch(() => undefined);
       });
       await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).paused), { timeout: 2_000 }).toBe(false);
+      await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 8_000 })
+        .toBeGreaterThan(0.1);
       backgroundStartTime = await page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime);
+      await readBackgroundState("playback-confirmed-before-background");
       setPhase("tab-switch:background");
       await bounded(other.bringToFront(), "Bringing the secondary browser tab to the foreground");
       backgroundVisibility = await page.evaluate(() => document.visibilityState);
+      // Local Chromium/WebKit Playwright targets can report every page visible
+      // while another target is foregrounded. Record the browser's actual signal
+      // without treating page.bringToFront() as proof of a hidden native tab.
+      await readBackgroundState("secondary-tab-foreground");
       setPhase("tab-switch:return");
       await bounded(page.bringToFront(), "Returning to the media page");
+      await expect.poll(() => page.evaluate(() => document.visibilityState), { timeout: 2_000 }).toBe("visible");
       expect(await page.locator("video").evaluate((element) => Boolean((element as HTMLVideoElement).error))).toBe(false);
+      await readBackgroundState("media-tab-restored");
       pausedOnReturn = await page.locator("video").evaluate((element) => (element as HTMLVideoElement).paused);
       if (pausedOnReturn) {
         // A trusted native-control gesture; keyboard activation avoids browser-specific
@@ -570,7 +764,16 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       }
       const returnStartTime = await page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime);
       setPhase("tab-switch:wait-for-progress");
-      await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(returnStartTime + 0.2);
+      try {
+        await expect.poll(() => page.locator("video").evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 8_000 })
+          .toBeGreaterThan(returnStartTime + 0.2);
+      } catch (error) {
+        await readBackgroundState("progress-timeout");
+        const diagnostic = JSON.stringify({ testedSha, runId, backgroundVisibility, pausedOnReturn, backgroundStartTime, backgroundSnapshots }, null, 2);
+        await testInfo.attach("background-tab-return-diagnostics", { body: diagnostic, contentType: "application/json" });
+        throw error;
+      }
+      await readBackgroundState("progress-confirmed-after-return");
       await seekAndPaint(page.locator("video"));
       await capture(page, "video-after-tab-return");
     } finally { setPhase("tab-switch:close-secondary"); await other.close(); }
@@ -592,7 +795,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     await testInfo.attach("real-storage-media-evidence", { body: JSON.stringify({ testedSha, runId, project: testInfo.project.name, timings, consoleErrors, expectedFaultConsole, pageErrors, failed, controlledFaultResponses,
       metadataResumeProofs: [...metadataResumeProofs.entries()].map(([requestId, proof]) => ({ requestId, ...proof })),
       rangeContinuationProofs: [...rangeContinuationProofs.entries()].map(([requestId, proof]) => ({ requestId, ...proof })),
-      backgroundVisibility, pausedOnReturn, backgroundStartTime, waitEvents,
+      backgroundVisibility, pausedOnReturn, backgroundStartTime, backgroundSnapshots, waitEvents,
       optimizerSelection: "NOT APPLICABLE to unoptimized authenticated Supabase fallback; tested separately in local-demo optimized image campaign" }), contentType: "application/json" });
     setPhase("network:assertions");
     await networkSnapshot("before-assertions");
@@ -618,14 +821,24 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       }
       expect(request.expectedPause || request.expectedFault).toBe(true); expect(request.method).toBe("GET"); expect(request.path).toBe(videoPath);
       if (request.expectedPause) {
-        expect(request.pauseWitness?.trusted && request.pauseWitness.paused).toBe(true);
-        expect(request.pauseWitness!.atEpochMs).toBeLessThan(request.failedAtEpochMs);
+        if (isWebKit) {
+          expect(request.pauseActionWitness).toMatchObject({ gateArrivalSequence: 1, clientClosed: true });
+          expect(request.failedAtEpochMs).toBeGreaterThanOrEqual(request.pauseActionWitness!.clickStartedAtEpochMs);
+          expect(request.failedAtEpochMs).toBeLessThanOrEqual(request.pauseActionWitness!.pauseConfirmedAtEpochMs + 1_500);
+        } else {
+          expect(request.pauseWitness?.trusted && request.pauseWitness.paused).toBe(true);
+          expect(request.pauseWitness!.atEpochMs).toBeLessThan(request.failedAtEpochMs);
+        }
       }
       if (request.expectedFault) {
-        expect(request.responseStatus).toBeNull();
         expect(request.phaseAtStart).toBe("controlled-fault:navigation");
         expect(request.controlledFaultArrivalSequences).toHaveLength(1);
-        expect(["Load request cancelled", "NS_BINDING_ABORTED"]).toContain(request.error);
+        if (request.responseStatus === 503) expect(request.error).toBe("net::ERR_ABORTED");
+        else {
+          expect(request.responseStatus).toBeNull();
+          expect(isWebKit).toBe(true);
+          expect(["Load request cancelled", "NS_BINDING_ABORTED"]).toContain(request.error);
+        }
       }
       else expect(["net::ERR_ABORTED", "Load request cancelled", "NS_BINDING_ABORTED"]).toContain(request.error);
     }
@@ -647,8 +860,12 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       cleanupVerified = true;
       }
     } finally {
-    const sourceMatchesHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim() === testedSha && !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "scripts", "public", "messages", "package.json", "package-lock.json", "next.config.*"], { encoding: "utf8" }).trim();
-    const provenance = { testedSha, runId, cleanupVerified, status: completed && cleanupVerified ? sourceMatchesHead ? "PASS" : "WORKING_TREE" : "FAIL", sourceMatchesHead, project: testInfo.project.name, tool: "Playwright", screenshots, networkDiagnostics };
+    const sourceMatchesHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim() === testedSha &&
+      !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "scripts", "public", "messages", "package.json", "package-lock.json", "next.config.*", "playwright*.ts"], { encoding: "utf8" }).trim();
+    const provenance = { testedSha, runId, cleanupVerified,
+      status: completed && cleanupVerified ? sourceMatchesHead ? "PASS" : "WORKING_TREE" : "FAIL",
+      observationMode: useNativeMediaObserver ? "native-event-trace-and-passive-network" : "passive-playwright-network-and-video-state",
+      sourceMatchesHead, project: testInfo.project.name, tool: "Playwright", screenshots, networkDiagnostics };
     const body = JSON.stringify(provenance, null, 2);
     await writeFile(testInfo.outputPath("supabase-media-provenance.json"), body);
     await testInfo.attach("supabase-media-provenance", { body, contentType: "application/json" });

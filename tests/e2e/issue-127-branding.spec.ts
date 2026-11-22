@@ -66,10 +66,10 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
         await Promise.all(visible.map((image) => image.decode()));
         await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       });
-      const artifact = `docs/verification/issue-127/branding-${info.project.name}-w${width}-dpr${dpr}-${phase}.png`;
+      const artifact = `docs/verification/issue-127/${runId}-${phase}.png`;
       await mkdir(path.dirname(path.resolve(artifact)), { recursive: true });
-      await page.screenshot({ path: path.resolve(artifact), animations: "disabled" });
-      screenshots.push({ path: artifact, testedSha, runId, phase, viewport: page.viewportSize(), dpr: await page.evaluate(() => devicePixelRatio), visualReview: "PENDING" });
+      const image = await page.screenshot({ path: path.resolve(artifact), animations: "disabled" });
+      screenshots.push({ path: artifact, sha256: hash(image), testedSha, runId, phase, viewport: page.viewportSize(), dpr: await page.evaluate(() => devicePixelRatio), visualReview: "PENDING" });
     }
 
     async function measure(role: string, image: Locator, referencePath?: string, targetBudgetBytes?: number) {
@@ -187,7 +187,7 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
       try { network = await observer.finish(); } catch { observerFailed = true; }
       await context.close();
       const sourceMatchesHead = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim() === testedSha &&
-        !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "scripts", "public", "messages", "package.json", "package-lock.json", "next.config.*"], { encoding: "utf8" }).trim();
+        !execFileSync("git", ["status", "--porcelain", "--", "src", "tests", "scripts", "public", "messages", "package.json", "package-lock.json", "next.config.*", "playwright*.ts"], { encoding: "utf8" }).trim();
       const required = ["header-logo", "banner", "menu-logo", "audience-kids", "audience-adults"];
       const coverageGaps = required.filter((role) => !images.some((image) => image.role === role && (image.status === "MEASURED" || (role.startsWith("audience-") && image.status === "MEASURED_VECTOR"))))
         .map((role) => ({ role, status: images.find((image) => image.role === role)?.status ?? "NOT_MEASURED" }));

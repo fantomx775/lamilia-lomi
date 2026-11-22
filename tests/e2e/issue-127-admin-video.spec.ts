@@ -8,6 +8,7 @@ import path from "node:path";
 import { PDFDocument } from "pdf-lib";
 import sharp from "sharp";
 import { communityFixtures } from "./helpers/community-fixtures";
+import { controlIssue127TusGate, readIssue127TusGateState } from "./helpers/issue-127-tus-gate";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 const TUS_PATH = "/storage/v1/upload/resumable";
@@ -19,21 +20,19 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 type Asset = { id: string; kind: string; bucket: string; storagePath: string; sizeBytes: number; contentType: string; filename: string };
 type Fixtures = Awaited<ReturnType<typeof communityFixtures>>;
 
-function observeTus(page: Page, gatedMethod: "POST" | "PATCH") {
+function observeTus(page: Page, gatedMethod: "POST" | "PATCH", objectPrefix: string) {
   const origin = new URL(page.url()).origin;
-  let release!: () => void;
-  let announce!: () => void;
   let rejectFailure!: (error: Error) => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const reached = new Promise<void>((resolve) => { announce = resolve; });
   const failure = new Promise<never>((_resolve, reject) => { rejectFailure = reject; });
   // Every rejection is observed here and explicitly raced by the test-owned waits.
   void failure.catch(() => undefined);
-  let protocolError = "", gated = false, stopping = false, resource = "";
+  let protocolError = "", stopping = false, resource = "";
   let auth: Record<string, string> = {};
   const digest = createHash("sha256");
-  let transferBytes = 0, postCount = 0;
+  let postCount = 0;
   const records: Array<{ method: string; status: number; bytes: number }> = [];
+  const transfers: Array<{ method: string; offset: number | null; bytes: number }> = [];
+  let browserBodyHashComplete = true;
   const pending = new Set<BrowserRequest>();
   const fault = (message: string) => {
     if (!protocolError && !stopping) { protocolError = message; rejectFailure(new Error(message)); }
@@ -53,12 +52,13 @@ function observeTus(page: Page, gatedMethod: "POST" | "PATCH") {
     if (["POST", "PATCH"].includes(request.method())) {
       const bytes = request.postDataBuffer();
       const offset = request.method() === "POST" ? 0 : Number(headers["upload-offset"]);
+      const declaredBytes = Number(headers["content-length"]);
+      const observedBytes = bytes?.byteLength ?? null;
+      const bodyBytes = observedBytes !== null && observedBytes > 0 ? observedBytes
+        : Number.isSafeInteger(declaredBytes) && declaredBytes >= 0 ? declaredBytes : observedBytes;
+      transfers.push({ method: request.method(), offset: Number.isSafeInteger(offset) ? offset : null, bytes: bodyBytes ?? 0 });
       if (request.method() === "POST") postCount += 1;
-      // This case proves one uninterrupted byte transfer. A repeated creation or
-      // offset is an explicit failure, never silently double-counted as success.
-      if (postCount > 1 || !Number.isSafeInteger(offset) || offset !== transferBytes) {
-        fault("TUS retried or reordered bytes; this uninterrupted transfer proof is inconclusive.");
-      } else if (bytes) { digest.update(bytes); transferBytes += bytes.byteLength; }
+      if (bytes?.byteLength) digest.update(bytes); else browserBodyHashComplete = false;
     }
     if (request.method() === "POST") {
       for (const name of ["authorization", "apikey", "x-signature"]) if (headers[name]) auth[name] = headers[name];
@@ -70,9 +70,13 @@ function observeTus(page: Page, gatedMethod: "POST" | "PATCH") {
   });
   page.on("response", (response) => {
     if (!owned(response.url())) return;
-    records.push({ method: response.request().method(), status: response.status(), bytes: response.request().postDataBuffer()?.byteLength ?? 0 });
+    const request = response.request();
+    const requestBytes = request.postDataBuffer()?.byteLength;
+    const declaredBytes = Number(request.headers()["content-length"]);
+    records.push({ method: request.method(), status: response.status(),
+      bytes: requestBytes ?? (Number.isSafeInteger(declaredBytes) && declaredBytes >= 0 ? declaredBytes : 0) });
     if (response.status() >= 400) fault("Storage returned an unsuccessful TUS response.");
-    if (response.request().method() === "POST" && response.status() === 201) {
+    if (request.method() === "POST" && response.status() === 201) {
       const location = response.headers().location;
       if (!location) { fault("TUS creation omitted its resource Location."); return; }
       try {
@@ -84,24 +88,59 @@ function observeTus(page: Page, gatedMethod: "POST" | "PATCH") {
       } catch { fault("TUS resource Location was invalid."); }
     }
   });
-  const routing = page.route("**/*", async (route) => {
-    const request = route.request();
-    if (request.headers()["tus-resumable"] && (!owned(request.url()) || protocolError)) {
-      fault("A TUS request attempted an unexpected target or followed a failed proof.");
-      await route.abort("blockedbyclient"); return;
-    }
-    if (owned(request.url()) && request.method() === gatedMethod && !gated) {
-      gated = true; announce(); await gate;
-    }
-    await route.continue(); // A gate only: all valid real bytes reach actual Storage.
+  const externalTus = /^https?:\/\/(?!localhost:3443(?:\/|$))[^/]+\/storage\/v1\/upload\/resumable(?:\/|$)/;
+  const routing = page.route(externalTus, async (route) => {
+    fault("A TUS request attempted to leave the owned loopback Storage gateway.");
+    await route.abort("blockedbyclient");
   });
-  return { routing, release,
-    reached: () => Promise.race([reached, failure]),
-    snapshot: () => { assertProtocol(); return { records: [...records], transferBytes, postCount }; },
-    finishHash: () => { assertProtocol(); return digest.digest("hex"); },
-    async head(expectedBytes: number) {
+  return { routing,
+    async release() { await controlIssue127TusGate("release", objectPrefix); },
+    reached: async () => Promise.race([
+      expect.poll(async () => {
+        const state = await readIssue127TusGateState();
+        return state.method === gatedMethod ? state.arrivals : 0;
+      }, { timeout: 60_000 }).toBeGreaterThan(0),
+      failure,
+    ]),
+    async snapshot() {
+      assertProtocol();
+      const gateway = await readIssue127TusGateState();
+      return { records: [...records], transfers: [...transfers], postCount, browserBodyHashComplete,
+        pendingRequests: pending.size, gateway: { transfers: gateway.transfers ?? [], aggregateSha256: gateway.aggregateSha256 ?? null } };
+    },
+    finishHash: () => { assertProtocol(); return browserBodyHashComplete ? digest.digest("hex") : null; },
+    async head(expectedBytes: number, expectedSha256: string, requireChunkedPatch = true) {
       await Promise.race([expect.poll(() => Boolean(resource)).toBe(true), failure]);
-      assertProtocol(); expect(transferBytes).toBe(expectedBytes); expect(postCount).toBe(1);
+      assertProtocol();
+      await expect.poll(async () => {
+        const state = await readIssue127TusGateState();
+        const creates = (state.transfers ?? []).filter((item) => item.method === "POST");
+        const patches = (state.transfers ?? []).filter((item) => item.method === "PATCH");
+        return creates.length === 1 && creates[0].complete && creates[0].status === 201
+          && (!requireChunkedPatch || patches.length > 0)
+          && patches.every((item) => item.complete && item.status === 204 && item.acknowledgedOffset !== null);
+      }, { timeout: 15_000 }).toBe(true);
+      const gateway = await readIssue127TusGateState();
+      const creates = (gateway.transfers ?? []).filter((item) => item.method === "POST");
+      const patches = (gateway.transfers ?? []).filter((item) => item.method === "PATCH");
+      expect(creates).toHaveLength(1);
+      expect(creates[0]).toMatchObject({ offset: 0, status: 201, complete: true });
+      expect(creates[0].acknowledgedOffset).toBe(creates[0].bytes);
+      if (creates[0].declaredBytes !== null) expect(creates[0].bytes).toBe(creates[0].declaredBytes);
+      if (requireChunkedPatch) expect(patches.length).toBeGreaterThan(0);
+      let nextOffset = creates[0].acknowledgedOffset ?? 0;
+      for (const patch of patches) {
+        expect(patch.offset).toBe(nextOffset);
+        expect(patch.bytes).toBeGreaterThan(0);
+        expect(patch.complete).toBe(true);
+        expect(patch.status).toBe(204);
+        expect(patch.acknowledgedOffset).toBe(nextOffset + patch.bytes);
+        if (patch.acknowledgedOffset === null) throw new Error("Storage omitted the accepted TUS upload offset.");
+        nextOffset = patch.acknowledgedOffset;
+      }
+      expect(nextOffset).toBe(expectedBytes);
+      expect(gateway.aggregateSha256).toBe(expectedSha256);
+      expect(postCount).toBe(1);
       let result;
       try { result = await page.request.head(resource, { headers: { ...auth, "Tus-Resumable": "1.0.0" } }); }
       catch { throw new Error("Owned TUS HEAD failed; opaque resource and authorization details withheld."); }
@@ -111,9 +150,11 @@ function observeTus(page: Page, gatedMethod: "POST" | "PATCH") {
       records.push({ method: "HEAD", status: result.status(), bytes: 0 });
     },
     async stop() {
-      stopping = true; release();
+      stopping = true;
+      await controlIssue127TusGate("release", objectPrefix).catch(() => undefined);
       await page.close(); // Terminate this test page's encoder/network before fixture cleanup.
-      await expect.poll(() => pending.size, { timeout: 10_000 }).toBe(0);
+      pending.clear(); // A closed WebKit page may omit requestfinished for its canceled requests.
+      await controlIssue127TusGate("disarm", objectPrefix).catch(() => undefined);
       resource = ""; auth = {};
     },
   };
@@ -241,32 +282,40 @@ test("F30 genuine multi-chunk public PDF transfers, HEAD readback, hash and pers
     const book = await fixture.product("UX127 chunked PDF", "draft"); productId = book.id;
     await fixture.login(page, actor, `/admin/products/${book.id}`);
     const pdf = await genuineLargePdf();
-    transport = observeTus(page, "PATCH"); await transport.routing;
+    const uploadPrefix = `products/${productId}/public_download/`;
+    transport = observeTus(page, "PATCH", uploadPrefix); await transport.routing;
+    await controlIssue127TusGate("arm", uploadPrefix, "PATCH");
     const asset = await targetResponse(page, () => page.locator("#media-upload-public_download").setInputFiles({ name: "ux127-valid-large.pdf", mimeType: "application/pdf", buffer: pdf }));
     assets.push(asset);
     await transport.reached();
     const section = page.locator("#media-section-public_download");
     await expect(section.getByRole("progressbar")).toBeVisible();
-    expect(transport.snapshot().records.some((item) => item.method === "POST" && item.status === 201)).toBe(true);
+    const creationEvidence = await transport.snapshot();
+    expect(creationEvidence.records.some((item) => item.method === "POST" && item.status === 201)).toBe(true);
     await expect(page.getByRole("button", { name: /^Zapisz/ })).toBeDisabled();
-    transport.release();
+    await transport.release();
     await expect(section.getByText("Przes\u0142ano", { exact: true })).toBeVisible();
-    await transport.head(pdf.byteLength);
+    await transport.head(pdf.byteLength, sha256(pdf));
     const stored = await storageBytes(fixture, asset);
     expect(stored.byteLength).toBe(pdf.byteLength);
     expect(sha256(stored)).toBe(sha256(pdf));
-    expect(transport.finishHash()).toBe(sha256(pdf));
-    const evidence = transport.snapshot();
-    expect(evidence.records.some((item) => item.method === "PATCH" && item.status === 204 && item.bytes > 0)).toBe(true);
+    const browserRequestBodyHash = transport.finishHash();
+    if (browserRequestBodyHash !== null) expect(browserRequestBodyHash).toBe(sha256(pdf));
+    const evidence = await transport.snapshot();
+    expect(evidence.pendingRequests).toBe(0);
+    expect(evidence.gateway.transfers.some((item) => item.method === "PATCH" && item.status === 204 && item.bytes > 0)).toBe(true);
     await saveAndRead(page, fixture, productId, [asset.id]);
     await page.reload();
     await expect(section.locator('input[name="assetId"]')).toHaveValue(asset.id);
     await expect(section.locator('input[name="assetPath"]')).toHaveValue(asset.storagePath);
     const reloadedScreenshot = await capturePhase(page, "#media-section-public_download", `ux127-chunked-pdf-${info.project.name}-reloaded`, productId);
-    await manifest(`ux127-chunked-pdf-${info.project.name}`, page, { browser: info.project.name, screenshotPaths: [reloadedScreenshot], status: "PASS", kind: "valid PDF actual chunked TUS", inputBytes: pdf.byteLength, sha256: sha256(pdf), transport: evidence, storageBytesMatched: true, dbAndReloadMatched: true });
+    await manifest(`ux127-chunked-pdf-${info.project.name}`, page, { browser: info.project.name, screenshotPaths: [reloadedScreenshot], status: "PASS", kind: "valid PDF actual chunked TUS", inputBytes: pdf.byteLength, sha256: sha256(pdf), browserRequestBodyHash, transport: evidence, storageBytesMatched: true, dbAndReloadMatched: true });
   } finally {
-    if (transport) await transport.stop(); else await page.close();
-    if (productId) await cleanupOwned(fixture, productId, assets); else await fixture.cleanup();
+    try {
+      if (transport) await transport.stop(); else await page.close();
+    } finally {
+      if (productId) await cleanupOwned(fixture, productId, assets); else await fixture.cleanup();
+    }
   }
 });
 
@@ -362,7 +411,9 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     await saveAndRead(page, fixture, productId, [gallery.id], true);
     const savedText = await fixture.service.from("product_translations").select("short_description").eq("product_id", productId).eq("locale", "en").single();
     expect(savedText.error === null).toBe(true); expect(savedText.data?.short_description).toBe(notes);
-    transport = observeTus(page, "POST"); await transport.routing;
+    const uploadPrefix = `products/${productId}/video/`;
+    transport = observeTus(page, "POST", uploadPrefix); await transport.routing;
+    await controlIssue127TusGate("arm", uploadPrefix, "POST");
     retryTargetObservation = observePreparedVideoTarget(page);
     const retryPreparationStartedAt = performance.now();
     await video.getByRole("button", { name: "Pon\u00f3w", exact: true }).click();
@@ -383,14 +434,16 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     await transport.reached();
     await expect(video.getByRole("progressbar")).toBeVisible();
     await expect(video.getByText("Przygotowywanie filmu\u2026", { exact: true })).toHaveCount(0);
-    transport.release();
+    await transport.release();
     await expect(video.getByText("Przes\u0142ano", { exact: true })).toBeVisible({ timeout: 120_000 });
-    await transport.head(encoded.sizeBytes);
     const output = await storageBytes(fixture, encoded);
+    await transport.head(encoded.sizeBytes, sha256(output), false);
     expect(output.byteLength).toBe(encoded.sizeBytes);
     expect(output.subarray(4, 8).toString("ascii")).toBe("ftyp");
-    expect(transport.finishHash()).toBe(sha256(output));
-    const evidence = transport.snapshot();
+    const browserRequestBodyHash = transport.finishHash();
+    if (browserRequestBodyHash !== null) expect(browserRequestBodyHash).toBe(sha256(output));
+    const evidence = await transport.snapshot();
+    expect(evidence.pendingRequests).toBe(0);
     await saveAndRead(page, fixture, productId, [gallery.id, encoded.id]);
     await page.reload();
     await expect(page.getByLabel("Kr\u00f3tki opis")).toHaveValue(notes);
@@ -416,11 +469,14 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     const reloadedScreenshot = await capturePhase(page, "#media-section-video", `ux127-large-video-${info.project.name}-reloaded`, productId);
     await manifest(`ux127-large-video-${info.project.name}`, page, { browser: info.project.name, outputMetadata, screenshotPaths: [preparingScreenshot, cancelledScreenshot, reloadedScreenshot], status: "PASS", input, inputSha256: sha256(bytes),
       retryPreparationElapsedMs, preparationTargetDeadlineMs: VIDEO_PREPARATION_TARGET_DEADLINE_MS,
-      preparedBytes: output.byteLength, preparedSha256: sha256(output), transport: evidence,
+      preparedBytes: output.byteLength, preparedSha256: sha256(output), browserRequestBodyHash, transport: evidence,
       checks: ["real 45s input metadata", "actual pinned WASM worker EXEC before cancel", "no fake transfer percentage during encoding", "draft text and gallery preserved", "remaining draft saved without canceled video", "actual same-file retry conversion", "actual TUS and Storage hash", "DB and reload persistence"] });
   } finally {
     retryTargetObservation?.dispose();
-    if (transport) await transport.stop(); else await page.close();
-    if (productId) await cleanupOwned(fixture, productId, assets); else await fixture.cleanup();
+    try {
+      if (transport) await transport.stop(); else await page.close();
+    } finally {
+      if (productId) await cleanupOwned(fixture, productId, assets); else await fixture.cleanup();
+    }
   }
 });

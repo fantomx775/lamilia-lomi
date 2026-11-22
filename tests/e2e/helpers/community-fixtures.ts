@@ -22,9 +22,12 @@ export async function cleanupPreservingTestFailure<T>(testInfo: TestInfo, cleanu
   try { return await cleanup(); }
   catch (cleanupError) {
     if (!hasPrimaryFailure) throw cleanupError;
+    const safeErrorType = (error: unknown) => error instanceof Error &&
+      ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "TimeoutError", "AssertionError"].includes(error.name)
+      ? error.name : "Error";
     await testInfo.attach(attachmentName, { body: Buffer.from(JSON.stringify({
-      primaryFailure: primaryFailure instanceof Error ? primaryFailure.message : String(primaryFailure),
-      cleanupFailure: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      primaryFailureType: safeErrorType(primaryFailure),
+      cleanupFailureType: safeErrorType(cleanupError),
     }, null, 2)), contentType: "application/json" }).catch(() => undefined);
     return undefined;
   }
