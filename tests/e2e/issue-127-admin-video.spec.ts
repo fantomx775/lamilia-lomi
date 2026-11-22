@@ -457,7 +457,23 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     retryTargetObservation = observePreparedVideoTarget(page);
     const retryPreparationStartedAt = performance.now();
     await video.getByRole("button", { name: "Pon\u00f3w", exact: true }).click();
-    await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 90_000 }).toBe(2);
+    try {
+      await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 90_000 }).toBe(2);
+    } catch (error) {
+      const state = await page.evaluate(() => {
+        const encoding = (window as Window & { __ux127Encoding?: { started: number; finished: number; messages: string[]; workerErrors: number } }).__ux127Encoding;
+        const section = document.querySelector("#media-section-video");
+        const text = section?.textContent ?? "";
+        const input = document.querySelector<HTMLInputElement>("#media-upload-video");
+        return { encoding: encoding ? { started: encoding.started, finished: encoding.finished, messages: [...encoding.messages], workerErrors: encoding.workerErrors } : null,
+          preparingVisible: text.includes("Przygotowywanie filmu"), optimizationFailureVisible: text.includes("Optymalizacja pliku nie powiodła się"),
+          cancelledVisible: text.includes("Przerwano przygotowanie lub przesyłanie"), uploadProgressVisible: Boolean(section?.querySelector('[role="progressbar"]')),
+          retryButtonVisible: [...(section?.querySelectorAll("button") ?? [])].some((button) => button.textContent?.trim() === "Ponów"),
+          inputFilePresent: Boolean(input?.files?.[0]), inputFileBytes: input?.files?.[0]?.size ?? 0 };
+      });
+      await testInfo.attach("f30-retry-encoder-startup-diagnostic", { body: JSON.stringify({ testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), network: ffmpegNetwork, pinnedWasmStatuses: pinnedWasm, state }, null, 2), contentType: "application/json" });
+      throw error;
+    }
     const targetOutcome = await retryTargetObservation.result;
     const retryPreparationElapsedMs = performance.now() - retryPreparationStartedAt;
     await manifest(`ux127-video-preparation-phase-${info.project.name}`, page, {
