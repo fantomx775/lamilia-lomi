@@ -35,14 +35,18 @@ const cdpEvent = z.object({
 });
 const snapshot = z.object({
   cdpStatus: z.string(), ownedMedia: z.object({ apiPath: z.string(), storagePath: z.string(), origin: z.string().url() }),
+  ownedVideoContent: z.object({ byteLength: z.number().int().positive(), fixtureSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    storageReadbackSha256: z.string().regex(/^[a-f0-9]{64}$/) }),
   failed: z.array(failedRequest), successfulMedia: z.array(completedRequest), nativeTimeline: z.array(timelineEvent),
   lifecycleActions: z.array(z.object({ action: z.string(), atEpochMs: number })), cdpMedia: z.array(cdpEvent),
 });
 
 /**
- * Accept only a browser media abort that is followed by an exact, complete
- * Range tail and a decoded frame from the same owned element generation.
- * This does not accept path-only aborts or generic net::ERR_ABORTED results.
+ * Accept only an owned media range abort that is followed by an exact,
+ * complete range tail and a decoded frame from the same element generation.
+ * The initial response must be either demonstrably partial or demonstrably
+ * complete in both browser observers before the tail reissue. This does not
+ * accept path-only aborts or generic net::ERR_ABORTED results.
  */
 export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: number, fixtureBytes: number) {
   const parsed = snapshot.safeParse(input);
@@ -51,6 +55,10 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
   }
   const data = parsed.data;
   const unresolved = (reason: string) => ({ disposition: "UNRESOLVED" as const, reason });
+  if (data.ownedVideoContent.byteLength !== fixtureBytes ||
+      data.ownedVideoContent.fixtureSha256 !== data.ownedVideoContent.storageReadbackSha256) {
+    return unresolved("fixture-storage-readback-mismatch");
+  }
   let parsedExpectedOrigin: URL;
   try { parsedExpectedOrigin = new URL(data.ownedMedia.origin); } catch { return unresolved("invalid-owned-origin"); }
   if (parsedExpectedOrigin.origin !== data.ownedMedia.origin || parsedExpectedOrigin.protocol !== "https:" ||
@@ -84,6 +92,7 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
   if (failure.identitySample && !sameOwner(failure.identitySample)) return unresolved("failed-request-owner-mismatch");
 
   let abortEpochMs = failure.failedAtEpochMs;
+  let completeBodyBeforeAbort = false;
   if (data.cdpStatus === "OBSERVING") {
     const closeInTime = (event: z.infer<typeof cdpEvent>, epochMs: number) => event.wallTime !== undefined &&
       Math.abs(event.wallTime * 1000 - epochMs) <= 20;
@@ -95,6 +104,11 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
     if (terminals.length !== 1 || !terminals[0].canceled || terminals[0].category !== "net::ERR_ABORTED") {
       return unresolved("cdp-does-not-prove-owned-range-abort");
     }
+    const bytesReceived = terminals[0].receivedDataBytes;
+    const partialBody = bytesReceived > 0 && bytesReceived < fixtureBytes &&
+      (typeof failure.responseBodyBytes !== "number" || failure.responseBodyBytes > 0);
+    completeBodyBeforeAbort = bytesReceived === fixtureBytes && failure.responseBodyBytes === fixtureBytes;
+    if (!partialBody && !completeBodyBeforeAbort) return unresolved("cdp-does-not-prove-owned-range-abort");
     abortEpochMs = requests[0].wallTime * 1000 + (terminals[0].timestamp - requests[0].timestamp) * 1000;
   }
 
@@ -153,7 +167,8 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
     if (canceledResponse.length !== 1 || canceledResponse[0].status !== 206 ||
         canceledResponse[0].contentRange !== fullRange || canceledTerminal.length !== 1 ||
         !canceledTerminal[0].canceled || canceledTerminal[0].category !== "net::ERR_ABORTED" ||
-        canceledTerminal[0].receivedDataBytes <= 0 || canceledTerminal[0].receivedDataBytes >= fixtureBytes ||
+        (!completeBodyBeforeAbort && (canceledTerminal[0].receivedDataBytes <= 0 || canceledTerminal[0].receivedDataBytes >= fixtureBytes)) ||
+        (completeBodyBeforeAbort && (canceledTerminal[0].receivedDataBytes !== fixtureBytes || failure.responseBodyBytes !== fixtureBytes)) ||
         canceledResponse[0].fromDiskCache !== false || canceledResponse[0].fromServiceWorker !== false ||
         canceledResponse[0].fromPrefetchCache !== false) {
       return unresolved("cdp-does-not-prove-owned-range-abort");
@@ -184,11 +199,15 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
   const range = /^bytes=(\d+)-$/.exec(tail.allHeadersRange ?? tail.range ?? "")!;
   const partialOffset = Number(range[1]);
   if (typeof partialReceivedBytes !== "number" || !Number.isSafeInteger(partialReceivedBytes) ||
-      partialReceivedBytes <= 0 || partialReceivedBytes >= fixtureBytes || partialOffset > partialReceivedBytes) {
+      partialReceivedBytes <= 0 || partialReceivedBytes > fixtureBytes ||
+      (completeBodyBeforeAbort ? partialReceivedBytes !== fixtureBytes : partialReceivedBytes >= fixtureBytes) ||
+      partialOffset > partialReceivedBytes) {
     return unresolved("resumed-offset-exceeds-bytes-received-before-abort");
   }
   return {
-    disposition: "EXPECTED_OWNED_NATIVE_RANGE_CONTINUATION" as const,
+    disposition: completeBodyBeforeAbort
+      ? "EXPECTED_OWNED_NATIVE_FULL_RESPONSE_RANGE_REISSUE" as const
+      : "EXPECTED_OWNED_NATIVE_RANGE_CONTINUATION" as const,
     requestId: failure.requestId,
     parentRequestId: parent.requestId,
     resumedRequestId: tail.requestId,
@@ -196,7 +215,7 @@ export function classifyOwnedMediaRangeContinuation(input: unknown, requestId: n
     elementId: owner.elementId,
     generation: owner.generation,
     canceledContentRange: failure.contentRange,
-    partialReceivedBytes,
+    ...(completeBodyBeforeAbort ? { receivedBytesBeforeAbort: partialReceivedBytes } : { partialReceivedBytes }),
     resumedOffset: partialOffset,
     resumedBytes: tail.responseBodyBytes,
     decodedFrameAtEpochMs: frame.atEpochMs,

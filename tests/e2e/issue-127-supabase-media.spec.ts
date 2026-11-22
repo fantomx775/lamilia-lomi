@@ -92,12 +92,15 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
   const metadataResumeProofs = new Map<number, ReturnType<typeof classifyOwnedMetadataResume>>();
   const rangeContinuationProofs = new Map<number, ReturnType<typeof classifyOwnedMediaRangeContinuation>>();
   let ownedVideoBytes = 0;
+  let ownedVideoStorageReadbackSha256: string | null = null;
+  let ownedVideoContent: { byteLength: number; fixtureSha256: string; storageReadbackSha256: string } | null = null;
   const diagnosticWork: Promise<void>[] = [];
   let stopCdp: (() => Promise<void>) | null = null;
   let cdpStatus = "NOT_APPLICABLE";
   const inFlight = new Map<Request, RequestMetadata>();
   const requestIdentity = new WeakMap<Request, RequestMetadata>();
   const nativeTimeline: Array<Record<string, unknown>> = [];
+  const videoDomLifecycleByCache: Record<string, Array<Record<string, unknown>>> = {};
   const observerErrors: Array<{ category: "invalid-native-observation" }> = [];
   const lifecycleActions: Array<{ action: string; phase: string; atEpochMs: number }> = [];
   const networkDiagnostics: string[] = [];
@@ -213,6 +216,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       const evidence = { cdpStatus, observerErrors, consoleErrors, pageErrors, failed, mediaRequests,
         ownedMediaTransportRequests, successfulMedia, cdpMedia, nativeTimeline, lifecycleActions,
         ownedMedia: { apiPath: ownedVideoPath, storagePath: ownedStoragePath, origin: COMMUNITY_TEST_ORIGIN },
+        ownedVideoContent,
       };
       metadataResumeProofs.set(request.requestId, classifyOwnedMetadataResume(evidence, request.requestId, ownedVideoBytes));
       rangeContinuationProofs.set(request.requestId, classifyOwnedMediaRangeContinuation(evidence, request.requestId, ownedVideoBytes));
@@ -235,9 +239,9 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       metadataResumeProofs: [...metadataResumeProofs.entries()].map(([requestId, proof]) => ({ requestId, ...proof })),
       rangeContinuationProofs: [...rangeContinuationProofs.entries()].map(([requestId, proof]) => ({ requestId, ...proof })),
       mediaRequests, ownedMediaTransportRequests, storageTransportRequests, successfulMedia, mediaGateSnapshots, nativePlayer, cdpStatus, cdpMedia, nativeTimeline, lifecycleActions, observerErrors,
-      ownedMedia: { apiPath: ownedVideoPath, storagePath: ownedStoragePath, origin: COMMUNITY_TEST_ORIGIN }, nextFinalizationFailed,
+      ownedMedia: { apiPath: ownedVideoPath, storagePath: ownedStoragePath, origin: COMMUNITY_TEST_ORIGIN }, ownedVideoContent, nextFinalizationFailed,
       expectedNextCancellations: nextSnapshot?.expectedNextCancellations.filter((outcome) => outcome.kind === "next-prefetch") ?? [],
-      closedPrefetches: nextSnapshot?.closedPrefetches ?? [], pending: [...inFlight.values()] }, null, 2);
+      closedPrefetches: nextSnapshot?.closedPrefetches ?? [], pending: [...inFlight.values()], videoDomLifecycleByCache }, null, 2);
     const filename = `supabase-media-network-${checkpoint}.json`;
     await writeFile(testInfo.outputPath(filename), body);
     networkDiagnostics.push(filename);
@@ -394,7 +398,12 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       expect((await fixtures.service.storage.from(bucket).upload(storagePath, bytes, { contentType, upsert: false })).error).toBeNull();
       objects.push({ bucket, path: storagePath });
       const stored = await fixtures.service.storage.from(bucket).download(storagePath);
-      expect(stored.error).toBeNull(); expect(Buffer.from(await stored.data!.arrayBuffer())).toEqual(bytes);
+      expect(stored.error).toBeNull();
+      const storedBytes = Buffer.from(await stored.data!.arrayBuffer());
+      expect(storedBytes).toEqual(bytes);
+      if (kind === "video") {
+        ownedVideoStorageReadbackSha256 = createHash("sha256").update(storedBytes).digest("hex");
+      }
       rows.push({ id, product_id: book.id, kind, bucket, path: storagePath, filename, content_type: contentType,
         size_bytes: bytes.length, title: filename, locale: "en", sort_order: index, is_public: true, is_active: true, storage_provider: "supabase" });
       return id;
@@ -405,7 +414,11 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     }
     const videoBytes = await readFile(path.resolve("tests/e2e/fixtures/issue-127/flower.mp4"));
     ownedVideoBytes = videoBytes.length;
+    const videoFixtureSha256 = createHash("sha256").update(videoBytes).digest("hex");
     const video = await asset("video", videoBytes, "fixture-film.mp4");
+    if (ownedVideoStorageReadbackSha256 !== videoFixtureSha256) throw new Error("The owned video fixture hash and Storage readback hash do not match.");
+    ownedVideoContent = { byteLength: videoBytes.length, fixtureSha256: videoFixtureSha256,
+      storageReadbackSha256: ownedVideoStorageReadbackSha256 };
     expect((await fixtures.service.from("product_assets").insert(rows)).error).toBeNull();
     expect((await fixtures.service.from("products").update({ cover_asset_id: cover, video_asset_id: video }).eq("id", book.id)).error).toBeNull();
     expect((await fixtures.service.from("product_assets").select("id").eq("product_id", book.id)).data).toHaveLength(5);
@@ -514,6 +527,54 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       await resetDocument(`${COMMUNITY_TEST_ORIGIN}/en/products/${book.slug}`, `${cache}:navigation`);
       setPhase(`${cache}:video-intent`);
       const player = page.locator("video[data-flipthrough]");
+      if (!isWebKit) {
+        await expect(player).toBeAttached();
+        await page.evaluate(() => {
+          type LifecycleWindow = Window & { __ux127VideoDomTransitions?: Array<Record<string, unknown>> };
+          const target = window as LifecycleWindow;
+          const transitions: Array<Record<string, unknown>> = [];
+          target.__ux127VideoDomTransitions = transitions;
+          const nodeIds = new WeakMap<Node, number>();
+          const videoIds = new WeakMap<HTMLVideoElement, number>();
+          let nextNodeId = 0;
+          let nextVideoId = 0;
+          const nodeId = (node: Node | null) => {
+            if (!node) return null;
+            let id = nodeIds.get(node);
+            if (!id) { id = ++nextNodeId; nodeIds.set(node, id); }
+            return id;
+          };
+          const videoId = (video: HTMLVideoElement) => {
+            let id = videoIds.get(video);
+            if (!id) { id = ++nextVideoId; videoIds.set(video, id); }
+            return id;
+          };
+          const candidates = (node: Node) => node instanceof HTMLVideoElement && node.matches("video[data-flipthrough]")
+            ? [node] : node instanceof Element ? Array.from(node.querySelectorAll<HTMLVideoElement>("video[data-flipthrough]")) : [];
+          const sourcePath = (video: HTMLVideoElement) => {
+            try { return new URL(video.currentSrc || video.src, location.href).pathname; } catch { return "[invalid-source]"; }
+          };
+          const record = (action: string, video: HTMLVideoElement, mutationNode: Node, mutationTarget: Node) => ({
+            action, atEpochMs: Date.now(), atPerformanceMs: performance.now(), videoId: videoId(video),
+            mutationNodeId: nodeId(mutationNode), mutationNodeTag: mutationNode instanceof Element ? mutationNode.tagName : mutationNode.nodeName,
+            mutationTargetId: nodeId(mutationTarget), mutationTargetTag: mutationTarget instanceof Element ? mutationTarget.tagName : mutationTarget.nodeName,
+            currentParentId: nodeId(video.parentNode), currentParentTag: video.parentElement?.tagName ?? null,
+            connected: video.isConnected, sourcePath: sourcePath(video), paused: video.paused,
+            readyState: video.readyState, networkState: video.networkState, errorCode: video.error?.code ?? null,
+          });
+          const initial = document.querySelector<HTMLVideoElement>("video[data-flipthrough]");
+          if (initial) transitions.push({ action: "initial", atEpochMs: Date.now(), atPerformanceMs: performance.now(), videoId: videoId(initial),
+            currentParentId: nodeId(initial.parentNode), currentParentTag: initial.parentElement?.tagName ?? null,
+            connected: initial.isConnected, sourcePath: sourcePath(initial), paused: initial.paused,
+            readyState: initial.readyState, networkState: initial.networkState, errorCode: initial.error?.code ?? null });
+          new MutationObserver((records) => {
+            for (const mutation of records) {
+              for (const node of mutation.removedNodes) for (const video of candidates(node)) transitions.push(record("containing-subtree-removed", video, node, mutation.target));
+              for (const node of mutation.addedNodes) for (const video of candidates(node)) transitions.push(record("containing-subtree-added", video, node, mutation.target));
+            }
+          }).observe(document, { childList: true, subtree: true });
+        });
+      }
       await player.scrollIntoViewIfNeeded();
       await expect(player).toHaveAttribute("controls", ""); await expect(player).toHaveAttribute("playsinline", "");
       await expect(page.getByText("fixture-film.mp4", { exact: true })).toHaveCount(0);
@@ -538,6 +599,16 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
           return false;
         });
       expect(coldProgressed, `The real product video must advance during ${cache} playback.`).toBe(true);
+      if (!isWebKit) {
+        videoDomLifecycleByCache[cache] = await page.evaluate(() =>
+          ((window as Window & { __ux127VideoDomTransitions?: Array<Record<string, unknown>> }).__ux127VideoDomTransitions ?? []).map((entry) => ({ ...entry })));
+        const domLifecycle = videoDomLifecycleByCache[cache];
+        const initialDomState = domLifecycle.find((entry) => entry.action === "initial");
+        expect(initialDomState).toBeDefined();
+        expect(domLifecycle.every((entry) => entry.videoId === initialDomState!.videoId && entry.connected === true &&
+          entry.sourcePath === videoPath && entry.currentParentId === initialDomState!.currentParentId)).toBe(true);
+        expect(domLifecycle.filter((entry) => entry.mutationNodeTag === "VIDEO")).toHaveLength(0);
+      }
       if (useClickFrameMeasurement) {
         await expect.poll(() => page.evaluate(() => (window as unknown as { mediaTiming: { frame: number | null } }).mediaTiming.frame)).not.toBeNull();
         const timing = await page.evaluate(() => (window as unknown as { mediaTiming: { click: number; frame: number } }).mediaTiming);
@@ -796,6 +867,8 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
       metadataResumeProofs: [...metadataResumeProofs.entries()].map(([requestId, proof]) => ({ requestId, ...proof })),
       rangeContinuationProofs: [...rangeContinuationProofs.entries()].map(([requestId, proof]) => ({ requestId, ...proof })),
       backgroundVisibility, pausedOnReturn, backgroundStartTime, backgroundSnapshots, waitEvents,
+      ownedMedia: { apiPath: ownedVideoPath, storagePath: ownedStoragePath, origin: COMMUNITY_TEST_ORIGIN }, ownedVideoContent,
+      videoDomLifecycleByCache,
       optimizerSelection: "NOT APPLICABLE to unoptimized authenticated Supabase fallback; tested separately in local-demo optimized image campaign" }), contentType: "application/json" });
     setPhase("network:assertions");
     await networkSnapshot("before-assertions");
@@ -813,7 +886,25 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
         continue;
       }
       const rangeContinuation = rangeContinuationProofs.get(request.requestId);
-      if (rangeContinuation?.disposition === "EXPECTED_OWNED_NATIVE_RANGE_CONTINUATION") {
+      if (rangeContinuation?.disposition === "EXPECTED_OWNED_NATIVE_FULL_RESPONSE_RANGE_REISSUE") {
+        expect(isWebKit).toBe(false);
+        expect(["cold-media:video-play", "warm-media:video-play"]).toContain(request.phaseAtStart);
+        expect(request.allHeadersRange ?? request.range).toBe("bytes=0-");
+        expect(request.contentRange).toBe(`bytes 0-${ownedVideoBytes - 1}/${ownedVideoBytes}`);
+        expect(request.responseBodyBytes).toBe(ownedVideoBytes);
+        expect(rangeContinuation).toMatchObject({ receivedBytesBeforeAbort: ownedVideoBytes, requiresIndependentReview: true });
+        expect(ownedVideoContent?.byteLength).toBe(ownedVideoBytes);
+        expect(ownedVideoContent?.storageReadbackSha256).toBe(ownedVideoContent?.fixtureSha256);
+        const cache = request.phaseAtStart.startsWith("warm-") ? "warm-media" : "cold-media";
+        const cacheLifecycle = videoDomLifecycleByCache[cache] ?? [];
+        const initial = cacheLifecycle.find((entry) => entry.action === "initial");
+        expect(initial).toBeDefined();
+        expect(cacheLifecycle.every((entry) => entry.videoId === initial!.videoId && entry.connected === true &&
+          entry.sourcePath === videoPath && entry.currentParentId === initial!.currentParentId)).toBe(true);
+        expect(cacheLifecycle.filter((entry) => entry.mutationNodeTag === "VIDEO")).toHaveLength(0);
+      }
+      if (rangeContinuation?.disposition === "EXPECTED_OWNED_NATIVE_RANGE_CONTINUATION" ||
+          rangeContinuation?.disposition === "EXPECTED_OWNED_NATIVE_FULL_RESPONSE_RANGE_REISSUE") {
         expect(request.method).toBe("GET"); expect(request.resource).toBe("media");
         expect(request.originKind).toBe("test-origin"); expect(request.path).toBe(ownedStoragePath); expect(request.error).toBe("net::ERR_ABORTED");
         expect(request.responseStatus).toBe(206);
@@ -967,7 +1058,12 @@ async function observeNativeMedia(page: Page, ownedSources: OwnedMediaSource[], 
         for (const node of record.removedNodes) {
           if (!(node instanceof Element)) continue;
           const removed = node instanceof HTMLVideoElement ? [node] : Array.from(node.querySelectorAll<HTMLVideoElement>("video[data-flipthrough]"));
-          for (const candidate of removed) if (identities.has(candidate)) emit(candidate, "video-detached", false);
+          for (const candidate of removed) {
+            // Mutation records may report an ancestor wrapper that was moved
+            // while the native video remained connected. Only label a genuine
+            // element detach after the batch has settled.
+            if (identities.has(candidate) && !candidate.isConnected) emit(candidate, "video-detached", false);
+          }
         }
       }
       const video = document.querySelector<HTMLVideoElement>("video[data-flipthrough]");
