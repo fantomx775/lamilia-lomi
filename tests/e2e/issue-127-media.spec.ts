@@ -189,8 +189,23 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       await expect(page.getByText("flower.mp4", { exact: true })).toHaveCount(0);
       await video.evaluate((element) => {
         const player = element as HTMLVideoElement;
-        const state = window as unknown as { ux127VideoTiming: { started: number; frame: number | null; frameSequence: number | null; monitoring: boolean } };
+        const state = window as unknown as {
+          ux127VideoTiming: { started: number; frame: number | null; frameSequence: number | null; monitoring: boolean };
+          ux127VideoEvents: Array<Record<string, number | string | null | boolean>>;
+        };
         state.ux127VideoTiming = { started: 0, frame: null, frameSequence: null, monitoring: true };
+        state.ux127VideoEvents = [];
+        for (const eventName of ["loadstart", "loadedmetadata", "loadeddata", "canplay", "canplaythrough", "play", "playing", "timeupdate", "waiting", "stalled", "suspend", "abort", "error", "pause"]) {
+          player.addEventListener(eventName, () => state.ux127VideoEvents.push({
+            event: eventName,
+            at: performance.now(),
+            currentTime: player.currentTime,
+            readyState: player.readyState,
+            networkState: player.networkState,
+            paused: player.paused,
+            errorCode: player.error?.code ?? null,
+          }));
+        }
         player.addEventListener("playing", () => {
           state.ux127VideoTiming.started = performance.now();
           const requestFrame = player.requestVideoFrameCallback;
@@ -220,7 +235,54 @@ test("F15-F17 fixed gallery frames, decoded detail and independent MP4 Range/inl
       let playbackState: { currentTime: number; readyState: number };
       try {
         await page.getByRole("button", { name: /Play Inside the book/ }).click();
-        await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0.2);
+        try {
+          await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 25_000 }).toBeGreaterThan(0.2);
+        } catch (error) {
+          const failureState = await video.evaluate((element) => {
+            const player = element as HTMLVideoElement;
+            const state = window as unknown as {
+              ux127VideoEvents: Array<Record<string, number | string | null | boolean>>;
+              ux127VideoTiming: { started: number; frame: number | null; frameSequence: number | null; monitoring: boolean };
+            };
+            return {
+              currentSrcPath: player.currentSrc ? new URL(player.currentSrc).pathname : null,
+              currentTime: player.currentTime,
+              duration: Number.isFinite(player.duration) ? player.duration : null,
+              readyState: player.readyState,
+              networkState: player.networkState,
+              paused: player.paused,
+              ended: player.ended,
+              error: player.error ? { code: player.error.code, message: player.error.message } : null,
+              canPlayMp4: player.canPlayType("video/mp4"),
+              buffered: Array.from({ length: player.buffered.length }, (_, index) => ({
+                start: player.buffered.start(index),
+                end: player.buffered.end(index),
+              })),
+              events: state.ux127VideoEvents,
+              timing: state.ux127VideoTiming,
+            };
+          });
+          await testInfo.attach("first-frame-failure-diagnostics", {
+            body: JSON.stringify({
+              testedSha,
+              project: testInfo.project.name,
+              video: failureState,
+              rangeRequests: [...mediaRangeEvidence.values()].map((evidence) => ({
+                range: evidence.request.headers()["range"] ?? null,
+                status: evidence.status ?? null,
+                contentRange: evidence.contentRange ?? null,
+                responseSequence: evidence.responseSequence ?? null,
+                finishedSequence: evidence.requestFinishedSequence ?? null,
+                failureSequence: evidence.failureSequence ?? null,
+              })),
+              failedRequests,
+              pageErrors,
+              consoleErrors,
+            }, null, 2),
+            contentType: "application/json",
+          });
+          throw error;
+        }
         await expect.poll(() => page.evaluate(() => (window as unknown as { ux127VideoTiming: { frameSequence: number | null } }).ux127VideoTiming.frameSequence)).not.toBeNull();
         const playbackRanges = () => [...mediaRangeEvidence.values()];
         if (playbackRanges().length > 0) {
