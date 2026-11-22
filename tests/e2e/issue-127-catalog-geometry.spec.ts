@@ -56,6 +56,18 @@ function sameGeometry(before: Awaited<ReturnType<typeof geometry>>, after: Await
   }
 }
 
+function localOptimizedImageSourcePath(url: URL) {
+  if (url.pathname !== "/_next/image") return null;
+  const source = url.searchParams.get("url");
+  if (!source) return null;
+  try {
+    const parsed = new URL(source, url.origin);
+    return parsed.origin === url.origin ? parsed.pathname : null;
+  } catch {
+    return null;
+  }
+}
+
 test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured geometry", async ({ page }, info) => {
   test.skip(process.env.RUN_ISSUE_127_CATALOG_GEOMETRY_E2E !== "1", "Requires exclusive verified local-demo dev app with catalogue result delay enabled.");
   test.setTimeout(240_000);
@@ -98,11 +110,15 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
   page.on("request", (request) => {
     const url = new URL(request.url());
     const headers = request.headers();
+    const documentUrl = page.url() ? new URL(page.url()) : null;
     const metadata: Record<string, unknown> = {
       case: currentCase,
       phase: currentPhase,
       method: request.method(),
       pathname: url.pathname,
+      initiatingDocumentPath: documentUrl?.pathname ?? null,
+      initiatingFixtureCase: documentUrl?.searchParams.get("ux127case") ?? null,
+      optimizedImageSourcePath: localOptimizedImageSourcePath(url),
       hasSearchQuery: url.searchParams.has("q"),
       searchQuery: url.searchParams.get("q"),
       resourceType: request.resourceType(),
@@ -161,6 +177,25 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         const grid = page.getByTestId("product-catalog-grid");
         await expect(grid).toBeVisible();
         await expect(grid.locator("article")).toHaveCount(2);
+        await expect.poll(async () => {
+          const images = await grid.locator("article img").evaluateAll((elements) => elements.map((element) => {
+            const image = element as HTMLImageElement;
+            return image.complete && image.naturalWidth > 0;
+          }));
+          return images.length >= 2 && images.every(Boolean);
+        }).toBe(true);
+        const decodedImages = await grid.locator("article img").evaluateAll((images) => images.map((image) => {
+          const element = image as HTMLImageElement;
+          const current = new URL(element.currentSrc, window.location.origin);
+          const source = current.pathname === "/_next/image" ? current.searchParams.get("url") : current.href;
+          try {
+            const parsed = new URL(source ?? "", window.location.origin);
+            return parsed.origin === window.location.origin ? parsed.pathname : null;
+          } catch {
+            return null;
+          }
+        }));
+        expect(decodedImages.filter(Boolean).length).toBeGreaterThanOrEqual(2);
         await expect(page.getByTestId("catalog-category-list")).toHaveCount(categoryCount ? 1 : 0);
         if (categoryCount) await expect(page.locator('[data-testid^="catalog-category-ux127-category-"]')).toHaveCount(categoryCount);
         await page.evaluate(() => document.fonts.ready);
@@ -245,6 +280,9 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
           searchQuery: finalUrl.searchParams.get("q"),
           queryResultCommitted,
           resultArticleCount: await grid.locator("article").count(),
+          decodedCatalogImageCount: decodedImages.filter(Boolean).length,
+          allCatalogImagesDecoded: true,
+          decodedImageSourcePaths: decodedImages.filter((source): source is string => Boolean(source)),
           searchedProductVisible: (await grid.getByText(productTitle, { exact: true }).count()) > 0,
           initialProductAbsent: (await grid.getByText(initialProductTitle, { exact: true }).count()) === 0,
           resultsBusy: await results.getAttribute("aria-busy"),
@@ -291,8 +329,52 @@ test("R5 F10 actual 0/1/7-category shell and 3/4/5-column results keep measured 
         queryRequests.length === 1 &&
         result?.queryResultCommitted === true &&
         result.searchQuery === failure.searchQuery;
-      if (!result || !isCommittedCatalogRscCancellation) {
+      const caseParts = typeof failure.case === "string"
+        ? /^c(0|1|7)-cols(3|4|5)-w(390|768|1024|1440)$/.exec(failure.case)
+        : null;
+      const targetPage = typeof failure.urlAtFailure === "string" ? new URL(failure.urlAtFailure) : null;
+      const isSupersededCatalogImageCancellation = Boolean(
+        failure.failure === "net::ERR_ABORTED" &&
+          failure.phase === "navigation" &&
+          failure.method === "GET" &&
+          failure.pathname === "/_next/image" &&
+          failure.resourceType === "image" &&
+          failure.isNavigationRequest === false &&
+          failure.isRscRequest === false &&
+          failure.isPrefetchRequest === false &&
+          failure.isHmrRefresh === false &&
+          failure.initiatingDocumentPath === "/en/products" &&
+          typeof failure.initiatingFixtureCase === "string" &&
+          failure.initiatingFixtureCase !== failure.case &&
+          /^c(0|1|7)-cols(3|4|5)-w(390|768|1024|1440)$/.test(failure.initiatingFixtureCase) &&
+          typeof failure.optimizedImageSourcePath === "string" &&
+          result?.case === failure.case &&
+          result?.queryResultCommitted === true &&
+          result?.allCatalogImagesDecoded === true &&
+          Array.isArray(result?.decodedImageSourcePaths) &&
+          result?.decodedImageSourcePaths.includes(failure.optimizedImageSourcePath) &&
+          caseParts !== null &&
+          targetPage?.pathname === "/en/products" &&
+          targetPage?.searchParams.get("ux127case") === `${caseParts[1]}-${caseParts[2]}-${caseParts[3]}` &&
+          observedDuring?.case === failure.case &&
+          observedDuring?.phase === "navigation",
+      );
+      if (!result || (!isCommittedCatalogRscCancellation && !isSupersededCatalogImageCancellation)) {
         browserDiagnostics.unclassifiedRequestFailures.push(failure);
+        continue;
+      }
+      if (isSupersededCatalogImageCancellation) {
+        browserDiagnostics.committedRouteCancellations.push({
+          ...failure,
+          disposition: "superseded-image-replaced-and-decoded",
+          resultEvidence: {
+            targetCase: result.case,
+            decodedCatalogImageCount: result.decodedCatalogImageCount,
+            matchingDecodedSourcePath: failure.optimizedImageSourcePath,
+            targetPage: targetPage ? `${targetPage.pathname}${targetPage.search}` : null,
+          },
+          reason: "A GET for a local optimized image from the previous owned catalog case was aborted during the next controlled catalog navigation. The destination case then committed its unique query and decoded every product-card image, including the exact same local source path. Only this proven superseded-image case is classified; all other request failures remain unclassified.",
+        });
         continue;
       }
       browserDiagnostics.committedRouteCancellations.push({
