@@ -264,3 +264,18 @@ body:has(.mobile-navigation-dialog[open]) {
     to { transform: translateX(-100%); }
   }
 }
+
+/* UX127 shared notification motion. Manual popover keeps notifications above dialogs. */
+@keyframes toast-enter {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-exit {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-8px); }
+}
+.toast-notice { animation: toast-enter 200ms ease-out both; }
+.toast-notice[data-closing="true"] { animation: toast-exit 160ms ease-in both; }
+@media (prefers-reduced-motion: reduce) {
+  .toast-notice, .toast-notice[data-closing="true"] { animation: none; }
+}

@@ -95,7 +95,7 @@ describe("community artwork upload API", () => {
     mocks.consumeRateLimit.mockImplementation(async (scope: string) => { mocks.order.push(scope); return true; });
     mocks.normalize.mockImplementation(async () => {
       mocks.order.push("normalize");
-      return { bytes: new Uint8Array([1, 2, 3]), contentType: "image/webp", originalSha256: "b".repeat(64), normalizedSha256: "c".repeat(64) };
+      return { bytes: new Uint8Array([1, 2, 3]), contentType: "image/webp", width: 1536, height: 2048, originalSha256: "b".repeat(64), normalizedSha256: "c".repeat(64) };
     });
     mocks.reserve.mockResolvedValue({ state: "reserved", leaseToken: "55555555-5555-4555-8555-555555555555", storagePath: `community/${actor.userId}/${key}`, storageProvider: "local" });
     mocks.store.mockResolvedValue({ path: `community/${actor.userId}/${key}`, provider: "local" });
@@ -118,7 +118,7 @@ describe("community artwork upload API", () => {
       contentType: "image/webp",
       uploadFingerprint: "a".repeat(64),
     }));
-    expect(mocks.finalize).toHaveBeenCalledWith(key, expect.any(String));
+    expect(mocks.finalize).toHaveBeenCalledWith(key, expect.any(String), { width: 1536, height: 2048 });
     expect(mocks.dispatchNotifications).toHaveBeenCalledOnce();
     expect(mocks.finalize.mock.invocationCallOrder[0]).toBeLessThan(mocks.dispatchNotifications.mock.invocationCallOrder[0]!);
   });
@@ -178,7 +178,7 @@ describe("community artwork upload API", () => {
     expect(mocks.markStored).not.toHaveBeenCalled();
     expect(mocks.consumeRateLimit).toHaveBeenCalledTimes(1);
     expect(mocks.consumeRateLimit).toHaveBeenCalledWith("artwork-upload-attempt", actor.userId, 12, 60 * 60);
-    expect(mocks.finalize).toHaveBeenCalledWith(key, "55555555-5555-4555-8555-555555555555");
+    expect(mocks.finalize).toHaveBeenCalledWith(key, "55555555-5555-4555-8555-555555555555", { width: 1536, height: 2048 });
   });
 
   it("does not publish or redirect uploaded bytes", async () => {

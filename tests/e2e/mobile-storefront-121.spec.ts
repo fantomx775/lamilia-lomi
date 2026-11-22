@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { isLocalDemoAppTarget } from "./local-target";
 import { communityFixtures } from "./helpers/community-fixtures";
+import { hideLocalNextDevPortalIfBlocking } from "./helpers/hide-local-next-dev-portal";
 
 test.setTimeout(90_000);
 test.use({ ignoreHTTPSErrors: true });
@@ -21,7 +22,10 @@ test("mobile header fits, traps focus and closes with Back, Escape, X and route 
   test.skip(testInfo.project.name === "chromium", "Mobile interaction test");
   await page.goto("/en");
   const cookie = page.getByRole("button", { name: "Essential only", exact: true });
-  if (await cookie.isVisible()) await cookie.click();
+  if (await cookie.isVisible()) {
+    await hideLocalNextDevPortalIfBlocking(page, cookie);
+    await cookie.click();
+  }
 
   const opener = page.getByRole("button", { name: "Open navigation menu" });
   const account = page.getByRole("link", { name: "Log in", exact: true }).first();
@@ -66,7 +70,10 @@ test("auth fields have a mobile font floor, login returns to account and logout 
   test.skip(testInfo.project.name === "chromium", "Mobile interaction test");
   await page.goto("/en/login?returnTo=%2Fen%2Faccount");
   const cookie = page.getByRole("button", { name: "Essential only", exact: true });
-  if (await cookie.isVisible()) await cookie.click();
+  if (await cookie.isVisible()) {
+    await hideLocalNextDevPortalIfBlocking(page, cookie);
+    await cookie.click();
+  }
   for (const route of ["/en/login", "/en/register", "/en/reset-password"]) {
     await page.goto(route);
     const controls = page.locator('main :is(input:not([type="hidden"],[type="checkbox"]),select,textarea):visible');
@@ -86,7 +93,10 @@ test("auth fields have a mobile font floor, login returns to account and logout 
   await expect(page.getByRole("button", { name: "Log out", exact: true })).toBeHidden();
   await expect(page.getByText("User dashboard", { exact: true }).first()).toBeHidden();
   expect(await page.evaluate(() => visualViewport?.scale)).toBe(1);
-  if (await cookie.isVisible()) await cookie.click();
+  if (await cookie.isVisible()) {
+    await hideLocalNextDevPortalIfBlocking(page, cookie);
+    await cookie.click();
+  }
   await page.screenshot({ path: testInfo.outputPath("account.png"), fullPage: true, animations: "disabled" });
   await page.getByRole("button", { name: "Open navigation menu" }).click();
   const logout = page.getByRole("button", { name: "Log out", exact: true });
@@ -115,7 +125,10 @@ test("navigation animates both directions and releases modal lifecycle on mobile
   await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.goto("/en");
   const cookie = page.getByRole("button", { name: "Essential only", exact: true });
-  if (await cookie.isVisible()) await cookie.click();
+  if (await cookie.isVisible()) {
+    await hideLocalNextDevPortalIfBlocking(page, cookie);
+    await cookie.click();
+  }
   const opener = page.getByRole("button", { name: "Open navigation menu" });
   const dialog = page.getByRole("dialog", { name: "Mobile primary navigation" });
   // Inspect actual Web Animations state rather than infer animation from CSS text.
@@ -128,25 +141,22 @@ test("navigation animates both directions and releases modal lifecycle on mobile
     })));
     expect(enter).toEqual(expect.arrayContaining([expect.objectContaining({ name: "mobile-navigation-enter", duration: 220 })]));
     await dialog.evaluate(async (element) => { await Promise.all(element.getAnimations().map((animation) => animation.finished)); });
-    await page.evaluate(() => {
-      const element = document.querySelector("#mobile-primary-navigation")!;
-      (window as unknown as { navExit: unknown }).navExit = null;
-      element.addEventListener("animationstart", (event) => {
-        const animation = event as AnimationEvent;
-        if (animation.animationName !== "mobile-navigation-exit") return;
-        (window as unknown as { navExit: unknown }).navExit = {
-          open: (element as HTMLDialogElement).open,
-          overflow: getComputedStyle(document.body).overflow,
-          duration: getComputedStyle(element).animationDuration,
-        };
-      }, { once: true });
-    });
     if (method === "Escape") await page.keyboard.press("Escape");
     else if (method === "Back") await page.goBack();
     else if (method === "link") await dialog.getByRole("link", { name: "About", exact: true }).click();
     else await dialog.getByRole("button", { name: "Close navigation menu" }).click();
+    await expect(dialog).toHaveAttribute("data-closing", "true");
+    const exit = await dialog.evaluate((element) => {
+      const animation = element.getAnimations().find((item) => (item as CSSAnimation).animationName === "mobile-navigation-exit");
+      return {
+        open: (element as HTMLDialogElement).open,
+        overflow: getComputedStyle(document.body).overflow,
+        duration: getComputedStyle(element).animationDuration,
+        animationDuration: animation?.effect?.getTiming().duration ?? null,
+      };
+    });
+    expect(exit).toEqual({ open: true, overflow: "hidden", duration: "0.22s", animationDuration: 220 });
     await expect(dialog).toBeHidden();
-    expect(await page.evaluate(() => (window as unknown as { navExit: unknown }).navExit)).toEqual({ open: true, overflow: "hidden", duration: "0.22s" });
     expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).not.toBe("hidden");
     if (method === "link") {
       await expect(page).toHaveURL(/\/en\/about$/);

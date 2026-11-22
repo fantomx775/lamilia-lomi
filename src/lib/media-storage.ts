@@ -809,11 +809,12 @@ function publicStoragePath(supabaseUrl: string, bucket: string, storagePath: str
 
 function resumableUploadEndpoint(supabaseUrl: string) {
   const url = new URL(supabaseUrl);
-  const hostname = url.hostname.endsWith(".supabase.co")
+  url.hostname = url.hostname.endsWith(".supabase.co")
     ? url.hostname.slice(0, -".supabase.co".length) + ".storage.supabase.co"
     : url.hostname;
 
-  return `${url.protocol}//${hostname}/storage/v1/upload/resumable`;
+  // origin preserves custom ports while excluding credentials, query and fragment.
+  return new URL("/storage/v1/upload/resumable", url.origin).href;
 }
 
 function isDuplicateStorageError(error: { message?: string; status?: number; statusCode?: string | number }) {

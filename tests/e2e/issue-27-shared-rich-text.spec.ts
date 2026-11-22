@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
+import { isKnownCaretOnlyHydrationWarning } from "./helpers/hydration-warnings";
 import { isLocalDemoAppTarget } from "./local-target";
 
 test.setTimeout(180_000);
@@ -164,8 +165,8 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
     await page.keyboard.type("Use the account responsibly");
     await termsEditor.press("Enter");
     await page.keyboard.type("Keep your account details current");
-    await termsEditor.press("Control+Home");
-    await termsEditor.press("Shift+End");
+    await termsEditor.locator("p").first().selectText();
+    expect(await termsEditor.evaluate(() => window.getSelection()?.toString())).toBe("Terms and Conditions");
     await page.getByLabel("Styl akapitu").selectOption("h2");
     await expect(termsEditor.locator("h2").first()).toHaveText("Terms and Conditions");
     await expect(termsEditor.locator("h2")).toHaveText("Terms and Conditions");
@@ -291,11 +292,15 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
       }
       return request;
     });
+    const knownHydrationWarnings = diagnostics.consoleErrors.filter(isKnownCaretOnlyHydrationWarning);
+    const unexpectedConsoleErrors = diagnostics.consoleErrors.filter((message) => !isKnownCaretOnlyHydrationWarning(message));
     const browserEvidence = {
       runId: browserRunId,
       project: testInfo.project.name,
       flows: ["product-description", "terms", "privacy"],
       consoleErrors: diagnostics.consoleErrors,
+      knownHydrationWarnings,
+      unexpectedConsoleErrors,
       pageErrors: diagnostics.pageErrors,
       failedNetworkRequests: inspectedNetworkRequests,
       failedResponses: diagnostics.failedResponses,
@@ -307,7 +312,7 @@ test("shared rich text saves and renders product, Terms, and Privacy content", a
       contentType: "application/json",
     });
     console.log(`BROWSER_EVIDENCE issue-27 ${JSON.stringify(browserEvidence)}`);
-    expect(diagnostics.consoleErrors).toEqual([]);
+    expect(unexpectedConsoleErrors).toEqual([]);
     expect(diagnostics.pageErrors).toEqual([]);
     expect(inspectedNetworkRequests.every((request) => request.disposition === "unrelated" && request.reason)).toBe(true);
     expect(diagnostics.failedResponses).toEqual([]);

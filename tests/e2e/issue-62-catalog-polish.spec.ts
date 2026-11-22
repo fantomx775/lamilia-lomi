@@ -25,11 +25,16 @@ test("catalog category recovery, full titles and configurable responsive cards",
   page.on("console", message => { if (message.type() === "error") consoleErrors.push(message.text()); });
   page.on("pageerror", error => pageErrors.push(error.message));
   page.on("response", response => {
-    if (response.status() >= 400) failedResponses.push({
-      path: new URL(response.url()).pathname,
-      status: response.status(),
-      disposition: response.status() === 404 && response.url().includes(missingImage) ? "intentional-missing-image" : "unresolved",
-    });
+    if (response.status() >= 400) {
+      const responseUrl = new URL(response.url());
+      const optimizedSource = responseUrl.pathname === "/_next/image" ? responseUrl.searchParams.get("url") : null;
+      failedResponses.push({
+        path: responseUrl.pathname,
+        status: response.status(),
+        disposition: response.status() === 404 && (response.url().includes(missingImage) || optimizedSource === missingImage)
+          ? "intentional-missing-image" : "unresolved",
+      });
+    }
   });
   page.on("requestfailed", request => failedRequests.push({
     path: new URL(request.url()).pathname,
@@ -89,18 +94,17 @@ test("catalog category recovery, full titles and configurable responsive cards",
       const shortCard = grid.locator("article").first();
       const longCard = grid.locator("article").nth(1);
       const responsiveCard = grid.locator("article").nth(2);
-      const matchesTitleTruncation = async (card: typeof shortCard) => {
-        const truncated = await card.locator("h3").evaluate(element => element.scrollHeight > element.clientHeight + 1);
-        await expect(card.locator("summary")).toHaveCount(truncated ? 1 : 0);
-        return truncated;
+      const assertCompleteTitles = async () => {
+        await expect(shortCard.locator("h3[data-product-card-title]")).toHaveText("Moon Garden");
+        await expect(longCard.locator("h3[data-product-card-title]")).toHaveText(longTitle);
+        await expect(responsiveCard.locator("h3[data-product-card-title]")).toHaveText(responsiveTitle);
+        await expect(grid.locator("details, summary")).toHaveCount(0);
+        const headingsFit = await grid.locator("h3[data-product-card-title]").evaluateAll(headings =>
+          headings.every(heading => heading.scrollHeight <= heading.clientHeight + 1),
+        );
+        expect(headingsFit).toBe(true);
       };
-      await expect.poll(() => longCard.locator("summary").count()).toBe(1);
-      await expect(shortCard.locator("details")).toHaveCount(0);
-      await matchesTitleTruncation(responsiveCard);
-      const titleHeights = await grid.locator("h3").evaluateAll(headings => headings.map(heading => heading.getBoundingClientRect().height));
-      expect(Math.max(...titleHeights) - Math.min(...titleHeights)).toBeLessThan(1);
-      const titleRegion = await grid.locator("h3").first().evaluate(element => ({ height: element.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(element).lineHeight) }));
-      expect(titleRegion.height).toBeCloseTo(titleRegion.lineHeight * 3, 0);
+      await assertCompleteTitles();
       const covers = await grid.locator("a > div.relative").evaluateAll(elements => elements.map(element => {
         const bounds = element.getBoundingClientRect(); return bounds.width / bounds.height;
       }));
@@ -116,42 +120,30 @@ test("catalog category recovery, full titles and configurable responsive cards",
     }
     const grid = page.getByTestId("product-catalog-grid");
     const longCard = grid.locator("article").nth(1);
-    const disclosure = longCard.locator("summary");
-    await disclosure.scrollIntoViewIfNeeded();
-    if (testInfo.project.name === "chromium") {
-      await disclosure.focus();
-      await page.keyboard.press("Enter");
-    } else await disclosure.tap();
-    await expect(longCard.locator("details")).toHaveAttribute("open", "");
-    await expect(longCard.getByTestId("full-product-title")).toHaveText(longTitle);
+    await longCard.locator("h3[data-product-card-title]").scrollIntoViewIfNeeded();
+    await expect(longCard.locator("h3[data-product-card-title]")).toHaveText(longTitle);
+    await expect(longCard.locator("details, summary")).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     await screenshot("full-title", false);
     if (testInfo.project.name === "chromium") {
       const responsiveCard = grid.locator("article").nth(2);
       const responsiveHeading = responsiveCard.locator("h3");
-      expect(await responsiveHeading.evaluate(element => element.scrollHeight > element.clientHeight + 1)).toBe(true);
-      await expect(responsiveCard.locator("summary")).toHaveCount(1);
       await page.setViewportSize({ width: 800, height: 1024 });
       await expect.poll(() => page.getByTestId("product-catalog-grid").evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(2);
-      await expect.poll(async () => {
-        const truncated = await responsiveHeading.evaluate(element => element.scrollHeight > element.clientHeight + 1);
-        return !truncated && await responsiveCard.locator("summary").count() === 0;
-      }).toBe(true);
+      await expect(responsiveHeading).toHaveText(responsiveTitle);
+      await expect.poll(() => responsiveHeading.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+      await expect(responsiveCard.locator("details, summary")).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
       await page.evaluate(() => scrollTo(0, 0));
       await screenshot("tablet");
       await page.setViewportSize({ width: 1440, height: 900 });
-      await expect.poll(() => responsiveCard.locator("summary").count()).toBe(1);
+      await expect(responsiveHeading).toHaveText(responsiveTitle);
+      await expect.poll(() => responsiveHeading.evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
     }
-    if (testInfo.project.name === "chromium") {
-      await disclosure.focus();
-      await page.keyboard.press("Enter");
-    } else {
-      await disclosure.tap();
-    }
-    await expect(longCard.locator("details")).not.toHaveAttribute("open", "");
+    await expect(grid.locator("details, summary")).toHaveCount(0);
     expect(pageErrors).toEqual([]);
     expect(failedResponses.filter(entry => entry.disposition === "unresolved")).toEqual([]);
+    expect(failedResponses.filter(entry => entry.disposition === "intentional-missing-image").length).toBeGreaterThan(0);
     expect(failedRequests.filter(entry => entry.disposition === "unresolved")).toEqual([]);
     expect(consoleErrors.filter(message => !message.includes("404 (Not Found)"))).toEqual([]);
   } finally {

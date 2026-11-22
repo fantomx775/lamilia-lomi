@@ -41,18 +41,41 @@ test("local demo persists a private upload and safely edits and deletes its actu
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
+  const readerPreviewMediaIds = new Set<string>();
+  const expectedMediaNavigationCancellations: string[] = [];
+  let currentPhase = "setup";
   for (const observed of [page, adminPage]) {
+    const contextName = observed === page ? "reader" : "admin";
     observed.on("pageerror", (error) => pageErrors.push(error.message));
     observed.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
+    observed.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      const mediaArtworkId = /^\/api\/community\/artworks\/([a-f0-9-]{36})\/media$/.exec(pathname)?.[1];
+      if (mediaArtworkId && contextName === "reader" && currentPhase === "reader-preview") {
+        readerPreviewMediaIds.add(mediaArtworkId);
+      }
+    });
     observed.on("requestfailed", (request) => {
       const pathname = new URL(request.url()).pathname;
+      const mediaArtworkId = /^\/api\/community\/artworks\/([a-f0-9-]{36})\/media$/.exec(pathname)?.[1];
+      // The lightbox can still be fetching its larger rendition when the user
+      // leaves the page. Accept only that artwork's explicit navigation abort.
+      if (
+        request.failure()?.errorText === "net::ERR_ABORTED" &&
+        contextName === "reader" && currentPhase === "artwork-detail" &&
+        mediaArtworkId && readerPreviewMediaIds.has(mediaArtworkId)
+      ) {
+        expectedMediaNavigationCancellations.push("reader-preview-to-artwork-detail");
+        return;
+      }
       if (pathname.startsWith("/api/community/")) failedRequests.push(`${request.failure()?.errorText} ${pathname}`);
     });
     observed.on("response", (response) => {
-      if (response.status() >= 400 && new URL(response.url()).pathname.startsWith("/api/community/")) {
-        failedRequests.push(`${response.status()} ${new URL(response.url()).pathname}`);
+      const pathname = new URL(response.url()).pathname;
+      if (response.status() >= 400 && pathname.startsWith("/api/community/")) {
+        failedRequests.push(`${response.status()} ${pathname}`);
       }
     });
   }
@@ -62,6 +85,7 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await page.getByLabel("Password", { exact: true }).fill("demo-password");
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page).toHaveURL("http://127.0.0.1:3100/en/account");
+    await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await essentials(page);
     const accountManagement = page.locator("details").filter({ hasText: "Account management" });
     await expect(accountManagement).not.toHaveAttribute("open");
@@ -100,7 +124,11 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(cards).toHaveCount(1);
     await expect(cards).toContainText("Pending review");
     await expectLoadedImage(image);
-    await cards.screenshot({ path: testInfo.outputPath("large-jpg-pending.png"), caret: "initial" });
+    await cards.screenshot({
+      path: testInfo.outputPath("large-jpg-pending.png"),
+      caret: "initial",
+      style: "nextjs-portal { display: none !important; }",
+    });
     const snapshot = JSON.parse(await readFile(file, "utf8"));
     expect(snapshot.artworks).toHaveLength(1);
     const storedFile = path.resolve("data/.collection-media", snapshot.artworks[0].storagePath);
@@ -120,6 +148,7 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await page.reload();
     await expect(cards).toContainText("Published");
     await expectLoadedImage(image);
+    currentPhase = "reader-gallery";
     await page.goto("/en/products/moon-garden-coloring-book");
     const readerGallery = page.getByRole("region", { name: "Colored by Our Readers" });
     await expect(readerGallery.getByText("Local private garden fixture", { exact: true })).toBeVisible();
@@ -127,18 +156,26 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(authorLink.getByRole("img", { name: "Generated avatar for @cc_local_demo_artist" })).toBeVisible();
     const readerPhoto = readerGallery.getByRole("img", { name: "Colored by @cc_local_demo_artist", exact: true });
     await expectLoadedImage(readerPhoto);
+    await page.waitForLoadState("networkidle");
     await readerGallery.screenshot({
       path: testInfo.outputPath("reader-gallery.png"),
       scale: "css",
       caret: "initial",
       style: "header { visibility: hidden !important; } nextjs-portal { display: none !important; }",
     });
+    currentPhase = "reader-preview";
     await readerGallery.getByRole("button", { name: /Open community artwork/ }).click();
     const preview = page.getByRole("dialog", { name: "Reader artwork preview" });
     await expect(preview.getByText("Local private garden fixture", { exact: true })).toBeVisible();
     await expectLoadedImage(preview.getByRole("img", { name: "Colored by @cc_local_demo_artist" }));
-    await preview.screenshot({ path: testInfo.outputPath("book-artwork-description.png"), caret: "initial" });
+    await page.waitForLoadState("networkidle");
+    await preview.screenshot({
+      path: testInfo.outputPath("book-artwork-description.png"),
+      caret: "initial",
+      style: "nextjs-portal { display: none !important; }",
+    });
     const artworkId = snapshot.artworks[0].id;
+    currentPhase = "artwork-detail";
     await page.goto(`http://127.0.0.1:3100/en/club/artworks/${artworkId}`);
     const heart = page.getByTestId("community-heart-toggle");
     const detailImage = page.getByTestId("community-artwork-media");
@@ -194,7 +231,12 @@ test("local demo persists a private upload and safely edits and deletes its actu
     await expect(cards.getByTestId("community-artwork-actions")).toBeFocused();
     await cards.getByTestId("community-artwork-actions").click();
     await cards.getByTestId("community-artwork-delete").click();
+    const deleteResponse = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === `/api/community/artworks/${snapshot.artworks[0].id}` &&
+      response.request().method() === "DELETE"
+    );
     await deleteDialog.getByTestId("community-artwork-confirm-delete").click();
+    expect((await deleteResponse).status()).toBe(200);
     await expect(cards).toHaveCount(0);
     await expect(stat(storedFile)).rejects.toMatchObject({ code: "ENOENT" });
     await page.reload();
@@ -202,6 +244,7 @@ test("local demo persists a private upload and safely edits and deletes its actu
     expect(pageErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);
     expect(failedRequests).toEqual([]);
+    expect(expectedMediaNavigationCancellations.length).toBeLessThanOrEqual(1);
   } finally {
     await adminContext.close();
     const snapshot = await readFile(file, "utf8").then((text) => JSON.parse(text), () => null);

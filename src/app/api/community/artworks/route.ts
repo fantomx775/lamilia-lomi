@@ -204,7 +204,7 @@ export async function POST(request: Request) {
 
     let artworkId: string;
     try {
-      artworkId = await finalizeCommunityArtworkUpload(safeIdempotencyKey, reservation.leaseToken);
+      artworkId = await finalizeCommunityArtworkUpload(safeIdempotencyKey, reservation.leaseToken, { width: image.width, height: image.height });
     } catch (finalizeError) {
       // A timeout can hide a committed RPC. Reread the reservation and retry only while our lease still owns it.
       let current;
@@ -217,7 +217,7 @@ export async function POST(request: Request) {
         artworkId = current.artworkId;
       } else if (current?.state === "stored" && current.leaseToken === reservation.leaseToken) {
         try {
-          artworkId = await finalizeCommunityArtworkUpload(safeIdempotencyKey, reservation.leaseToken);
+          artworkId = await finalizeCommunityArtworkUpload(safeIdempotencyKey, reservation.leaseToken, { width: image.width, height: image.height });
         } catch {
           if (finalizeError instanceof CommunityConflictError || finalizeError instanceof CommunityValidationError
             || finalizeError instanceof CommunityAuthorizationError) {

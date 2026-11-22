@@ -1,18 +1,25 @@
 import { expect, test } from "@playwright/test";
+import { hideLocalNextDevPortalIfBlocking } from "./helpers/hide-local-next-dev-portal";
 
 test("consent gates Google, instruments interactions, and can be withdrawn", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   let googleLoads = 0;
   await page.route("https://www.googletagmanager.com/**", route => { googleLoads++; return route.fulfill({ contentType: "application/javascript", body: "/* isolated Google transport */" }); });
   await page.goto("/en");
-  await expect(page.getByRole("button", { name: "Essential only", exact: true })).toBeVisible();
+  const essentialOnly = page.getByRole("button", { name: "Essential only", exact: true });
+  await expect(essentialOnly).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("cookie-consent.png"), fullPage: false });
-  await page.getByRole("button", { name: "Essential only", exact: true }).click();
+  await hideLocalNextDevPortalIfBlocking(page, essentialOnly);
+  await essentialOnly.click();
   await page.reload();
   await expect(page.getByRole("button", { name: "Cookie settings", exact: true })).toBeVisible();
   expect(googleLoads).toBe(0);
-  await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
-  await page.getByRole("button", { name: "Allow analytics", exact: true }).click();
+  const cookieSettings = page.getByRole("button", { name: "Cookie settings", exact: true });
+  await hideLocalNextDevPortalIfBlocking(page, cookieSettings);
+  await cookieSettings.click();
+  const allowAnalytics = page.getByRole("button", { name: "Allow analytics", exact: true });
+  await hideLocalNextDevPortalIfBlocking(page, allowAnalytics);
+  await allowAnalytics.click();
   await expect.poll(() => googleLoads).toBe(1);
   const events = () => page.evaluate(() => (window as unknown as { dataLayer: ArrayLike<unknown>[] }).dataLayer?.map(item => Array.from(item)).filter(item => item[0] === "event") ?? []);
   expect((await events()).filter(item => item[1] === "page_view")).toHaveLength(1);
@@ -27,13 +34,14 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
   const mobileMenuButton = page.getByRole("button", { name: "Open navigation menu" });
   if (await mobileMenuButton.isVisible()) {
     await mobileMenuButton.click();
-    await page.getByRole("navigation", { name: "Mobile primary navigation" }).getByRole("link", { name: "Catalog", exact: true }).click();
+    const mobileMenu = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+    await mobileMenu.getByRole("navigation", { name: "Storefront", exact: true }).getByRole("link", { name: "Catalog", exact: true }).click();
   } else {
     await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Catalog", exact: true }).click();
   }
   await expect(page).toHaveURL(/\/en\/products$/);
-  await page.locator('a[href="/en/products/moon-garden-coloring-book"]').first().click();
-  await expect(page).toHaveURL(/\/en\/products\/moon-garden-coloring-book$/);
+  await page.locator('a[href^="/en/products/moon-garden-coloring-book"]').first().click();
+  await expect(page).toHaveURL(/\/en\/products\/moon-garden-coloring-book(?:\?.*)?$/);
   await expect.poll(async () => (await events()).filter(item => item[1] === "page_view").length).toBe(4);
   const pageViews = (await events()).filter(item => item[1] === "page_view").map(item => item[2] as Record<string, unknown>);
   const origin = await page.evaluate(() => location.origin);
@@ -60,8 +68,10 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
       return originalSetItem.call(this, key, value);
     };
   });
-  await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
-  await page.getByRole("button", { name: "Essential only", exact: true }).click();
+  await hideLocalNextDevPortalIfBlocking(page, cookieSettings);
+  await cookieSettings.click();
+  await hideLocalNextDevPortalIfBlocking(page, essentialOnly);
+  await essentialOnly.click();
   await expect(page.getByRole("button", { name: "Cookie settings", exact: true })).toBeVisible();
   await page.evaluate(() => {
     const video = document.createElement("video");
@@ -74,7 +84,6 @@ test("consent gates Google, instruments interactions, and can be withdrawn", asy
   await page.reload();
   expect(await page.locator('script[src*="googletagmanager"]').count()).toBe(0);
 });
-
 
 test("real Google tag encodes the configured measurement ID and page view", async ({ page }) => {
   test.setTimeout(60_000);

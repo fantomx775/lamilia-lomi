@@ -190,6 +190,23 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
       await waitForQueueReadsToSettle();
 
     }
+    async function reloadQueue(artworkId: string, status: string, revision: number, pendingCount: number) {
+      // A document reload receives the first queue from the Server Component;
+      // only interactive filters/actions are required to issue a queue API GET.
+      const response = await adminPage.reload();
+      expect(response).not.toBeNull();
+      expect(response!.request().resourceType()).toBe("document");
+      expect(response!.status()).toBe(200);
+      expect(await response!.finished()).toBeNull();
+      await expect(adminPage.getByTestId("community-moderation-page")).toBeVisible();
+      await expect(adminPage.getByTestId("community-moderation-item")).toHaveCount(pendingCount);
+      await expect(adminPage.getByTestId(`community-count-${status}`)).toContainText("1");
+      const persisted = await fixtures.service.from("community_artworks").select("status, revision")
+        .eq("id", artworkId).eq("author_id", owner.id).eq("product_id", book.id).single();
+      expect(persisted.error).toBeNull();
+      expect(persisted.data).toEqual({ status, revision });
+      await waitForQueueReadsToSettle();
+    }
     async function waitForQueueReadsToSettle() {
       await expect.poll(() => activeQueueReads.size, { timeout: 12_000 }).toBe(0);
     }
@@ -211,7 +228,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await apply("approve");
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
 
-    await waitForQueueFetch(() => adminPage.reload(), "queue after approval reload");
+    await reloadQueue(rose.id, "approved", 2, 2);
     await expect(adminPage.getByTestId("community-count-approved")).toContainText("1");
     const visitor = await fixtures.newPage(browser);
     expect((await visitor.request.get(`${origin}/api/community/artworks/${rose.id}/media`)).status()).toBe(200);
@@ -224,7 +241,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-confirm").click(), "moderate rejection after reason preview");
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
 
-    await waitForQueueFetch(() => adminPage.reload(), "queue after rejection reload");
+    await reloadQueue(coast.id, "rejected", 2, 1);
     await expect(adminPage.getByTestId("community-count-rejected")).toContainText("1");
     expect((await visitor.request.get(`${origin}/api/community/artworks/${coast.id}/media`)).status()).toBe(404);
     expect((await visitor.request.get(`${origin}/api/community/artworks/${cottage.id}/media`)).status()).toBe(404);
@@ -232,7 +249,7 @@ test("Polish moderation UI publishes, rejects, removes, restores and recovers a 
     await select(rose.description);
     await apply("remove", "Please remove identifying information.");
     await fixtures.normalizeDisplayTimestamps({ artworkIds });
-    await waitForQueueFetch(() => adminPage.reload(), "queue after removal reload");
+    await reloadQueue(rose.id, "removed", 3, 1);
     expect((await visitor.request.get(`${origin}/api/community/artworks/${rose.id}/media`)).status()).toBe(404);
     await waitForQueueFetch(() => adminPage.getByTestId("community-moderation-status-filter").selectOption("removed"), "removed status filter");
     await select(rose.description);

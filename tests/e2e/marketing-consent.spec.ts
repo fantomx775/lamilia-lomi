@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import { isLocalDemoAppTarget } from "./local-target";
+import { hideLocalNextDevPortalIfBlocking } from "./helpers/hide-local-next-dev-portal";
 
 test.setTimeout(75_000);
 
@@ -12,7 +13,10 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
 
   await page.goto("/en");
   const essentialOnly = page.getByRole("button", { name: "Essential only", exact: true });
-  if (await essentialOnly.isVisible()) await essentialOnly.click();
+  if (await essentialOnly.isVisible()) {
+    await hideLocalNextDevPortalIfBlocking(page, essentialOnly);
+    await essentialOnly.click();
+  }
 
   await page.goto("/en/login?returnTo=%2Fen%2Faccount");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -54,7 +58,10 @@ test("account owner can withdraw and restore marketing consent", async ({ page }
   await expect(preference).not.toBeChecked();
   await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
   const cookieNotice = page.getByRole("button", { name: "Essential only", exact: true });
-  if (await cookieNotice.isVisible()) await cookieNotice.click();
+  if (await cookieNotice.isVisible()) {
+    await hideLocalNextDevPortalIfBlocking(page, cookieNotice);
+    await cookieNotice.click();
+  }
   await expect(cookieNotice).toBeHidden();
   const preferences = page.locator('section[aria-labelledby="account-preferences-title"]');
   await expect(preferences).toBeVisible();

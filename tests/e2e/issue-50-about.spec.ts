@@ -160,9 +160,9 @@ test("About settings save six unique books and render responsively from current 
 
     await page.locator("header").getByRole("link", { name: "About", exact: true }).click();
     await page.waitForURL(/\/en\/about$/, { timeout: 60_000 });
-    await expect(page.getByRole("heading", { level: 1, name: "Loved by Our Readers" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeVisible();
     await expect(page.getByRole("heading", { level: 3 })).toHaveCount(6);
-    const coloringSection = page.getByRole("region", { name: "Favorite Coloring Books" });
+    const coloringSection = page.getByRole("region", { name: "Selected Coloring Books" });
     const coloringTitles = await coloringSection.getByRole("heading", { level: 3 }).allTextContents();
     expect(coloringTitles).toEqual([
       "Quiet Patterns Coloring Book",
@@ -198,7 +198,7 @@ test("About settings save six unique books and render responsively from current 
       })).toBe(true);
     }
     await page.evaluate(() => document.fonts.ready.then(() => true));
-    await expect(page.getByRole("heading", { level: 1, name: "Loved by Our Readers" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" });
     await page.screenshot({ path: path.join(screenshotDirectory, "about-desktop.png"), fullPage: true });
@@ -209,7 +209,7 @@ test("About settings save six unique books and render responsively from current 
     await page.screenshot({ path: path.join(screenshotDirectory, "about-tablet-768.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await expectNoHorizontalOverflow(page);
-    await expect(page.getByRole("heading", { level: 1, name: "Loved by Our Readers" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeVisible();
     await expect(page.getByRole("link", { name: "About", exact: true }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: "My Library", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { level: 3 })).toHaveCount(6);

@@ -45,11 +45,17 @@ export const ADMIN_ERROR_CODES = {
 
 export type AdminErrorCode = (typeof ADMIN_ERROR_CODES)[keyof typeof ADMIN_ERROR_CODES];
 
+export type MediaSaveOutcome = {
+  assetId: string;
+  state: "retained" | "deleted" | "unknown";
+};
+
 export type AdminMutationResult =
   | { ok: true; id: string; categoryImage?: CategoryImage; cleanupDeferred?: boolean; cleanupImagePath?: string }
   | {
       ok: false;
       errors: AdminErrorCode[];
+      mediaOutcomes?: MediaSaveOutcome[];
       mediaCleanupFailures?: Array<{
         assetId: string;
         kind: ProductAsset["kind"];

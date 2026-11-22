@@ -20,19 +20,21 @@ type BrowserDiagnostics = {
   failedRequests: Array<{ method: string; url: string; error: string | null; range: string | null }>;
 };
 
-test("Issue 67 shows a native cover poster and plays the real flip-through video", async ({ page }, testInfo) => {
+test("Issue 67 shows a native cover poster and plays the bundled local video", async ({ page }, testInfo) => {
   test.skip(!(await isLocalDemoAppTarget(page, testInfo.project.use.baseURL)), "The real public video fixture runs against disposable local content.");
 
   const release = await acquireLocalContentStoreLock();
   const store = path.resolve("data/lamilialomi-content.local.json");
   const originalStore = fs.existsSync(store) ? fs.readFileSync(store) : null;
-  const mediaDirectory = path.resolve("public/uploads/issue-67-browser");
   const evidenceDirectory = path.resolve(process.env.ISSUE_67_SCREENSHOT_DIR ?? "test-results/issue-67-screenshots");
   const runId = process.env.ISSUE_67_RUN_ID ?? `issue-67-${Date.now()}`;
+  const mediaRunId = `${runId}-${testInfo.project.name}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const mediaDirectory = path.resolve("public/uploads", `issue-67-browser-${mediaRunId}`);
   const diagnostics: BrowserDiagnostics[] = [];
   let videoServer: Server | undefined;
   let webkitBrowser: Awaited<ReturnType<typeof webkit.launch>> | undefined;
   let webkitPlaybackVerified = false;
+  let ownsMediaDirectory = false;
 
   const recordDiagnostics = (target: Page, engine: string) => {
     const result: BrowserDiagnostics = {
@@ -101,53 +103,44 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
       assets: [] as ProductAsset[],
     };
 
+    if (fs.existsSync(mediaDirectory)) throw new Error("The unique Issue 67 media fixture directory already exists.");
     fs.mkdirSync(mediaDirectory, { recursive: true });
-    const coverFile = path.join(mediaDirectory, "cover.png");
-    if (!fs.existsSync(coverFile)) {
-      const coverResponse = await fetch(frog.cover.path, { signal: AbortSignal.timeout(90_000) });
-      if (!coverResponse.ok) throw new Error(`Public cover fixture download returned ${coverResponse.status}`);
-      fs.writeFileSync(coverFile, Buffer.from(await coverResponse.arrayBuffer()));
-    }
+    ownsMediaDirectory = true;
+    const fixtureDirectory = path.resolve("tests/e2e/fixtures/issue-60/assets");
+    const coverFile = path.join(mediaDirectory, "cover.svg");
+    fs.copyFileSync(path.join(fixtureDirectory, "cover.svg"), coverFile);
     const videoFile = path.join(mediaDirectory, "source.mp4");
-    if (!fs.existsSync(videoFile)) {
-      const videoResponse = await fetch(frog.video.path, { signal: AbortSignal.timeout(90_000) });
-      if (!videoResponse.ok) throw new Error(`Public video fixture download returned ${videoResponse.status}`);
-      fs.writeFileSync(videoFile, Buffer.from(await videoResponse.arrayBuffer()));
-    }
+    fs.copyFileSync(path.resolve("tests/e2e/fixtures/issue-127/flower.mp4"), videoFile);
 
     const galleryAssets: ProductAsset[] = [];
     for (const [index, image] of frog.images.entries()) {
-      const filename = `page-${index + 1}.png`;
+      const filename = `page-${index + 1}.svg`;
       const imageFile = path.join(mediaDirectory, filename);
-      if (!fs.existsSync(imageFile)) {
-        const imageResponse = await fetch(image.path, { signal: AbortSignal.timeout(90_000) });
-        if (!imageResponse.ok) throw new Error(`Public gallery fixture returned ${imageResponse.status}`);
-        fs.writeFileSync(imageFile, Buffer.from(await imageResponse.arrayBuffer()));
-      }
+      fs.copyFileSync(path.join(fixtureDirectory, `page-${index + 1}.svg`), imageFile);
 
       galleryAssets.push({
         id: `issue-67-gallery-${index + 1}`,
         productId,
         kind: "gallery",
         bucket: "public-media",
-        path: `/uploads/issue-67-browser/${filename}`,
+        path: `/uploads/${path.basename(mediaDirectory)}/${filename}`,
         filename: image.alt ?? filename,
-        contentType: "image/png",
+        contentType: "image/svg+xml",
         sortOrder: index + 1,
         isPublic: true,
         title: image.alt,
       });
     }
 
-    const localPosterPath = "/uploads/issue-67-browser/cover.png";
+    const localPosterPath = `/uploads/${path.basename(mediaDirectory)}/cover.svg`;
     const posterAsset: ProductAsset = {
       id: "issue-67-cover",
       productId,
       kind: "cover",
       bucket: "public-media",
       path: localPosterPath,
-      filename: frog.cover.alt ?? "cover.png",
-      contentType: "image/png",
+      filename: frog.cover.alt ?? "cover.svg",
+      contentType: "image/svg+xml",
       sortOrder: 0,
       isPublic: true,
       title: frog.cover.alt,
@@ -214,13 +207,20 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     )).toBe(expectedColumnCount);
     await expect(video).toHaveAttribute("controls", "");
     await expect(video).toHaveAttribute("playsinline", "");
-    await expect(video).toHaveAttribute("preload", "none");
-    await expect(video).toHaveAttribute("poster", localPosterPath);
+    // F17 selectively prepares metadata as this one player approaches the viewport.
+    await video.scrollIntoViewIfNeeded();
+    await expect(video).toHaveAttribute("preload", "metadata");
+    await expect.poll(async () => {
+      const poster = await video.getAttribute("poster");
+      if (!poster) return null;
+      const parsed = new URL(poster, String(testInfo.project.use.baseURL));
+      return `${parsed.pathname}|${parsed.searchParams.get("url")}`;
+    }).toBe(`/_next/image|${localPosterPath}`);
     await expect(page.getByText("Flip-through · 8 sec", { exact: true })).toHaveCount(0);
 
     const posterResponse = await page.request.get(new URL(localPosterPath, String(testInfo.project.use.baseURL)).toString());
     expect(posterResponse.status()).toBe(200);
-    expect(posterResponse.headers()["content-type"]).toContain("image/png");
+    expect(posterResponse.headers()["content-type"]).toContain("image/svg+xml");
     await video.evaluate(async (element) => {
       const posterImage = new Image();
       posterImage.src = (element as HTMLVideoElement).poster;
@@ -299,10 +299,14 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
         images.every((image) => (image as HTMLImageElement).naturalWidth > 0),
       ), { timeout: 45_000 }).toBe(true);
       const webkitVideo = webkitPage.locator("video");
-      await expect(webkitVideo).toHaveAttribute("poster", localPosterPath);
+      await expect.poll(async () => {
+        const poster = await webkitVideo.getAttribute("poster");
+        if (!poster) return null;
+        const parsed = new URL(poster, String(testInfo.project.use.baseURL));
+        return `${parsed.pathname}|${parsed.searchParams.get("url")}`;
+      }).toBe(`/_next/image|${localPosterPath}`);
       await expect(webkitVideo).toHaveAttribute("controls", "");
       await expect(webkitPage.getByText("Flip-through · 8 sec", { exact: true })).toHaveCount(0);
-      await expect.poll(() => webkitVideo.evaluate((element) => (element as HTMLVideoElement).poster), { timeout: 15_000 }).toContain("/uploads/issue-67-browser/cover.png");
       await webkitVideo.evaluate(async (element) => {
         const posterImage = new Image();
         posterImage.src = (element as HTMLVideoElement).poster;
@@ -343,6 +347,7 @@ test("Issue 67 shows a native cover poster and plays the real flip-through video
     if (webkitBrowser) await webkitBrowser.close();
     videoServer?.closeAllConnections();
     if (videoServer) await new Promise<void>((resolve, reject) => videoServer!.close((error) => error ? reject(error) : resolve()));
+    if (ownsMediaDirectory) fs.rmSync(mediaDirectory, { recursive: true, force: true });
     if (originalStore) fs.writeFileSync(store, originalStore);
     else if (fs.existsSync(store)) fs.unlinkSync(store);
     fs.mkdirSync(path.dirname(evidenceDirectory), { recursive: true });

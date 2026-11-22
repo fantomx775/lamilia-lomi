@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
+import { Readable } from "node:stream";
 
 import { hasAdminAccess } from "@/lib/auth";
 import { getBackendMode } from "@/lib/config";
@@ -83,10 +84,15 @@ export async function GET(request: Request, { params }: Props) {
       return NextResponse.redirect(new URL(asset.path, request.url));
     }
 
+    const localUploadPath = asset.path.startsWith("/uploads/")
+      ? asset.path
+      : asset.path === `/api/media/${assetId}` && asset.storagePath?.startsWith("/uploads/")
+        ? asset.storagePath
+        : null;
     const relativePath = asset.path.startsWith("/assets/")
       ? asset.path.slice(1)
-      : asset.path.startsWith("/uploads/")
-        ? `uploads/${asset.path.slice("/uploads/".length)}`
+      : localUploadPath
+        ? localUploadRelativePath(localUploadPath, asset.productId, asset.kind)
         : null;
 
     if (!relativePath) {
@@ -94,22 +100,66 @@ export async function GET(request: Request, { params }: Props) {
     }
 
     const publicRoot = path.resolve(process.cwd(), "public");
-    const filePath = path.resolve(publicRoot, ...relativePath.split("/").map((part) => decodeURIComponent(part)));
-    if (!filePath.startsWith(`${publicRoot}${path.sep}`) || !fs.existsSync(filePath)) {
+    const isLocalUpload = localUploadPath !== null;
+    let filePath: string;
+    try {
+      const segments = relativePath.split("/");
+      filePath = path.resolve(publicRoot, ...(isLocalUpload ? segments : segments.map((part) => decodeURIComponent(part))));
+    } catch {
+      return notFoundMediaResponse();
+    }
+    const expectedUploadDirectory = isLocalUpload
+      ? path.resolve(publicRoot, "uploads", asset.productId, asset.kind)
+      : null;
+    if (
+      !isPathInsideDirectory(publicRoot, filePath) ||
+      (expectedUploadDirectory && !isPathInsideDirectory(expectedUploadDirectory, filePath))
+    ) {
       return notFoundMediaResponse();
     }
 
+    let fileSize: number;
+    try {
+      fileSize = fs.statSync(filePath).size;
+    } catch {
+      return notFoundMediaResponse();
+    }
+    const range = parseByteRange(request.headers.get("range"), fileSize);
+    if (range.kind === "unsatisfiable") {
+      return new NextResponse(null, {
+        status: 416,
+        headers: {
+          "Accept-Ranges": "bytes",
+          "Content-Range": `bytes */${fileSize}`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    const contentLength = range.kind === "range" ? range.end - range.start + 1 : fileSize;
     const headers = new Headers({
       "Content-Type": asset.contentType,
-      "Content-Length": String(fs.statSync(filePath).size),
+      "Content-Length": String(contentLength),
+      "Accept-Ranges": "bytes",
       "Cache-Control": requestedVersion === null
         ? "public, max-age=31536000, immutable"
         : "public, max-age=60, s-maxage=60",
     });
+    if (range.kind === "range") {
+      headers.set("Content-Range", `bytes ${range.start}-${range.end}/${fileSize}`);
+    }
     if (isDownload) {
       headers.set("Content-Disposition", `attachment; filename="${safeFilename(asset.filename)}"`);
     }
-    return new NextResponse(fs.readFileSync(filePath), { headers });
+    const fileStream = fs.createReadStream(
+      filePath,
+      range.kind === "range" ? { start: range.start, end: range.end } : undefined,
+    );
+    const body = Readable.toWeb(fileStream) as unknown as BodyInit;
+    return new NextResponse(body, {
+      status: range.kind === "range" ? 206 : 200,
+      headers,
+    });
   }
 
   if (!isMediaKind(asset.kind) || asset.bucket !== mediaBucketForKind(asset.kind)) {
@@ -215,6 +265,62 @@ export async function GET(request: Request, { params }: Props) {
     adminPreviewAuthorized ? "private, no-store" : "private, max-age=30",
   );
   return response;
+}
+
+function parseByteRange(value: string | null, size: number):
+  | { kind: "full" }
+  | { kind: "range"; start: number; end: number }
+  | { kind: "unsatisfiable" } {
+  if (!value) return { kind: "full" };
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return { kind: "full" };
+
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0 || size === 0) {
+      return { kind: "unsatisfiable" };
+    }
+    return { kind: "range", start: Math.max(0, size - suffixLength), end: size - 1 };
+  }
+
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : size - 1;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start >= size || start > requestedEnd) {
+    return { kind: "unsatisfiable" };
+  }
+  return { kind: "range", start, end: Math.min(requestedEnd, size - 1) };
+}
+
+function localUploadRelativePath(value: string, productId: string, kind: string) {
+  if (!value.startsWith("/uploads/")) return null;
+  let segments: string[];
+  try {
+    segments = value.slice("/uploads/".length).split("/").map((part) => decodeURIComponent(part));
+  } catch {
+    return null;
+  }
+  if (
+    segments.length !== 3 ||
+    segments[0] !== productId ||
+    segments[1] !== kind ||
+    segments[0].includes("/") ||
+    segments[0].includes("\\") ||
+    segments[1].includes("/") ||
+    segments[1].includes("\\") ||
+    !segments[2] ||
+    segments[2] === "." ||
+    segments[2] === ".." ||
+    segments[2].includes("/") ||
+    segments[2].includes("\\")
+  ) {
+    return null;
+  }
+  return path.join("uploads", ...segments);
+}
+
+function isPathInsideDirectory(directory: string, candidate: string) {
+  const relative = path.relative(directory, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 function safeFilename(value: string) {

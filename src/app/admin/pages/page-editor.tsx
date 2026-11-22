@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
 import { RichTextEditor } from "@/components/admin/rich-text-editor";
 import { AdminSaveBar } from "@/components/admin/admin-save-bar";
-import { useAdminToast } from "@/components/admin/admin-toast";
+import { adminRouteToastScope, useAdminToast } from "@/components/admin/admin-toast";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { StaticPageRecord } from "@/lib/types";
@@ -176,7 +176,7 @@ export function PageEditor({
       saveInProgressRef.current = false;
       setIsSaving(false);
       setTransportFailed(true);
-      publishToast("error", "Nie udało się wysłać zapisu. Twoje zmiany pozostały w edytorze.");
+      publishToast("error", "Nie udało się wysłać zapisu. Twoje zmiany pozostały w edytorze.", { scope: adminRouteToastScope(`/admin/pages/${slug}`) });
     });
   };
 

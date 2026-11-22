@@ -21,6 +21,7 @@ import type {
   CommunityAudience,
   CommunityAdminProductOption,
   CommunityArtworkStatus,
+  CommunityArtworkDimensions,
   CommunityArtworkSort,
   CommunityCreateArtworkInput,
   CommunityHeartAccess,
@@ -180,10 +181,10 @@ export async function assertCommunityArtworkUploadEligibility(actor: CommunityAc
   return supabase.assertUploadEligibility(actor, productId);
 }
 
-export async function finalizeCommunityArtworkUpload(idempotencyKey: string, leaseToken: string) {
+export async function finalizeCommunityArtworkUpload(idempotencyKey: string, leaseToken: string, imageDimensions: CommunityArtworkDimensions) {
   const actor = await assertCommunityActor();
-  if (actor.backend === "local") return localStore.finalizeArtworkUpload(actor, idempotencyKey, leaseToken, getContentSnapshot().products);
-  return supabase.finalizeArtworkUpload(actor, idempotencyKey, leaseToken);
+  if (actor.backend === "local") return localStore.finalizeArtworkUpload(actor, idempotencyKey, leaseToken, getContentSnapshot().products, imageDimensions);
+  return supabase.finalizeArtworkUpload(actor, idempotencyKey, leaseToken, imageDimensions);
 }
 
 export async function markCommunityArtworkUploadStored(idempotencyKey: string, leaseToken: string) {
@@ -256,6 +257,21 @@ export async function listMyCommunityArtworks(limit = 50) {
   const safeLimit = boundedLimit(limit);
   if (actor.backend === "local") return localStore.listMyArtworks(actor, getContentSnapshot().products, safeLimit);
   return supabase.listOwnerArtworks(actor, safeLimit);
+}
+
+/** Every page reauthenticates the owner; the cursor is a position, never an identity. */
+export async function listMyCommunityArtworksPage(input: { cursor?: string | null; limit?: number } = {}) {
+  const actor = await assertCommunityActor();
+  const cursor = input.cursor ? decodeCommunityTimestampCursor(input.cursor) : null;
+  if (input.cursor && !cursor) throw new CommunityValidationError("The artwork page cursor is invalid.");
+  const limit = Math.min(50, boundedLimit(input.limit ?? 50));
+  await processCommunityArtworkCleanup(actor);
+  const rows = actor.backend === "local"
+    ? await localStore.listMyArtworks(actor, getContentSnapshot().products, limit + 1, cursor)
+    : await supabase.listOwnerArtworks(actor, limit + 1, cursor);
+  const items = rows.slice(0, limit);
+  const last = items.at(-1);
+  return { items, nextCursor: rows.length > limit && last ? encodeCommunityTimestampCursor(last.createdAt, last.id) : null };
 }
 
 export async function listCommunityModerationQueue(input: { status?: CommunityArtworkStatus | "all"; productId?: string; creator?: string; cursor?: string | null; limit?: number } = {}) {

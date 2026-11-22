@@ -111,7 +111,9 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await expect(header.getByRole("button", { name: /navigation menu/ })).toHaveCount(0);
       await expect(page.getByTestId("catalog-desktop-filters")).toBeVisible();
       await expect(page.getByTestId("product-catalog-grid").locator("article")).toHaveCount(1);
-      await expect(page.getByTestId("product-catalog-grid").locator("article summary")).toBeVisible();
+      const desktopCard = page.getByTestId("product-catalog-grid").locator("article").first();
+      await expect(desktopCard.locator("[data-product-card-title]")).toHaveText(product.translations[0].title);
+      await expect(desktopCard.locator("details, summary")).toHaveCount(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       await saveScreenshot(page, "desktop-catalog", true);
     } else {
@@ -139,27 +141,44 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await saveScreenshot(page, "pixel7-catalog", true);
 
       await menuButton.click();
-      const mobileMenu = header.getByRole("navigation", { name: "Mobile primary navigation" });
+      const mobileMenu = header.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+      const mobileNavigation = mobileMenu.getByRole("navigation", { name: "Storefront", exact: true });
       await expect(mobileMenu).toBeVisible();
       for (const label of ["Catalog", "About", "My Library", "Log in", "Sign up"]) {
-        await expect(mobileMenu.getByRole("link", { name: label, exact: true })).toBeVisible();
+        await expect(mobileNavigation.getByRole("link", { name: label, exact: true })).toBeVisible();
       }
-      await expect(mobileMenu.getByRole("link", { name: "Sign up" })).toHaveAttribute("href", "/en/register");
+      await expect(mobileNavigation.getByRole("link", { name: "Sign up" })).toHaveAttribute("href", "/en/register");
       await saveScreenshot(page, "pixel7-header-menu");
       await page.keyboard.press("Escape");
       await expect(menuButton).toBeFocused();
       await expect(mobileMenu).not.toBeVisible();
+      await expect(header.locator("dialog#mobile-primary-navigation")).toHaveJSProperty("open", false);
 
       await menuButton.click();
-      await page.mouse.click(4, 180);
+      await expect.poll(() => mobileMenu.evaluate((dialog) => dialog.getBoundingClientRect().x)).toBeGreaterThanOrEqual(-1);
+      const dialogBounds = await mobileMenu.boundingBox();
+      expect(dialogBounds).not.toBeNull();
+      // Click the blank dialog padding away from the mobile scrollbar hit area.
+      await page.mouse.click(dialogBounds!.x + 2, dialogBounds!.y + dialogBounds!.height / 2);
       await expect(mobileMenu).not.toBeVisible();
+      await expect(header.locator("dialog#mobile-primary-navigation")).toHaveJSProperty("open", false);
 
       const card = page.getByTestId("product-catalog-grid").locator("article").first();
-      const disclosure = card.locator("summary");
-      await expect(disclosure).toBeVisible();
-      await page.mouse.move(0, 0);
-      await disclosure.tap();
-      await expect(card.locator("details")).toHaveAttribute("open", "");
+      await expect(card.locator("[data-product-card-title]")).toHaveText(product.translations[0].title);
+      await expect(card.locator("details, summary")).toHaveCount(0);
+      const productLink = card.getByRole("link");
+      const productHref = await productLink.getAttribute("href");
+      expect(productHref).not.toBeNull();
+      const productUrl = new URL(productHref!, page.url());
+      expect(productUrl.pathname).toBe(`/en/products/${product.slug}`);
+      const catalogContext = productUrl.searchParams.get("catalog");
+      expect(catalogContext).not.toBeNull();
+      const catalogUrl = new URL(catalogContext!, page.url());
+      expect(catalogUrl.pathname).toBe("/en/products");
+      for (const key of ["q", "audience", "type", "category", "tag", "sort"]) {
+        expect(catalogUrl.searchParams.get(key)).toBe(search.get(key));
+      }
+      expect(catalogUrl.hash).toBe(`#${await card.getAttribute("id")}`);
       await page.mouse.move(0, 0);
       await expect.poll(async () => card.evaluate((element) => getComputedStyle(element).boxShadow)).not.toContain("197, 111, 93");
 
@@ -252,8 +271,9 @@ test("Issue 66 compact mobile storefront keeps navigation and URL filters usable
       await expect(webkitHeader.getByRole("link", { name: "Log in", exact: true })).toBeVisible();
       const webkitMenuButton = webkitHeader.getByRole("button", { name: "Open navigation menu" });
       await webkitMenuButton.tap();
-      const webkitMenu = webkitHeader.getByRole("navigation", { name: "Mobile primary navigation" });
-      await expect(webkitMenu.getByRole("link", { name: "Sign up", exact: true })).toHaveAttribute("href", "/en/register");
+      const webkitMenu = webkitHeader.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+      const webkitNavigation = webkitMenu.getByRole("navigation", { name: "Storefront", exact: true });
+      await expect(webkitNavigation.getByRole("link", { name: "Sign up", exact: true })).toHaveAttribute("href", "/en/register");
       await saveScreenshot(webkitPage, "webkit-iphone-header-menu");
       await webkitPage.keyboard.press("Escape");
       await expect(webkitMenuButton).toBeFocused();

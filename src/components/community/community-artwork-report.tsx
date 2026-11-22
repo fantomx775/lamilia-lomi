@@ -59,12 +59,12 @@ export function CommunityArtworkReport({ artworkId, access, returnTo, subject = 
       });
       const payload = await response.json();
       if (response.status === 201 || (response.ok && payload.ok)) {
-        showToast("success", payload.duplicate ? "You have already submitted this report. Thank you." : "Thank you. Your report has been sent to the moderation team.");
+        showToast("success", payload.duplicate ? "You have already submitted this report. Thank you." : "Thank you. Your report has been sent to the moderation team.", { scope: `community-report-${subject}-${artworkId}` });
         setOpen(false);
         return;
       }
-      showToast("error", payload.message || "We could not send your report. Please try again.");
-    } catch { showToast("error", "We could not reach the server. Please try again."); }
+      showToast("error", payload.message || "We could not send your report. Please try again.", { scope: `community-report-${subject}-${artworkId}` });
+    } catch { showToast("error", "We could not reach the server. Please try again.", { scope: `community-report-${subject}-${artworkId}` }); }
     finally { busyRef.current = false; setBusy(false); }
   };
 

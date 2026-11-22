@@ -1,11 +1,33 @@
 import { primaryNavigation } from "./helpers/navigation";
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { resetLocalPremiumCodeFixture } from "./local-premium-code-fixture";
 import { isLocalDemoAppTarget } from "./local-target";
 
 const productSlug = "moon-garden-coloring-book";
+
+type CatalogProductDestination = { pathname: string; catalog: string };
+
+async function getCatalogProductDestination(link: Locator): Promise<CatalogProductDestination> {
+  const href = await link.getAttribute("href");
+  expect(href).not.toBeNull();
+  const target = new URL(href!, "http://catalog.test");
+  expect(target.pathname).toBe(`/en/products/${productSlug}`);
+  const catalog = target.searchParams.get("catalog");
+  expect(catalog).not.toBeNull();
+  const returnUrl = new URL(catalog!, target.origin);
+  expect(returnUrl.pathname).toBe("/en/products");
+  const cardId = await link.evaluate((element) => element.closest("article")?.id ?? "");
+  expect(returnUrl.hash).toBe(`#${cardId}`);
+  return { pathname: target.pathname, catalog: catalog! };
+}
+
+async function expectCatalogProductDestination(page: Page, expected: CatalogProductDestination) {
+  await expect(page).toHaveURL((url) =>
+    url.pathname === expected.pathname && url.searchParams.get("catalog") === expected.catalog,
+  );
+}
 
 type BrowserDiagnostics = {
   consoleErrors: string[];
@@ -90,8 +112,10 @@ test("desktop primary navigation journey reaches Catalog, Product Detail, Librar
   await page.screenshot({ path: testInfo.outputPath("catalog-desktop.png"), fullPage: true });
 
   const productCard = page.getByRole("link", { name: /Moon Garden Coloring Book/i });
+  const productDestination = await getCatalogProductDestination(productCard);
   started = Date.now();
   await productCard.click();
+  await expectCatalogProductDestination(page, productDestination);
   await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   timings.push({ transition: "Catalog → Product Detail", clickToContentMs: Date.now() - started });
 
@@ -126,12 +150,15 @@ test("tablet header navigation is visible and fits the viewport", async ({ page 
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.goto("/en/products");
 
-  const toggle = page.getByRole("button", { name: "Open navigation menu", exact: true });
-  await expect(toggle).toBeVisible();
-  await toggle.click();
-  const nav = page.getByRole("navigation", { name: "Mobile primary navigation", exact: true });
+  const menuButton = page.getByRole("button", { name: "Open navigation menu", exact: true });
+  await expect(menuButton).toBeVisible();
+  await menuButton.click();
+  const dialog = page.getByRole("dialog", { name: "Mobile primary navigation", exact: true });
+  await expect(dialog).toBeVisible();
+  const nav = dialog.getByRole("navigation", { name: "Storefront", exact: true });
   await expect(nav.getByRole("link", { name: "Catalog", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "My Library", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open navigation menu", exact: true })).toHaveAttribute("aria-expanded", "true");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("tablet-catalog-navigation.png"), fullPage: true });
 });
@@ -188,10 +215,11 @@ test("product navigation keeps semantic keyboard behavior and reaches the full d
   await page.goto("/en/products");
   const productCard = page.getByRole("link", { name: /Moon Garden Coloring Book/i });
   await expect(productCard).toBeVisible();
+  const productDestination = await getCatalogProductDestination(productCard);
   await productCard.focus();
   await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
+  await expectCatalogProductDestination(page, productDestination);
   await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   await expect(page.getByTestId("product-unlock-section")).toBeVisible();
   await expect(page.getByTestId("unlock-guest-state")).toBeVisible();
@@ -224,6 +252,7 @@ test("a slow Product Detail request shows inline pending feedback and then the f
   await page.goto("/en/products");
   const productCard = page.getByRole("link", { name: /Moon Garden Coloring Book/i });
   await expect(productCard).toBeVisible();
+  const productDestination = await getCatalogProductDestination(productCard);
   await page.screenshot({ path: testInfo.outputPath("catalog.png"), fullPage: true });
   try {
     if (testInfo.project.name === "mobile") {
@@ -240,7 +269,7 @@ test("a slow Product Detail request shows inline pending feedback and then the f
     await page.screenshot({ path: testInfo.outputPath("catalog-product-link-pending.png"), fullPage: true });
 
     releaseRequest();
-    await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
+    await expectCatalogProductDestination(page, productDestination);
     await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
     await expect(page.getByTestId("product-detail-loading")).toHaveCount(0);
     expect(interceptedRequests.length).toBeGreaterThan(0);
@@ -266,6 +295,7 @@ test("a delayed Product Detail read shows its route skeleton before the final pa
   await page.goto("/en/products");
   const productCard = page.getByRole("link", { name: /Moon Garden Coloring Book/i });
   await expect(productCard).toBeVisible();
+  const productDestination = await getCatalogProductDestination(productCard);
   await page.screenshot({ path: testInfo.outputPath("catalog-before-slow-product-read.png"), fullPage: true });
 
   if (testInfo.project.name === "mobile") {
@@ -279,7 +309,7 @@ test("a delayed Product Detail read shows its route skeleton before the final pa
   await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("product-detail-loading-skeleton.png"), fullPage: true });
 
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
+  await expectCatalogProductDestination(page, productDestination);
   await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   await expect(page.getByTestId("product-detail-loading")).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("product-detail-after-slow-read.png"), fullPage: true });
@@ -397,7 +427,7 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   const pageErrors: string[] = [];
   const sameOriginFailures: string[] = [];
   const expectedCanceledRscPrefetches: string[] = [];
-  const expectedCanceledPriorRouteRscRequests: string[] = [];
+  const expectedCanceledCompletedRscRequests: string[] = [];
   const canceledRscRequests: Array<{ path: string; isPrefetch: boolean; detail: string }> = [];
   const completedAndLeftRscRoutes = new Set<string>();
   let appOrigin = "";
@@ -455,20 +485,21 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
   await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   completedAndLeftRscRoutes.add("/en/products");
-  await page.getByRole("link", { name: /Moon Garden Coloring Book/i }).tap();
-  await expect(page).toHaveURL(new RegExp(`/en/products/${productSlug}$`));
+  const productCard = page.getByRole("link", { name: /Moon Garden Coloring Book/i });
+  const productDestination = await getCatalogProductDestination(productCard);
+  await productCard.tap();
+  await expectCatalogProductDestination(page, productDestination);
   await expect(page.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
   completedAndLeftRscRoutes.add(`/en/products/${productSlug}`);
   await page.goBack();
   await expect(page).toHaveURL(/\/en\/products$/);
   await expect(page.getByRole("heading", { name: "Browse LamiliaLomi books" })).toBeVisible();
-  const currentPath = new URL(page.url()).pathname;
   for (const canceled of canceledRscRequests) {
     if (canceled.isPrefetch) {
       expectedCanceledRscPrefetches.push(canceled.detail);
-    } else if (completedAndLeftRscRoutes.has(canceled.path) && canceled.path !== currentPath) {
-      expectedCanceledPriorRouteRscRequests.push(canceled.detail);
+    } else if (completedAndLeftRscRoutes.has(canceled.path)) {
+      expectedCanceledCompletedRscRequests.push(canceled.detail);
     } else {
       sameOriginFailures.push(canceled.detail);
     }
@@ -486,7 +517,7 @@ test("mobile primary navigation exposes Catalog and Library without horizontal o
       "Canceled RSC prefetch requests:",
       ...expectedCanceledRscPrefetches,
       "Canceled RSC requests for already-visited routes:",
-      ...expectedCanceledPriorRouteRscRequests,
+      ...expectedCanceledCompletedRscRequests,
     ].join("\n"),
     contentType: "text/plain",
   });

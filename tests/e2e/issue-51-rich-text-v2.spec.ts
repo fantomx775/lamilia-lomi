@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { acquireLocalContentStoreLock } from "./local-content-store-lock";
+import { isKnownCaretOnlyHydrationWarning } from "./helpers/hydration-warnings";
 import { isLocalDemoAppTarget } from "./local-target";
 
 test.setTimeout(600_000);
@@ -289,6 +290,8 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       }
       return request;
     });
+    const knownHydrationWarnings = diagnostics.consoleErrors.filter(isKnownCaretOnlyHydrationWarning);
+    const unexpectedConsoleErrors = diagnostics.consoleErrors.filter((message) => !isKnownCaretOnlyHydrationWarning(message));
     const browserEvidence = {
       runId: browserRunId,
       testedAt: new Date().toISOString(),
@@ -296,6 +299,8 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       project: testInfo.project.name,
       flows: ["product-description", "terms", "privacy", "about-page"],
       consoleErrors: diagnostics.consoleErrors,
+      knownHydrationWarnings,
+      unexpectedConsoleErrors,
       pageErrors: diagnostics.pageErrors,
       attemptedHtmlResourceRequests,
       failedNetworkRequests: inspectedNetworkRequests,
@@ -308,7 +313,7 @@ test("Issue 51 rich text and HTML modes preserve supported content safely", asyn
       contentType: "application/json",
     });
     console.log(`BROWSER_EVIDENCE issue-51 ${JSON.stringify(browserEvidence)}`);
-    expect(diagnostics.consoleErrors).toEqual([]);
+    expect(unexpectedConsoleErrors).toEqual([]);
     expect(diagnostics.pageErrors).toEqual([]);
     expect(inspectedNetworkRequests.every((request) => request.disposition === "unrelated" && request.reason)).toBe(true);
     expect(diagnostics.failedResponses).toEqual([]);

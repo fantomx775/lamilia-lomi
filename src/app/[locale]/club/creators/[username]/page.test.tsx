@@ -34,6 +34,8 @@ const state = vi.hoisted(() => ({
 
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: React.ComponentProps<"a">) => <a href={href} {...props}>{children}</a>,
+  // Server-rendered links have no navigation in flight; retain the real hint.
+  useLinkStatus: () => ({ pending: false }),
 }));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND"); } }));
 vi.mock("@/lib/community-flags", () => ({

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEven
 
 import { AdminEditorHeader, AdminEditorSection } from "@/components/admin/admin-editor-foundation";
 import { AdminSaveBar } from "@/components/admin/admin-save-bar";
-import { useAdminToast } from "@/components/admin/admin-toast";
+import { adminRouteToastScope, useAdminToast } from "@/components/admin/admin-toast";
 import { RichTextEditor } from "@/components/admin/rich-text-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -223,7 +223,7 @@ export function AboutPageEditor({
         saveInProgressRef.current = false;
         setIsSaving(false);
         setTransportFailed(true);
-        publishToast("error", "Nie udało się wysłać zapisu About. Twoje zmiany pozostały w edytorze.");
+        publishToast("error", "Nie udało się wysłać zapisu About. Twoje zmiany pozostały w edytorze.", { scope: adminRouteToastScope("/admin/pages/about") });
       });
       return;
     }

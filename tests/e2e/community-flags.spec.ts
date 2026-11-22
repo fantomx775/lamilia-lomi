@@ -33,7 +33,9 @@ test("disabled switches block real public images and mutations while preserving 
     const storagePath = `community/${owner.id}/${key}`;
     expect((await fixtures.service.storage.from("collection-media").upload(storagePath, image, { contentType: "image/webp", upsert: false })).error).toBeNull();
     expect((await fixtures.service.rpc("community_mark_upload_stored", { p_actor_user_id: owner.id, p_idempotency_key: key, p_lease_token: lease })).error).toBeNull();
-    const finalized = await fixtures.service.rpc("community_finalize_upload", { p_actor_user_id: owner.id, p_idempotency_key: key, p_lease_token: lease });
+    const finalized = await fixtures.service.rpc("community_finalize_upload", {
+      p_actor_user_id: owner.id, p_idempotency_key: key, p_lease_token: lease, p_image_width: 80, p_image_height: 60,
+    });
     expect(finalized.error).toBeNull();
     const artworkId = finalized.data as string;
     const adminPage = await fixtures.newPage(browser);
@@ -60,6 +62,12 @@ test("disabled switches block real public images and mutations while preserving 
     const mediaUrl = `${origin}/api/community/artworks/${artworkId}/media`;
     const anonymousMediaStatus = (await page.request.get(mediaUrl)).status();
     expect(anonymousMediaStatus).toBe(404);
+    const publicVariantStatuses: Array<{ width: number; status: number }> = [];
+    for (const width of [480, 960, 2048]) {
+      const status = (await page.request.get(`${mediaUrl}?width=${width}`)).status();
+      publicVariantStatuses.push({ width, status });
+      expect(status).toBe(404);
+    }
     const checks = [];
     for (const pathname of ["/en/club", `/en/club/artworks/${artworkId}`, "/en/club/creators/cc_flags_fixture"]) {
       checks.push(await communityHtmlCheck(page.request, pathname, 404, "This page could not be found."));
@@ -99,6 +107,13 @@ test("disabled switches block real public images and mutations while preserving 
     expect((await page.request.patch(`${origin}/api/community/profile`, { headers: { Origin: origin }, data: { username: "cc_flags_new" } })).status()).toBe(404);
     const ownerMediaStatus = (await page.request.get(mediaUrl)).status();
     expect(ownerMediaStatus).toBe(200);
+    const ownerVariantStatuses: Array<{ width: number; status: number }> = [];
+    for (const width of [480, 960, 2048]) {
+      const response = await page.request.get(`${mediaUrl}?width=${width}`);
+      expect(response.status()).toBe(200);
+      expect(response.headers()["cache-control"]).toContain("no-store");
+      ownerVariantStatuses.push({ width, status: response.status() });
+    }
     const reportDenied = await page.request.post(`${origin}/api/community/artworks/${artworkId}/report`, {
       headers: { Origin: origin }, data: { reason: "privacy" },
     });
@@ -108,6 +123,9 @@ test("disabled switches block real public images and mutations while preserving 
     expect((await page.request.patch(`${origin}/api/community/artworks/${artworkId}`, { headers: { Origin: origin }, data: { revision: 2, description: "Blocked edit" } })).status()).toBe(404);
     expect((await page.request.delete(`${origin}/api/community/artworks/${artworkId}`, { headers: { Origin: origin }, data: { revision: 2 } })).status()).toBe(200);
     expect((await page.request.get(mediaUrl)).status()).toBe(404);
+    for (const width of [480, 960, 2048]) {
+      expect((await page.request.get(`${mediaUrl}?width=${width}`)).status()).toBe(404);
+    }
     expect((await fixtures.service.storage.from("collection-media").download(storagePath)).error).toBeTruthy();
     await panel.getByRole("button", { name: "Leave the Coloring Club", exact: true }).click();
     await panel.getByRole("button", { name: "Confirm leave", exact: true }).click();
@@ -123,7 +141,8 @@ test("disabled switches block real public images and mutations while preserving 
       runId: process.env.COMMUNITY_BROWSER_RUN_ID ?? "cc07-public-off-1", publicEnabled: false,
       command: "LAMILIA_BACKEND=supabase PLAYWRIGHT_BASE_URL=https://127.0.0.1:3443 RUN_COMMUNITY_FLAGS_OFF_E2E=1 npx playwright test tests/e2e/community-flags.spec.ts --project=chromium --workers=1",
       checks, approvedFixture: { artworkPath: `/en/club/artworks/${artworkId}`, mediaPath: `/api/community/artworks/${artworkId}/media`,
-        artworkStatus: "approved", ownerMediaStatus, anonymousMediaStatus, publicListingStatus, mutationsBlocked: true },
+        artworkStatus: "approved", ownerMediaStatus, anonymousMediaStatus, publicVariantStatuses, ownerVariantStatuses,
+        publicListingStatus, mutationsBlocked: true },
     }, null, 2));
   } finally {
     await fixtures.cleanup();

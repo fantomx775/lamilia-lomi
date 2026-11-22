@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { CookieConsentBanner } from "@/components/cookie-consent";
 import { SiteFooter } from "@/components/site-footer";
 import { ToastProvider } from "@/components/ui/toast";
+import { CommunityRouteNavigationProvider, CommunityRoutePendingRegion } from "@/components/community/community-route-transition";
 import { SiteHeader } from "@/components/site-header";
 import { routing, type Locale } from "@/i18n/routing";
 
@@ -29,12 +30,12 @@ export default async function LocaleLayout({ children, params }: Props) {
   return (
     <NextIntlClientProvider messages={messages}>
       <ToastProvider>
-        <div data-public-storefront className="flex min-h-dvh flex-1 flex-col">
+        <CommunityRouteNavigationProvider><div data-public-storefront className="flex min-h-dvh flex-1 flex-col">
           <SiteHeader locale={locale as Locale} />
-          <main className="flex-1">{children}</main>
+          <main className="flex-1"><CommunityRoutePendingRegion>{children}</CommunityRoutePendingRegion></main>
           <SiteFooter locale={locale as Locale} />
           <CookieConsentBanner />
-        </div>
+        </div></CommunityRouteNavigationProvider>
       </ToastProvider>
     </NextIntlClientProvider>
   );

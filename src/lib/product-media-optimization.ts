@@ -9,16 +9,24 @@ const CORE_FILES = [
 
 let imageEncoding = Promise.resolve();
 
-export async function optimizeProductMedia(kind: AssetKind, file: File): Promise<File> {
+export async function optimizeProductMedia(kind: AssetKind, file: File, operationSignal?: AbortSignal): Promise<File> {
+  operationSignal?.throwIfAborted();
   if (kind === "cover" || kind === "gallery") {
-    const result = imageEncoding.then(() => optimizeProductImage(file));
+    const result = imageEncoding.then(async () => {
+      operationSignal?.throwIfAborted();
+      const result = await optimizeProductImage(file);
+      operationSignal?.throwIfAborted();
+      return result;
+    });
     imageEncoding = result.then(() => undefined, () => undefined);
     return result;
   }
 
   if (kind !== "video") return file;
 
-  const signal = AbortSignal.timeout(60_000);
+  // The pinned WASM encoder is a large download; keep the user-visible Cancel
+  // action responsive while allowing slower connections to finish loading it.
+  const signal = operationSignal ? AbortSignal.any([operationSignal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000);
   const encoder = await createVideoEncoder(signal);
   const coreObjectUrls: string[] = [];
   try {
@@ -33,7 +41,7 @@ export async function optimizeProductMedia(kind: AssetKind, file: File): Promise
       coreURL: coreObjectUrls[0],
       wasmURL: coreObjectUrls[1],
     }, { signal });
-    const encodingSignal = AbortSignal.timeout(420_000);
+    const encodingSignal = operationSignal ? AbortSignal.any([operationSignal, AbortSignal.timeout(420_000)]) : AbortSignal.timeout(420_000);
     await encoder.writeFile("input", new Uint8Array(await file.arrayBuffer()), { signal: encodingSignal });
     const result = await encoder.exec([
       "-i", "input",

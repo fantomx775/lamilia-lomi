@@ -9,7 +9,7 @@ export function AccountDeletionToast() {
     try {
       if (sessionStorage.getItem("lamilia-account-deleted") !== "1") return;
       sessionStorage.removeItem("lamilia-account-deleted");
-      showToast("success", "Your account was deleted.");
+      showToast("success", "Your account was deleted.", { scope: "account-delete" });
     } catch {
       // Storage can be unavailable in restricted browsing contexts.
     }

@@ -4,13 +4,16 @@ import type { PublicReaderArtwork } from "@/lib/types";
 import type { CommunityHeartAccess, CommunityPublicArtwork } from "@/lib/community/types";
 import { CommunityAvatar } from "@/components/community/community-avatar";
 import { CommunityHeartControl } from "@/components/community/community-heart-control";
+import { communityArtworkMediaUrl, communityArtworkMediaSrcSet } from "@/lib/community/media-urls";
 
 export function ReaderArtworkGallery({ artworks, communityArtworks = [], productSlug, communityEnabled = false, heartAccess = "guest" }: { artworks: PublicReaderArtwork[]; communityArtworks?: CommunityPublicArtwork[]; productSlug?: string; communityEnabled?: boolean; heartAccess?: CommunityHeartAccess }) {
   if (!artworks.length && !communityArtworks.length && !communityEnabled) return null;
   const curatedImages = artworks.map((item) => ({ id: item.id, path: item.src, alt: item.description || `Colored by ${item.displayName}`, caption: `Colored by ${item.displayName}`, unoptimized: true }));
   const communityImages = communityArtworks.map((item) => ({
     id: `community-${item.id}`,
-    path: `/api/community/artworks/${item.id}/media`,
+    path: communityArtworkMediaUrl(item.id, 480),
+    thumbnailSrcSet: communityArtworkMediaSrcSet(item.id, item.imageDimensions),
+    detailPath: communityArtworkMediaUrl(item.id, 2048),
     alt: `Colored by @${item.creator.username}`,
     caption: `Colored by @${item.creator.username}`,
     description: item.description,

@@ -5,6 +5,9 @@ test("guest can browse public product flow", async ({ page }) => {
   await page.goto("/en");
   await expect(page.getByRole("heading", { name: "LamiliaLomi" })).toBeVisible();
   await expect(page.getByRole("link", { name: /Browse catalog/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Find your next book" })).toBeVisible();
+  await expect(page.locator('main a[href="/en/products?audience=kids"]')).toContainText("Kids");
+  await expect(page.locator('main a[href="/en/products?audience=adults"]')).toContainText("Adults");
 
   await page.goto("/en/products?q=moon");
   await expect(page.getByRole("link", { name: /Moon Garden Coloring Book/i })).toBeVisible();
@@ -53,7 +56,10 @@ test("demo user can log in and see unlocked library", async ({ page }, testInfo)
 
   await expect(page).toHaveURL(/\/en\/library/);
   await expect(page.getByRole("heading", { name: "My Library" })).toBeVisible();
-  await expect(page.getByRole("link", { name: /Moon Garden Coloring Book/i })).toBeVisible();
+  const libraryCard = page.getByTestId("library-book-card").filter({ hasText: "Moon Garden Coloring Book" });
+  await expect(libraryCard.getByRole("heading", { name: "Moon Garden Coloring Book" })).toBeVisible();
+  await expect(libraryCard.getByRole("link", { name: "Open my files", exact: true })).toBeVisible();
+  await expect(libraryCard.getByRole("link", { name: "View book details", exact: true })).toBeVisible();
 });
 
 test("admin is protected for guests", async ({ page }) => {

@@ -10,6 +10,12 @@ import { createRecoveryClient } from "@/lib/supabase/recovery";
 
 import { requestPasswordReset, saveRecoveredPassword } from "./actions";
 
+export const metadata = {
+  title: "Reset password",
+  description: "Request a password reset or choose a new password for your LamiliaLomi account.",
+  robots: { index: false, follow: false },
+};
+
 const messages = {
   requested: "Check your inbox. If an account uses that email, a reset link will arrive shortly. Check your spam folder if you don't see it.",
   "invalid-email": "Enter a valid email address.",

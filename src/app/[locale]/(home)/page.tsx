@@ -9,6 +9,7 @@ import type { Locale } from "@/i18n/routing";
 import { ImageWithFallback } from "@/components/image-with-fallback";
 import { getAudiencePath } from "@/lib/products";
 import { getFeaturedProductsForRequest } from "@/lib/products-request";
+import { publicImageAlt } from "@/lib/product-display";
 
 type Props = {
   params: Promise<{ locale: Locale }>;
@@ -23,7 +24,6 @@ export default async function HomePage({ params }: Props) {
   ]);
   const kids = kidsProducts[0];
   const adults = adultsProducts[0];
-  const qrProduct = featured[0];
 
   return (
     <div>
@@ -47,18 +47,18 @@ export default async function HomePage({ params }: Props) {
               Browse catalog
               <ArrowRight className="size-4" aria-hidden />
             </NavigationLink>
-            {qrProduct ? (
+            {(
               <NavigationLink
                 className={buttonClassName({
                   variant: "outline",
                   className: "border-[#B8AEA0]",
                 })}
-                href={`/${locale}/unlock/${qrProduct.slug}`}
+                href={`/${locale}/unlock`}
                 pendingLabel="Opening bonus unlock"
               >
-                Try QR unlock
+                Unlock my book bonus
               </NavigationLink>
-            ) : null}
+            )}
           </div>
         </div>
 
@@ -73,10 +73,10 @@ export default async function HomePage({ params }: Props) {
               <div className="relative aspect-[8.5/11] overflow-hidden rounded-md bg-[var(--color-blush)]">
                 <ImageWithFallback
                   src={product!.cover.path}
-                  alt={product!.cover.title ?? product!.title}
-                  loading="eager"
+                  alt={publicImageAlt(product!.cover.title, `${product!.title} cover`)}
+                  loading="lazy"
                   className="object-contain"
-                  sizes="(min-width: 1024px) 28vw, 48vw"
+                  sizes="(min-width: 1280px) 300px, (min-width: 1024px) 25vw, (min-width: 640px) calc(50vw - 48px), calc(100vw - 56px)"
                 />
               </div>
               <div className="flex items-center justify-between py-4">
@@ -94,34 +94,34 @@ export default async function HomePage({ params }: Props) {
         <div className="mx-auto grid max-w-7xl gap-6 px-4 py-12 sm:px-6 md:grid-cols-3 lg:px-8">
           <Card>
             <CardHeader>
-              <h2 className="font-serif text-2xl font-semibold">QR to bonus</h2>
+              <h2 className="font-serif text-2xl font-semibold">More to create</h2>
             </CardHeader>
             <CardContent>
               <p className="text-sm leading-6 text-[var(--color-muted)]">
-                Printed book codes unlock product-specific premium files and
-                return access through the reader library.
+                Find the code inside your printed book to unlock its printable
+                bonuses. Return to My Library whenever you want to create again.
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <h2 className="font-serif text-2xl font-semibold">Amazon bridge</h2>
+              <h2 className="font-serif text-2xl font-semibold">Find your next book</h2>
             </CardHeader>
             <CardContent>
               <p className="text-sm leading-6 text-[var(--color-muted)]">
-                Product pages keep Amazon links visible while preserving a
-                premium branded experience.
+                Browse covers and sample pages here, then follow View on Amazon
+                to choose and buy your printed book.
               </p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <h2 className="font-serif text-2xl font-semibold">Owner control</h2>
+              <h2 className="font-serif text-2xl font-semibold">A moment of imagination</h2>
             </CardHeader>
             <CardContent>
               <p className="text-sm leading-6 text-[var(--color-muted)]">
-                The Polish admin area is ready for product, user, export, and
-                content management flows.
+                Discover coloring pages and illustrated stories for children
+                and adults, with something new to explore at your own pace.
               </p>
             </CardContent>
           </Card>
@@ -135,7 +135,7 @@ export default async function HomePage({ params }: Props) {
               Featured catalog
             </p>
             <h2 className="mt-2 font-serif text-3xl font-semibold">
-              Real product paths from the first screen
+              Explore the collection
             </h2>
           </div>
           <NavigationLink

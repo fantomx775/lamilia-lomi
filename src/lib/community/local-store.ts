@@ -9,6 +9,7 @@ import type {
   CommunityAdminReport,
   CommunityAdminProductOption,
   CommunityArtworkStatus,
+  CommunityArtworkDimensions,
   CommunityArtworkSort,
   CommunityAudience,
   CommunityCreateArtworkInput,
@@ -34,6 +35,7 @@ import {
 } from "./errors";
 import { COMMUNITY_RULES_VERSION } from "./rules";
 import { decodeCommunityPopularCursor, decodeCommunityTimestampCursor, encodeCommunityPopularCursor, encodeCommunityTimestampCursor } from "./cursor";
+import { communityArtworkDimensions } from "./media-urls";
 
 export {
   CommunityAuthorizationError,
@@ -76,6 +78,7 @@ type LocalArtwork = {
   storagePath: string | null;
   storageProvider: CommunityStorageProvider;
   contentType: CommunityImageContentType;
+  imageDimensions?: CommunityArtworkDimensions | null;
   sizeBytes: number;
   description: string;
   status: "pending" | "approved" | "rejected" | "removed";
@@ -393,8 +396,11 @@ export class CommunityLocalStore {
     });
   }
 
-  async finalizeArtworkUpload(actor: LocalCommunityActor, idempotencyKey: string, leaseToken: string, products: Product[]) {
+  async finalizeArtworkUpload(actor: LocalCommunityActor, idempotencyKey: string, leaseToken: string, products: Product[], imageDimensions: CommunityArtworkDimensions) {
     assertEligibleForSubmission(actor);
+    if (!communityArtworkDimensions(imageDimensions.width, imageDimensions.height)) {
+      throw new CommunityValidationError("Invalid image dimensions.");
+    }
     return this.transact((snapshot) => {
       const reservation = snapshot.uploadReservations.find((item) => item.authorId === actor.userId && item.idempotencyKey === idempotencyKey);
       if (!reservation) throw new CommunityConflictError("Upload reservation is no longer available.");
@@ -412,6 +418,7 @@ export class CommunityLocalStore {
         id: this.uuid(), authorId: actor.userId, productId: reservation.productId,
         storagePath: reservation.storagePath, storageProvider: reservation.storageProvider,
         contentType: reservation.contentType, sizeBytes: reservation.sizeBytes,
+        imageDimensions,
         description: reservation.description, status: "pending", revision: 1,
         moderationReason: null, createdAt: now, updatedAt: now, publishedAt: null,
         unlockVerifiedAt: now, deletedAt: null, idempotencyKey,
@@ -660,7 +667,7 @@ export class CommunityLocalStore {
     return products.filter((product) => product.status === "published")
       .map((product) => ({ id: product.id, slug: product.slug, title: product.translations.find((translation) => translation.locale === "en")?.title ?? product.slug, audience: product.audience }))
       .sort((a, b) => a.title.localeCompare(b.title, "en"))
-      .slice(0, boundedLimit(limit));
+      .slice(0, boundedProductOptionsLimit(limit));
   }
 
   async getPublicArtwork(artworkId: string, products: Product[], viewerUserId?: string): Promise<CommunityPublicArtwork | null> {
@@ -713,11 +720,12 @@ export class CommunityLocalStore {
     });
   }
 
-  async listMyArtworks(actor: LocalCommunityActor, products: Product[], limit = 24): Promise<CommunityOwnerArtwork[]> {
+  async listMyArtworks(actor: LocalCommunityActor, products: Product[], limit = 24, cursor?: { timestamp: string; id: string } | null): Promise<CommunityOwnerArtwork[]> {
     assertVerified(actor);
     return this.read((snapshot) => snapshot.artworks
-      .filter((artwork) => artwork.authorId === actor.userId && !artwork.deletedAt)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .filter((artwork) => artwork.authorId === actor.userId && !artwork.deletedAt
+        && (!cursor || artwork.createdAt < cursor.timestamp || (artwork.createdAt === cursor.timestamp && artwork.id < cursor.id)))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
       .slice(0, boundedLimit(limit))
       .flatMap((artwork) => {
         const product = products.find((candidate) => candidate.id === artwork.productId);
@@ -727,8 +735,11 @@ export class CommunityLocalStore {
 
   async getMyArtwork(actor: LocalCommunityActor, artworkId: string, products: Product[]) {
     assertVerified(actor);
-    const items = await this.listMyArtworks(actor, products, 100);
-    return items.find((item) => item.id === artworkId) ?? null;
+    return this.read((snapshot) => {
+      const artwork = snapshot.artworks.find((item) => item.id === artworkId && item.authorId === actor.userId && !item.deletedAt);
+      const product = artwork && products.find((item) => item.id === artwork.productId);
+      return artwork && product ? toOwnerArtwork(artwork, product) : null;
+    });
   }
 
   async getUploadReservation(actor: LocalCommunityActor, idempotencyKey: string) {
@@ -1261,6 +1272,7 @@ function toPublicArtwork(artwork: LocalArtwork, product: Product, profile: Local
     product: publicProduct(product),
     creator: { username: profile.username, avatarSeed: profile.avatarSeed },
     contentType: artwork.contentType,
+    imageDimensions: communityArtworkDimensions(artwork.imageDimensions?.width, artwork.imageDimensions?.height),
     description: artwork.description,
     publishedAt: artwork.publishedAt!,
     likesCount,
@@ -1305,6 +1317,11 @@ function toPrivateProfile(profile: LocalProfile) {
 function boundedLimit(value: number | undefined) {
   if (value === undefined) return 24;
   if (!Number.isSafeInteger(value) || value < 1 || value > 100) throw new CommunityValidationError("Page size must be between 1 and 100.");
+  return value;
+}
+
+function boundedProductOptionsLimit(value: number) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 200) throw new CommunityValidationError("Product option limit must be between 1 and 200.");
   return value;
 }
 

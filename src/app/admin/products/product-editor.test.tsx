@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor, within, type RenderResult } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within, type RenderResult } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -36,6 +36,8 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: editorMocks.routerReplace }),
 }));
 
+import { AdminToastProvider } from "@/components/admin/admin-toast";
+import { useToast } from "@/components/ui/toast";
 import { ProductEditor, productEditorFormSignature, replaceCreatedProductRoute } from "./product-editor";
 import { AdminProductEditorHistoryGuard, shouldUseProductEditorNavigationApi } from "@/app/admin/admin-product-editor-history-guard";
 import { buildProductFromFormData } from "@/lib/admin-content";
@@ -142,6 +144,33 @@ beforeEach(() => {
 });
 
 describe("ProductEditor V2", () => {
+  it.each([false, true])("resolves a failed Save after successful retry without dismiss, unrelated error=%s", async (unrelated) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(readerArtworkGetResponse()));
+    const saveAction = vi.fn().mockResolvedValueOnce({ ok: false, errors: [ADMIN_ERROR_CODES.INTERNAL] })
+      .mockResolvedValueOnce({ ok: true, id: product.id });
+    function OtherFailure() {
+      const { showToast } = useToast();
+      return <button onClick={() => showToast("error", "Unrelated upload failed", { scope: "independent-upload" })}>Other failure</button>;
+    }
+    const user = userEvent.setup();
+    const view = render(<AdminToastProvider><OtherFailure /><ProductEditor title="Edit" product={product}
+      categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} /></AdminToastProvider>);
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    const toastRegion = () => document.querySelector('[data-toast-region]') as HTMLElement;
+    await waitFor(() => expect(within(toastRegion()).getByRole("alert")).toBeInTheDocument());
+    if (unrelated) await user.click(view.getByRole("button", { name: "Other failure" }));
+    await user.type(view.getByLabelText("Tytu\u0142"), " revised");
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+    if (unrelated) {
+      await waitFor(() => expect(within(toastRegion()).getByRole("alert")).toHaveTextContent("Unrelated upload failed"));
+    } else {
+      await waitFor(() => expect(within(toastRegion()).getByRole("status")).toHaveTextContent("Zmiany produktu zosta\u0142y zapisane."));
+      expect(within(toastRegion()).queryByRole("alert")).toBeNull();
+    }
+  });
+
   const snapshot = getSeedContentSnapshot();
   const product = snapshot.products[0];
 
@@ -974,6 +1003,203 @@ describe("ProductEditor V2", () => {
     await user.click(view.getByRole("button", { name: "Usuń" }));
     await waitFor(() => expect(view.queryByText("cover-cleanup-retry.jpg")).not.toBeInTheDocument());
     expect(fetchMock).toHaveBeenLastCalledWith("/api/admin/assets", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it.each(["retained", "unknown", "deleted"] as const)("uses the explicit %s save outcome for an uploaded asset", async (state) => {
+    const id = "retry-asset";
+    const storagePath = "/uploads/retry/cover/book.jpg";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ asset: {
+      id, kind: "cover", bucket: "public-media", path: storagePath, storagePath,
+      filename: "book.jpg", contentType: "image/jpeg", sizeBytes: 4, sortOrder: 1,
+    } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const saveAction = vi.fn()
+      .mockResolvedValueOnce({ ok: false, errors: [ADMIN_ERROR_CODES.INTERNAL], mediaOutcomes: [{ assetId: id, state }] })
+      .mockResolvedValue({ ok: true, id: "retry-product" });
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
+    await user.type(view.getByLabelText("Tytuł"), "Book");
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-cover")!, new File(["book"], "book.jpg", { type: "image/jpeg" }));
+    await waitFor(() => expect(view.getByText("Przesłano")).toBeInTheDocument());
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    if (state === "deleted") {
+      expect(await view.findByText("Produkt nie został zapisany. Prześlij ten plik ponownie przed kolejną próbą.")).toBeInTheDocument();
+      expect(view.container.querySelector('input[name="assetId"]')).toBeNull();
+    } else {
+      await waitFor(() => expect(view.getByRole("button", { name: /Zapisz/ })).toBeEnabled());
+      expect(view.container.querySelector('input[name="assetId"]')).toHaveValue(id);
+      await user.type(view.getByLabelText("Tytuł"), " revised");
+      await user.click(view.getByRole("button", { name: /Zapisz/ }));
+      await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+      expect(saveAction.mock.calls[1][0].get("assetId")).toBe(id);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("blocks Save during asynchronous dimensions preflight and rejects drops during Save", async () => {
+    let finishDimensions!: (size: { width: number; height: number }) => void;
+    editorMocks.readImageDimensions.mockImplementation(() => new Promise((resolve) => { finishDimensions = resolve; }));
+    let finishSave!: (result: { ok: true; id: string }) => void;
+    const saveAction = vi.fn().mockImplementation(() => new Promise((resolve) => { finishSave = resolve; }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ asset: {
+      id: "preflight-asset", kind: "cover", bucket: "public-media", path: "/uploads/preflight/cover/book.jpg",
+      filename: "book.jpg", contentType: "image/jpeg", sizeBytes: 4, sortOrder: 1,
+    } }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
+    await user.type(view.getByLabelText("Tytuł"), "Book");
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-cover")!, new File(["book"], "book.jpg", { type: "image/jpeg" }));
+    expect(view.getByRole("button", { name: /Zapisz/ })).toBeDisabled();
+    fireEvent.submit(view.container.querySelector("form")!);
+    expect(saveAction).not.toHaveBeenCalled();
+    finishDimensions({ width: 850, height: 1100 });
+    await waitFor(() => expect(view.getByText("Przesłano")).toBeInTheDocument());
+    await user.click(view.getByRole("button", { name: /Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    const zone = view.container.querySelector('[role="button"][aria-controls="media-upload-gallery"]')!;
+    fireEvent.drop(zone, { dataTransfer: { files: [new File(["later"], "later.jpg", { type: "image/jpeg" })] } });
+    expect(editorMocks.readImageDimensions).toHaveBeenCalledTimes(1);
+    finishSave({ ok: true, id: "saved" });
+    await waitFor(() => expect(view.getByText("Zapisano. Zmiany są aktualne.")).toBeInTheDocument());
+    expect(saveAction.mock.calls[0][0].getAll("assetId")).toEqual(["preflight-asset"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a completed PDF save clean when an animation frame precedes fieldset release", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_input, init?: RequestInit) => {
+      if (!init?.method) return readerArtworkGetResponse();
+      return { ok: true, json: async () => ({ asset: { id: "timed-pdf", kind: "public_download", bucket: "public-media",
+        path: "/uploads/controlled/public_download/read.pdf", storagePath: "/uploads/controlled/public_download/read.pdf",
+        filename: "read.pdf", contentType: "application/pdf", sizeBytes: 12, sortOrder: 1 } }) };
+    }));
+    let completeSave!: (result: { ok: true; id: string }) => void;
+    const saveAction = vi.fn<(formData: FormData) => Promise<{ ok: true; id: string }>>(() => new Promise((resolve) => { completeSave = resolve; }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Save timing" product={{ ...product, status: "draft", assets: [] }}
+      categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
+    const form = view.container.querySelector<HTMLFormElement>("#product-editor-form")!;
+    const queuedFrames: FrameRequestCallback[] = [];
+    let frameBeforeRelease = false;
+    const runFrame = (callback: FrameRequestCallback) => {
+      frameBeforeRelease ||= Boolean(form.querySelector<HTMLFieldSetElement>("fieldset")?.disabled);
+      callback(0);
+    };
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      if (form.querySelector<HTMLFieldSetElement>("fieldset")?.disabled) runFrame(callback);
+      else queuedFrames.push(callback);
+      return 1;
+    });
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-public_download")!, new File(["%PDF-fixture"], "read.pdf", { type: "application/pdf" }));
+    await waitFor(() => expect(view.container.querySelector('#media-section-public_download input[name="assetId"]')).toHaveValue("timed-pdf"));
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    expect(form.querySelector("fieldset")).toBeDisabled();
+    expect(saveAction.mock.calls[0][0].getAll("assetId")).toEqual(["timed-pdf"]);
+    // Real dirty refresh callbacks queued during upload can run while Save has
+    // disabled its fieldset, before the server result and React release commit.
+    expect(queuedFrames.length).toBeGreaterThan(0);
+    act(() => { queuedFrames.splice(0).forEach(runFrame); });
+    await act(async () => { completeSave({ ok: true, id: product.id }); });
+    expect(frameBeforeRelease).toBe(true);
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Zapisano. Zmiany s\u0105 aktualne."));
+    expect(form.querySelector("fieldset")).not.toBeDisabled();
+    expect(view.container.querySelector('#media-section-public_download input[name="assetId"]')).toHaveValue("timed-pdf");
+  });
+
+  async function cancelledMediaSavedElsewhere(newProduct = false) {
+    const original = new File(["original-video"], "cancelled-video.webm", { type: "video/webm" });
+    let videoAttempts = 0;
+    editorMocks.optimizeProductMedia.mockImplementation(async (kind, file: File, signal: AbortSignal) => {
+      if (kind !== "video") return file;
+      videoAttempts += 1;
+      if (videoAttempts === 1) return new Promise<File>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+      });
+      return new File(["prepared-video"], "cancelled-video.mp4", { type: "video/mp4" });
+    });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_input, init?: RequestInit) => {
+      if (!init?.method) return readerArtworkGetResponse();
+      const body = JSON.parse(String(init.body));
+      const storagePath = `/uploads/${body.productId}/${body.kind}/${body.filename}`;
+      return { ok: true, json: async () => ({ asset: { id: `recovery-${body.kind}`, kind: body.kind,
+        bucket: body.kind === "video" ? "public-videos" : "public-media", path: storagePath, storagePath,
+        filename: body.filename, contentType: body.contentType, sizeBytes: body.sizeBytes, sortOrder: 1 } }) };
+    }));
+    const saveAction = vi.fn(async (data: FormData) => ({ ok: true as const, id: String(data.get("id")) }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Recovery" product={newProduct ? undefined : { ...product, status: "draft", assets: [] }}
+      categories={snapshot.categories} tags={snapshot.tags} saveAction={saveAction} />);
+    const title = view.getByLabelText("Tytu\u0142");
+    await user.clear(title);
+    await user.type(title, "Keep this draft after video cancellation");
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-gallery")!, new File(["gallery"], "kept-gallery.png", { type: "image/png" }));
+    const gallery = view.container.querySelector("#media-section-gallery") as HTMLElement;
+    await waitFor(() => expect(within(gallery).getByText("Przes\u0142ano", { exact: true })).toBeInTheDocument());
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-video")!, original);
+    const video = view.container.querySelector("#media-section-video") as HTMLElement;
+    await within(video).findByText("Przygotowywanie filmu\u2026");
+    await user.click(within(video).getByRole("button", { name: "Przerwij" }));
+    await within(video).findByText("Przerwano przygotowanie lub przesy\u0142anie. Mo\u017cesz ponowi\u0107 albo usun\u0105\u0107 plik.");
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.getByRole("button", { name: /^Zapisz/ })).toBeEnabled());
+    expect(saveAction.mock.calls[0][0].getAll("assetId")).toEqual(["recovery-gallery"]);
+    expect(title).toHaveValue("Keep this draft after video cancellation");
+    expect(view.container.querySelector('#media-section-gallery input[name="assetId"]')).toHaveValue("recovery-gallery");
+    return { user, view, original, video, saveAction };
+  }
+
+  it("cancelled media Save recovery does not label an unsubmitted draft as all saved", async () => {
+    const { view } = await cancelledMediaSavedElsewhere();
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Niezapisane zmiany"));
+    expect(view.queryByText("Zapisano. Zmiany s\u0105 aktualne.")).toBeNull();
+  });
+
+  it("cancelled media Save recovery retries the exact original File without reselection", async () => {
+    const { user, original, video, view, saveAction } = await cancelledMediaSavedElsewhere();
+    await user.click(within(video).getByRole("button", { name: "Pon\u00f3w" }));
+    await waitFor(() => expect(editorMocks.optimizeProductMedia.mock.calls.filter(([kind]) => kind === "video")).toHaveLength(2));
+    const attempts = editorMocks.optimizeProductMedia.mock.calls.filter(([kind]) => kind === "video");
+    expect(attempts[0][1]).toBe(original);
+    expect(attempts[1][1]).toBe(original);
+    await within(video).findByText("Przes\u0142ano", { exact: true });
+    await user.click(view.getByRole("button", { name: /^Zapisz/ }));
+    await waitFor(() => expect(saveAction).toHaveBeenCalledTimes(2));
+    expect(saveAction.mock.calls[1][0].getAll("assetId")).toEqual(["recovery-gallery", "recovery-video"]);
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Zapisano. Zmiany s\u0105 aktualne."));
+  });
+
+  it.each([false, true])("cancelled media Save recovery becomes clean only after its unsubmitted file is deliberately removed, new=%s", async (newProduct) => {
+    const { user, video, view, saveAction } = await cancelledMediaSavedElsewhere(newProduct);
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Niezapisane zmiany"));
+    await user.click(within(video).getByRole("button", { name: "Usu\u0144" }));
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Wszystkie zmiany s\u0105 zapisane"));
+    expect(within(video).queryByText("cancelled-video.webm")).toBeNull();
+    expect(saveAction).toHaveBeenCalledTimes(1);
+    expect(view.container.querySelector('#media-section-gallery input[name="assetId"]')).toHaveValue("recovery-gallery");
+  });
+
+  it("cancelled media Save recovery keeps a new editor in place until its retained file is resolved", async () => {
+    const { view } = await cancelledMediaSavedElsewhere(true);
+    expect(editorMocks.routerReplace).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.getByTestId("product-save-bar")).toHaveTextContent("Niezapisane zmiany"));
+  });
+
+  it("shows preparation without a transfer percentage and lets one operation be cancelled", async () => {
+    editorMocks.optimizeProductMedia.mockImplementation((_kind, _file, signal: AbortSignal) => new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true });
+    }));
+    const user = userEvent.setup();
+    const view = render(<ProductEditor title="Nowy produkt" categories={snapshot.categories} tags={snapshot.tags} saveAction={vi.fn()} />);
+    await user.type(view.getByLabelText("Tytuł"), "Keep my draft");
+    await user.upload(view.container.querySelector<HTMLInputElement>("#media-upload-video")!, new File(["video"], "movie.mp4", { type: "video/mp4" }));
+    expect(await view.findByText("Przygotowywanie filmu…")).toBeInTheDocument();
+    expect(view.queryByRole("progressbar")).toBeNull();
+    await user.click(view.getByRole("button", { name: "Przerwij" }));
+    expect(await view.findByText("Przerwano przygotowanie lub przesyłanie. Możesz ponowić albo usunąć plik.")).toBeInTheDocument();
+    expect(view.getByLabelText("Tytuł")).toHaveValue("Keep my draft");
+    expect(view.getByRole("button", { name: /Zapisz/ })).toBeEnabled();
   });
 
   it("falls back to multipart upload for the local backend", async () => {

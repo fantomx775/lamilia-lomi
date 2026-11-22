@@ -5,7 +5,7 @@ import type { Locale } from "@/i18n/routing";
 import { COMMUNITY_RULES_VERSION } from "@/lib/community/rules";
 
 export const metadata = {
-  title: "Community guidelines | LamiliaLomi",
+  title: "Community guidelines",
   description: "Read the current Coloring Club community guidelines before joining.",
 };
 

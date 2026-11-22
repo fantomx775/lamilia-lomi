@@ -55,10 +55,10 @@ describe("About page", () => {
 
     expect(pageMocks.getAboutPageSettingsForRequest).toHaveBeenCalledOnce();
     expect(pageMocks.getPublishedProductViewsForRequest).toHaveBeenCalledWith("en");
-    expect(screen.getByRole("heading", { level: 1, name: "Loved by Our Readers" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "About Lamilia Lomi" })).toBeInTheDocument();
     expect(screen.getByText("Thoughtful books for creative little moments.")).toBeInTheDocument();
 
-    const coloringSection = screen.getByRole("region", { name: "Favorite Coloring Books" });
+    const coloringSection = screen.getByRole("region", { name: "Selected Coloring Books" });
     const coloringTitles = within(coloringSection).getAllByRole("heading", { level: 3 });
     expect(coloringTitles.map((heading) => heading.textContent)).toEqual([
       "Moon Garden Coloring Book",
@@ -80,7 +80,7 @@ describe("About page", () => {
     expect(coloringSection.querySelector(".lg\\:grid-cols-3")).toBeInTheDocument();
     expect(coloringSection.querySelector(".grid-cols-2")).toBeInTheDocument();
 
-    const pictureSection = screen.getByRole("region", { name: "Favorite Picture Books" });
+    const pictureSection = screen.getByRole("region", { name: "Selected Picture Books" });
     expect(within(pictureSection).getByRole("heading", { level: 3, name: "The Moonlit Forest" })).toBeInTheDocument();
     expect(within(pictureSection).queryByRole("heading", { level: 3, name: "Moon Garden Coloring Book" })).not.toBeInTheDocument();
     expect(within(pictureSection).queryByRole("heading", { level: 3, name: "A Coloring Book" })).not.toBeInTheDocument();
@@ -129,7 +129,7 @@ describe("About page", () => {
 
     render(await AboutPage({ params: Promise.resolve({ locale: "en" }) }));
 
-    const section = screen.getByRole("region", { name: "Favorite Coloring Books" });
+    const section = screen.getByRole("region", { name: "Selected Coloring Books" });
     expect(within(section).queryByRole("heading", { name: "Retired Coloring Book" })).not.toBeInTheDocument();
     expect(within(section).getByText("New favorites are on the way.")).toBeInTheDocument();
   });

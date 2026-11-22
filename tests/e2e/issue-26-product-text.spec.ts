@@ -36,6 +36,7 @@ test("product text fields count, warn, survive failed saves, and persist on crea
   const slug = `issue-26-${suffix.toLowerCase()}`;
   const consoleErrors: string[] = [];
   const unexpectedFailedRequests: string[] = [];
+  const expectedReaderArtworkCancellations: string[] = [];
   const unexpectedServerErrors: string[] = [];
   let failureIntercepted = false;
   let productPath: string | undefined;
@@ -48,6 +49,20 @@ test("product text fields count, warn, survive failed saves, and persist on crea
   });
   page.on("requestfailed", (request) => {
     const failure = request.failure()?.errorText ?? "failed";
+    const requestUrl = new URL(request.url());
+    const productId = productPath?.split("/").at(-1);
+    const expectedReaderArtworkCancellation =
+      failure === "net::ERR_ABORTED" &&
+      request.method() === "GET" &&
+      request.resourceType() === "fetch" &&
+      Boolean(productId) &&
+      requestUrl.origin === new URL(String(testInfo.project.use.baseURL)).origin &&
+      requestUrl.pathname === `/api/admin/products/${productId}/reader-artworks`;
+    if (expectedReaderArtworkCancellation) {
+      // This read-only sidebar fetch is superseded by editor reloads; product text is reloaded and verified below.
+      expectedReaderArtworkCancellations.push(`${request.method()} ${requestUrl.pathname}: ${failure}`);
+      return;
+    }
     // Next may cancel a server-action POST or an in-flight RSC navigation when
     // a later navigation supersedes it; the destination and saved values are
     // asserted below. Other request failures remain unexpected.
@@ -118,8 +133,9 @@ test("product text fields count, warn, survive failed saves, and persist on crea
     await Promise.all([
       page.getByRole("button", { name: /Zapisz/ }).click(),
     ]);
+    // The create route can replace this transient success toast with its clean saved state first.
     await expect(page.getByTestId("product-save-bar").getByRole("status"))
-      .toHaveText("Zapisano. Zmiany są aktualne.");
+      .toHaveText(/^(?:Zapisano\. Zmiany są aktualne\.|Wszystkie zmiany są zapisane)$/);
     await expect(page).toHaveURL(/\/admin\/products\/[0-9a-f-]+$/i);
     productPath = new URL(page.url()).pathname;
 
@@ -187,7 +203,7 @@ test("product text fields count, warn, survive failed saves, and persist on crea
     expect(unexpectedFailedRequests).toEqual([]);
     expect(unexpectedServerErrors).toEqual([]);
     await testInfo.attach("issue-26-browser-diagnostics.txt", {
-      body: JSON.stringify({ consoleErrors, unexpectedFailedRequests, unexpectedServerErrors }, null, 2),
+      body: JSON.stringify({ consoleErrors, unexpectedFailedRequests, expectedReaderArtworkCancellations, unexpectedServerErrors }, null, 2),
       contentType: "text/plain",
     });
   } finally {

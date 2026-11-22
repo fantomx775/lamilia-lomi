@@ -1,9 +1,10 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
+import { communityArtworkMediaUrl, communityArtworkMediaSrcSet } from "@/lib/community/media-urls";
+import { NavigationLink } from "@/components/navigation-link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
+import { LinkPendingIndicator } from "@/components/link-pending-indicator";
 import { CommunityAvatar } from "@/components/community/community-avatar";
 import { CommunityHeartControl } from "@/components/community/community-heart-control";
 import type { CommunityHeartAccess, CommunityPage, CommunityPublicArtwork, CommunityPublicProductOption } from "@/lib/community/types";
@@ -36,7 +37,10 @@ export function CommunityGallery({
   const mounted = useSyncExternalStore(subscribeToHydration, () => true, () => false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const failedOperation = useRef<"filter" | "more">("filter");
   const [filterKey, setFilterKey] = useState(0);
+  const [appliedFilterKey, setAppliedFilterKey] = useState(0);
+  const staleResults = appliedFilterKey !== filterKey;
   const requestGeneration = useRef(0);
   const filterController = useRef<AbortController | null>(null);
 
@@ -56,7 +60,7 @@ export function CommunityGallery({
         if (!response.ok) throw new Error("Gallery unavailable");
         return await response.json() as { ok: true } & CommunityPage<CommunityPublicArtwork>;
       })
-      .then((nextPage) => { if (requestGeneration.current === generation) setPage(nextPage); })
+      .then((nextPage) => { if (requestGeneration.current === generation) { setPage(nextPage); setAppliedFilterKey(filterKey); } })
       .catch((cause: unknown) => { if (requestGeneration.current === generation && !(cause instanceof DOMException && cause.name === "AbortError")) setError(true); })
       .finally(() => { if (requestGeneration.current === generation) setLoading(false); });
     return () => controller.abort();
@@ -70,8 +74,9 @@ export function CommunityGallery({
     if (nextProductId) params.set("productId", nextProductId);
     if (sort !== "latest") params.set("sort", sort);
     const query = params.toString();
-    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
-    setPage({ items: [], nextCursor: null });
+    // Filter edits replace the current entry: Back leaves Club rather than replaying every select.
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    failedOperation.current = "filter";
     setLoading(true);
     setError(false);
     setAudience(nextAudience);
@@ -88,8 +93,9 @@ export function CommunityGallery({
     if (productId) params.set("productId", productId);
     if (nextSort !== "latest") params.set("sort", nextSort);
     const query = params.toString();
-    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
-    setPage({ items: [], nextCursor: null });
+    // Filter edits replace the current entry: Back leaves Club rather than replaying every select.
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    failedOperation.current = "filter";
     setLoading(true);
     setError(false);
     setSort(nextSort);
@@ -97,8 +103,9 @@ export function CommunityGallery({
   }
 
   async function loadMore() {
-    if (!page.nextCursor || loading) return;
+    if (!page.nextCursor || loading || staleResults) return;
     const generation = requestGeneration.current;
+    failedOperation.current = "more";
     setLoading(true);
     setError(false);
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), sort, cursor: page.nextCursor });
@@ -143,16 +150,17 @@ export function CommunityGallery({
         </select>
       </label>
     </div>
-    {error && page.items.length ? <p className="mb-4 rounded-md bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error)]" role="alert">More artwork could not be loaded. Your current gallery is still here. Try loading more again.</p> : null}
-    {loading && !page.items.length ? <p className="py-10 text-center text-sm text-[var(--color-muted)]" aria-live="polite">Loading approved artwork…</p> : error && !page.items.length ? <div className="rounded-xl border border-[var(--color-border)] bg-white/75 px-5 py-9 text-center" role="alert"><h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">The gallery could not be updated</h2><p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Please try again in a moment.</p><button type="button" onClick={() => { setLoading(true); setError(false); setFilterKey((key) => key + 1); }} className="mt-4 min-h-10 rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-semibold">Try again</button></div> : page.items.length ? <ul data-testid="community-artwork-grid" aria-busy={loading} className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">
+    {loading && page.items.length ? <p role="status" className="mb-4 text-sm text-[var(--color-muted)]">Updating artwork… Your current gallery is still here.</p> : null}
+    {error && page.items.length ? <div className="mb-4 rounded-md bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error)]" role="alert"><p>The gallery could not be updated. Your current gallery is still here.</p><button type="button" className="mt-2 min-h-11 rounded border border-current px-3 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2" onClick={() => { if (failedOperation.current === "more") void loadMore(); else { setLoading(true); setError(false); setFilterKey((key) => key + 1); } }}>Try again</button></div> : null}
+    {loading && !page.items.length ? <p className="py-10 text-center text-sm text-[var(--color-muted)]" aria-live="polite">Loading approved artwork…</p> : error && !page.items.length ? <div className="rounded-xl border border-[var(--color-border)] bg-white/75 px-5 py-9 text-center" role="alert"><h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">The gallery could not be updated</h2><p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Please try again in a moment.</p><button type="button" onClick={() => { setLoading(true); setError(false); setFilterKey((key) => key + 1); }} className="mt-4 min-h-11 rounded-md border border-[var(--color-border)] bg-white px-4 text-sm font-semibold">Try again</button></div> : page.items.length ? <ul data-testid="community-artwork-grid" aria-busy={loading} className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4">
       {page.items.map((artwork) => <li key={artwork.id}><CommunityArtworkCard artwork={artwork} heartAccess={heartAccess} /></li>)}
     </ul> : <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-white/60 px-5 py-12 text-center" data-testid="community-gallery-empty-state">
       <h2 className="font-serif text-2xl font-semibold text-[var(--color-ink)]">No approved artwork here yet</h2>
       <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-[var(--color-muted)]">Try a different book or audience, or come back as more community creations are approved.</p>
-      <Link className="mt-5 inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] px-4 text-sm font-medium hover:bg-[var(--color-blush)]" href="/en/products">Browse the books</Link>
+      <NavigationLink pendingLabel="Opening page" className="mt-5 inline-flex min-h-10 items-center rounded-md border border-[var(--color-border)] px-4 text-sm font-medium hover:bg-[var(--color-blush)]" href="/en/products">Browse the books</NavigationLink>
     </div>}
     <div className="mt-8 flex justify-center">
-      {page.nextCursor ? <button data-testid="community-gallery-load-more" type="button" disabled={loading} onClick={loadMore} className="min-h-11 rounded-md border border-[var(--color-border)] bg-white px-5 text-sm font-semibold text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] disabled:opacity-60">{loading ? "Loading…" : "Load more artwork"}</button> : page.items.length ? <p className="text-sm text-[var(--color-muted)]">You’ve reached the end of the gallery.</p> : null}
+      {page.nextCursor && !staleResults ? <button data-testid="community-gallery-load-more" type="button" disabled={loading} onClick={loadMore} className="min-h-11 rounded-md border border-[var(--color-border)] bg-white px-5 text-sm font-semibold text-[var(--color-ink)] hover:bg-[var(--color-blush)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] disabled:opacity-60">{loading ? "Loading…" : "Load more artwork"}</button> : page.items.length && !staleResults ? <p className="text-sm text-[var(--color-muted)]">You’ve reached the end of the gallery.</p> : null}
     </div>
   </>;
 }
@@ -161,21 +169,24 @@ export function CommunityArtworkCard({ artwork, heartAccess = "guest" }: { artwo
   const detailHref = `/en/club/artworks/${artwork.id}`;
   return <article data-testid="community-artwork-card" className="h-full overflow-hidden rounded-xl border border-[var(--color-border)] bg-white shadow-sm">
     <div className="relative">
-      <Link href={detailHref} aria-label={`View artwork by @${artwork.creator.username}`} className="group relative block aspect-[4/5] overflow-hidden bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--color-terracotta)]">
-        <Image src={`/api/community/artworks/${artwork.id}/media`} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} fill unoptimized loading="lazy" sizes="(max-width: 639px) 48vw, (max-width: 1023px) 46vw, 24vw" className="object-contain transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transition-none" />
-      </Link>
+      <NavigationLink pendingLabel="Opening page" href={detailHref} showPendingBar={false} aria-label={`View artwork by @${artwork.creator.username}`} className="group relative block aspect-[4/5] active:brightness-90 overflow-hidden bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-[var(--color-terracotta)]">
+        <LinkPendingIndicator label="Opening artwork" />
+        {/* Authenticated, revocable responsive variants are served by our media route. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={communityArtworkMediaUrl(artwork.id, 480)} srcSet={communityArtworkMediaSrcSet(artwork.id, artwork.imageDimensions)} alt={artwork.description ? `Coloring by @${artwork.creator.username}: ${artwork.description}` : `Coloring by @${artwork.creator.username}`} loading="lazy" sizes="(max-width: 639px) 48vw, (max-width: 1023px) 46vw, 24vw" className="absolute inset-0 size-full object-contain transition-transform duration-300 group-hover:scale-[1.02] motion-reduce:transition-none" />
+      </NavigationLink>
       <div className="absolute bottom-2 right-2"><CommunityHeartControl artworkId={artwork.id} likesCount={artwork.likesCount} likedByMe={artwork.likedByMe} access={heartAccess} compact /></div>
     </div>
     <div className="grid gap-2 p-3 sm:gap-3 sm:p-4">
       {artwork.description ? <p className="line-clamp-2 min-h-[2.5rem] break-words text-sm leading-5 text-[var(--color-ink)]">{artwork.description}</p> : <p className="min-h-[2.5rem] text-sm text-[var(--color-muted)]">A coloring-club creation</p>}
       <div className="flex min-w-0 items-center gap-2">
-        <Link href={`/en/club/creators/${encodeURIComponent(artwork.creator.username)}`} aria-label={`View @${artwork.creator.username}’s profile`} className="flex min-w-0 items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-[var(--color-terracotta)]">
+        <NavigationLink pendingLabel="Opening page" href={`/en/club/creators/${encodeURIComponent(artwork.creator.username)}`} aria-label={`View @${artwork.creator.username}’s profile`} className="flex min-h-11 min-w-0 items-center gap-2 rounded-sm focus-visible:outline-2 focus-visible:outline-[var(--color-terracotta)]">
           <CommunityAvatar username={artwork.creator.username} seed={artwork.creator.avatarSeed} photoSrc={artwork.creator.photoSrc} className="size-8 text-xs" />
           <span className="truncate text-sm font-medium text-[var(--color-ink)]">@{artwork.creator.username}</span>
-        </Link>
+        </NavigationLink>
       </div>
       <div className="min-w-0 border-t border-[var(--color-border)] pt-2 text-xs leading-5 text-[var(--color-muted)]">
-        <Link href={`/en/products/${encodeURIComponent(artwork.product.slug)}`} className="line-clamp-2 break-words hover:text-[var(--color-ink)]">{artwork.product.title}</Link>
+        <NavigationLink pendingLabel="Opening page" href={`/en/products/${encodeURIComponent(artwork.product.slug)}`} className="inline-flex min-h-11 items-center break-words hover:text-[var(--color-ink)]">{artwork.product.title}</NavigationLink>
         <time className="mt-1 block" dateTime={artwork.publishedAt}>{new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(artwork.publishedAt))}</time>
       </div>
     </div>

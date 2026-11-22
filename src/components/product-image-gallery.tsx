@@ -6,7 +6,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Maximize2, X } from "lucide-react";
 import type { ReactNode } from "react";
-import { getGalleryTrimRatio } from "@/lib/image-ratios";
 
 export type ProductGalleryImage = {
   id: string;
@@ -18,6 +17,8 @@ export type ProductGalleryImage = {
   captionHref?: string;
   captionAvatar?: ReactNode;
   thumbnailAction?: ReactNode;
+  thumbnailSrcSet?: string;
+  detailPath?: string;
 };
 
 export type ProductImageGalleryLabels = {
@@ -47,7 +48,6 @@ export function ProductImageGallery({
   sizes = "(min-width: 1280px) 600px, (min-width: 1024px) calc(50vw - 40px), (min-width: 640px) calc(50vw - 32px), calc(50vw - 22px)",
 }: ProductImageGalleryProps) {
   const [loadedSources, setLoadedSources] = useState<Record<string, string>>({});
-  const [trimRatios, setTrimRatios] = useState<Record<string, number>>({});
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -168,14 +168,21 @@ export function ProductImageGallery({
               }}
               className="group block w-full rounded-[1.25rem] text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-terracotta)]"
             >
-              <span className="relative block aspect-[8.5/11] overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]" style={{ aspectRatio: trimRatios[image.path] }}>
-                <Image
+              <span className="relative block aspect-[8.5/11] overflow-hidden rounded-[1.25rem] border border-[var(--color-border)] bg-white shadow-[0_16px_40px_rgba(62,52,47,0.08)]">
+                {image.thumbnailSrcSet ? (
+                  // Auth-checked, no-store derivatives must not pass through a public optimizer.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={image.path} srcSet={image.thumbnailSrcSet} sizes={sizes} alt={image.alt} loading="lazy" className="absolute inset-0 size-full object-contain" onLoad={({ currentTarget }) => {
+                    const source = currentTarget.currentSrc || currentTarget.src;
+                    setLoadedSources((current) => current[image.path] === source ? current : { ...current, [image.path]: source });
+                  }} />
+                ) : <Image
                   src={image.path}
                   alt={image.alt}
                   fill
                   loading="lazy"
                   unoptimized={image.unoptimized}
-                  className={trimRatios[image.path] ? "object-cover object-center" : "object-contain"}
+                  className="object-contain"
                   onLoad={({ currentTarget }) => {
                     const { currentSrc } = currentTarget;
                     if (currentSrc) {
@@ -183,17 +190,9 @@ export function ProductImageGallery({
                         ? current
                         : { ...current, [image.path]: currentSrc });
                     }
-                    const { naturalWidth: width, naturalHeight: height } = currentTarget;
-                    const sourceRatio = width / height;
-                    const ratio = readerLayout && imageCount === 1 && sourceRatio >= 2 / 3 && sourceRatio <= 3 / 2
-                      ? sourceRatio
-                      : getGalleryTrimRatio({ width, height });
-                    if (ratio) setTrimRatios((current) => current[image.path] === ratio
-                      ? current
-                      : { ...current, [image.path]: ratio });
                   }}
                   sizes={sizes}
-                />
+                />}
                 {index === thumbnailLimit - 1 && imageCount > thumbnailLimit ? (
                   <span
                     aria-hidden="true"
@@ -305,17 +304,11 @@ export function ProductImageGallery({
                   const isActive = index === activeIndex;
                   const loadedSource = loadedSources[image.path];
                   return (
-                    <Image
-                      key={image.id}
-                      src={loadedSource ?? image.path}
-                      alt={isActive ? image.alt : ""}
-                      aria-hidden={!isActive}
-                      fill
-                      loading="eager"
-                      fetchPriority={isActive ? "high" : "low"}
-                      unoptimized={Boolean(loadedSource) || image.unoptimized}
-                      className={isActive ? "object-contain" : "invisible object-contain"}
-                      sizes="(max-width: 768px) 90vw, 40rem"
+                    <GalleryPreviewImage
+                      key={`${image.id}:${image.detailPath ?? image.path}`}
+                      image={image}
+                      thumbnail={loadedSource}
+                      active={isActive}
                     />
                   );
                 })}
@@ -356,4 +349,35 @@ export function ProductImageGallery({
       </dialog>
     </>
   );
+}
+
+function GalleryPreviewImage({ image, thumbnail, active }: { image: ProductGalleryImage; thumbnail?: string; active: boolean }) {
+  const [decoded, setDecoded] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const alive = useRef(true);
+  const displaySource = decoded ?? (active ? thumbnail : undefined);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  return <div className={active ? "absolute inset-0" : "invisible absolute inset-0"} aria-hidden={!active}>
+    {/* Only the active slide can reuse a thumbnail observed by its real onLoad.
+        Unknown thumbnails stay neutral; neighbors reuse only their decoded real detail. */}
+    {/* Keep the native gesture target mounted when this slide becomes a neighbor.
+        An absent src requests nothing; hide the empty image while status stays visible. */}
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img data-gallery-display src={displaySource} alt={image.alt} aria-hidden={!active || !displaySource}
+      loading="eager" className={`absolute inset-0 size-full object-contain${displaySource ? "" : " invisible"}`} />
+    <Image key={attempt} src={image.detailPath ?? image.path} alt="" aria-hidden fill loading="eager"
+      fetchPriority={active ? "high" : "low"} unoptimized={image.unoptimized}
+      sizes="(min-width: 768px) min(75vw, calc((100dvh - 8rem) * 0.773)), min(90vw, calc((100dvh - 11rem) * 0.773))"
+      className="pointer-events-none invisible object-contain"
+      onLoad={async ({ currentTarget }) => {
+        const source = currentTarget.currentSrc || currentTarget.src;
+        try { await currentTarget.decode?.(); if (alive.current) { setDecoded(source); setFailed(false); } }
+        catch { if (alive.current) setFailed(true); }
+      }}
+      onError={() => setFailed(true)} />
+    {active && !decoded ? <div className="absolute inset-x-2 bottom-2 rounded-lg bg-white/95 p-3 text-center text-sm shadow-sm">
+      {failed ? <><p role="alert">The larger preview could not be loaded. You can retry or move to another image.</p><button type="button" className="mt-2 min-h-11 rounded-md border border-[var(--color-border)] px-4 font-medium" onClick={() => { setFailed(false); setAttempt((value) => value + 1); }}>Retry image</button></> : <p role="status">Loading larger preview...</p>}
+    </div> : null}
+  </div>;
 }

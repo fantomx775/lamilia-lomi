@@ -7,6 +7,7 @@ import { RichTextContent } from "@/components/rich-text-content";
 import type { Locale } from "@/i18n/routing";
 import { isMediaProxyPath } from "@/lib/media-upload";
 import type { AboutPageSettings, LocalizedProductView } from "@/lib/types";
+import { productTypeLabel, publicImageAlt } from "@/lib/product-display";
 
 export function AboutPageContent({
   locale,
@@ -48,7 +49,7 @@ export function AboutPageContent({
           aria-hidden="true"
         />
         <h1 className="font-serif text-3xl font-semibold leading-tight text-[var(--color-ink)] sm:text-4xl lg:text-[2.65rem]">
-          Loved by Our <span className="text-[var(--color-terracotta)]">Readers</span>
+          About <span className="text-[var(--color-terracotta)]">Lamilia Lomi</span>
         </h1>
         {settings.intro.trim() ? (
           <RichTextContent
@@ -57,7 +58,7 @@ export function AboutPageContent({
           />
         ) : (
           <p className="mt-2 text-sm text-[var(--color-muted)] sm:text-base">
-            A selection of customer favorites from the Lamilia Lomi collection.
+            Coloring books and illustrated stories for moments of imagination and creativity.
           </p>
         )}
       </header>
@@ -65,7 +66,7 @@ export function AboutPageContent({
       <div className="mx-auto grid max-w-7xl gap-3 px-4 py-5 sm:gap-4 sm:px-6 sm:py-7 lg:px-8">
         <FavoriteBookSection
           id="favorite-coloring-books"
-          title="Favorite Coloring Books"
+          title="Selected Coloring Books"
           description="Beautiful designs for relaxation, creativity, and everyday joy."
           products={coloringBooks}
           locale={locale}
@@ -74,7 +75,7 @@ export function AboutPageContent({
 
         <FavoriteBookSection
           id="favorite-picture-books"
-          title="Favorite Picture Books"
+          title="Selected Picture Books"
           description="Magical stories and beautiful illustrations for young dreamers."
           products={pictureBooks}
           locale={locale}
@@ -111,7 +112,7 @@ function FavoriteBookSection({
         />
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--color-terracotta)]">
-            Lamilia Lomi favorites
+            From the Lamilia Lomi collection
           </p>
           <h2
             id={`${id}-heading`}
@@ -168,7 +169,7 @@ function FavoriteBookCard({
         <div className="relative h-24 overflow-hidden rounded-md bg-[#f8f5ee] sm:h-32 lg:h-36">
           <Image
             src={product.cover.path}
-            alt={product.cover.title ?? product.title}
+            alt={publicImageAlt(product.cover.title, `${product.title} cover`)}
             fill
             loading={eagerImage ? "eager" : "lazy"}
             unoptimized={isMediaProxyPath(product.cover.path)}
@@ -178,17 +179,16 @@ function FavoriteBookCard({
         </div>
       </Link>
 
-      <h3 className="mt-2 min-h-5 truncate font-serif text-sm font-semibold leading-5 text-[var(--color-ink)] sm:text-base">
+      <h3 className="mt-2 min-h-5 break-words font-serif text-sm font-semibold leading-5 text-[var(--color-ink)] [overflow-wrap:anywhere] sm:text-base">
         <Link
           href={`/${locale}/products/${product.slug}`}
           className="rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)] hover:text-[var(--color-terracotta)]"
-          title={product.title}
         >
           {product.title}
         </Link>
       </h3>
       <p className="mt-0.5 min-h-4 truncate text-[10px] leading-4 text-[var(--color-muted)] sm:text-xs">
-        {formatProductType(product.productType)} <span aria-hidden="true">·</span>{" "}
+        {productTypeLabel(product.productType)} <span aria-hidden="true">·</span>{" "}
         {product.audienceLabel}
       </p>
       {product.primaryAmazonLink ? (
@@ -196,7 +196,7 @@ function FavoriteBookCard({
           href={product.primaryAmazonLink.url}
           productId={product.id}
           market={product.primaryAmazonLink.market}
-          className="mt-2 min-h-8 w-full justify-center bg-[var(--color-action)] px-2 py-1.5 text-[11px] text-white hover:bg-[var(--color-action-hover)] focus-visible:outline-[var(--color-terracotta)] sm:text-xs"
+          className="mt-2 min-h-11 w-full justify-center bg-[var(--color-action)] px-2 py-1.5 text-[11px] text-white hover:bg-[var(--color-action-hover)] focus-visible:outline-[var(--color-terracotta)] sm:text-xs"
         >
           View on Amazon
         </AmazonLink>
@@ -221,12 +221,4 @@ function resolveConfiguredProducts(
     selectedIds.add(id);
     return [product];
   });
-}
-
-function formatProductType(value: string) {
-  return value
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
 }

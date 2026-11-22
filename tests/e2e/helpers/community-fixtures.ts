@@ -17,6 +17,22 @@ export function createCommunityNavigationObserver(runId: string) {
   });
 }
 
+export async function cleanupPreservingTestFailure<T>(testInfo: TestInfo, cleanup: () => Promise<T>,
+  hasPrimaryFailure: boolean, primaryFailure: unknown, attachmentName: string): Promise<T | undefined> {
+  try { return await cleanup(); }
+  catch (cleanupError) {
+    if (!hasPrimaryFailure) throw cleanupError;
+    const safeErrorType = (error: unknown) => error instanceof Error &&
+      ["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "TimeoutError", "AssertionError"].includes(error.name)
+      ? error.name : "Error";
+    await testInfo.attach(attachmentName, { body: Buffer.from(JSON.stringify({
+      primaryFailureType: safeErrorType(primaryFailure),
+      cleanupFailureType: safeErrorType(cleanupError),
+    }, null, 2)), contentType: "application/json" }).catch(() => undefined);
+    return undefined;
+  }
+}
+
 /** Real form login; identity checks never serialize fixture credentials or HTML. */
 export async function loginCommunityFixture(page: Page, account: { email: string; password: string },
   returnTo = "/en/library/creations", expectedDestination = returnTo, observer?: NextCancellationObserver, requireEmptyEmail = false) {
@@ -81,18 +97,32 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
   const contexts: BrowserContext[] = [];
   const password = `Cc-${randomUUID()}-9!`;
   const trackedPages = new Set<Page>();
+  const crashedPages = new WeakSet<Page>();
+  const unconfirmedMutationPages = new WeakSet<Page>();
+  const trackedMutationRequests = new WeakSet<object>();
+  const confirmedServerMutations = new WeakSet<object>();
   const activeMutations = new Map<object, Promise<void>>();
   function observeMutations(page: Page) {
     if (trackedPages.has(page)) return;
     trackedPages.add(page);
+    page.on("crash", () => crashedPages.add(page));
     const completions = new Map<object, () => void>();
     page.on("request", (request) => {
       if (!/^\/api\/(?:admin\/)?community\/artworks/.test(new URL(request.url()).pathname) || request.method() === "GET") return;
+      trackedMutationRequests.add(request);
       activeMutations.set(request, new Promise<void>((resolve) => completions.set(request, resolve)));
     });
     const finish = (request: object) => { completions.get(request)?.(); completions.delete(request); activeMutations.delete(request); };
     page.on("requestfinished", finish);
-    page.on("requestfailed", finish);
+    page.on("requestfailed", (request) => {
+      if (!completions.has(request)) return;
+      if (!confirmedServerMutations.has(request)) unconfirmedMutationPages.add(page);
+      finish(request);
+    });
+  }
+  function confirmServerMutationCompleted(request: object) {
+    if (!trackedMutationRequests.has(request)) throw new Error("Cannot confirm an untracked community mutation request.");
+    confirmedServerMutations.add(request);
   }
   const runToken = randomUUID().slice(0, 8);
 
@@ -252,9 +282,39 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
       // A failed UI assertion must not delete its account while its own upload
       // loop is still in flight. Requests finish before fixture data is removed.
       for (const page of trackedPages) {
-        if (!page.isClosed()) await page.getByTestId("community-upload-submit").filter({ hasText: "Sending artwork" }).waitFor({ state: "hidden", timeout: 90_000 });
+        if (page.isClosed() || crashedPages.has(page)) continue;
+        try {
+          await page.getByTestId("community-upload-submit").filter({ hasText: "Sending artwork" }).waitFor({ state: "hidden", timeout: 90_000 });
+        } catch (cause) {
+          // A renderer crash cancels its browser-side upload loop, so skip the
+          // UI wait and continue to the server-side mutation audit below.
+          if (!crashedPages.has(page)) throw cause;
+        }
       }
       await Promise.all([...activeMutations.values()]);
+      const unconfirmedMutation = [...trackedPages].some((page) => unconfirmedMutationPages.has(page));
+      if (unconfirmedMutation) {
+        // A failed browser mutation does not prove that its server handler
+        // stopped. Preserve this exact fixture and fail the test so a later
+        // audited cleanup can follow the server-side outcome.
+        await testInfo.attach("community-fixture-cleanup-deferred", { body: Buffer.from(JSON.stringify({
+          reason: "server-side mutation outcome unconfirmed",
+          userIds: users, productIds: products, storagePaths: [...curatedObjects.values()],
+        }, null, 2)), contentType: "application/json" });
+        throw new Error("Fixture cleanup deferred because a community mutation outcome is unconfirmed.");
+      }
+      const artworkIdsBefore = new Set<string>();
+      for (const id of users) {
+        const rows = await service.from("community_artworks").select("id").eq("author_id", id);
+        if (rows.error) throw new Error("Cannot audit owned community fixture rows before cleanup.");
+        for (const row of rows.data ?? []) artworkIdsBefore.add(row.id);
+      }
+      for (const id of products) {
+        const rows = await service.from("community_artworks").select("id").eq("product_id", id);
+        if (rows.error) throw new Error("Cannot audit owned community fixture rows before cleanup.");
+        for (const row of rows.data ?? []) artworkIdsBefore.add(row.id);
+      }
+      let storageObjectsRemoved = 0;
       for (const [id, storagePath] of curatedObjects) {
         expect((await service.storage.from("collection-media").remove([storagePath])).error).toBeNull();
         expect((await service.from("product_reader_artworks").delete().eq("id", id).in("product_id", products)).error).toBeNull();
@@ -267,10 +327,13 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
         const listed = await service.storage.from("collection-media").list(prefix, { limit: 1000 });
         if (listed.error) throw new Error("Cannot inspect isolated community fixture objects.");
         const objects = (listed.data ?? []).filter((item) => item.id).map((item) => `${prefix}/${item.name}`);
-        if (objects.length) expect((await service.storage.from("collection-media").remove(objects)).error).toBeNull();
+        if (objects.length) {
+          expect((await service.storage.from("collection-media").remove(objects)).error).toBeNull();
+          storageObjectsRemoved += objects.length;
+        }
       }
-      if (users.length) {
-        const identities = users.map((id) => `'${id}'::uuid`).join(",");
+      if (users.length || products.length) {
+        const identities = users.length ? users.map((id) => `'${id}'::uuid`).join(",") : "NULL::uuid";
         const productIds = products.length ? products.map((id) => `'${id}'::uuid`).join(",") : "NULL::uuid";
         const ownedArt = `SELECT id FROM public.community_artworks WHERE author_id IN (${identities}) OR product_id IN (${productIds})`;
         execFileSync(target.dockerExecutable, ["exec", "-i", target.databaseContainerId, "psql", "-U", "supabase_admin", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"], {
@@ -288,20 +351,53 @@ export async function communityFixtures(testInfo: TestInfo, observer?: NextCance
           env: { ...process.env, DOCKER_HOST: target.dockerEndpoint, DOCKER_CONTEXT: "" },
         });
       }
-      for (const id of products) expect((await service.from("products").delete().eq("id", id)).error).toBeNull();
+      for (const id of products) {
+        const deleted = await service.from("products").delete().eq("id", id).select("id");
+        expect(deleted.error).toBeNull();
+        expect(deleted.data?.map((row) => row.id)).toEqual([id]);
+      }
       for (const id of users) {
         const existing = await service.auth.admin.getUserById(id);
         if (existing.error?.code === "user_not_found") continue;
         expect(existing.error).toBeNull();
         expect((await service.auth.admin.deleteUser(id)).error).toBeNull();
       }
+      const artworkIdsAfter = new Set<string>();
+      for (const id of users) {
+        const rows = await service.from("community_artworks").select("id").eq("author_id", id);
+        if (rows.error) throw new Error("Cannot audit owned community fixture rows after cleanup.");
+        for (const row of rows.data ?? []) artworkIdsAfter.add(row.id);
+      }
+      for (const id of products) {
+        const rows = await service.from("community_artworks").select("id").eq("product_id", id);
+        if (rows.error) throw new Error("Cannot audit owned community fixture rows after cleanup.");
+        for (const row of rows.data ?? []) artworkIdsAfter.add(row.id);
+      }
+      expect([...artworkIdsAfter]).toEqual([]);
+      const remainingProducts = products.length
+        ? await service.from("products").select("id").in("id", products)
+        : { data: [], error: null };
+      expect(remainingProducts.error).toBeNull();
+      expect(remainingProducts.data).toEqual([]);
+      for (const id of users) {
+        const remainingUser = await service.auth.admin.getUserById(id);
+        expect(remainingUser.error?.code).toBe("user_not_found");
+      }
+      for (const id of users) {
+        const remaining = await service.storage.from("collection-media").list(`community/${id}`, { limit: 1000 });
+        if (remaining.error) throw new Error("Cannot read back isolated community fixture Storage cleanup.");
+        expect((remaining.data ?? []).filter((item) => item.id)).toEqual([]);
+      }
+      return { status: "complete" as const, users: users.length, products: products.length,
+        artworks: artworkIdsBefore.size, storageObjectsRemoved };
     } finally {
       for (const context of contexts) await context.close();
       await anon.auth.signOut();
     }
   }
 
-  return { service, anon, actor, product, unlock, readerArtwork, normalizeDisplayTimestamps, setEmailVerified, newPage, login, cleanup, users, products };
+  return { service, anon, actor, product, unlock, readerArtwork, normalizeDisplayTimestamps, setEmailVerified,
+    newPage, login, confirmServerMutationCompleted, cleanup, users, products };
 }
 
 export async function essentials(page: Page) {
@@ -310,7 +406,7 @@ export async function essentials(page: Page) {
   if (await accept.isVisible()) await accept.click();
 }
 
-export async function communityScreenshots(page: Page, folderName: string, view: string, runId: string) {
+export async function communityScreenshots(page: Page, folderName: string, view: string, runId: string, settleRequests?: () => Promise<void>) {
   if (!/^[a-z0-9_-]+$/i.test(folderName) || !/^[a-z0-9_-]+$/i.test(view)) throw new Error("Unsafe screenshot path.");
   const set = process.env.COMMUNITY_SCREENSHOT_SET;
   if (set && !/^[a-z0-9_-]+$/i.test(set)) throw new Error("Unsafe screenshot set.");
@@ -318,6 +414,9 @@ export async function communityScreenshots(page: Page, folderName: string, view:
   const testedSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const screenshots = [];
   for (const width of [390, 768, 1440]) {
+    // A caller that observes real image requests must drain the previous
+    // candidate before this helper deliberately changes its responsive source.
+    await settleRequests?.();
     await page.setViewportSize({ width, height: 1000 });
     await expect(page.getByTestId("localized-route-loading")).toHaveCount(0);
     const dialog = page.getByRole("dialog").filter({ visible: true });
@@ -332,6 +431,8 @@ export async function communityScreenshots(page: Page, folderName: string, view:
       if (!await photo.isVisible()) continue;
       await photo.scrollIntoViewIfNeeded();
       await expect.poll(() => photo.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+      await expect(photo).toHaveJSProperty("complete", true);
+      await photo.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
     }
     await page.mouse.move(0, 0);
     await page.evaluate(() => document.fonts.ready);
@@ -350,6 +451,9 @@ export async function communityScreenshots(page: Page, folderName: string, view:
     const filename = `${view}-${width}.png`;
     const screenshotPath = await communityArtifactPath(folderName, filename);
     await page.screenshot({ path: screenshotPath, fullPage: !dialogOpen, caret: "hide", animations: "disabled" });
+    // Full-page capture can start below-the-fold lazy images. Do not resize
+    // or return to a caller that navigates while those real requests run.
+    await settleRequests?.();
     screenshots.push({ path: process.env.COMMUNITY_ARTIFACT_DIR ? screenshotPath : `docs/verification/issue-77/${folderName}/${filename}`, testedSha, runId });
   }
   return screenshots;

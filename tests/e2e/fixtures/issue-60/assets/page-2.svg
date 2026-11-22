@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1100" viewBox="0 0 800 1100">
+  <rect width="800" height="1100" fill="#eaf3f2"/><circle cx="400" cy="505" r="260" fill="#c8e3d2"/>
+  <ellipse cx="400" cy="640" rx="186" ry="117" fill="#65aa78"/><circle cx="332" cy="525" r="61" fill="#79bd8c"/><circle cx="468" cy="525" r="61" fill="#79bd8c"/>
+  <circle cx="337" cy="519" r="15" fill="#203b32"/><circle cx="463" cy="519" r="15" fill="#203b32"/>
+  <path d="M362 673 Q400 704 438 673" fill="none" stroke="#203b32" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="602" cy="721" r="51" fill="#f2c55c" stroke="#d39832" stroke-width="8"/>
+  <text x="400" y="940" text-anchor="middle" font-family="Georgia,serif" font-size="43" fill="#355d4a">A promise by the pond</text>
+</svg>

@@ -1,6 +1,6 @@
 import { cache } from "react";
-import Image from "next/image";
-import Link from "next/link";
+import { communityArtworkMediaUrl, communityArtworkMediaSrcSet } from "@/lib/community/media-urls";
+import { NavigationLink } from "@/components/navigation-link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 
@@ -65,16 +65,18 @@ export default async function CreatorProfilePage({ params }: PageProps) {
                 <Card className="h-full shadow-none">
                   <CardContent className="grid h-full content-start gap-3 p-3 sm:p-4">
                     <div className="relative">
-                      <Link href={`/${locale}/club/artworks/${artwork.id}`} className="relative block aspect-[4/5] overflow-hidden rounded-lg bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" aria-label={`View artwork${artwork.description ? `: ${artwork.description}` : ""}`}>
-                        <Image src={`/api/community/artworks/${artwork.id}/media`} alt={artwork.description ? `Coloring by @${creator.username}: ${artwork.description}` : `Coloring by @${creator.username}`} fill unoptimized loading="lazy" sizes="(max-width: 639px) 90vw, (max-width: 1023px) 45vw, 30vw" className="object-cover" />
-                      </Link>
+                      <NavigationLink pendingLabel="Opening page" href={`/${locale}/club/artworks/${artwork.id}`} className="relative block aspect-[4/5] overflow-hidden rounded-lg bg-[var(--color-bg-alt)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" aria-label={`View artwork${artwork.description ? `: ${artwork.description}` : ""}`}>
+                        {/* Authenticated responsive variants, without a public cache. */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={communityArtworkMediaUrl(artwork.id, 480)} srcSet={communityArtworkMediaSrcSet(artwork.id, artwork.imageDimensions)} alt={artwork.description ? `Coloring by @${creator.username}: ${artwork.description}` : `Coloring by @${creator.username}`} loading="lazy" sizes="(max-width: 639px) 90vw, (max-width: 1023px) 45vw, 30vw" className="absolute inset-0 size-full object-contain" />
+                      </NavigationLink>
                       <div className="absolute bottom-2 right-2"><CommunityHeartControl artworkId={artwork.id} likesCount={artwork.likesCount} likedByMe={artwork.likedByMe} access={heartContext.access} returnTo={`/${locale}/club/creators/${encodeURIComponent(creator.username)}`} compact /></div>
                     </div>
                     <h3 className="line-clamp-2 break-words font-serif text-lg font-semibold text-[var(--color-ink)]">
-                      <Link href={`/${locale}/club/artworks/${artwork.id}`} className="hover:underline">{artwork.description || `Artwork for ${artwork.product.title}`}</Link>
+                      <NavigationLink pendingLabel="Opening page" href={`/${locale}/club/artworks/${artwork.id}`} className="hover:underline">{artwork.description || `Artwork for ${artwork.product.title}`}</NavigationLink>
                     </h3>
                     <p className="text-sm text-[var(--color-muted)]">
-                      From <Link className="font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" href={`/${locale}/products/${encodeURIComponent(artwork.product.slug)}`}>{artwork.product.title}</Link>
+                      From <NavigationLink pendingLabel="Opening page" className="font-medium text-[var(--color-ink)] underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-terracotta)]" href={`/${locale}/products/${encodeURIComponent(artwork.product.slug)}`}>{artwork.product.title}</NavigationLink>
                     </p>
                     <time className="text-xs text-[var(--color-muted)]" dateTime={artwork.publishedAt}>
                       Shared {new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(artwork.publishedAt))}
@@ -89,7 +91,7 @@ export default async function CreatorProfilePage({ params }: PageProps) {
         <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-alt)] p-6 text-sm leading-6 text-[var(--color-muted)]" data-testid="creator-empty-state">
           <h2 className="font-serif text-xl font-semibold text-[var(--color-ink)]">No approved creations yet</h2>
           <p className="mt-2">New creations appear here after review.</p>
-          <Link className="mt-3 inline-flex min-h-11 items-center font-medium text-[var(--color-ink)] underline underline-offset-4" href={`/${locale}/club`}>Browse Coloring Club</Link>
+          <NavigationLink pendingLabel="Opening page" className="mt-3 inline-flex min-h-11 items-center font-medium text-[var(--color-ink)] underline underline-offset-4" href={`/${locale}/club`}>Browse Coloring Club</NavigationLink>
         </div>
       )}
     </div>
