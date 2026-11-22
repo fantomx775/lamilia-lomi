@@ -434,7 +434,7 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
           preparingVisible: text.includes("Przygotowywanie filmu"), optimizationFailureVisible: text.includes("Optymalizacja pliku nie powiodła się"),
           uploadProgressVisible: Boolean(section?.querySelector('[role="progressbar"]')) };
       });
-      await testInfo.attach("f30-encoder-startup-diagnostic", { body: JSON.stringify({ testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), network: ffmpegNetwork, pinnedWasmStatuses: pinnedWasm, state }, null, 2), contentType: "application/json" });
+      await info.attach("f30-encoder-startup-diagnostic", { body: JSON.stringify({ testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), network: ffmpegNetwork, pinnedWasmStatuses: pinnedWasm, state }, null, 2), contentType: "application/json" });
       throw error;
     }
     expect(pinnedWasm.includes(200)).toBe(true); // Original browser fetch also enforces the pinned SRI from application code.
@@ -471,7 +471,7 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
           retryButtonVisible: [...(section?.querySelectorAll("button") ?? [])].some((button) => button.textContent?.trim() === "Ponów"),
           inputFilePresent: Boolean(input?.files?.[0]), inputFileBytes: input?.files?.[0]?.size ?? 0 };
       });
-      await testInfo.attach("f30-retry-encoder-startup-diagnostic", { body: JSON.stringify({ testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), network: ffmpegNetwork, pinnedWasmStatuses: pinnedWasm, state }, null, 2), contentType: "application/json" });
+      await info.attach("f30-retry-encoder-startup-diagnostic", { body: JSON.stringify({ testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), network: ffmpegNetwork, pinnedWasmStatuses: pinnedWasm, state }, null, 2), contentType: "application/json" });
       throw error;
     }
     const targetOutcome = await retryTargetObservation.result;
