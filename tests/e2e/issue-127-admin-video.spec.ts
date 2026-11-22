@@ -321,17 +321,29 @@ test("F30 genuine multi-chunk public PDF transfers, HEAD readback, hash and pers
 
 async function installActualEncoderObservation(page: Page) {
   await page.addInitScript(() => {
-    const scope = window as Window & { __ux127Encoding?: { started: number; finished: number }; __ux127Input?: File };
-    scope.__ux127Encoding = { started: 0, finished: 0 };
+    const scope = window as Window & { __ux127Encoding?: { started: number; finished: number; messages: string[]; workerErrors: number }; __ux127Input?: File };
+    scope.__ux127Encoding = { started: 0, finished: 0, messages: [], workerErrors: 0 };
+    const record = (kind: string, type: unknown) => {
+      const known = ["LOAD", "EXEC", "FFPROBE", "WRITE_FILE", "READ_FILE", "ERROR", "LOG", "PROGRESS"];
+      scope.__ux127Encoding!.messages.push(`${kind}:${typeof type === "string" && known.includes(type) ? type : "other"}`);
+      if (scope.__ux127Encoding!.messages.length > 30) scope.__ux127Encoding!.messages.shift();
+    };
     const original = Worker.prototype.postMessage;
     const observed = new WeakSet<Worker>();
     Worker.prototype.postMessage = function (message: unknown, ...args: unknown[]) {
       if (!observed.has(this)) {
         observed.add(this);
-        this.addEventListener("message", (event) => { if (event.data?.type === "EXEC") scope.__ux127Encoding!.finished += 1; });
+        this.addEventListener("message", (event) => {
+          record("receive", event.data?.type);
+          if (event.data?.type === "EXEC") scope.__ux127Encoding!.finished += 1;
+        });
+        this.addEventListener("error", () => { scope.__ux127Encoding!.workerErrors += 1; });
+        this.addEventListener("messageerror", () => { scope.__ux127Encoding!.workerErrors += 1; });
       }
+      const type = message && typeof message === "object" && "type" in message ? message.type : null;
+      record("send", type);
       const result = Reflect.apply(original, this, [message, ...args]);
-      if (message && typeof message === "object" && "type" in message && message.type === "EXEC") scope.__ux127Encoding!.started += 1;
+      if (type === "EXEC") scope.__ux127Encoding!.started += 1;
       return result; // Transparent instrumentation: exact original worker/messages/arguments/results.
     };
     document.addEventListener("change", (event) => {
@@ -379,8 +391,23 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     expect(bytes.subarray(0, 4).toString("hex")).toBe("1a45dfa3"); // Genuine EBML container; duration is checked in browser below.
     await installActualEncoderObservation(page);
     const pinnedWasm: number[] = [];
+    const ffmpegNetwork: Array<{ path: string; status: number | null; outcome: "response" | "request-failed" }> = [];
+    const safeEncoderPath = (value: string) => {
+      try {
+        const url = new URL(value);
+        if (url.origin === "https://cdn.jsdelivr.net" && url.pathname.startsWith("/npm/@ffmpeg/core@0.12.10/dist/esm/")) return url.pathname;
+        if (url.origin === new URL(info.project.use.baseURL as string).origin && url.pathname.startsWith("/admin-video-encoder/")) return url.pathname;
+      } catch { /* Ignore non-owned and malformed URLs. */ }
+      return null;
+    };
     page.on("response", (response) => {
+      const safePath = safeEncoderPath(response.url());
+      if (safePath) ffmpegNetwork.push({ path: safePath, status: response.status(), outcome: "response" });
       if (response.url() === "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm") pinnedWasm.push(response.status());
+    });
+    page.on("requestfailed", (request) => {
+      const safePath = safeEncoderPath(request.url());
+      if (safePath) ffmpegNetwork.push({ path: safePath, status: null, outcome: "request-failed" });
     });
     const actor = await fixture.actor("video-retry", { admin: true });
     const book = await fixture.product("UX127 real encoder recovery", "draft"); productId = book.id;
@@ -396,7 +423,20 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     const input = await inputMetadata(page);
     expect(input.duration).toBeGreaterThan(44); expect(input.duration).toBeLessThan(46);
     expect(input.bytes).toBe(bytes.byteLength);
-    await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 90_000 }).toBe(1);
+    try {
+      await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 90_000 }).toBe(1);
+    } catch (error) {
+      const state = await page.evaluate(() => {
+        const encoding = (window as Window & { __ux127Encoding?: { started: number; finished: number; messages: string[]; workerErrors: number } }).__ux127Encoding;
+        const section = document.querySelector("#media-section-video");
+        const text = section?.textContent ?? "";
+        return { encoding: encoding ? { started: encoding.started, finished: encoding.finished, messages: [...encoding.messages], workerErrors: encoding.workerErrors } : null,
+          preparingVisible: text.includes("Przygotowywanie filmu"), optimizationFailureVisible: text.includes("Optymalizacja pliku nie powiodła się"),
+          uploadProgressVisible: Boolean(section?.querySelector('[role="progressbar"]')) };
+      });
+      await testInfo.attach("f30-encoder-startup-diagnostic", { body: JSON.stringify({ testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), network: ffmpegNetwork, pinnedWasmStatuses: pinnedWasm, state }, null, 2), contentType: "application/json" });
+      throw error;
+    }
     expect(pinnedWasm.includes(200)).toBe(true); // Original browser fetch also enforces the pinned SRI from application code.
     await expect(video.getByText("Przygotowywanie filmu\u2026", { exact: true })).toBeVisible();
     await expect(video.getByRole("progressbar")).toHaveCount(0);
