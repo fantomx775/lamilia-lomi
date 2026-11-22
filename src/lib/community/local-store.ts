@@ -667,7 +667,7 @@ export class CommunityLocalStore {
     return products.filter((product) => product.status === "published")
       .map((product) => ({ id: product.id, slug: product.slug, title: product.translations.find((translation) => translation.locale === "en")?.title ?? product.slug, audience: product.audience }))
       .sort((a, b) => a.title.localeCompare(b.title, "en"))
-      .slice(0, boundedLimit(limit));
+      .slice(0, boundedProductOptionsLimit(limit));
   }
 
   async getPublicArtwork(artworkId: string, products: Product[], viewerUserId?: string): Promise<CommunityPublicArtwork | null> {
@@ -1317,6 +1317,11 @@ function toPrivateProfile(profile: LocalProfile) {
 function boundedLimit(value: number | undefined) {
   if (value === undefined) return 24;
   if (!Number.isSafeInteger(value) || value < 1 || value > 100) throw new CommunityValidationError("Page size must be between 1 and 100.");
+  return value;
+}
+
+function boundedProductOptionsLimit(value: number) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 200) throw new CommunityValidationError("Product option limit must be between 1 and 200.");
   return value;
 }
 

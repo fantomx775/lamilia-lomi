@@ -65,6 +65,19 @@ function input(productId: string) {
 }
 
 describe("Coloring Club local adapter", () => {
+  it("allows the public product filter cap without widening artwork page sizes", () => {
+    const store = makeStore();
+    const product = getPublishedProduct();
+    const products = Array.from({ length: 120 }, (_, index) => ({
+      ...product,
+      id: `fixture-${index}`,
+      slug: `fixture-${String(index).padStart(3, "0")}`,
+    }));
+
+    expect(store.listPublicProductOptions(products, 200)).toHaveLength(120);
+    expect(() => store.listPublicProductOptions(products, 201)).toThrow(CommunityValidationError);
+  });
+
   it("uses stable published-time and artwork-ID cursors without duplicates", async () => {
     const store = makeStore();
     const product = getPublishedProduct();
