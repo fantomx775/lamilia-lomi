@@ -24,7 +24,9 @@ export async function optimizeProductMedia(kind: AssetKind, file: File, operatio
 
   if (kind !== "video") return file;
 
-  const signal = operationSignal ? AbortSignal.any([operationSignal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000);
+  // The pinned WASM encoder is a large download; keep the user-visible Cancel
+  // action responsive while allowing slower connections to finish loading it.
+  const signal = operationSignal ? AbortSignal.any([operationSignal, AbortSignal.timeout(180_000)]) : AbortSignal.timeout(180_000);
   const encoder = await createVideoEncoder(signal);
   const coreObjectUrls: string[] = [];
   try {

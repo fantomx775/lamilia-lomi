@@ -424,7 +424,7 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     expect(input.duration).toBeGreaterThan(44); expect(input.duration).toBeLessThan(46);
     expect(input.bytes).toBe(bytes.byteLength);
     try {
-      await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 90_000 }).toBe(1);
+      await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 210_000 }).toBe(1);
     } catch (error) {
       const state = await page.evaluate(() => {
         const encoding = (window as Window & { __ux127Encoding?: { started: number; finished: number; messages: string[]; workerErrors: number } }).__ux127Encoding;
@@ -458,7 +458,7 @@ test("F30 actual 45-second video encoder cancel, preserved draft and genuine ret
     const retryPreparationStartedAt = performance.now();
     await video.getByRole("button", { name: "Pon\u00f3w", exact: true }).click();
     try {
-      await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 90_000 }).toBe(2);
+      await expect.poll(() => page.evaluate(() => (window as Window & { __ux127Encoding?: { started: number } }).__ux127Encoding?.started ?? 0), { timeout: 210_000 }).toBe(2);
     } catch (error) {
       const state = await page.evaluate(() => {
         const encoding = (window as Window & { __ux127Encoding?: { started: number; finished: number; messages: string[]; workerErrors: number } }).__ux127Encoding;
