@@ -143,17 +143,39 @@ test("real private image pipeline, retries, metadata stripping and immediate pub
     const publicImage = visitor.getByTestId("community-artwork-media");
     await expect.poll(() => publicImage.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
     await publicImage.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
-    const renderedMedia = await publicImage.evaluate((element) => {
-      const image = element as HTMLImageElement;
-      return { srcSet: image.srcset, currentSrc: image.currentSrc, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight };
-    });
+    let renderedMedia!: { srcSet: string; currentSrc: string; naturalWidth: number; naturalHeight: number; layoutWidth: number };
+    for (const viewportWidth of [390, 640, 768, 1024, 1279, 1280, 1440]) {
+      await visitor.setViewportSize({ width: viewportWidth, height: 1000 });
+      await publicImage.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
+      const measured = await publicImage.evaluate((element) => {
+        const image = element as HTMLImageElement;
+        return { srcSet: image.srcset, currentSrc: image.currentSrc, naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+          layoutWidth: image.getBoundingClientRect().width };
+      });
+      const source = new URL(measured.currentSrc);
+      expect(source.origin).toBe(origin);
+      expect(source.pathname).toBe(new URL(mediaUrl).pathname);
+      expect(variantWidths).toContain(Number(source.searchParams.get("width")));
+      expect(Math.abs(measured.naturalWidth - Math.round(measured.layoutWidth))).toBeLessThanOrEqual(1);
+      expect(Math.abs(measured.naturalHeight - Math.round(measured.naturalWidth * normalized.height! / normalized.width!))).toBeLessThanOrEqual(1);
+      renderedMedia = measured;
+    }
     expect(renderedMedia.srcSet).toContain(`${new URL(mediaUrl).pathname}?width=480 480w`);
     expect(renderedMedia.srcSet).toContain(`${new URL(mediaUrl).pathname}?width=960 640w`);
     expect(renderedMedia.srcSet).not.toMatch(/(?:960|2048)w(?:,|$)/);
     const selectedWidth = Number(new URL(renderedMedia.currentSrc).searchParams.get("width"));
     expect(variantWidths).toContain(selectedWidth);
-    expect(renderedMedia.naturalWidth).toBe(Math.min(selectedWidth, normalized.width!));
-    expect(renderedMedia.naturalHeight).toBe(Math.round(renderedMedia.naturalWidth * normalized.height! / normalized.width!));
+    const currentSource = new URL(renderedMedia.currentSrc);
+    expect(currentSource.origin).toBe(origin);
+    expect(currentSource.pathname).toBe(new URL(mediaUrl).pathname);
+    const displayedResponse = await visitor.request.get(renderedMedia.currentSrc);
+    expect(displayedResponse.status()).toBe(200);
+    const displayedVariant = await sharp(await displayedResponse.body()).metadata();
+    expect(displayedVariant.width).toBe(Math.min(selectedWidth, normalized.width!));
+    expect(displayedVariant.height).toBe(Math.round(displayedVariant.width! * normalized.height! / normalized.width!));
+    // naturalWidth is density-corrected from the responsive `sizes` slot; inspect
+    // the selected response bytes above for their actual pixel dimensions.
+    expect(renderedMedia.naturalWidth).toBe(Math.round(renderedMedia.layoutWidth));
     const screenshots = await communityScreenshots(visitor, "issue-127", "f12-approved-artwork", runId);
     await testInfo.attach("f12-responsive-media-evidence", {
       body: JSON.stringify({ status: "PASS", testedSha: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(), runId,
