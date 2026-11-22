@@ -430,6 +430,7 @@ test("F15-F17 real isolated product media has Range, decoded previews and recove
     async function diagnosePlainVideoAfterStall(stage: string) {
       const posterSrc = await page.locator("video").getAttribute("poster");
       const uiState = { playButtonVisible: await page.getByTestId("product-video-play").isVisible().catch(() => false),
+        retryButtonVisible: await page.getByRole("button", { name: "Retry video", exact: true }).isVisible().catch(() => false),
         posterImagePresent: await page.locator("video[data-flipthrough]").locator("xpath=../img").count() > 0 };
       const componentState = await page.locator("video").evaluate((element) => {
         const video = element as HTMLVideoElement;

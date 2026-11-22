@@ -113,8 +113,23 @@ function VideoPlayer({ video, posterSrc }: { video: VideoPreviewAsset; posterSrc
           playsInline
           className="absolute inset-0 size-full object-contain"
           aria-label={label}
-          onPlay={() => setState("loading")}
-          onPlaying={() => { setStarted(true); setState("playing"); }}
+          onPlay={(event) => {
+            const element = event.currentTarget;
+            const generation = playbackGeneration.current;
+            const initialTime = element.currentTime;
+            setState("loading");
+            window.setTimeout(() => {
+              if (!alive.current || player.current !== element || playbackGeneration.current !== generation || element.paused) return;
+              if (element.currentTime <= initialTime + 0.05) setState("waiting");
+            }, 2_000);
+          }}
+          onPlaying={() => setState("playing")}
+          onTimeUpdate={(event) => {
+            if (event.currentTarget.currentTime > 0.05) {
+              setStarted(true);
+              setState("playing");
+            }
+          }}
           onWaiting={() => setState("waiting")}
           onStalled={() => setState("waiting")}
           onPause={(event) => {
