@@ -146,11 +146,9 @@ for (const width of [360, 390, 430, 768]) for (const dpr of [1, 2, 3]) {
       await expect(headerLogo).toBeVisible();
       await measure("header-logo", headerLogo, "/assets/home/lamilia-lomi-logo-192.webp", 20_000);
       const campaign = page.getByTestId("home-campaign-banner");
-      if (await campaign.count() !== 1) images.push({ role: "banner", status: "ABSENT", visualSharpness: "PENDING_VISUAL_REVIEW" });
-      if (await campaign.count() === 1) {
-        await expect(campaign).toBeVisible();
-        await measure("banner", campaign.locator("picture img"), width < 768 ? "/assets/home/campaign-mobile-1200.webp" : "/assets/home/campaign-desktop-1920.webp", 200_000);
-      }
+      await expect(campaign).toHaveCount(1, { timeout: 15_000 });
+      await expect(campaign).toBeVisible();
+      await measure("banner", campaign.locator("picture img"), width < 768 ? "/assets/home/campaign-mobile-1200.webp" : "/assets/home/campaign-desktop-1920.webp", 200_000);
       await capture("header-banner");
 
       // Only the actual home audience links are considered; no invented cards or fixture writes.
