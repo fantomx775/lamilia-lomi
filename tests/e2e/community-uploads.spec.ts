@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { createCommunityNavigationObserver, communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
+import { cleanupPreservingTestFailure, createCommunityNavigationObserver, communityArtifactPath, communityFixtures, communityScreenshots, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 import { readCommunityCronSecret } from "../../scripts/testing/isolated-community-target.mjs";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
@@ -287,6 +287,8 @@ test("three previews become independent private creations with persistent status
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   let cleaned = false;
+  let bodyFailed = false;
+  let bodyFailure: unknown;
   try {
     const owner = await fixtures.actor("batch-owner", { username: "cc_batch_artist" });
     const moderator = await fixtures.actor("batch-admin", { admin: true });
@@ -374,10 +376,18 @@ test("three previews become independent private creations with persistent status
     nextDiagnostics = await nextEvidence.finish();
     expect(nextDiagnostics.unresolved).toEqual([]);
     expect(consoleErrors).toEqual([]);
+  } catch (error) {
+    bodyFailed = true;
+    bodyFailure = error;
+    throw error;
   } finally {
     try {
       try { nextDiagnostics ??= await nextEvidence.finish(); }
-      finally { await fixtures.cleanup(); cleaned = true; }
+      finally {
+        const receipt = await cleanupPreservingTestFailure(testInfo, fixtures.cleanup, bodyFailed, bodyFailure,
+          "community-batch-upload-deferred-cleanup-after-test-failure");
+        cleaned = receipt?.status === "complete";
+      }
     } finally {
       await mkdir("docs/verification/issue-77/cc03", { recursive: true });
       await writeFile(await communityArtifactPath("cc03"), `${JSON.stringify({ runId, screenshots,
@@ -441,6 +451,8 @@ test("upload stays in the viewport with long names and mobile-sized fields", asy
     "Requires the isolated real Supabase upload application.");
   test.setTimeout(120_000);
   const fixtures = await communityFixtures(testInfo);
+  let bodyFailed = false;
+  let bodyFailure: unknown;
   try {
     const owner = await fixtures.actor("responsive-owner", { username: "cc_responsive_artist" });
     const book = await fixtures.product("The Little Garden of Moonflowers and Other Enchanting Things to Color on Quiet Afternoons");
@@ -511,8 +523,13 @@ test("upload stays in the viewport with long names and mobile-sized fields", asy
       const screenshot = await communityArtifactPath("issue-121", `my-creations-${testInfo.project.name}-390.png`);
       await page.screenshot({ path: screenshot, animations: "disabled", style: "nextjs-portal { display: none !important; }", fullPage: true });
     }
+  } catch (error) {
+    bodyFailed = true;
+    bodyFailure = error;
+    throw error;
   } finally {
-    await fixtures.cleanup();
+    await cleanupPreservingTestFailure(testInfo, fixtures.cleanup, bodyFailed, bodyFailure,
+      "community-responsive-upload-deferred-cleanup-after-test-failure");
   }
 });
 
@@ -525,6 +542,8 @@ test("keyboard drawer state and a dropped successful response recover without a 
   let intercepted = false;
   const interceptedResponses: Array<{ status: number; body?: unknown }> = [];
   const proxyRequests: Array<Promise<unknown>> = [];
+  let bodyFailed = false;
+  let bodyFailure: unknown;
   try {
     const owner = await fixtures.actor("retry-owner", { username: "cc_retry_artist" });
     const book = await fixtures.product("Retry Fixture Book");
@@ -578,6 +597,9 @@ test("keyboard drawer state and a dropped successful response recover without a 
       interceptedResponses.push({ status: response.status(), ...(!response.ok() ? { body: await response.json() } : {}) });
       if (!intercepted && response.ok()) {
         intercepted = true;
+        // route.fetch completed the real server mutation before the browser
+        // response is intentionally discarded; fixture cleanup may proceed.
+        fixtures.confirmServerMutationCompleted(interceptedRequest);
         await route.abort("failed");
       } else await route.fulfill({ response });
     });
@@ -597,12 +619,17 @@ test("keyboard drawer state and a dropped successful response recover without a 
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(2);
     await page.reload();
     await expect(page.getByTestId("community-artwork-card")).toHaveCount(2);
+  } catch (error) {
+    bodyFailed = true;
+    bodyFailure = error;
+    throw error;
   } finally {
     try {
       if (!page.isClosed()) await page.unroute("**/api/community/artworks");
     } finally {
       await Promise.allSettled(proxyRequests);
-      await fixtures.cleanup();
+      await cleanupPreservingTestFailure(testInfo, fixtures.cleanup, bodyFailed, bodyFailure,
+        "community-upload-deferred-cleanup-after-test-failure");
     }
   }
 });

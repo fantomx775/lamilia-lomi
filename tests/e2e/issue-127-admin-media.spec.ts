@@ -1,10 +1,10 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { randomUUID } from "node:crypto";
-import { communityFixtures } from "./helpers/community-fixtures";
+import { communityFixtures, COMMUNITY_TEST_ORIGIN } from "./helpers/community-fixtures";
 
 test.use({ ignoreHTTPSErrors: true, trace: "off", screenshot: "off", video: "off" });
 
@@ -52,13 +52,24 @@ test("F31 real cloud Save failure retains uploaded bytes for retry and reload", 
   const directory = path.resolve("docs/verification/issue-127");
   const storageTransfers: string[] = [];
   const pageErrors: string[] = [];
+  const pendingServerActions = new Set<Request>();
+  let lastServerActionActivityAt = 0;
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("request", (request) => {
     const url = new URL(request.url());
+    if (url.origin === COMMUNITY_TEST_ORIGIN && request.method() === "POST" && request.headers()["next-action"]) {
+      pendingServerActions.add(request);
+      lastServerActionActivityAt = Date.now();
+    }
     if (url.pathname.startsWith("/storage/v1/upload/resumable") && ["POST", "PATCH"].includes(request.method())) {
       storageTransfers.push(`${request.method()} ${url.pathname}`);
     }
   });
+  const finishServerAction = (request: Request) => {
+    if (pendingServerActions.delete(request)) lastServerActionActivityAt = Date.now();
+  };
+  page.on("requestfinished", finishServerAction);
+  page.on("requestfailed", finishServerAction);
   let storagePath = "";
   let storageBucket = "";
   let productId = "";
@@ -103,6 +114,11 @@ test("F31 real cloud Save failure retains uploaded bytes for retry and reload", 
     const persisted = await fixtures.service.from("product_assets").select("id,path").eq("product_id", book.id).eq("id", asset.id).single();
     expect(persisted.error).toBeNull();
     expect(persisted.data?.path).toBe(storagePath);
+    // WebKit can schedule a follow-up Server Action immediately after React
+    // reports the save result. Let that actual work settle before a full GET
+    // reload, so the test does not cancel the request it is measuring.
+    await expect.poll(() => pendingServerActions.size === 0 && Date.now() - lastServerActionActivityAt >= 500,
+      { timeout: 15_000, message: "Product save Server Actions must settle before persistence reload." }).toBe(true);
     await page.reload();
     await expect(page.locator('input[name="assetId"]')).toHaveValue(asset.id);
     await expect(page.locator('input[name="assetPath"]')).toHaveValue(storagePath);

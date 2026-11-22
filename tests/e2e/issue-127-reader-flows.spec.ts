@@ -79,10 +79,22 @@ async function holdReaderTable() {
   catch (cause) { child.stdin.end("ROLLBACK;\n"); throw cause; }
   finally { if (acquisitionTimer) clearTimeout(acquisitionTimer); }
   return {
-    cancelOwnBlockedReaders() {
+    async observeOwnBlockedReader() {
+      if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("Unsafe fixture blocker PID.");
+      const startedAt = Date.now();
+      const until = startedAt + 10_000;
+      while (Date.now() < until) {
+        const observation = execFileSync(target.dockerExecutable, args, { ...options, encoding: "utf8", timeout: 2_000,
+          input: `SELECT coalesce(bool_or(${pid} = ANY(pg_blocking_pids(pid)) AND query ILIKE '%product_reader_artworks%'), false) FROM pg_stat_activity WHERE pid <> ${pid};` });
+        if (observation.trim() === "t") return { observedAfterMs: Date.now() - startedAt };
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("The isolated fixture lock had no observed product_reader_artworks waiter to cancel.");
+    },
+    async cancelObservedReader() {
       if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("Unsafe fixture blocker PID.");
       const canceled = execFileSync(target.dockerExecutable, args, { ...options, encoding: "utf8", input: `SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE ${pid} = ANY(pg_blocking_pids(pid)) AND query ILIKE '%product_reader_artworks%';` });
-      expect(canceled.trim().split(/\s+/)).toContain("t");
+      return canceled.trim().split(/\s+/).includes("t");
     },
     async release() {
       if (child.exitCode !== null) return;
@@ -132,12 +144,20 @@ test("F18 core book is usable while real reader query waits, fails, and recovers
     expect((await fixture.service.from("amazon_links").insert({ id: randomUUID(), product_id: book.id, market: "amazon.com", url: "https://www.amazon.com/dp/B0TESTONLY", is_primary: true })).error).toBeNull();
     await fixture.readerArtwork(book.id, "Controlled artist", 0, "rose-fox.webp");
     lock = await holdReaderTable();
+    // Start sampling before navigation so a short-lived real waiter cannot
+    // disappear while the hero and streamed fallback are being inspected.
+    const blockedReader = lock.observeOwnBlockedReader();
     await page.goto(`/en/products/${book.slug}`, { waitUntil: "commit" });
     await expect(page.getByTestId("product-hero").getByRole("heading", { name: book.title })).toBeVisible();
     await expect(page.getByRole("link", { name: "View on Amazon" })).toBeVisible();
     await expect(page.getByTestId("product-community-loading")).toBeVisible();
     await capture(page, info, "f18-main-before-secondary");
-    lock.cancelOwnBlockedReaders();
+    const observation = await blockedReader;
+    const cancelled = await lock.cancelObservedReader();
+    await info.attach("f18-reader-query-transition", { body: Buffer.from(JSON.stringify({
+      status: "exact-blocked-reader-observed", observedAfterMs: observation.observedAfterMs,
+      outcome: cancelled ? "cancelled-by-fixture" : "reader-finished-before-cancel",
+    }, null, 2)), contentType: "application/json" });
     await expect(page.getByTestId("product-community-error")).toBeVisible();
     await expect(page.getByTestId("product-hero")).toBeVisible();
     await capture(page, info, "f18-error");
@@ -199,7 +219,12 @@ test("F07 F10 F23 catalog Enter, all filter context, Back and native GET", async
       await search.press("Enter");
       await expect.poll(() => heldNavigations).toBeGreaterThan(0);
       await expect(searchForm.locator('[data-catalog-form-pending="true"]')).toBeVisible();
-      await expect(page.getByTestId("product-catalog-loading")).toBeVisible();
+      // The submitted RSC is held, so the enhanced navigation must keep the
+      // current result grid mounted while the form exposes pending feedback.
+      // F10's local geometry gate asserts the same contract across breakpoints.
+      await expect(page.getByTestId("product-catalog-grid")).toBeVisible();
+      await expect(card).toBeVisible();
+      await expect(page.getByTestId("product-catalog-loading")).toHaveCount(0);
       await search.press("End"); await search.pressSequentially(" sky");
       const newerDraft = `${book.title} sky`;
       await expect(search).toHaveValue(newerDraft); await expect(search).toBeFocused();
